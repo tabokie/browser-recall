@@ -43,6 +43,10 @@
     "message": "清除",
     "description": "Generic clear button label."
   },
+  "commonReload": {
+    "message": "重新加载",
+    "description": "Generic reload button label."
+  },
   "commonClose": {
     "message": "关闭",
     "description": "Close button title."
@@ -58,10 +62,6 @@
   "commonDelete": {
     "message": "删除",
     "description": "Generic delete button label."
-  },
-  "commonEnglish": {
-    "message": "英语",
-    "description": "English language label."
   },
   "commonExplore": {
     "message": "探索",
@@ -207,9 +207,21 @@
     "message": "数据",
     "description": "Desktop settings group label."
   },
+  "desktopDataStorageHint": {
+    "message": "数据以按日期组织的人类可读 JSONL 文件形式存储在本地。可使用任何文本编辑器打开，或使用 jq 处理。",
+    "description": "Desktop local data storage help text."
+  },
+  "desktopDefaultBrowserProfile": {
+    "message": "默认配置文件",
+    "description": "Fallback browser profile name."
+  },
   "desktopDebugLogging": {
     "message": "调试日志（重启后重置）",
     "description": "Desktop debug logging setting."
+  },
+  "desktopDeleteAllDataHint": {
+    "message": "删除 Browser Recall Desktop 数据文件夹中的所有文件。此操作无法撤销。",
+    "description": "Desktop delete-all-data help text."
   },
   "desktopDeviceNotConfigured": {
     "message": "设备尚未配置",
@@ -218,6 +230,10 @@
   "desktopDisconnectedManageTokensHtml": {
     "message": "已断开。<a href=\"https://github.com/settings/tokens\" target=\"_blank\" style=\"color:#1a73e8;\">在 GitHub 管理令牌</a>",
     "description": "Sync disconnected status with link."
+  },
+  "desktopDisconnected": {
+    "message": "已断开",
+    "description": "Paired browser disconnected status."
   },
   "desktopEmptyRecycleBin": {
     "message": "清空回收站",
@@ -238,6 +254,10 @@
   "desktopHistoryBatchSize": {
     "message": "历史加载批大小",
     "description": "Desktop advanced setting label."
+  },
+  "desktopHistoryBatchSizeHint": {
+    "message": "滚动时一次加载的每日历史文件数量。较大的值会预先加载更多历史记录，但在大型数据集上可能感觉较慢。",
+    "description": "Desktop history batch size help text."
   },
   "desktopGetStarted": {
     "message": "开始使用",
@@ -298,6 +318,10 @@
   "desktopLaunchAtLogin": {
     "message": "登录时启动",
     "description": "Desktop launch-at-login setting."
+  },
+  "desktopLaunchAtLoginUnsupported": {
+    "message": "登录时启动仅适用于 macOS 13 或更高版本。",
+    "description": "Launch-at-login platform support notice."
   },
   "desktopLaunchAtLoginLong": {
     "message": "登录时启动 Browser Recall",
@@ -392,7 +416,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "打开 Chrome 中的 Browser Recall 弹窗，然后点击 Pair with desktop。",
+    "message": "打开 Chrome 中的 Browser Recall 弹窗，然后点击“与桌面配对”。",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -479,6 +503,10 @@
     "message": "回放工作线程失败",
     "description": "Service error message."
   },
+  "desktopResumeService": {
+    "message": "恢复服务",
+    "description": "Service error recovery button label."
+  },
   "desktopRecycleBin": {
     "message": "回收站",
     "description": "Recycle bin view label."
@@ -510,6 +538,14 @@
   "desktopRestoreFailed": {
     "message": "恢复项目失败：$1",
     "description": "Recycle bin restore failure."
+  },
+  "desktopRevoke": {
+    "message": "撤销",
+    "description": "Paired browser revoke button label."
+  },
+  "desktopRevokeBrowserFailed": {
+    "message": "撤销浏览器授权失败：$1",
+    "description": "Paired browser revoke failure."
   },
   "desktopPageNotePrefix": {
     "message": "页面笔记：",
@@ -1047,10 +1083,6 @@
     "message": "切换记录",
     "description": "Extension popup recording toggle accessibility label."
   },
-  "commonChineseSimplified": {
-    "message": "简体中文",
-    "description": "Simplified Chinese language label."
-  },
   "desktopAddPageNotePlaceholder": {
     "message": "添加页面笔记...",
     "description": "Localized UI text."
@@ -1180,7 +1212,7 @@
     "description": "Localized UI text."
   },
   "desktopGithubNotConnected": {
-    "message": "GitHub 未连接，请先点击“Connect with GitHub”",
+    "message": "GitHub 未连接，请先点击“连接 GitHub”",
     "description": "Localized UI text."
   },
   "desktopGithubPrefilled": {
@@ -1328,7 +1360,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "打开 Chrome 中的 Browser Recall 弹窗，然后点击“Pair with desktop”。",
+    "message": "打开 Chrome 中的 Browser Recall 弹窗，然后点击“与桌面配对”。",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {

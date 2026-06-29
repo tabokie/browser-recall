@@ -96,7 +96,7 @@ Key consequences:
 
 The desktop shell scrolls the main results pane and sidebar independently. Results containers keep a bottom gutter aligned to the sidebar bottom edge, and the virtual scroller preserves that gutter as part of its base padding.
 
-Desktop UI localization is resolved in the web UI. The shell exposes the current operating-system locale to the UI, and the user can persist a desktop-only `localeOverride` setting in `views/manifest/settings.json`. Translation catalogs are shared from `packages/core/locales/` and currently ship English (`en`) and Simplified Chinese (`zh-CN`); the daemon stores only the override value and does not translate product strings.
+Desktop UI localization is resolved in the web UI. The shell exposes the current operating-system locale to the UI, and the user can persist a desktop-only `localeOverride` setting in `views/manifest/settings.json`. Translation catalogs are shared from `packages/core/locales/` and ship English, Arabic, German, Spanish, French, Hindi, Indonesian, Italian, Japanese, Korean, Brazilian and European Portuguese, Russian, Simplified Chinese, and Traditional Chinese. `packages/core/i18n.js` is the single registry for locale codes, native display names, and system-locale aliases; the daemon stores only the override value and does not translate product strings. Explicit overrides must resolve to a registered code, and a selected catalog load failure is surfaced instead of silently substituting English.
 
 The shim currently covers:
 
@@ -160,6 +160,8 @@ Highlight notes are persisted through daemon `createNote` commands like other no
 ### Localization
 
 The connector extension uses WebExtension native localization. Staged extension bundles include root `/_locales/<locale>/messages.json` files and a manifest `default_locale`; manifest metadata, command descriptions, and extension UI strings use the browser's current UI locale through `chrome.i18n` / `browser.i18n`. The staged extension catalogs are filtered to `extension*`, `command*`, and `common*` keys so desktop-only UI strings are not packaged into the browser connector.
+
+Desktop language options and extension locale directories are generated from the shared locale registry. Asset staging fails when a registered catalog is missing, an unregistered catalog exists, or keys, substitution placeholders, HTML tags, code/keyboard literals, product names, or technical terms drift from the English catalog.
 
 ### Settings
 
@@ -234,6 +236,13 @@ Current automated coverage is split across three layers:
 - `tests/unit/` for shared JS helpers and connector-side utility logic
 - `tests/integration/` for daemon/connector RPC and event-flow coverage
 - `tests/e2e/` for current shipped extension popup and connector behavior
+
+Desktop locale registration and persistence are covered by a daemon-backed
+Playwright workflow that drives every registered locale through the production
+desktop settings UI and connector command path, verifies each real settings
+checkpoint, reloads the UI, and checks Arabic RTL direction. A separate
+browser E2E verifies that the packaged extension resolves messages through its
+real WebExtension locale catalog. Only Tauri shell-only surfaces are shimmed.
 
 E2E is the preferred product safety net for desktop and extension behavior. New coverage should favor real user workflows, cross-feature combinations, and seeded randomized inputs over expanding unit-test LoC. Rust daemon integration tests are the preferred fallback for daemon authority behavior that is impractical to assert through browser E2E. `scripts/test-coverage-monitor.mjs` surfaces JS and Rust uncovered production line ranges for triage, tracks the suite mix, and fails on JS or inline Rust unit-test LoC growth unless an explicit exception is made.
 

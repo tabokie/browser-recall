@@ -27,6 +27,21 @@ pub(crate) const NOTE_PREFIX: &str = "note:";
 pub(crate) const SNAPSHOT_PREFIX: &str = "snapshot:";
 pub(crate) const LIST_PREFIX: &str = "list:";
 pub(crate) const SETTINGS_KEY: &str = "manifest:settings";
+pub const PERSISTENT_SETTINGS_KEYS: &[&str] = &[
+    "theme",
+    "colorScheme",
+    "localeOverride",
+    "historyFileBatch",
+    "captureSnapshotVideo",
+    "blacklistEnabled",
+    "urlBlacklist",
+    "titleCleanupEnabled",
+    "titleTrimRules",
+    "syncEnabled",
+    "syncMethod",
+    "syncRepoUrl",
+    "syncRetentionDays",
+];
 pub(crate) const NAME_TO_ID_KEY: &str = "manifest:name-to-id";
 pub(crate) const LIST_ORDER_KEY: &str = "manifest:list-order";
 pub(crate) const ORPHANED_KEY: &str = "manifest:orphaned";

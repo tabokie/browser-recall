@@ -8,199 +8,199 @@
     "description": "Lowercase product mark used in compact desktop UI."
   },
   "extensionDescription": {
-    "message": "Chrome connector for Browser Recall Desktop. Capture pages in the browser and open the full app locally.",
+    "message": "Konektor Chrome untuk Browser Recall Desktop. Tangkap halaman di browser dan buka aplikasi lengkap secara lokal.",
     "description": "Extension store and browser management description."
   },
   "commandHighlightSelection": {
-    "message": "Highlight selected text or add a page note",
+    "message": "Sorot teks yang dipilih atau tambahkan catatan halaman",
     "description": "Browser command description."
   },
   "commandCaptureSnapshot": {
-    "message": "Capture snapshot of current page",
+    "message": "Ambil cuplikan halaman saat ini",
     "description": "Browser command description."
   },
   "commandLikePage": {
-    "message": "Like the current page",
+    "message": "Sukai halaman saat ini",
     "description": "Browser command description."
   },
   "commandDislikePage": {
-    "message": "Dislike the current page",
+    "message": "Tidak menyukai halaman saat ini",
     "description": "Browser command description."
   },
   "commonAdd": {
-    "message": "Add",
+    "message": "Tambahkan",
     "description": "Generic add button label."
   },
   "commonBack": {
-    "message": "Back",
+    "message": "Kembali",
     "description": "Back navigation label."
   },
   "commonCancel": {
-    "message": "Cancel",
+    "message": "Batalkan",
     "description": "Generic cancel button label."
   },
   "commonClear": {
-    "message": "Clear",
+    "message": "Bersihkan",
     "description": "Generic clear button label."
   },
   "commonReload": {
-    "message": "Reload",
+    "message": "Muat ulang",
     "description": "Generic reload button label."
   },
   "commonClose": {
-    "message": "Close",
+    "message": "Tutup",
     "description": "Close button title."
   },
   "commonConfirm": {
-    "message": "Confirm",
+    "message": "Konfirmasikan",
     "description": "Confirm button title."
   },
   "commonContinue": {
-    "message": "Continue",
+    "message": "Lanjutkan",
     "description": "Continue navigation label."
   },
   "commonDelete": {
-    "message": "Delete",
+    "message": "Hapus",
     "description": "Generic delete button label."
   },
   "commonExplore": {
-    "message": "Explore",
+    "message": "Jelajahi",
     "description": "Explore view label."
   },
   "commonFlush": {
-    "message": "Flush",
+    "message": "Siram",
     "description": "Flush pending writes button label."
   },
   "commonImportHistory": {
-    "message": "Import History",
+    "message": "Impor Riwayat",
     "description": "Import history button label."
   },
   "commonImportSelected": {
-    "message": "Import Selected",
+    "message": "Impor yang Dipilih",
     "description": "Import selected items button label."
   },
   "commonLoading": {
-    "message": "Loading...",
+    "message": "Memuat...",
     "description": "Generic loading state."
   },
   "commonLists": {
-    "message": "Lists",
+    "message": "Daftar",
     "description": "Lists section label."
   },
   "commonRemove": {
-    "message": "Remove",
+    "message": "Hapus",
     "description": "Generic remove button title."
   },
   "commonSettings": {
-    "message": "Settings",
+    "message": "Pengaturan",
     "description": "Settings label."
   },
   "commonSystem": {
-    "message": "System",
+    "message": "Sistem",
     "description": "Use system setting option label."
   },
   "desktopAddons": {
-    "message": "Add-ons",
+    "message": "Pengaya",
     "description": "Desktop settings group label."
   },
   "desktopAddRule": {
-    "message": "Add rule",
+    "message": "Tambahkan aturan",
     "description": "Desktop inbox rule add button title."
   },
   "desktopAddPageNote": {
-    "message": "+ Add page note",
+    "message": "+ Tambahkan catatan halaman",
     "description": "Page detail add page note button."
   },
   "desktopAdvanced": {
-    "message": "Advanced",
+    "message": "Lanjutan",
     "description": "Desktop settings group label."
   },
   "desktopAppearance": {
-    "message": "Appearance",
+    "message": "Penampilan",
     "description": "Desktop settings group label."
   },
   "desktopBrowsersActiveToday": {
-    "message": "Browsers active today",
+    "message": "Browser aktif hari ini",
     "description": "Paired browser list label."
   },
   "desktopCaptureVideos": {
-    "message": "Capture videos in snapshots",
+    "message": "Rekam video dalam snapshot",
     "description": "Desktop setting label."
   },
   "desktopCacheClearFailed": {
-    "message": "Cache clear failed: $1",
+    "message": "Gagal menghapus cache: $1",
     "description": "Status shown when cache clearing fails."
   },
   "desktopCancelPreview": {
-    "message": "Cancel Preview",
+    "message": "Batalkan Pratinjau",
     "description": "Rule preview cancel button label."
   },
   "desktopCheckDevices": {
-    "message": "Check Devices",
+    "message": "Periksa Perangkat",
     "description": "Sync devices check button."
   },
   "desktopChecking": {
-    "message": "Checking...",
+    "message": "Memeriksa...",
     "description": "Button label while checking."
   },
   "desktopChooseDataFolder": {
-    "message": "Choose Data Folder",
+    "message": "Pilih Folder Data",
     "description": "Desktop onboarding data-folder button."
   },
   "desktopChangeDataFolder": {
-    "message": "Change Data Folder",
+    "message": "Ubah Folder Data",
     "description": "Change data folder button label."
   },
   "desktopChoosing": {
-    "message": "Choosing...",
+    "message": "Memilih...",
     "description": "Button label while choosing a data folder."
   },
   "desktopClearAllData": {
-    "message": "Clear All Data",
+    "message": "Hapus Semua Data",
     "description": "Clear all data button label."
   },
   "desktopClearCacheReload": {
-    "message": "Clear Cache & Reload",
+    "message": "Hapus Cache & Muat Ulang",
     "description": "Clear cache button label."
   },
   "desktopCollapse": {
-    "message": "Collapse",
+    "message": "Runtuh",
     "description": "Collapse list title."
   },
   "desktopConnect": {
-    "message": "Connect",
+    "message": "Hubungkan",
     "description": "Sync connect button label."
   },
   "desktopConnected": {
-    "message": "Connected",
+    "message": "Terhubung",
     "description": "Sync connected state label."
   },
   "desktopConnecting": {
-    "message": "Connecting...",
+    "message": "Menghubungkan...",
     "description": "Sync connecting button label."
   },
   "desktopCouldNotStartSetup": {
-    "message": "Could not start setup: $1",
+    "message": "Tidak dapat memulai penyiapan: $1",
     "description": "Onboarding setup failure."
   },
   "desktopColor": {
-    "message": "Color",
+    "message": "Warna",
     "description": "Desktop appearance color setting."
   },
   "desktopConnection": {
-    "message": "Connection",
+    "message": "Koneksi",
     "description": "Desktop settings group label."
   },
   "desktopCreateList": {
-    "message": "Create list",
+    "message": "Buat daftar",
     "description": "Create list button title."
   },
   "desktopCreateTokenGithub": {
-    "message": "Create Token on GitHub",
+    "message": "Buat Token di GitHub",
     "description": "Create GitHub token button label."
   },
   "desktopCreateGithubRepo": {
-    "message": "Create one on GitHub",
+    "message": "Buat satu di GitHub",
     "description": "Create GitHub repository link text."
   },
   "desktopData": {
@@ -208,791 +208,791 @@
     "description": "Desktop settings group label."
   },
   "desktopDataStorageHint": {
-    "message": "Stored locally as human-readable JSONL files organized by date. Open with any text editor or process with jq.",
+    "message": "Disimpan secara lokal sebagai file JSONL yang mudah dibaca dan disusun berdasarkan tanggal. Buka dengan editor teks apa pun atau proses dengan jq.",
     "description": "Desktop local data storage help text."
   },
   "desktopDefaultBrowserProfile": {
-    "message": "Default profile",
+    "message": "Profil bawaan",
     "description": "Fallback browser profile name."
   },
   "desktopDebugLogging": {
-    "message": "Debug logging (resets on restart)",
+    "message": "Debug logging (reset saat restart)",
     "description": "Desktop debug logging setting."
   },
   "desktopDeleteAllDataHint": {
-    "message": "Deletes all files in the Browser Recall Desktop data folder. This cannot be undone.",
+    "message": "Menghapus semua file di folder data Browser Recall Desktop. Hal ini tidak dapat dibatalkan.",
     "description": "Desktop delete-all-data help text."
   },
   "desktopDeviceNotConfigured": {
-    "message": "Device not configured",
+    "message": "Perangkat tidak dikonfigurasi",
     "description": "Desktop storage status when setup is incomplete."
   },
   "desktopDisconnectedManageTokensHtml": {
-    "message": "Disconnected. <a href=\"https://github.com/settings/tokens\" target=\"_blank\" style=\"color:#1a73e8;\">Manage tokens on GitHub</a>",
+    "message": "Terputus. <a href=\"https://github.com/settings/tokens\" target=\"_blank\" style=\"color:#1a73e8;\">Kelola token di GitHub</a>",
     "description": "Sync disconnected status with link."
   },
   "desktopDisconnected": {
-    "message": "Disconnected",
+    "message": "Terputus",
     "description": "Paired browser disconnected status."
   },
   "desktopEmptyRecycleBin": {
-    "message": "Empty Recycle Bin",
+    "message": "Kosongkan Tempat Sampah",
     "description": "Recycle bin action."
   },
   "desktopErrorPrefix": {
-    "message": "Error: $1",
+    "message": "Kesalahan: $1",
     "description": "Generic error prefix."
   },
   "desktopExcludedSites": {
-    "message": "Excluded Sites",
+    "message": "Situs yang Dikecualikan",
     "description": "Desktop settings add-on title."
   },
   "desktopExcludedSitesDesc": {
-    "message": "Skip recording for matching web address prefixes",
+    "message": "Lewati perekaman untuk awalan alamat web yang cocok",
     "description": "Desktop settings add-on description."
   },
   "desktopHistoryBatchSize": {
-    "message": "History loading batch size",
+    "message": "Riwayat memuat ukuran batch",
     "description": "Desktop advanced setting label."
   },
   "desktopHistoryBatchSizeHint": {
-    "message": "Number of daily history files loaded at once when scrolling. Higher values load more history upfront but may feel slower on large datasets.",
+    "message": "Jumlah file riwayat harian yang dimuat sekaligus saat menggulir. Nilai yang lebih tinggi memuat lebih banyak riwayat di awal tetapi mungkin terasa lebih lambat pada kumpulan data yang besar.",
     "description": "Desktop history batch size help text."
   },
   "desktopGetStarted": {
-    "message": "Get Started",
+    "message": "Memulai",
     "description": "Onboarding completion button."
   },
   "desktopHistoryImportHelp": {
-    "message": "Import a JSON array of browser history entries. Supported entry shapes include Chrome-style objects with url, title, and lastVisitTime, or expanded entries with visitTimes.",
+    "message": "Impor serangkaian entri riwayat browser JSON. Bentuk entri yang didukung mencakup objek bergaya Chrome dengan url, judul, dan lastVisitTime, atau entri yang diperluas dengan visitTimes.",
     "description": "History import help text."
   },
   "desktopImportBookmarks": {
-    "message": "Import Bookmarks",
+    "message": "Impor Bookmark",
     "description": "Import bookmarks button label."
   },
   "desktopImportBookmarksProgress": {
-    "message": "Importing bookmarks into Browser Recall...",
+    "message": "Mengimpor bookmark ke Browser Recall...",
     "description": "Bookmark import progress message."
   },
   "desktopImportBrowserHistoryProgress": {
-    "message": "Importing browser history into Browser Recall...",
+    "message": "Mengimpor riwayat browser ke Browser Recall...",
     "description": "History import progress message."
   },
   "desktopImportFailed": {
-    "message": "Import failed: $1",
+    "message": "Impor gagal: $1",
     "description": "Import failure message."
   },
   "desktopImporting": {
-    "message": "Importing...",
+    "message": "Mengimpor...",
     "description": "Import button busy label."
   },
   "desktopDataFolder": {
-    "message": "Data folder: $1",
+    "message": "Folder data: $1",
     "description": "Configured data folder status."
   },
   "desktopSelectFolderPrompt": {
-    "message": "Select the folder where Browser Recall should store its local data.",
+    "message": "Pilih folder tempat Browser Recall harus menyimpan data lokalnya.",
     "description": "Data folder picker prompt."
   },
   "desktopChooseFolderContinue": {
-    "message": "Choose a data folder to continue.",
+    "message": "Pilih folder data untuk melanjutkan.",
     "description": "Data folder required message."
   },
   "desktopCouldNotUseFolder": {
-    "message": "Could not use that folder: $1",
+    "message": "Tidak dapat menggunakan folder itu: $1",
     "description": "Data folder failure message."
   },
   "desktopLocalStorageFull": {
-    "message": "Local storage full",
+    "message": "Penyimpanan lokal penuh",
     "description": "Service error message."
   },
   "desktopInboxRules": {
-    "message": "Inbox rules",
+    "message": "Aturan kotak masuk",
     "description": "Desktop inbox rules button title and panel label."
   },
   "desktopLanguage": {
-    "message": "Language",
+    "message": "Bahasa",
     "description": "Desktop appearance language setting."
   },
   "desktopLaunchAtLogin": {
-    "message": "Launch at login",
+    "message": "Luncurkan saat login",
     "description": "Desktop launch-at-login setting."
   },
   "desktopLaunchAtLoginUnsupported": {
-    "message": "Launch at login is available on macOS 13 or newer.",
+    "message": "Peluncuran saat masuk tersedia di macOS 13 atau lebih baru.",
     "description": "Launch-at-login platform support notice."
   },
   "desktopLaunchAtLoginLong": {
-    "message": "Launch Browser Recall when you log in",
+    "message": "Luncurkan Browser Recall saat Anda masuk",
     "description": "Onboarding launch-at-login setting."
   },
   "desktopNoBrowsersActiveToday": {
-    "message": "No browsers active today.",
+    "message": "Tidak ada browser yang aktif hari ini.",
     "description": "Empty paired browser list text."
   },
   "desktopNoKnownChildren": {
-    "message": "No known children",
+    "message": "Tidak ada anak yang dikenal",
     "description": "Page relation empty state."
   },
   "desktopNoKnownParents": {
-    "message": "No known parents",
+    "message": "Tidak ada orang tua yang dikenal",
     "description": "Page relation empty state."
   },
   "desktopNoDeletedItems": {
-    "message": "No deleted items",
+    "message": "Tidak ada item yang dihapus",
     "description": "Empty recycle bin text."
   },
   "desktopNoLists": {
-    "message": "No lists",
+    "message": "Tidak ada daftar",
     "description": "List picker empty state."
   },
   "desktopNoMatches": {
-    "message": "No matches",
+    "message": "Tidak ada kecocokan",
     "description": "Rule preview empty state."
   },
   "desktopNoMatchingPins": {
-    "message": "No matching pins",
+    "message": "Tidak ada pin yang cocok",
     "description": "Filtered pin empty state."
   },
   "desktopNoPinnedPages": {
-    "message": "No pinned pages",
+    "message": "Tidak ada halaman yang disematkan",
     "description": "Pinned page empty state."
   },
   "desktopNoPinnedPreview": {
-    "message": "No pinned pages available for preview",
+    "message": "Tidak ada halaman yang disematkan tersedia untuk pratinjau",
     "description": "Rule preview empty state for pinned pages."
   },
   "desktopNoPinnedPagesPreview": {
-    "message": "No pinned pages available for preview",
+    "message": "Tidak ada halaman yang disematkan tersedia untuk pratinjau",
     "description": "Rules pinned preview empty state."
   },
   "desktopNoResults": {
-    "message": "No results",
+    "message": "Tidak ada hasil",
     "description": "Search empty state."
   },
   "desktopNoVisitsPreview": {
-    "message": "No visits found to match against",
+    "message": "Tidak ditemukan kunjungan yang cocok",
     "description": "Rules visit preview empty state."
   },
   "desktopNoteOn": {
-    "message": "Note on $1",
+    "message": "Catatan tentang $1",
     "description": "Recycle bin note display name with URL."
   },
   "desktopNoteWithSlug": {
-    "message": "Note ($1)",
+    "message": "Catatan ($1)",
     "description": "Recycle bin note display name with slug."
   },
   "desktopNoAnnotation": {
-    "message": "No annotation",
+    "message": "Tidak ada anotasi",
     "description": "Empty note annotation placeholder."
   },
   "desktopOnboardingDataHeading": {
-    "message": "Choose your data folder",
+    "message": "Pilih folder data Anda",
     "description": "Onboarding data-folder heading."
   },
   "desktopOnboardingDataText": {
-    "message": "Browser Recall stores plain-text local data in the folder you choose. No default folder is used until you make this choice.",
+    "message": "Browser Recall menyimpan data lokal teks biasa di folder yang Anda pilih. Tidak ada folder default yang digunakan sampai Anda membuat pilihan ini.",
     "description": "Onboarding data-folder explanation."
   },
   "desktopOnboardingIntro": {
-    "message": "browser-recall saves browsing history, notes, and highlights through Browser Recall Desktop into a local plain-text data folder.",
+    "message": "browser-recall menyimpan riwayat penelusuran, catatan, dan sorotan melalui Browser Recall Desktop ke dalam folder data teks biasa lokal.",
     "description": "Onboarding product description."
   },
   "desktopOnboardingLiveCapture": {
-    "message": "Live capture",
+    "message": "Tangkapan langsung",
     "description": "Onboarding live capture heading."
   },
   "desktopOnboardingLiveCaptureText": {
-    "message": "Install the browser extension and pair it from the extension popup. Browser Recall Desktop must stay running in the background to record visits.",
+    "message": "Instal ekstensi browser dan pasangkan dari popup ekstensi. Browser Recall Desktop harus tetap berjalan di latar belakang untuk mencatat kunjungan.",
     "description": "Onboarding live capture explanation."
   },
   "desktopOnboardingPickColor": {
-    "message": "Pick a color",
+    "message": "Pilih warna",
     "description": "Onboarding color picker heading."
   },
   "desktopPairFromBrowserPopup": {
-    "message": "Pair from Browser Popup",
+    "message": "Pasangkan dari Popup Browser",
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "Open the Browser Recall popup in Chrome and click Pair with desktop.",
+    "message": "Buka pop-up Browser Recall di Chrome, lalu klik ‘Pasangkan dengan desktop’.",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
-    "message": "Page details unavailable",
+    "message": "Detail halaman tidak tersedia",
     "description": "Page detail empty state."
   },
   "desktopParents": {
-    "message": "Parents",
+    "message": "Orang tua",
     "description": "Page relation section label."
   },
   "desktopPatternRequired": {
-    "message": "Pattern is required",
+    "message": "Pola diperlukan",
     "description": "Rule validation error."
   },
   "desktopPinned": {
-    "message": "Pinned",
+    "message": "Disematkan",
     "description": "Pinned pages section label."
   },
   "desktopPinnedPages": {
-    "message": "Pinned Pages",
+    "message": "Halaman yang Disematkan",
     "description": "Pinned pages rule preview label."
   },
   "desktopPinSearchCreateList": {
-    "message": "Pin a search to create a list",
+    "message": "Sematkan pencarian untuk membuat daftar",
     "description": "Empty list sidebar message."
   },
   "desktopPreview": {
-    "message": "Preview",
+    "message": "Pratinjau",
     "description": "Preview button label."
   },
   "desktopKeyword": {
-    "message": "Keyword",
+    "message": "Kata kunci",
     "description": "Rule type label."
   },
   "desktopFunction": {
-    "message": "Function",
+    "message": "Fungsi",
     "description": "Rule type label."
   },
   "desktopCustomFunction": {
-    "message": "(custom function)",
+    "message": "(fungsi khusus)",
     "description": "Rule description fallback."
   },
   "desktopUnknown": {
-    "message": "unknown",
+    "message": "tidak diketahui",
     "description": "Unknown type fallback."
   },
   "desktopRemoveRuleFailed": {
-    "message": "Failed to remove rule: $1",
+    "message": "Gagal menghapus aturan: $1",
     "description": "Rule removal failure."
   },
   "desktopNoEditRow": {
-    "message": "No edit row",
+    "message": "Tidak ada baris edit",
     "description": "Rule editor internal validation shown to user."
   },
   "desktopFunctionBodyRequired": {
-    "message": "Function body is required",
+    "message": "Badan fungsi diperlukan",
     "description": "Rule editor validation."
   },
   "desktopUnknownRuleType": {
-    "message": "Unknown rule type",
+    "message": "Jenis aturan tidak diketahui",
     "description": "Rule editor validation."
   },
   "desktopRuleKeywordPlaceholder": {
-    "message": "keyword or /regex/",
+    "message": "kata kunci atau /regex/",
     "description": "Keyword rule input placeholder."
   },
   "desktopRuleDescriptionPlaceholder": {
-    "message": "description",
+    "message": "deskripsi",
     "description": "Function rule description placeholder."
   },
   "desktopSaveEnter": {
-    "message": "Save (Enter)",
+    "message": "Simpan (Masuk)",
     "description": "Rule editor save button title."
   },
   "desktopMatchesChecked": {
-    "message": "$1 matches ($2 checked)",
+    "message": "$1 kecocokan ($2 dipilih)",
     "description": "Rule preview match count."
   },
   "desktopRecentVisits": {
-    "message": "Recent Visits",
+    "message": "Kunjungan Terkini",
     "description": "Rules preview section label."
   },
   "desktopReplayWorkerFailed": {
-    "message": "Replay worker failed",
+    "message": "Pekerja pemutaran ulang gagal",
     "description": "Service error message."
   },
   "desktopResumeService": {
-    "message": "Resume Service",
+    "message": "Lanjutkan Layanan",
     "description": "Service error recovery button label."
   },
   "desktopRecycleBin": {
-    "message": "Recycle Bin",
+    "message": "Tempat Sampah",
     "description": "Recycle bin view label."
   },
   "desktopRecycleBinLoadFailed": {
-    "message": "Failed to load recycle bin: $1",
+    "message": "Gagal memuat keranjang sampah: $1",
     "description": "Recycle bin load failure."
   },
   "desktopReloadExtension": {
-    "message": "Reload Extension",
+    "message": "Muat Ulang Ekstensi",
     "description": "Fatal error reload button."
   },
   "desktopReloading": {
-    "message": "Reloading...",
+    "message": "Memuat ulang...",
     "description": "Reloading button state."
   },
   "desktopRepositoryRequired": {
-    "message": "Repository address is required",
+    "message": "Alamat repositori diperlukan",
     "description": "Sync validation message."
   },
   "desktopResults": {
-    "message": "Results",
+    "message": "Hasil",
     "description": "Results section label."
   },
   "desktopRestore": {
-    "message": "Restore",
+    "message": "Pulihkan",
     "description": "Recycle bin restore button."
   },
   "desktopRestoreFailed": {
-    "message": "Failed to restore item: $1",
+    "message": "Gagal memulihkan item: $1",
     "description": "Recycle bin restore failure."
   },
   "desktopRevoke": {
-    "message": "Revoke",
+    "message": "Cabut",
     "description": "Paired browser revoke button label."
   },
   "desktopRevokeBrowserFailed": {
-    "message": "Failed to revoke browser: $1",
+    "message": "Gagal mencabut browser: $1",
     "description": "Paired browser revoke failure."
   },
   "desktopPageNotePrefix": {
-    "message": "Page note: ",
+    "message": "Catatan halaman:",
     "description": "Prefix for page-note recycle bin display names."
   },
   "desktopSelectBookmarkFile": {
-    "message": "Select an exported bookmarks file to preview folders.",
+    "message": "Pilih file bookmark yang diekspor untuk melihat folder.",
     "description": "Bookmark import placeholder."
   },
   "desktopSettingsSaved": {
-    "message": "Settings saved",
+    "message": "Pengaturan disimpan",
     "description": "Status shown after saving settings."
   },
   "desktopServiceUnavailable": {
-    "message": "Service unavailable",
+    "message": "Layanan tidak tersedia",
     "description": "Generic service unavailable message."
   },
   "desktopSessionStorageFull": {
-    "message": "Session storage full",
+    "message": "Penyimpanan sesi penuh",
     "description": "Service error message."
   },
   "desktopSimilar": {
-    "message": "Similar",
+    "message": "Serupa",
     "description": "Page relation section label."
   },
   "desktopSortBy": {
-    "message": "Sort by",
+    "message": "Urutkan berdasarkan",
     "description": "Filter section label."
   },
   "desktopStarting": {
-    "message": "Starting...",
+    "message": "Mulai...",
     "description": "Startup button state."
   },
   "desktopStorageAccessFailed": {
-    "message": "Storage access failed",
+    "message": "Akses penyimpanan gagal",
     "description": "Service error message."
   },
   "desktopStorageUnavailable": {
-    "message": "Storage Unavailable",
+    "message": "Penyimpanan Tidak Tersedia",
     "description": "Fatal storage error title."
   },
   "desktopSync": {
-    "message": "Sync",
+    "message": "Sinkronisasi",
     "description": "Sync add-on title."
   },
   "desktopSyncDesc": {
-    "message": "Sync history and notes across devices, not including snapshots",
+    "message": "Sinkronkan riwayat dan catatan di seluruh perangkat, tidak termasuk snapshot",
     "description": "Sync add-on description."
   },
   "desktopSyncNow": {
-    "message": "Sync Now",
+    "message": "Sinkronkan Sekarang",
     "description": "Sync now button label."
   },
   "desktopSyncing": {
-    "message": "Syncing...",
+    "message": "Menyinkronkan...",
     "description": "Sync button busy label."
   },
   "desktopTokenRequired": {
-    "message": "Token is required",
+    "message": "Token diperlukan",
     "description": "Sync token validation message."
   },
   "desktopViewDetails": {
-    "message": "View details",
+    "message": "Lihat detailnya",
     "description": "Result card detail button title."
   },
   "desktopWaitingApproval": {
-    "message": "Waiting for approval...",
+    "message": "Menunggu persetujuan...",
     "description": "Pairing button pending label."
   },
   "desktopTheme": {
-    "message": "Theme",
+    "message": "Tema",
     "description": "Desktop appearance theme setting."
   },
   "desktopThemeDark": {
-    "message": "Dark",
+    "message": "Gelap",
     "description": "Dark theme option."
   },
   "desktopThemeLight": {
-    "message": "Light",
+    "message": "Ringan",
     "description": "Light theme option."
   },
   "desktopTitleCleanup": {
-    "message": "Title Cleanup",
+    "message": "Pembersihan Judul",
     "description": "Desktop settings add-on title."
   },
   "desktopTitleCleanupDesc": {
-    "message": "Clean up page titles per site when recording",
+    "message": "Bersihkan judul halaman per situs saat merekam",
     "description": "Desktop settings add-on description."
   },
   "desktopTooManyResults": {
-    "message": "Too many results to select (limit: 100)",
+    "message": "Terlalu banyak hasil untuk dipilih (batas: 100)",
     "description": "Bulk selection limit message."
   },
   "desktopToggleSidebar": {
-    "message": "Toggle sidebar",
+    "message": "Alihkan bilah sisi",
     "description": "Sidebar toggle title."
   },
   "desktopVisitsOverTime": {
-    "message": "Visits over time",
+    "message": "Kunjungan dari waktu ke waktu",
     "description": "Time chart label."
   },
   "extensionCheckAgain": {
-    "message": "Check Again",
+    "message": "Periksa Lagi",
     "description": "Extension setup retry button."
   },
   "extensionActionFailedReload": {
-    "message": "$1 - please reload the extension.",
+    "message": "$1 - harap muat ulang ekstensi.",
     "description": "Popup error with reload hint."
   },
   "extensionActionFailed": {
-    "message": "Action failed",
+    "message": "Tindakan gagal",
     "description": "Generic extension action failure."
   },
   "extensionApproveBrowserDesktop": {
-    "message": "Approve this browser in the desktop app.",
+    "message": "Setujui browser ini di aplikasi desktop.",
     "description": "Connector approval pending metadata."
   },
   "extensionAddNote": {
-    "message": "Add a note...",
+    "message": "Tambahkan catatan...",
     "description": "Extension note placeholder."
   },
   "extensionAddNoteEsc": {
-    "message": "Add a note... Esc to save.",
+    "message": "Tambahkan catatan... Esc untuk menyimpan.",
     "description": "Extension note placeholder with keyboard hint."
   },
   "extensionAddPageNote": {
-    "message": "+ Page note",
+    "message": "+ Catatan halaman",
     "description": "Popup page note add button."
   },
   "extensionAddPageNoteEsc": {
-    "message": "Add a page note... Esc to save.",
+    "message": "Tambahkan catatan halaman... Esc untuk menyimpan.",
     "description": "Extension page note placeholder with keyboard hint."
   },
   "extensionAddToList": {
-    "message": "Add to list",
+    "message": "Tambahkan ke daftar",
     "description": "Popup add to list title."
   },
   "extensionApprovalPending": {
-    "message": "Approval Pending",
+    "message": "Persetujuan Tertunda",
     "description": "Connector approval pending status."
   },
   "extensionApprovalDenied": {
-    "message": "Approval Denied",
+    "message": "Persetujuan Ditolak",
     "description": "Connector approval denied status."
   },
   "extensionBlacklisted": {
-    "message": "Blacklisted",
+    "message": "Masuk daftar hitam",
     "description": "Popup blacklisted page title."
   },
   "extensionBrowserRecallApprovalDenied": {
-    "message": "Browser Recall Desktop approval denied",
+    "message": "Browser Recall Desktop persetujuan ditolak",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallApprovalPending": {
-    "message": "Browser Recall Desktop approval pending",
+    "message": "Browser Recall Desktop persetujuan menunggu keputusan",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallDesktopConnected": {
-    "message": "Browser Recall Desktop connected",
+    "message": "Browser Recall Desktop terhubung",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallDesktopOffline": {
-    "message": "Browser Recall Desktop is offline",
+    "message": "Browser Recall Desktop sedang offline",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallDesktopPaused": {
-    "message": "Browser Recall Desktop is paused",
+    "message": "Browser Recall Desktop dijeda",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallPaused": {
-    "message": "Browser Recall is paused",
+    "message": "Browser Recall dijeda",
     "description": "Paused service title."
   },
   "extensionBrowserRecallQueueFull": {
-    "message": "Browser Recall Desktop queue is full",
+    "message": "Browser Recall Desktop antrian penuh",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallRecordingPaused": {
-    "message": "Browser Recall recording is paused",
+    "message": "Browser Recall rekaman dijeda",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallTokenRejected": {
-    "message": "Browser Recall Desktop token rejected",
+    "message": "Browser Recall Desktop token ditolak",
     "description": "Extension badge title."
   },
   "extensionCannotCapturePdf": {
-    "message": "Cannot capture PDF pages",
+    "message": "Tidak dapat mengambil halaman PDF",
     "description": "Snapshot capture PDF error."
   },
   "extensionCaptureFailed": {
-    "message": "Capture failed",
+    "message": "Pengambilan gagal",
     "description": "Snapshot capture failure."
   },
   "extensionCaptureFrame": {
-    "message": "CAPTURE FRAME",
+    "message": "BINGKAI TANGKAP",
     "description": "Popup capture button."
   },
   "extensionCaptureIt": {
-    "message": "Capture It",
+    "message": "Tangkap Itu",
     "description": "Capture blacklisted page button."
   },
   "extensionCaptureNoContent": {
-    "message": "Capture failed: page returned no content",
+    "message": "Pengambilan gagal: halaman tidak menghasilkan konten",
     "description": "Snapshot capture empty page error."
   },
   "extensionCapturing": {
-    "message": "Capturing...",
+    "message": "Menangkap...",
     "description": "Capture busy label."
   },
   "extensionCheckAgainApproval": {
-    "message": "Check again to request approval.",
+    "message": "Periksa lagi untuk meminta persetujuan.",
     "description": "Connector retry approval metadata."
   },
   "extensionConnectionResetActionFailed": {
-    "message": "Browser Recall action failed because the extension connection was reset. Reload this page and try again.",
+    "message": "Tindakan Browser Recall gagal karena sambungan ekstensi disetel ulang. Muat ulang halaman ini dan coba lagi.",
     "description": "Extension action runtime failure message."
   },
   "extensionContextInvalidated": {
-    "message": "Extension context invalidated. Please refresh the page and try again.",
+    "message": "Konteks ekstensi tidak valid. Silakan segarkan halaman dan coba lagi.",
     "description": "Popup runtime invalidated message."
   },
   "extensionCreateListNamed": {
-    "message": "Create \"$1\"",
+    "message": "Buat \"$1\"",
     "description": "List picker create option."
   },
   "extensionCreateList": {
-    "message": "Create \"$1\"",
+    "message": "Buat \"$1\"",
     "description": "List picker create option."
   },
   "extensionCreateNoteFailed": {
-    "message": "Create note failed",
+    "message": "Gagal membuat catatan",
     "description": "Create note failure."
   },
   "extensionDeleteHighlight": {
-    "message": "Delete highlight",
+    "message": "Hapus sorotan",
     "description": "Delete highlight button title."
   },
   "extensionDeleteSnapshot": {
-    "message": "Delete snapshot",
+    "message": "Hapus cuplikan",
     "description": "Delete snapshot button title."
   },
   "extensionDesktopBridgeUnavailable": {
-    "message": "Desktop bridge unavailable",
+    "message": "Jembatan desktop tidak tersedia",
     "description": "Extension desktop bridge unavailable error."
   },
   "extensionDesktopApprovedConnectionFailed": {
-    "message": "Desktop approved, but connection failed.",
+    "message": "Desktop disetujui, tetapi koneksi gagal.",
     "description": "Connector approved but disconnected metadata."
   },
   "extensionDesktopBufferFull": {
-    "message": "Browser Recall Desktop buffer full - start the desktop app or wait for the queue to drain.",
+    "message": "Browser Recall Desktop buffer full - mulai aplikasi desktop atau tunggu hingga antrian habis.",
     "description": "Extension desktop command buffer full message."
   },
   "extensionDesktopEventQueueFull": {
-    "message": "Browser Recall Desktop event queue is full - start the desktop app or wait for the queue to drain.",
+    "message": "Browser Recall Desktop antrian acara sudah penuh - mulai aplikasi desktop atau tunggu hingga antrian habis.",
     "description": "Extension desktop event queue full message."
   },
   "extensionDesktopConnected": {
-    "message": "Desktop Connected",
+    "message": "Desktop Terhubung",
     "description": "Connector connected status."
   },
   "extensionDesktopConnectionActive": {
-    "message": "Desktop connection active.",
+    "message": "Koneksi desktop aktif.",
     "description": "Connector connected metadata."
   },
   "extensionDesktopOfflineMixed": {
-    "message": "Browser Recall Desktop is offline.",
+    "message": "Browser Recall Desktop sedang offline.",
     "description": "Connector offline sentence."
   },
   "extensionDesktopPageDataUnavailable": {
-    "message": "Desktop page data unavailable.",
+    "message": "Data halaman desktop tidak tersedia.",
     "description": "Popup bootstrap page data unavailable fallback."
   },
   "extensionDesktopPopupAccessFailed": {
-    "message": "Desktop popup access check failed",
+    "message": "Pemeriksaan akses popup desktop gagal",
     "description": "Popup access check failure."
   },
   "extensionDesktopPaused": {
-    "message": "Desktop Paused",
+    "message": "Desktop Dijeda",
     "description": "Connector paused status."
   },
   "extensionDesktopNotConnectedRefresh": {
-    "message": "Browser Recall Desktop is not connected yet. Start the desktop app and refresh from the popup.",
+    "message": "Browser Recall Desktop belum terhubung. Mulai aplikasi desktop dan segarkan dari popup.",
     "description": "Popup desktop disconnected failure."
   },
   "extensionDesktopQueueFull": {
-    "message": "Desktop Queue Full",
+    "message": "Antrean Desktop Penuh",
     "description": "Connector queue full status."
   },
   "extensionDeviceId": {
-    "message": "Device $1",
+    "message": "Perangkat $1",
     "description": "Connector device id metadata."
   },
   "extensionDisliked": {
-    "message": "Disliked",
+    "message": "Tidak disukai",
     "description": "Dislike notification."
   },
   "extensionEdit": {
-    "message": "Edit",
+    "message": "Sunting",
     "description": "Edit button title."
   },
   "extensionEditNote": {
-    "message": "Edit note",
+    "message": "Sunting catatan",
     "description": "Edit note button title."
   },
   "extensionHighlights": {
-    "message": "Highlights",
+    "message": "Sorotan",
     "description": "Highlights panel title."
   },
   "extensionHighlightsCount": {
-    "message": "Highlights ($1)",
+    "message": "Sorotan ($1)",
     "description": "Highlights panel title with count."
   },
   "extensionHighlightFailed": {
-    "message": "Highlight failed",
+    "message": "Sorotan gagal",
     "description": "Highlight failure."
   },
   "extensionLastCheckAuthenticatedStatusFailed": {
-    "message": "Last check: authenticated, but status failed.",
+    "message": "Pemeriksaan terakhir: diautentikasi, tetapi status gagal.",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckAuthenticatedStatusFailedDetail": {
-    "message": "Last check: authenticated, but status failed ($1).",
+    "message": "Pemeriksaan terakhir: diautentikasi, tetapi status gagal ($1).",
     "description": "Connector diagnostic with detail."
   },
   "extensionLastCheckApprovalDenied": {
-    "message": "Last check: desktop approval was denied.",
+    "message": "Pemeriksaan terakhir: persetujuan desktop ditolak.",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckCode": {
-    "message": "Last check: $1.",
+    "message": "Pemeriksaan terakhir: $1.",
     "description": "Connector diagnostic code fallback."
   },
   "extensionLastCheckMessage": {
-    "message": "Last check: $1",
+    "message": "Pemeriksaan terakhir: $1",
     "description": "Connector diagnostic message fallback."
   },
   "extensionLastCheckNoConnection": {
-    "message": "Last check: no usable desktop connection.",
+    "message": "Pemeriksaan terakhir: tidak ada koneksi desktop yang dapat digunakan.",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckNoConnectionDetail": {
-    "message": "Last check: no usable desktop connection ($1).",
+    "message": "Pemeriksaan terakhir: tidak ada koneksi desktop yang dapat digunakan ($1).",
     "description": "Connector diagnostic with port detail."
   },
   "extensionLastCheckReconnectFailed": {
-    "message": "Last check: desktop connection did not succeed in $1.",
+    "message": "Pemeriksaan terakhir: koneksi desktop tidak berhasil di $1.",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckSocketClosed": {
-    "message": "Last check: socket closed.",
+    "message": "Pemeriksaan terakhir: soket tertutup.",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckSocketClosedDetail": {
-    "message": "Last check: socket closed ($1).",
+    "message": "Pemeriksaan terakhir: soket tertutup ($1).",
     "description": "Connector diagnostic with socket state."
   },
   "extensionLastCheckStatusRefreshFailed": {
-    "message": "Last check: status refresh failed.",
+    "message": "Pemeriksaan terakhir: penyegaran status gagal.",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckStatusRefreshFailedDetail": {
-    "message": "Last check: status refresh failed ($1).",
+    "message": "Pemeriksaan terakhir: penyegaran status gagal ($1).",
     "description": "Connector diagnostic with detail."
   },
   "extensionLastCheckTokenRejected": {
-    "message": "Last check: desktop rejected the saved token.",
+    "message": "Pemeriksaan terakhir: desktop menolak token yang disimpan.",
     "description": "Connector diagnostic."
   },
   "extensionLastDiagnostic": {
-    "message": " Last diagnostic: $1.",
+    "message": "Diagnostik terakhir: $1.",
     "description": "Connector diagnostic suffix."
   },
   "extensionLastPortFailures": {
-    "message": " Last port failures: $1.",
+    "message": "Kegagalan port terakhir: $1.",
     "description": "Connector diagnostic suffix."
   },
   "extensionLikeFailed": {
-    "message": "Like failed",
+    "message": "Seperti gagal",
     "description": "Like action failure."
   },
   "extensionLiked": {
-    "message": "Liked",
+    "message": "Menyukai",
     "description": "Like notification."
   },
   "extensionLookingForDesktop": {
-    "message": "Looking for Browser Recall Desktop",
+    "message": "Mencari Browser Recall Desktop",
     "description": "Extension badge title."
   },
   "extensionManageSettings": {
-    "message": "Manage in Settings",
+    "message": "Kelola di Pengaturan",
     "description": "Popup settings action."
   },
   "extensionNoAnnotation": {
-    "message": "No annotation",
+    "message": "Tidak ada anotasi",
     "description": "Popup no annotation placeholder."
   },
   "extensionNoLists": {
-    "message": "No lists",
+    "message": "Tidak ada daftar",
     "description": "Popup no lists message."
   },
   "extensionNoTargetTab": {
-    "message": "No target tab",
+    "message": "Tidak ada tab target",
     "description": "Extension notification routing failure."
   },
   "extensionNotAvailablePage": {
-    "message": "Not available for this page",
+    "message": "Tidak tersedia untuk halaman ini",
     "description": "Popup unsupported page message."
   },
   "extensionOpenDesktopFlush": {
-    "message": "Open desktop to flush capture.",
+    "message": "Buka desktop untuk menyiram tangkapan.",
     "description": "Connector queue full meta."
   },
   "extensionPageDataUnavailable": {
-    "message": "Page Data Unavailable",
+    "message": "Data Halaman Tidak Tersedia",
     "description": "Popup page data unavailable title."
   },
   "extensionPageNote": {
-    "message": "Page Note",
+    "message": "Catatan Halaman",
     "description": "Page note overlay title."
   },
   "extensionRatePageFailed": {
-    "message": "ratePage failed",
+    "message": "ratePage gagal",
     "description": "Rating command failure."
   },
   "extensionRefreshFailed": {
-    "message": "Failed to refresh.",
+    "message": "Gagal menyegarkan.",
     "description": "Popup connector refresh failure."
   },
   "extensionResumeCaptureDesktop": {
-    "message": "Resume capture from desktop settings.",
+    "message": "Lanjutkan pengambilan dari pengaturan desktop.",
     "description": "Connector paused metadata."
   },
   "extensionRetryWindow": {
-    "message": "the retry window",
+    "message": "jendela coba lagi",
     "description": "Connector diagnostic retry window label."
   },
   "extensionConfigureShortcuts": {
-    "message": "Configure Shortcuts",
+    "message": "Konfigurasikan Pintasan",
     "description": "Extension options button."
   },
   "extensionCurrentPageReceipt": {
-    "message": "current page receipt",
+    "message": "tanda terima halaman saat ini",
     "description": "Extension popup placeholder URL text."
   },
   "extensionDesktopControl": {
-    "message": "Desktop Control",
+    "message": "Kontrol Desktop",
     "description": "Extension options heading."
   },
   "extensionDesktopOffline": {
@@ -1000,527 +1000,527 @@
     "description": "Extension popup desktop offline heading."
   },
   "extensionKeyboardShortcuts": {
-    "message": "Keyboard Shortcuts",
+    "message": "Pintasan Papan Ketik",
     "description": "Extension options heading."
   },
   "extensionMainUiRunsInDesktop": {
-    "message": "The main Browser Recall interface runs in the desktop app.",
+    "message": "Antarmuka utama Browser Recall berjalan di aplikasi desktop.",
     "description": "Extension options explanatory text."
   },
   "extensionNotSet": {
-    "message": "Not set",
+    "message": "Tidak disetel",
     "description": "Keyboard shortcut missing value."
   },
   "extensionOpenBrowserRecall": {
-    "message": "Open Browser Recall",
+    "message": "Buka Browser Recall",
     "description": "Extension options open app button."
   },
   "extensionOpenDesktop": {
-    "message": "Open Desktop",
+    "message": "Buka Desktop",
     "description": "Extension popup open desktop button."
   },
   "extensionPauseTracing": {
-    "message": "Pause tracing",
+    "message": "Jeda pelacakan",
     "description": "Extension popup recording toggle title."
   },
   "extensionStartDesktop": {
-    "message": "Start Browser Recall Desktop to resume live capture.",
+    "message": "Mulai Browser Recall Desktop untuk melanjutkan pengambilan langsung.",
     "description": "Extension setup message."
   },
   "extensionStartDesktopCapture": {
-    "message": "Start Browser Recall Desktop to resume live capture.",
+    "message": "Mulai Browser Recall Desktop untuk melanjutkan pengambilan langsung.",
     "description": "Connector offline metadata."
   },
   "extensionStorageUnavailable": {
-    "message": "Storage Unavailable",
+    "message": "Penyimpanan Tidak Tersedia",
     "description": "Extension fatal error title."
   },
   "extensionSnapshotCaptured": {
-    "message": "Snapshot captured",
+    "message": "Cuplikan diambil",
     "description": "Snapshot capture success notification."
   },
   "extensionSomethingWentWrong": {
-    "message": "Something went wrong",
+    "message": "Ada yang tidak beres",
     "description": "Generic extension error."
   },
   "extensionTokenRejected": {
-    "message": "Token Rejected",
+    "message": "Token Ditolak",
     "description": "Connector token rejected status."
   },
   "extensionUpdateFailed": {
-    "message": "Update failed",
+    "message": "Pembaruan gagal",
     "description": "Update note failure."
   },
   "extensionWaitingApproval": {
-    "message": "Waiting for Approval",
+    "message": "Menunggu Persetujuan",
     "description": "Connector approval pending button."
   },
   "extensionSearchOrCreate": {
-    "message": "Search or create...",
+    "message": "Telusuri atau buat...",
     "description": "List picker search placeholder."
   },
   "extensionSnapshotMissingParams": {
-    "message": "Missing snapshot parameters.",
+    "message": "Parameter snapshot tidak ada.",
     "description": "Snapshot viewer error."
   },
   "extensionSnapshotNotFound": {
-    "message": "Snapshot not found.",
+    "message": "Cuplikan tidak ditemukan.",
     "description": "Snapshot viewer error."
   },
   "extensionReloaded": {
-    "message": "Browser Recall extension reloaded. Please reload the page and try again.",
+    "message": "Ekstensi Browser Recall dimuat ulang. Silakan muat ulang halaman dan coba lagi.",
     "description": "Runtime invalidated message."
   },
   "extensionReloadExtension": {
-    "message": "Reload Extension",
+    "message": "Muat Ulang Ekstensi",
     "description": "Extension fatal error reload button."
   },
   "extensionOpenAppFallback": {
-    "message": "Can't open the app? Launch it from your Applications folder, then try again.",
+    "message": "Tidak dapat membuka aplikasi? Luncurkan dari folder Aplikasi Anda, lalu coba lagi.",
     "description": "Extension options fallback notice."
   },
   "extensionToggleRecording": {
-    "message": "Toggle recording",
+    "message": "Alihkan rekaman",
     "description": "Extension popup recording toggle accessibility label."
   },
   "desktopAddPageNotePlaceholder": {
-    "message": "Add a page note...",
+    "message": "Tambahkan catatan halaman...",
     "description": "Localized UI text."
   },
   "desktopAlreadyPaired": {
-    "message": "Chrome is already paired with Browser Recall Desktop",
+    "message": "Chrome sudah dipasangkan dengan Browser Recall Desktop",
     "description": "Localized UI text."
   },
   "desktopApprovePairing": {
-    "message": "Approve the pairing request in Browser Recall Desktop",
+    "message": "Setujui permintaan pemasangan di Browser Recall Desktop",
     "description": "Localized UI text."
   },
   "desktopAsGithubUser": {
-    "message": "as @$1",
+    "message": "sebagai @$1",
     "description": "Connected GitHub user suffix."
   },
   "desktopAuthentication": {
-    "message": "Authentication",
+    "message": "Otentikasi",
     "description": "Localized UI text."
   },
   "desktopBookmarkPreviewPlaceholder": {
-    "message": "Select an exported bookmarks file to preview folders.",
+    "message": "Pilih file bookmark yang diekspor untuk melihat folder.",
     "description": "Localized UI text."
   },
   "desktopBridgeCheckFailed": {
-    "message": "Desktop bridge check failed: $1",
+    "message": "Pemeriksaan jembatan desktop gagal: $1",
     "description": "Desktop bridge check failure."
   },
   "desktopCancelling": {
-    "message": "Cancelling...",
+    "message": "Membatalkan...",
     "description": "Localized UI text."
   },
   "desktopCannotDeleteHistory": {
-    "message": "Cannot delete history",
+    "message": "Tidak dapat menghapus riwayat",
     "description": "Localized UI text."
   },
   "desktopCanOnlyPasteIntoList": {
-    "message": "Can only paste into a list",
+    "message": "Hanya dapat menempelkan ke dalam daftar",
     "description": "Localized UI text."
   },
   "desktopChildren": {
-    "message": "Children",
+    "message": "Anak-anak",
     "description": "Localized UI text."
   },
   "desktopClearAllDataFinalConfirm": {
-    "message": "Final confirmation: Delete all history files?",
+    "message": "Konfirmasi akhir: Hapus semua file riwayat?",
     "description": "Localized UI text."
   },
   "desktopClearAllDataWarning": {
-    "message": "Warning: this will delete all files in your storage directory.\n\nThis cannot be undone. Are you absolutely sure?",
+    "message": "Peringatan: ini akan menghapus semua file di direktori penyimpanan Anda.\n\nHal ini tidak dapat dibatalkan. Apakah Anda benar-benar yakin?",
     "description": "Localized UI text."
   },
   "desktopClearDataFailed": {
-    "message": "Error clearing data: $1",
+    "message": "Kesalahan saat menghapus data: $1",
     "description": "Clear all data failure."
   },
   "desktopClearedFiles": {
-    "message": "Cleared $1 files/directories",
+    "message": "Menghapus $1 file/direktori",
     "description": "Clear all data success."
   },
   "desktopClearing": {
-    "message": "Clearing...",
+    "message": "Membersihkan...",
     "description": "Localized UI text."
   },
   "desktopClearReload": {
-    "message": "Clear & Reload",
+    "message": "Hapus & Muat Ulang",
     "description": "Localized UI text."
   },
   "desktopColumnTitle": {
-    "message": "Title",
+    "message": "Judul",
     "description": "Localized UI text."
   },
   "desktopCurrentDevice": {
-    "message": "(current)",
+    "message": "(saat ini)",
     "description": "Localized UI text."
   },
   "desktopDaysAgo": {
-    "message": "$1d ago",
+    "message": "$1 hari yang lalu",
     "description": "Relative time in days."
   },
   "desktopDevices": {
-    "message": "Devices",
+    "message": "Perangkat",
     "description": "Localized UI text."
   },
   "desktopExperimental": {
-    "message": "Experimental",
+    "message": "Eksperimental",
     "description": "Localized UI text."
   },
   "desktopExploreResults": {
-    "message": "Explore results",
+    "message": "Jelajahi hasil",
     "description": "Localized UI text."
   },
   "desktopFilters": {
-    "message": "Filters",
+    "message": "Filter",
     "description": "Localized UI text."
   },
   "desktopFirstSeen": {
-    "message": "First seen",
+    "message": "Pertama kali terlihat",
     "description": "Localized UI text."
   },
   "desktopFirstVisit": {
-    "message": "First visit",
+    "message": "Kunjungan pertama",
     "description": "Localized UI text."
   },
   "desktopFirstVisited": {
-    "message": "First visited:",
+    "message": "Pertama kali dikunjungi:",
     "description": "Localized UI text."
   },
   "desktopFixSettingsBeforeSync": {
-    "message": "Fix settings before syncing",
+    "message": "Perbaiki pengaturan sebelum menyinkronkan",
     "description": "Localized UI text."
   },
   "desktopFlushed": {
-    "message": "Flushed!",
+    "message": "Memerah!",
     "description": "Localized UI text."
   },
   "desktopFlushing": {
-    "message": "Flushing...",
+    "message": "Pembilasan...",
     "description": "Localized UI text."
   },
   "desktopFocus": {
-    "message": "Focus",
+    "message": "Fokus",
     "description": "Localized UI text."
   },
   "desktopGithubAuthExpired": {
-    "message": "GitHub authorization expired - please reconnect.",
+    "message": "GitHub otorisasi kedaluwarsa - harap sambungkan kembali.",
     "description": "Localized UI text."
   },
   "desktopGithubNotConnected": {
-    "message": "GitHub not connected - click \"Connect with GitHub\" first",
+    "message": "GitHub belum terhubung — klik “Hubungkan dengan GitHub” terlebih dahulu",
     "description": "Localized UI text."
   },
   "desktopGithubPrefilled": {
-    "message": "Opens GitHub with pre-filled settings",
+    "message": "Membuka GitHub dengan pengaturan yang sudah diisi sebelumnya",
     "description": "Localized UI text."
   },
   "desktopHasHighlights": {
-    "message": "Has highlights",
+    "message": "Memiliki sorotan",
     "description": "Localized UI text."
   },
   "desktopHasSnapshots": {
-    "message": "Has snapshots",
+    "message": "Memiliki snapshot",
     "description": "Localized UI text."
   },
   "desktopHistoryImportHelpHtml": {
-    "message": "Import a JSON array of browser history entries. Supported entry shapes include Chrome-style objects with <code>url</code>, <code>title</code>, and <code>lastVisitTime</code>, or expanded entries with <code>visitTimes</code>.",
+    "message": "Impor larik JSON berisi entri riwayat browser. Objek berformat Chrome dengan <code>url</code>, <code>title</code>, dan <code>lastVisitTime</code>, serta entri terperinci dengan <code>visitTimes</code>, didukung.",
     "description": "Localized UI text."
   },
   "desktopHistoryInvalidJson": {
-    "message": "invalid JSON or unsupported history export format",
+    "message": "JSON tidak valid atau format ekspor riwayat tidak didukung",
     "description": "Localized UI text."
   },
   "desktopHistoryParseFailed": {
-    "message": "Could not parse history JSON: $1",
+    "message": "Tidak dapat menguraikan riwayat JSON: $1",
     "description": "History import JSON parse failure."
   },
   "desktopHistoryReadyToImport": {
-    "message": "Ready to import $1 visits across $2 pages.",
+    "message": "Siap mengimpor $1 kunjungan di seluruh $2 halaman.",
     "description": "History import preview summary."
   },
   "desktopHoursAgo": {
-    "message": "$1h ago",
+    "message": "$1 jam yang lalu",
     "description": "Relative time in hours."
   },
   "desktopImportBookmarksDone": {
-    "message": "Done! Imported $1 lists with $2 bookmarks.",
+    "message": "Selesai! $1 daftar dengan $2 bookmark telah diimpor.",
     "description": "Bookmark import success summary."
   },
   "desktopImportHistoryDone": {
-    "message": "Done! Imported $1 visits across $2 pages.",
+    "message": "Selesai! $1 kunjungan di $2 halaman telah diimpor.",
     "description": "History import success summary."
   },
   "desktopImportSkipped": {
-    "message": "$1 items skipped during parsing or import.",
+    "message": "$1 item dilewati selama penguraian atau impor.",
     "description": "History import skipped item summary."
   },
   "desktopInboxRulesHint": {
-    "message": "Rules automatically sort new pages into this list. Keyword rules match against page title, web address, and body text. Function rules use a custom JS predicate that returns true/false.",
+    "message": "Aturan secara otomatis mengurutkan halaman baru ke dalam daftar ini. Aturan kata kunci cocok dengan judul halaman, alamat web, dan teks isi. Aturan fungsi menggunakan predikat JS khusus yang mengembalikan nilai benar/salah.",
     "description": "Localized UI text."
   },
   "desktopIntervalMinutes": {
-    "message": "Interval (min)",
+    "message": "Interval (menit)",
     "description": "Localized UI text."
   },
   "desktopInvalidToken": {
-    "message": "Invalid token: $1",
+    "message": "Token tidak valid: $1",
     "description": "Sync token validation failure."
   },
   "desktopItemsSkipped": {
-    "message": "$1 items skipped",
+    "message": "$1 item dilewati",
     "description": "Import skipped item summary."
   },
   "desktopJustNow": {
-    "message": "just now",
+    "message": "sekarang",
     "description": "Localized UI text."
   },
   "desktopLastSeen": {
-    "message": "Last seen",
+    "message": "Terakhir terlihat",
     "description": "Localized UI text."
   },
   "desktopLastVisit": {
-    "message": "Last visit",
+    "message": "Kunjungan terakhir",
     "description": "Localized UI text."
   },
   "desktopLastVisited": {
-    "message": "Last visited:",
+    "message": "Terakhir dikunjungi:",
     "description": "Localized UI text."
   },
   "desktopMakePrivate": {
-    "message": "(make it private)",
+    "message": "(jadikan pribadi)",
     "description": "Localized UI text."
   },
   "desktopManualSetupHtml": {
-    "message": "<li> Create a <strong>private</strong> repository on <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> (e.g. <code>portal-sync</code>). Leave it empty. </li> <li> Go to <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">Fine-grained tokens</a> and create a token: <ul> <li> Set expiration to <strong>No expiration</strong> </li> <li> Under \"Repository access\", choose <strong>Only select repositories</strong> and pick your sync repo </li> <li> Under \"Permissions\", add <strong>Contents</strong> and set to <strong>Read and write</strong> </li> </ul> </li> <li>Paste the repository address and token above.</li>",
+    "message": "<li>Buat repositori <strong>privat</strong> di <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> (misalnya <code>portal-sync</code>) dan biarkan kosong.</li><li>Buka halaman <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">token dengan izin terperinci</a> lalu buat token:<ul><li>Atur masa berlaku ke <strong>Tanpa kedaluwarsa</strong></li><li>Di bagian “Akses repositori”, pilih <strong>Hanya repositori terpilih</strong> lalu pilih repositori sinkronisasi</li><li>Di bagian “Izin”, tambahkan <strong>Konten</strong> dan atur ke <strong>Baca dan tulis</strong></li></ul></li><li>Tempel alamat repositori dan token di atas.</li>",
     "description": "Localized UI text."
   },
   "desktopManualSetupInstructions": {
-    "message": "Manual setup instructions",
+    "message": "Petunjuk pengaturan manual",
     "description": "Localized UI text."
   },
   "desktopMemoryCacheHint": {
-    "message": "Settings and metadata cached in browser storage for fast access. The source of truth is settings.json in your storage directory.",
+    "message": "Pengaturan dan metadata di-cache di penyimpanan browser untuk akses cepat. Sumber kebenarannya adalah settings.json di direktori penyimpanan Anda.",
     "description": "Localized UI text."
   },
   "desktopMemoryCacheHtml": {
-    "message": "<span id=\"cacheSize\">...</span> memory cache <span class=\"hint-icon\">?<span class=\"hint-tip\" data-i18n=\"desktopMemoryCacheHint\">Settings and metadata cached in browser storage for fast access. The source of truth is settings.json in your storage directory.</span></span>",
+    "message": "<span id=\"cacheSize\">...</span> cache memori <span class=\"hint-icon\">?<span class=\"hint-tip\" data-i18n=\"desktopMemoryCacheHint\">Pengaturan dan metadata di-cache di penyimpanan browser untuk akses cepat. Sumber kebenarannya adalah settings.json di direktori penyimpanan Anda.</span></span>",
     "description": "Localized UI text."
   },
   "desktopMinutesAgo": {
-    "message": "$1m ago",
+    "message": "$1m yang lalu",
     "description": "Relative time in minutes."
   },
   "desktopNoBlockedPrefixes": {
-    "message": "No blocked web address prefixes",
+    "message": "Tidak ada awalan alamat web yang diblokir",
     "description": "Localized UI text."
   },
   "desktopNoImportableHistory": {
-    "message": "No importable history entries found in this file.",
+    "message": "Tidak ditemukan entri riwayat yang dapat diimpor dalam file ini.",
     "description": "Localized UI text."
   },
   "desktopNoSyncRepo": {
-    "message": "Don't have a sync repo?",
+    "message": "Tidak memiliki repo sinkronisasi?",
     "description": "Localized UI text."
   },
   "desktopNoTrimmingRules": {
-    "message": "No trimming rules",
+    "message": "Tidak ada aturan pemangkasan",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "Select text and press <kbd>Alt+H</kbd> to highlight it, or press <kbd>Alt+H</kbd> with no selection to add a note to the current page.",
+    "message": "Pilih teks dan tekan <kbd>Alt+H</kbd> untuk menyorotnya, atau tekan <kbd>Alt+H</kbd> tanpa pilihan untuk menambahkan catatan ke halaman saat ini.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {
-    "message": "Highlights & notes",
+    "message": "Sorotan & catatan",
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryText": {
-    "message": "Every page visit is automatically saved by Browser Recall Desktop and stays searchable by title, web address, and content.",
+    "message": "Setiap kunjungan halaman secara otomatis disimpan oleh Browser Recall Desktop dan tetap dapat dicari berdasarkan judul, alamat web, dan konten.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryTitle": {
-    "message": "Browsing history",
+    "message": "Riwayat penelusuran",
     "description": "Localized UI text."
   },
   "desktopOnboardingListsText": {
-    "message": "Organize pages into lists. Use automatic inbox rules to create a live-updating list.",
+    "message": "Atur halaman ke dalam daftar. Gunakan aturan kotak masuk otomatis untuk membuat daftar pembaruan langsung.",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTextHtml": {
-    "message": "Press <kbd>Alt+S</kbd> to save an offline copy of the page through the desktop bridge.",
+    "message": "Tekan <kbd>Alt+S</kbd> untuk menyimpan salinan halaman secara offline melalui jembatan desktop.",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTitle": {
-    "message": "Page snapshots",
+    "message": "Cuplikan halaman",
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "Open the Browser Recall popup in Chrome and click Pair with desktop.",
+    "message": "Buka pop-up Browser Recall di Chrome, lalu klik ‘Pasangkan dengan desktop’.",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {
-    "message": "Page properties",
+    "message": "Properti halaman",
     "description": "Localized UI text."
   },
   "desktopPasteExistingToken": {
-    "message": "or paste an existing token:",
+    "message": "atau tempelkan token yang ada:",
     "description": "Localized UI text."
   },
   "desktopPausedLower": {
-    "message": "paused",
+    "message": "dijeda",
     "description": "Localized UI text."
   },
   "desktopPauseSync": {
-    "message": "Pause sync",
+    "message": "Jeda sinkronisasi",
     "description": "Localized UI text."
   },
   "desktopPendingWritesHtml": {
-    "message": "<span id=\"bufferSize\">0</span> pending writes",
+    "message": "<span id=\"bufferSize\">0</span> penulisan tertunda",
     "description": "Localized UI text."
   },
   "desktopPinTime": {
-    "message": "Pin time",
+    "message": "Waktu penyematan",
     "description": "Localized UI text."
   },
   "desktopProvider": {
-    "message": "Provider",
+    "message": "Penyedia",
     "description": "Localized UI text."
   },
   "desktopPulledAgo": {
-    "message": "pulled $1",
+    "message": "menarik $1",
     "description": "Remote sync pull timestamp."
   },
   "desktopPulling": {
-    "message": "pulling...",
+    "message": "menarik...",
     "description": "Localized UI text."
   },
   "desktopPushedAgo": {
-    "message": "pushed $1",
+    "message": "mendorong $1",
     "description": "Local sync push timestamp."
   },
   "desktopPushing": {
-    "message": "pushing...",
+    "message": "mendorong...",
     "description": "Localized UI text."
   },
   "desktopQuery": {
-    "message": "Query",
+    "message": "Pertanyaan",
     "description": "Localized UI text."
   },
   "desktopRemainingWrites": {
-    "message": "$1 remaining",
+    "message": "$1 tersisa",
     "description": "Pending write flush remaining count."
   },
   "desktopRememberToken": {
-    "message": "Remember token",
+    "message": "Ingat tandanya",
     "description": "Localized UI text."
   },
   "desktopRememberTokenHint": {
-    "message": "When off, the token is kept in memory only and cleared on browser restart.",
+    "message": "Jika tidak aktif, token hanya disimpan di memori dan dihapus saat browser dimulai ulang.",
     "description": "Localized UI text."
   },
   "desktopRemoveAfterPipe": {
-    "message": "Remove after |",
+    "message": "Hapus setelah |",
     "description": "Localized UI text."
   },
   "desktopRemoveBrackets": {
-    "message": "Remove [brackets]",
+    "message": "Hapus [tanda kurung]",
     "description": "Localized UI text."
   },
   "desktopRemoveParens": {
-    "message": "Remove (parens)",
+    "message": "Hapus (orang tua)",
     "description": "Localized UI text."
   },
   "desktopRepositoryAddress": {
-    "message": "Repository address",
+    "message": "Alamat repositori",
     "description": "Localized UI text."
   },
   "desktopResumeSync": {
-    "message": "Resume sync",
+    "message": "Lanjutkan sinkronisasi",
     "description": "Localized UI text."
   },
   "desktopRetentionDays": {
-    "message": "Retention (days)",
+    "message": "Retensi (hari)",
     "description": "Localized UI text."
   },
   "desktopSelectAllUnavailable": {
-    "message": "Select all is not available here",
+    "message": "Pilih semua tidak tersedia di sini",
     "description": "Localized UI text."
   },
   "desktopSettingFailed": {
-    "message": "Desktop setting failed: $1",
+    "message": "Pengaturan desktop gagal: $1",
     "description": "Desktop shell setting failure."
   },
   "desktopSyncDisabled": {
-    "message": "Sync disabled: $1",
+    "message": "Sinkronisasi dinonaktifkan: $1",
     "description": "Sync disabled status detail."
   },
   "desktopSyncErrorRetry": {
-    "message": "Error (will retry): $1",
+    "message": "Kesalahan (akan mencoba lagi): $1",
     "description": "Sync retryable failure."
   },
   "desktopSyncSkipped": {
-    "message": "Sync skipped",
+    "message": "Sinkronisasi dilewati",
     "description": "Localized UI text."
   },
   "desktopTime": {
-    "message": "Time",
+    "message": "Waktu",
     "description": "Localized UI text."
   },
   "desktopToggleFailed": {
-    "message": "Toggle failed: $1",
+    "message": "Pengalihan gagal: $1",
     "description": "Sync device toggle failure."
   },
   "desktopVisitedMultipleTimes": {
-    "message": "Visited multiple times",
+    "message": "Dikunjungi beberapa kali",
     "description": "Localized UI text."
   },
   "desktopVisits": {
-    "message": "Visits",
+    "message": "Kunjungan",
     "description": "Localized UI text."
   },
   "extensionFirst": {
-    "message": "First",
+    "message": "Pertama",
     "description": "Localized UI text."
   },
   "desktopColumnRelevance": {
-    "message": "Rel",
+    "message": "Rel.",
     "description": "Search relevance column label."
   },
   "desktopColumnLastVisit": {
-    "message": "Last Visit",
+    "message": "Kunjungan Terakhir",
     "description": "Last visit column label."
   },
   "desktopColumnFirstVisit": {
-    "message": "First Visit",
+    "message": "Kunjungan Pertama",
     "description": "First visit column label."
   },
   "desktopColumnAttention": {
-    "message": "Att",
+    "message": "Perhatian",
     "description": "Attention score column label."
   },
   "desktopColumnPinTime": {
-    "message": "Pin Time",
+    "message": "Waktu Pin",
     "description": "Pin time column label."
   },
   "desktopDataFolderReady": {
-    "message": "Data folder ready",
+    "message": "Folder data sudah siap",
     "description": "Storage setup ready status."
   },
   "desktopDeviceId": {
-    "message": "Device $1",
+    "message": "Perangkat $1",
     "description": "Desktop device id label."
   },
   "desktopDeviceIdentityUnavailable": {
-    "message": "Device identity unavailable",
+    "message": "Identitas perangkat tidak tersedia",
     "description": "Missing desktop device identity status."
   },
   "desktopDeviceIdentityRestart": {
-    "message": "Device identity unavailable. Try restarting Browser Recall.",
+    "message": "Identitas perangkat tidak tersedia. Coba mulai ulang Browser Recall.",
     "description": "Startup failure when desktop device identity is unavailable."
   }
 }

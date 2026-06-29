@@ -9,6 +9,12 @@ const POPUP_HTML = readFileSync(
   path.join(ROOT, 'apps', 'extension', 'popup.html'),
   'utf8',
 );
+const EN_MESSAGES = JSON.parse(
+  readFileSync(
+    path.join(ROOT, 'packages', 'core', 'locales', 'en', 'messages.json'),
+    'utf8',
+  ),
+);
 
 async function waitFor(predicate, timeoutMs = 1500, stepMs = 25) {
   const deadline = Date.now() + timeoutMs;
@@ -82,6 +88,18 @@ function installChromeMock({ tab, responses }) {
   const sessionStore = {};
 
   globalThis.chrome = {
+    i18n: {
+      getUILanguage: () => 'en',
+      getMessage: (key, substitutions = []) => {
+        const values = Array.isArray(substitutions)
+          ? substitutions
+          : [substitutions];
+        return (EN_MESSAGES[key]?.message || '').replace(
+          /\$(\d+)/g,
+          (match, index) => values[Number(index) - 1] ?? match,
+        );
+      },
+    },
     runtime: {
       getURL: (resource) => `chrome-extension://abcdefghijklmnop/${resource}`,
       onMessage: runtimeMessages,
@@ -1231,7 +1249,7 @@ describe('popup desktop state rendering', () => {
     );
     expect(document.getElementById('pageHeader').style.display).toBe('none');
     expect(document.getElementById('pageTitle').textContent).toBe(
-      'BROWSER RECALL',
+      'Browser Recall',
     );
     const messageStyle = getComputedStyle(
       document.getElementById('pageDiagnosticTitle'),
@@ -1438,7 +1456,7 @@ describe('popup desktop state rendering', () => {
     );
 
     expect(document.getElementById('setupRequiredTitle').textContent).toBe(
-      'Desktop Offline',
+      'DESKTOP OFFLINE',
     );
     expect(document.getElementById('setupRequiredMeta').textContent).toContain(
       'Desktop approved, but connection failed.',
@@ -1546,7 +1564,7 @@ describe('popup desktop state rendering', () => {
     );
     expect(document.getElementById('dashboard').style.display).toBe('');
     expect(document.getElementById('pageTitle').textContent).toBe(
-      'BROWSER RECALL',
+      'Browser Recall',
     );
 
     connectorState.resolve({

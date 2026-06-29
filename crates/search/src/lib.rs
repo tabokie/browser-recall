@@ -426,15 +426,12 @@ fn read_dir_if_exists(path: &Path) -> io::Result<Option<fs::ReadDir>> {
 
 fn extract_note_fields(note: &NoteData) -> Vec<String> {
     let mut fields = Vec::new();
-    match &note.excerpt {
-        Value::Array(items) => {
-            for value in items {
-                if let Some(text) = value.as_str() {
-                    fields.push(text.to_string());
-                }
+    if let Value::Array(items) = &note.excerpt {
+        for value in items {
+            if let Some(text) = value.as_str() {
+                fields.push(text.to_string());
             }
         }
-        _ => {}
     }
     if let Some(note_text) = &note.note {
         fields.push(note_text.clone());

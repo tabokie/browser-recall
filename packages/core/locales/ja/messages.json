@@ -8,1519 +8,1519 @@
     "description": "Lowercase product mark used in compact desktop UI."
   },
   "extensionDescription": {
-    "message": "Chrome connector for Browser Recall Desktop. Capture pages in the browser and open the full app locally.",
+    "message": "Browser Recall Desktop 用の Chrome コネクタ。ブラウザでページを記録し、完全版アプリをローカルで開けます。",
     "description": "Extension store and browser management description."
   },
   "commandHighlightSelection": {
-    "message": "Highlight selected text or add a page note",
+    "message": "選択したテキストを強調表示するか、ページメモを追加します",
     "description": "Browser command description."
   },
   "commandCaptureSnapshot": {
-    "message": "Capture snapshot of current page",
+    "message": "現在のページのスナップショットをキャプチャする",
     "description": "Browser command description."
   },
   "commandLikePage": {
-    "message": "Like the current page",
+    "message": "現在のページにいいね！",
     "description": "Browser command description."
   },
   "commandDislikePage": {
-    "message": "Dislike the current page",
+    "message": "現在のページが気に入らない",
     "description": "Browser command description."
   },
   "commonAdd": {
-    "message": "Add",
+    "message": "追加",
     "description": "Generic add button label."
   },
   "commonBack": {
-    "message": "Back",
+    "message": "戻る",
     "description": "Back navigation label."
   },
   "commonCancel": {
-    "message": "Cancel",
+    "message": "キャンセル",
     "description": "Generic cancel button label."
   },
   "commonClear": {
-    "message": "Clear",
+    "message": "クリア",
     "description": "Generic clear button label."
   },
   "commonReload": {
-    "message": "Reload",
+    "message": "リロード",
     "description": "Generic reload button label."
   },
   "commonClose": {
-    "message": "Close",
+    "message": "閉じる",
     "description": "Close button title."
   },
   "commonConfirm": {
-    "message": "Confirm",
+    "message": "確認する",
     "description": "Confirm button title."
   },
   "commonContinue": {
-    "message": "Continue",
+    "message": "続ける",
     "description": "Continue navigation label."
   },
   "commonDelete": {
-    "message": "Delete",
+    "message": "削除",
     "description": "Generic delete button label."
   },
   "commonExplore": {
-    "message": "Explore",
+    "message": "探検する",
     "description": "Explore view label."
   },
   "commonFlush": {
-    "message": "Flush",
+    "message": "フラッシュ",
     "description": "Flush pending writes button label."
   },
   "commonImportHistory": {
-    "message": "Import History",
+    "message": "インポート履歴",
     "description": "Import history button label."
   },
   "commonImportSelected": {
-    "message": "Import Selected",
+    "message": "選択したものをインポート",
     "description": "Import selected items button label."
   },
   "commonLoading": {
-    "message": "Loading...",
+    "message": "読み込み中...",
     "description": "Generic loading state."
   },
   "commonLists": {
-    "message": "Lists",
+    "message": "リスト",
     "description": "Lists section label."
   },
   "commonRemove": {
-    "message": "Remove",
+    "message": "削除",
     "description": "Generic remove button title."
   },
   "commonSettings": {
-    "message": "Settings",
+    "message": "設定",
     "description": "Settings label."
   },
   "commonSystem": {
-    "message": "System",
+    "message": "システム",
     "description": "Use system setting option label."
   },
   "desktopAddons": {
-    "message": "Add-ons",
+    "message": "アドオン",
     "description": "Desktop settings group label."
   },
   "desktopAddRule": {
-    "message": "Add rule",
+    "message": "ルールの追加",
     "description": "Desktop inbox rule add button title."
   },
   "desktopAddPageNote": {
-    "message": "+ Add page note",
+    "message": "+ ページメモを追加",
     "description": "Page detail add page note button."
   },
   "desktopAdvanced": {
-    "message": "Advanced",
+    "message": "上級者向け",
     "description": "Desktop settings group label."
   },
   "desktopAppearance": {
-    "message": "Appearance",
+    "message": "外観",
     "description": "Desktop settings group label."
   },
   "desktopBrowsersActiveToday": {
-    "message": "Browsers active today",
+    "message": "現在アクティブなブラウザ",
     "description": "Paired browser list label."
   },
   "desktopCaptureVideos": {
-    "message": "Capture videos in snapshots",
+    "message": "スナップショットでビデオをキャプチャする",
     "description": "Desktop setting label."
   },
   "desktopCacheClearFailed": {
-    "message": "Cache clear failed: $1",
+    "message": "キャッシュクリアに失敗しました: $1",
     "description": "Status shown when cache clearing fails."
   },
   "desktopCancelPreview": {
-    "message": "Cancel Preview",
+    "message": "プレビューをキャンセル",
     "description": "Rule preview cancel button label."
   },
   "desktopCheckDevices": {
-    "message": "Check Devices",
+    "message": "デバイスを確認する",
     "description": "Sync devices check button."
   },
   "desktopChecking": {
-    "message": "Checking...",
+    "message": "確認中...",
     "description": "Button label while checking."
   },
   "desktopChooseDataFolder": {
-    "message": "Choose Data Folder",
+    "message": "データフォルダーの選択",
     "description": "Desktop onboarding data-folder button."
   },
   "desktopChangeDataFolder": {
-    "message": "Change Data Folder",
+    "message": "データフォルダの変更",
     "description": "Change data folder button label."
   },
   "desktopChoosing": {
-    "message": "Choosing...",
+    "message": "選択中...",
     "description": "Button label while choosing a data folder."
   },
   "desktopClearAllData": {
-    "message": "Clear All Data",
+    "message": "すべてのデータをクリア",
     "description": "Clear all data button label."
   },
   "desktopClearCacheReload": {
-    "message": "Clear Cache & Reload",
+    "message": "キャッシュのクリアとリロード",
     "description": "Clear cache button label."
   },
   "desktopCollapse": {
-    "message": "Collapse",
+    "message": "崩壊する",
     "description": "Collapse list title."
   },
   "desktopConnect": {
-    "message": "Connect",
+    "message": "接続する",
     "description": "Sync connect button label."
   },
   "desktopConnected": {
-    "message": "Connected",
+    "message": "接続済み",
     "description": "Sync connected state label."
   },
   "desktopConnecting": {
-    "message": "Connecting...",
+    "message": "接続中...",
     "description": "Sync connecting button label."
   },
   "desktopCouldNotStartSetup": {
-    "message": "Could not start setup: $1",
+    "message": "セットアップを開始できませんでした: $1",
     "description": "Onboarding setup failure."
   },
   "desktopColor": {
-    "message": "Color",
+    "message": "色",
     "description": "Desktop appearance color setting."
   },
   "desktopConnection": {
-    "message": "Connection",
+    "message": "接続",
     "description": "Desktop settings group label."
   },
   "desktopCreateList": {
-    "message": "Create list",
+    "message": "リストの作成",
     "description": "Create list button title."
   },
   "desktopCreateTokenGithub": {
-    "message": "Create Token on GitHub",
+    "message": "GitHub にトークンを作成します",
     "description": "Create GitHub token button label."
   },
   "desktopCreateGithubRepo": {
-    "message": "Create one on GitHub",
+    "message": "GitHub に作成します",
     "description": "Create GitHub repository link text."
   },
   "desktopData": {
-    "message": "Data",
+    "message": "データ",
     "description": "Desktop settings group label."
   },
   "desktopDataStorageHint": {
-    "message": "Stored locally as human-readable JSONL files organized by date. Open with any text editor or process with jq.",
+    "message": "日付別に整理された、人が読める JSONL ファイルとしてローカルに保存されます。任意のテキストエディタで開くか、jq で処理できます。",
     "description": "Desktop local data storage help text."
   },
   "desktopDefaultBrowserProfile": {
-    "message": "Default profile",
+    "message": "デフォルトのプロファイル",
     "description": "Fallback browser profile name."
   },
   "desktopDebugLogging": {
-    "message": "Debug logging (resets on restart)",
+    "message": "デバッグログ (再起動時にリセット)",
     "description": "Desktop debug logging setting."
   },
   "desktopDeleteAllDataHint": {
-    "message": "Deletes all files in the Browser Recall Desktop data folder. This cannot be undone.",
+    "message": "Browser Recall Desktop データ フォルダー内のすべてのファイルを削除します。これを元に戻すことはできません。",
     "description": "Desktop delete-all-data help text."
   },
   "desktopDeviceNotConfigured": {
-    "message": "Device not configured",
+    "message": "デバイスが設定されていません",
     "description": "Desktop storage status when setup is incomplete."
   },
   "desktopDisconnectedManageTokensHtml": {
-    "message": "Disconnected. <a href=\"https://github.com/settings/tokens\" target=\"_blank\" style=\"color:#1a73e8;\">Manage tokens on GitHub</a>",
+    "message": "接続が切断されました。<a href=\"https://github.com/settings/tokens\" target=\"_blank\" style=\"color:#1a73e8;\">GitHub でトークンを管理</a>",
     "description": "Sync disconnected status with link."
   },
   "desktopDisconnected": {
-    "message": "Disconnected",
+    "message": "切断されました",
     "description": "Paired browser disconnected status."
   },
   "desktopEmptyRecycleBin": {
-    "message": "Empty Recycle Bin",
+    "message": "ごみ箱を空にする",
     "description": "Recycle bin action."
   },
   "desktopErrorPrefix": {
-    "message": "Error: $1",
+    "message": "エラー: $1",
     "description": "Generic error prefix."
   },
   "desktopExcludedSites": {
-    "message": "Excluded Sites",
+    "message": "除外サイト",
     "description": "Desktop settings add-on title."
   },
   "desktopExcludedSitesDesc": {
-    "message": "Skip recording for matching web address prefixes",
+    "message": "一致する Web アドレス プレフィックスの記録をスキップする",
     "description": "Desktop settings add-on description."
   },
   "desktopHistoryBatchSize": {
-    "message": "History loading batch size",
+    "message": "履歴ロードのバッチサイズ",
     "description": "Desktop advanced setting label."
   },
   "desktopHistoryBatchSizeHint": {
-    "message": "Number of daily history files loaded at once when scrolling. Higher values load more history upfront but may feel slower on large datasets.",
+    "message": "スクロール時に一度に読み込まれる日次履歴ファイルの数。値が大きいほど、より多くの履歴が事前に読み込まれますが、大規模なデータセットでは速度が遅く感じる可能性があります。",
     "description": "Desktop history batch size help text."
   },
   "desktopGetStarted": {
-    "message": "Get Started",
+    "message": "始めましょう",
     "description": "Onboarding completion button."
   },
   "desktopHistoryImportHelp": {
-    "message": "Import a JSON array of browser history entries. Supported entry shapes include Chrome-style objects with url, title, and lastVisitTime, or expanded entries with visitTimes.",
+    "message": "ブラウザ履歴エントリの JSON 配列をインポートします。サポートされているエントリの形状には、url、title、lastVisitTime を含む Chrome スタイルのオブジェクト、または visitTimes を含む拡張エントリが含まれます。",
     "description": "History import help text."
   },
   "desktopImportBookmarks": {
-    "message": "Import Bookmarks",
+    "message": "ブックマークをインポートする",
     "description": "Import bookmarks button label."
   },
   "desktopImportBookmarksProgress": {
-    "message": "Importing bookmarks into Browser Recall...",
+    "message": "ブックマークを Browser Recall にインポートしています...",
     "description": "Bookmark import progress message."
   },
   "desktopImportBrowserHistoryProgress": {
-    "message": "Importing browser history into Browser Recall...",
+    "message": "ブラウザ履歴を Browser Recall にインポートしています...",
     "description": "History import progress message."
   },
   "desktopImportFailed": {
-    "message": "Import failed: $1",
+    "message": "インポートに失敗しました: $1",
     "description": "Import failure message."
   },
   "desktopImporting": {
-    "message": "Importing...",
+    "message": "インポート中...",
     "description": "Import button busy label."
   },
   "desktopDataFolder": {
-    "message": "Data folder: $1",
+    "message": "データフォルダー: $1",
     "description": "Configured data folder status."
   },
   "desktopSelectFolderPrompt": {
-    "message": "Select the folder where Browser Recall should store its local data.",
+    "message": "Browser Recall がローカル データを保存するフォルダーを選択します。",
     "description": "Data folder picker prompt."
   },
   "desktopChooseFolderContinue": {
-    "message": "Choose a data folder to continue.",
+    "message": "続行するにはデータ フォルダーを選択してください。",
     "description": "Data folder required message."
   },
   "desktopCouldNotUseFolder": {
-    "message": "Could not use that folder: $1",
+    "message": "そのフォルダーは使用できませんでした: $1",
     "description": "Data folder failure message."
   },
   "desktopLocalStorageFull": {
-    "message": "Local storage full",
+    "message": "ローカルストレージがいっぱいです",
     "description": "Service error message."
   },
   "desktopInboxRules": {
-    "message": "Inbox rules",
+    "message": "受信トレイのルール",
     "description": "Desktop inbox rules button title and panel label."
   },
   "desktopLanguage": {
-    "message": "Language",
+    "message": "言語",
     "description": "Desktop appearance language setting."
   },
   "desktopLaunchAtLogin": {
-    "message": "Launch at login",
+    "message": "ログイン時に起動",
     "description": "Desktop launch-at-login setting."
   },
   "desktopLaunchAtLoginUnsupported": {
-    "message": "Launch at login is available on macOS 13 or newer.",
+    "message": "ログイン時の起動は macOS 13 以降で利用できます。",
     "description": "Launch-at-login platform support notice."
   },
   "desktopLaunchAtLoginLong": {
-    "message": "Launch Browser Recall when you log in",
+    "message": "ログイン時に Browser Recall を起動します",
     "description": "Onboarding launch-at-login setting."
   },
   "desktopNoBrowsersActiveToday": {
-    "message": "No browsers active today.",
+    "message": "現在アクティブなブラウザはありません。",
     "description": "Empty paired browser list text."
   },
   "desktopNoKnownChildren": {
-    "message": "No known children",
+    "message": "知られている子供はいない",
     "description": "Page relation empty state."
   },
   "desktopNoKnownParents": {
-    "message": "No known parents",
+    "message": "知られている両親はいない",
     "description": "Page relation empty state."
   },
   "desktopNoDeletedItems": {
-    "message": "No deleted items",
+    "message": "削除されたアイテムはありません",
     "description": "Empty recycle bin text."
   },
   "desktopNoLists": {
-    "message": "No lists",
+    "message": "リストなし",
     "description": "List picker empty state."
   },
   "desktopNoMatches": {
-    "message": "No matches",
+    "message": "一致しません",
     "description": "Rule preview empty state."
   },
   "desktopNoMatchingPins": {
-    "message": "No matching pins",
+    "message": "一致するピンがありません",
     "description": "Filtered pin empty state."
   },
   "desktopNoPinnedPages": {
-    "message": "No pinned pages",
+    "message": "固定されたページはありません",
     "description": "Pinned page empty state."
   },
   "desktopNoPinnedPreview": {
-    "message": "No pinned pages available for preview",
+    "message": "プレビューに使用できる固定されたページはありません",
     "description": "Rule preview empty state for pinned pages."
   },
   "desktopNoPinnedPagesPreview": {
-    "message": "No pinned pages available for preview",
+    "message": "プレビューに使用できる固定されたページはありません",
     "description": "Rules pinned preview empty state."
   },
   "desktopNoResults": {
-    "message": "No results",
+    "message": "結果はありません",
     "description": "Search empty state."
   },
   "desktopNoVisitsPreview": {
-    "message": "No visits found to match against",
+    "message": "一致する訪問が見つかりませんでした",
     "description": "Rules visit preview empty state."
   },
   "desktopNoteOn": {
-    "message": "Note on $1",
+    "message": "$1 に関するメモ",
     "description": "Recycle bin note display name with URL."
   },
   "desktopNoteWithSlug": {
-    "message": "Note ($1)",
+    "message": "注 ($1)",
     "description": "Recycle bin note display name with slug."
   },
   "desktopNoAnnotation": {
-    "message": "No annotation",
+    "message": "注釈なし",
     "description": "Empty note annotation placeholder."
   },
   "desktopOnboardingDataHeading": {
-    "message": "Choose your data folder",
+    "message": "データフォルダーを選択してください",
     "description": "Onboarding data-folder heading."
   },
   "desktopOnboardingDataText": {
-    "message": "Browser Recall stores plain-text local data in the folder you choose. No default folder is used until you make this choice.",
+    "message": "Browser Recall は、選択したフォルダーにプレーンテキストのローカル データを保存します。この選択をするまで、デフォルトのフォルダーは使用されません。",
     "description": "Onboarding data-folder explanation."
   },
   "desktopOnboardingIntro": {
-    "message": "browser-recall saves browsing history, notes, and highlights through Browser Recall Desktop into a local plain-text data folder.",
+    "message": "browser-recall は、Browser Recall Desktop を通じて閲覧履歴、メモ、ハイライトをローカルのプレーンテキストデータフォルダに保存します。",
     "description": "Onboarding product description."
   },
   "desktopOnboardingLiveCapture": {
-    "message": "Live capture",
+    "message": "ライブキャプチャ",
     "description": "Onboarding live capture heading."
   },
   "desktopOnboardingLiveCaptureText": {
-    "message": "Install the browser extension and pair it from the extension popup. Browser Recall Desktop must stay running in the background to record visits.",
+    "message": "ブラウザ拡張機能をインストールし、拡張機能ポップアップからペアリングします。訪問を記録するには、Browser Recall Desktop をバックグラウンドで実行し続ける必要があります。",
     "description": "Onboarding live capture explanation."
   },
   "desktopOnboardingPickColor": {
-    "message": "Pick a color",
+    "message": "色を選択してください",
     "description": "Onboarding color picker heading."
   },
   "desktopPairFromBrowserPopup": {
-    "message": "Pair from Browser Popup",
+    "message": "ブラウザのポップアップからペアリングする",
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "Open the Browser Recall popup in Chrome and click Pair with desktop.",
+    "message": "Chrome で Browser Recall のポップアップを開き、「デスクトップとペアリング」をクリックします。",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
-    "message": "Page details unavailable",
+    "message": "ページの詳細は利用できません",
     "description": "Page detail empty state."
   },
   "desktopParents": {
-    "message": "Parents",
+    "message": "両親",
     "description": "Page relation section label."
   },
   "desktopPatternRequired": {
-    "message": "Pattern is required",
+    "message": "パターンは必須です",
     "description": "Rule validation error."
   },
   "desktopPinned": {
-    "message": "Pinned",
+    "message": "固定された",
     "description": "Pinned pages section label."
   },
   "desktopPinnedPages": {
-    "message": "Pinned Pages",
+    "message": "固定されたページ",
     "description": "Pinned pages rule preview label."
   },
   "desktopPinSearchCreateList": {
-    "message": "Pin a search to create a list",
+    "message": "検索を固定してリストを作成する",
     "description": "Empty list sidebar message."
   },
   "desktopPreview": {
-    "message": "Preview",
+    "message": "プレビュー",
     "description": "Preview button label."
   },
   "desktopKeyword": {
-    "message": "Keyword",
+    "message": "キーワード",
     "description": "Rule type label."
   },
   "desktopFunction": {
-    "message": "Function",
+    "message": "機能",
     "description": "Rule type label."
   },
   "desktopCustomFunction": {
-    "message": "(custom function)",
+    "message": "(カスタム関数)",
     "description": "Rule description fallback."
   },
   "desktopUnknown": {
-    "message": "unknown",
+    "message": "不明",
     "description": "Unknown type fallback."
   },
   "desktopRemoveRuleFailed": {
-    "message": "Failed to remove rule: $1",
+    "message": "ルールの削除に失敗しました: $1",
     "description": "Rule removal failure."
   },
   "desktopNoEditRow": {
-    "message": "No edit row",
+    "message": "編集行がありません",
     "description": "Rule editor internal validation shown to user."
   },
   "desktopFunctionBodyRequired": {
-    "message": "Function body is required",
+    "message": "関数本体は必須です",
     "description": "Rule editor validation."
   },
   "desktopUnknownRuleType": {
-    "message": "Unknown rule type",
+    "message": "不明なルールの種類",
     "description": "Rule editor validation."
   },
   "desktopRuleKeywordPlaceholder": {
-    "message": "keyword or /regex/",
+    "message": "キーワードまたは /regex/",
     "description": "Keyword rule input placeholder."
   },
   "desktopRuleDescriptionPlaceholder": {
-    "message": "description",
+    "message": "説明",
     "description": "Function rule description placeholder."
   },
   "desktopSaveEnter": {
-    "message": "Save (Enter)",
+    "message": "保存(入力)",
     "description": "Rule editor save button title."
   },
   "desktopMatchesChecked": {
-    "message": "$1 matches ($2 checked)",
+    "message": "$1 件一致（$2 件選択）",
     "description": "Rule preview match count."
   },
   "desktopRecentVisits": {
-    "message": "Recent Visits",
+    "message": "最近の訪問",
     "description": "Rules preview section label."
   },
   "desktopReplayWorkerFailed": {
-    "message": "Replay worker failed",
+    "message": "リプレイワーカーが失敗しました",
     "description": "Service error message."
   },
   "desktopResumeService": {
-    "message": "Resume Service",
+    "message": "サービスを再開する",
     "description": "Service error recovery button label."
   },
   "desktopRecycleBin": {
-    "message": "Recycle Bin",
+    "message": "ごみ箱",
     "description": "Recycle bin view label."
   },
   "desktopRecycleBinLoadFailed": {
-    "message": "Failed to load recycle bin: $1",
+    "message": "ごみ箱の読み込みに失敗しました: $1",
     "description": "Recycle bin load failure."
   },
   "desktopReloadExtension": {
-    "message": "Reload Extension",
+    "message": "リロード拡張機能",
     "description": "Fatal error reload button."
   },
   "desktopReloading": {
-    "message": "Reloading...",
+    "message": "再読み込み中...",
     "description": "Reloading button state."
   },
   "desktopRepositoryRequired": {
-    "message": "Repository address is required",
+    "message": "リポジトリアドレスは必須です",
     "description": "Sync validation message."
   },
   "desktopResults": {
-    "message": "Results",
+    "message": "結果",
     "description": "Results section label."
   },
   "desktopRestore": {
-    "message": "Restore",
+    "message": "復元",
     "description": "Recycle bin restore button."
   },
   "desktopRestoreFailed": {
-    "message": "Failed to restore item: $1",
+    "message": "アイテムの復元に失敗しました: $1",
     "description": "Recycle bin restore failure."
   },
   "desktopRevoke": {
-    "message": "Revoke",
+    "message": "取り消し",
     "description": "Paired browser revoke button label."
   },
   "desktopRevokeBrowserFailed": {
-    "message": "Failed to revoke browser: $1",
+    "message": "ブラウザの取り消しに失敗しました: $1",
     "description": "Paired browser revoke failure."
   },
   "desktopPageNotePrefix": {
-    "message": "Page note: ",
+    "message": "ページメモ:",
     "description": "Prefix for page-note recycle bin display names."
   },
   "desktopSelectBookmarkFile": {
-    "message": "Select an exported bookmarks file to preview folders.",
+    "message": "エクスポートされたブックマーク ファイルを選択してフォルダーをプレビューします。",
     "description": "Bookmark import placeholder."
   },
   "desktopSettingsSaved": {
-    "message": "Settings saved",
+    "message": "設定が保存されました",
     "description": "Status shown after saving settings."
   },
   "desktopServiceUnavailable": {
-    "message": "Service unavailable",
+    "message": "サービスが利用できません",
     "description": "Generic service unavailable message."
   },
   "desktopSessionStorageFull": {
-    "message": "Session storage full",
+    "message": "セッションストレージがいっぱいです",
     "description": "Service error message."
   },
   "desktopSimilar": {
-    "message": "Similar",
+    "message": "同様の",
     "description": "Page relation section label."
   },
   "desktopSortBy": {
-    "message": "Sort by",
+    "message": "並べ替え順",
     "description": "Filter section label."
   },
   "desktopStarting": {
-    "message": "Starting...",
+    "message": "開始中...",
     "description": "Startup button state."
   },
   "desktopStorageAccessFailed": {
-    "message": "Storage access failed",
+    "message": "ストレージアクセスに失敗しました",
     "description": "Service error message."
   },
   "desktopStorageUnavailable": {
-    "message": "Storage Unavailable",
+    "message": "ストレージが使用できません",
     "description": "Fatal storage error title."
   },
   "desktopSync": {
-    "message": "Sync",
+    "message": "同期",
     "description": "Sync add-on title."
   },
   "desktopSyncDesc": {
-    "message": "Sync history and notes across devices, not including snapshots",
+    "message": "スナップショットを除く、デバイス間で履歴とメモを同期します",
     "description": "Sync add-on description."
   },
   "desktopSyncNow": {
-    "message": "Sync Now",
+    "message": "今すぐ同期",
     "description": "Sync now button label."
   },
   "desktopSyncing": {
-    "message": "Syncing...",
+    "message": "同期中...",
     "description": "Sync button busy label."
   },
   "desktopTokenRequired": {
-    "message": "Token is required",
+    "message": "トークンが必要です",
     "description": "Sync token validation message."
   },
   "desktopViewDetails": {
-    "message": "View details",
+    "message": "詳細を見る",
     "description": "Result card detail button title."
   },
   "desktopWaitingApproval": {
-    "message": "Waiting for approval...",
+    "message": "承認を待っています...",
     "description": "Pairing button pending label."
   },
   "desktopTheme": {
-    "message": "Theme",
+    "message": "テーマ",
     "description": "Desktop appearance theme setting."
   },
   "desktopThemeDark": {
-    "message": "Dark",
+    "message": "暗い",
     "description": "Dark theme option."
   },
   "desktopThemeLight": {
-    "message": "Light",
+    "message": "ライト",
     "description": "Light theme option."
   },
   "desktopTitleCleanup": {
-    "message": "Title Cleanup",
+    "message": "タイトルのクリーンアップ",
     "description": "Desktop settings add-on title."
   },
   "desktopTitleCleanupDesc": {
-    "message": "Clean up page titles per site when recording",
+    "message": "記録時にサイトごとにページタイトルをクリーンアップする",
     "description": "Desktop settings add-on description."
   },
   "desktopTooManyResults": {
-    "message": "Too many results to select (limit: 100)",
+    "message": "結果が多すぎて選択できません (制限: 100)",
     "description": "Bulk selection limit message."
   },
   "desktopToggleSidebar": {
-    "message": "Toggle sidebar",
+    "message": "サイドバーの切り替え",
     "description": "Sidebar toggle title."
   },
   "desktopVisitsOverTime": {
-    "message": "Visits over time",
+    "message": "長期にわたる訪問数",
     "description": "Time chart label."
   },
   "extensionCheckAgain": {
-    "message": "Check Again",
+    "message": "もう一度確認してください",
     "description": "Extension setup retry button."
   },
   "extensionActionFailedReload": {
-    "message": "$1 - please reload the extension.",
+    "message": "$1 - 拡張機能をリロードしてください。",
     "description": "Popup error with reload hint."
   },
   "extensionActionFailed": {
-    "message": "Action failed",
+    "message": "アクションが失敗しました",
     "description": "Generic extension action failure."
   },
   "extensionApproveBrowserDesktop": {
-    "message": "Approve this browser in the desktop app.",
+    "message": "デスクトップ アプリでこのブラウザを承認します。",
     "description": "Connector approval pending metadata."
   },
   "extensionAddNote": {
-    "message": "Add a note...",
+    "message": "メモを追加...",
     "description": "Extension note placeholder."
   },
   "extensionAddNoteEsc": {
-    "message": "Add a note... Esc to save.",
+    "message": "メモを追加... Esc キーを押して保存します。",
     "description": "Extension note placeholder with keyboard hint."
   },
   "extensionAddPageNote": {
-    "message": "+ Page note",
+    "message": "+ ページメモ",
     "description": "Popup page note add button."
   },
   "extensionAddPageNoteEsc": {
-    "message": "Add a page note... Esc to save.",
+    "message": "ページメモを追加... Esc キーを押して保存します。",
     "description": "Extension page note placeholder with keyboard hint."
   },
   "extensionAddToList": {
-    "message": "Add to list",
+    "message": "リストに追加",
     "description": "Popup add to list title."
   },
   "extensionApprovalPending": {
-    "message": "Approval Pending",
+    "message": "承認待ち",
     "description": "Connector approval pending status."
   },
   "extensionApprovalDenied": {
-    "message": "Approval Denied",
+    "message": "承認が拒否されました",
     "description": "Connector approval denied status."
   },
   "extensionBlacklisted": {
-    "message": "Blacklisted",
+    "message": "ブラックリストに登録されている",
     "description": "Popup blacklisted page title."
   },
   "extensionBrowserRecallApprovalDenied": {
-    "message": "Browser Recall Desktop approval denied",
+    "message": "Browser Recall Desktop 承認が拒否されました",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallApprovalPending": {
-    "message": "Browser Recall Desktop approval pending",
+    "message": "Browser Recall Desktop 承認待ち",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallDesktopConnected": {
-    "message": "Browser Recall Desktop connected",
+    "message": "Browser Recall Desktop 接続されました",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallDesktopOffline": {
-    "message": "Browser Recall Desktop is offline",
+    "message": "Browser Recall Desktop はオフラインです",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallDesktopPaused": {
-    "message": "Browser Recall Desktop is paused",
+    "message": "Browser Recall Desktop は一時停止中です",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallPaused": {
-    "message": "Browser Recall is paused",
+    "message": "Browser Recall は一時停止中です",
     "description": "Paused service title."
   },
   "extensionBrowserRecallQueueFull": {
-    "message": "Browser Recall Desktop queue is full",
+    "message": "Browser Recall Desktop キューがいっぱいです",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallRecordingPaused": {
-    "message": "Browser Recall recording is paused",
+    "message": "Browser Recall 録音は一時停止されています",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallTokenRejected": {
-    "message": "Browser Recall Desktop token rejected",
+    "message": "Browser Recall Desktop トークンが拒否されました",
     "description": "Extension badge title."
   },
   "extensionCannotCapturePdf": {
-    "message": "Cannot capture PDF pages",
+    "message": "PDF ページをキャプチャできません",
     "description": "Snapshot capture PDF error."
   },
   "extensionCaptureFailed": {
-    "message": "Capture failed",
+    "message": "キャプチャに失敗しました",
     "description": "Snapshot capture failure."
   },
   "extensionCaptureFrame": {
-    "message": "CAPTURE FRAME",
+    "message": "キャプチャフレーム",
     "description": "Popup capture button."
   },
   "extensionCaptureIt": {
-    "message": "Capture It",
+    "message": "キャプチャーイット",
     "description": "Capture blacklisted page button."
   },
   "extensionCaptureNoContent": {
-    "message": "Capture failed: page returned no content",
+    "message": "キャプチャに失敗しました: ページからコンテンツが返されませんでした",
     "description": "Snapshot capture empty page error."
   },
   "extensionCapturing": {
-    "message": "Capturing...",
+    "message": "キャプチャ中...",
     "description": "Capture busy label."
   },
   "extensionCheckAgainApproval": {
-    "message": "Check again to request approval.",
+    "message": "もう一度チェックして承認をリクエストします。",
     "description": "Connector retry approval metadata."
   },
   "extensionConnectionResetActionFailed": {
-    "message": "Browser Recall action failed because the extension connection was reset. Reload this page and try again.",
+    "message": "Browser Recall 内線接続がリセットされたため、アクションが失敗しました。このページをリロードして、もう一度お試しください。",
     "description": "Extension action runtime failure message."
   },
   "extensionContextInvalidated": {
-    "message": "Extension context invalidated. Please refresh the page and try again.",
+    "message": "拡張コンテキストが無効になりました。ページを更新して、もう一度お試しください。",
     "description": "Popup runtime invalidated message."
   },
   "extensionCreateListNamed": {
-    "message": "Create \"$1\"",
+    "message": "「$1」を作成します",
     "description": "List picker create option."
   },
   "extensionCreateList": {
-    "message": "Create \"$1\"",
+    "message": "「$1」を作成します",
     "description": "List picker create option."
   },
   "extensionCreateNoteFailed": {
-    "message": "Create note failed",
+    "message": "メモの作成に失敗しました",
     "description": "Create note failure."
   },
   "extensionDeleteHighlight": {
-    "message": "Delete highlight",
+    "message": "ハイライトの削除",
     "description": "Delete highlight button title."
   },
   "extensionDeleteSnapshot": {
-    "message": "Delete snapshot",
+    "message": "スナップショットの削除",
     "description": "Delete snapshot button title."
   },
   "extensionDesktopBridgeUnavailable": {
-    "message": "Desktop bridge unavailable",
+    "message": "デスクトップブリッジが使用不可",
     "description": "Extension desktop bridge unavailable error."
   },
   "extensionDesktopApprovedConnectionFailed": {
-    "message": "Desktop approved, but connection failed.",
+    "message": "デスクトップは承認されましたが、接続に失敗しました。",
     "description": "Connector approved but disconnected metadata."
   },
   "extensionDesktopBufferFull": {
-    "message": "Browser Recall Desktop buffer full - start the desktop app or wait for the queue to drain.",
+    "message": "Browser Recall Desktop バッファーがいっぱいです - デスクトップ アプリを起動するか、キューが空になるまで待ちます。",
     "description": "Extension desktop command buffer full message."
   },
   "extensionDesktopEventQueueFull": {
-    "message": "Browser Recall Desktop event queue is full - start the desktop app or wait for the queue to drain.",
+    "message": "Browser Recall Desktop イベント キューがいっぱいです。デスクトップ アプリを起動するか、キューが空になるまで待ちます。",
     "description": "Extension desktop event queue full message."
   },
   "extensionDesktopConnected": {
-    "message": "Desktop Connected",
+    "message": "接続されたデスクトップ",
     "description": "Connector connected status."
   },
   "extensionDesktopConnectionActive": {
-    "message": "Desktop connection active.",
+    "message": "デスクトップ接続がアクティブです。",
     "description": "Connector connected metadata."
   },
   "extensionDesktopOfflineMixed": {
-    "message": "Browser Recall Desktop is offline.",
+    "message": "Browser Recall Desktop はオフラインです。",
     "description": "Connector offline sentence."
   },
   "extensionDesktopPageDataUnavailable": {
-    "message": "Desktop page data unavailable.",
+    "message": "デスクトップ ページ データが利用できません。",
     "description": "Popup bootstrap page data unavailable fallback."
   },
   "extensionDesktopPopupAccessFailed": {
-    "message": "Desktop popup access check failed",
+    "message": "デスクトップポップアップアクセスチェックに失敗しました",
     "description": "Popup access check failure."
   },
   "extensionDesktopPaused": {
-    "message": "Desktop Paused",
+    "message": "デスクトップが一時停止されました",
     "description": "Connector paused status."
   },
   "extensionDesktopNotConnectedRefresh": {
-    "message": "Browser Recall Desktop is not connected yet. Start the desktop app and refresh from the popup.",
+    "message": "Browser Recall Desktop はまだ接続されていません。デスクトップ アプリを起動し、ポップアップから更新します。",
     "description": "Popup desktop disconnected failure."
   },
   "extensionDesktopQueueFull": {
-    "message": "Desktop Queue Full",
+    "message": "デスクトップキューがいっぱいです",
     "description": "Connector queue full status."
   },
   "extensionDeviceId": {
-    "message": "Device $1",
+    "message": "デバイス $1",
     "description": "Connector device id metadata."
   },
   "extensionDisliked": {
-    "message": "Disliked",
+    "message": "嫌い",
     "description": "Dislike notification."
   },
   "extensionEdit": {
-    "message": "Edit",
+    "message": "編集",
     "description": "Edit button title."
   },
   "extensionEditNote": {
-    "message": "Edit note",
+    "message": "メモを編集する",
     "description": "Edit note button title."
   },
   "extensionHighlights": {
-    "message": "Highlights",
+    "message": "ハイライト",
     "description": "Highlights panel title."
   },
   "extensionHighlightsCount": {
-    "message": "Highlights ($1)",
+    "message": "ハイライト ($1)",
     "description": "Highlights panel title with count."
   },
   "extensionHighlightFailed": {
-    "message": "Highlight failed",
+    "message": "ハイライトに失敗しました",
     "description": "Highlight failure."
   },
   "extensionLastCheckAuthenticatedStatusFailed": {
-    "message": "Last check: authenticated, but status failed.",
+    "message": "最終チェック: 認証されましたが、ステータスは失敗しました。",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckAuthenticatedStatusFailedDetail": {
-    "message": "Last check: authenticated, but status failed ($1).",
+    "message": "最終チェック: 認証されましたが、ステータスは失敗しました ($1)。",
     "description": "Connector diagnostic with detail."
   },
   "extensionLastCheckApprovalDenied": {
-    "message": "Last check: desktop approval was denied.",
+    "message": "最終チェック: デスクトップの承認が拒否されました。",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckCode": {
-    "message": "Last check: $1.",
+    "message": "最終チェック: $1。",
     "description": "Connector diagnostic code fallback."
   },
   "extensionLastCheckMessage": {
-    "message": "Last check: $1",
+    "message": "最終チェック: $1",
     "description": "Connector diagnostic message fallback."
   },
   "extensionLastCheckNoConnection": {
-    "message": "Last check: no usable desktop connection.",
+    "message": "最終チェック: 使用可能なデスクトップ接続がありません。",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckNoConnectionDetail": {
-    "message": "Last check: no usable desktop connection ($1).",
+    "message": "最終チェック: 使用可能なデスクトップ接続がありません ($1)。",
     "description": "Connector diagnostic with port detail."
   },
   "extensionLastCheckReconnectFailed": {
-    "message": "Last check: desktop connection did not succeed in $1.",
+    "message": "最終チェック: デスクトップ接続は $1 で成功しませんでした。",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckSocketClosed": {
-    "message": "Last check: socket closed.",
+    "message": "最終チェック: ソケットが閉じられています。",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckSocketClosedDetail": {
-    "message": "Last check: socket closed ($1).",
+    "message": "最終チェック: ソケットが閉じられています ($1)。",
     "description": "Connector diagnostic with socket state."
   },
   "extensionLastCheckStatusRefreshFailed": {
-    "message": "Last check: status refresh failed.",
+    "message": "最終チェック: ステータスの更新に失敗しました。",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckStatusRefreshFailedDetail": {
-    "message": "Last check: status refresh failed ($1).",
+    "message": "最終チェック: ステータスの更新に失敗しました ($1)。",
     "description": "Connector diagnostic with detail."
   },
   "extensionLastCheckTokenRejected": {
-    "message": "Last check: desktop rejected the saved token.",
+    "message": "最終チェック: デスクトップが保存されたトークンを拒否しました。",
     "description": "Connector diagnostic."
   },
   "extensionLastDiagnostic": {
-    "message": " Last diagnostic: $1.",
+    "message": "最終診断: $1。",
     "description": "Connector diagnostic suffix."
   },
   "extensionLastPortFailures": {
-    "message": " Last port failures: $1.",
+    "message": "最新のポート障害: $1。",
     "description": "Connector diagnostic suffix."
   },
   "extensionLikeFailed": {
-    "message": "Like failed",
+    "message": "失敗したような",
     "description": "Like action failure."
   },
   "extensionLiked": {
-    "message": "Liked",
+    "message": "気に入った",
     "description": "Like notification."
   },
   "extensionLookingForDesktop": {
-    "message": "Looking for Browser Recall Desktop",
+    "message": "Browser Recall Desktop を探しています",
     "description": "Extension badge title."
   },
   "extensionManageSettings": {
-    "message": "Manage in Settings",
+    "message": "設定で管理",
     "description": "Popup settings action."
   },
   "extensionNoAnnotation": {
-    "message": "No annotation",
+    "message": "注釈なし",
     "description": "Popup no annotation placeholder."
   },
   "extensionNoLists": {
-    "message": "No lists",
+    "message": "リストなし",
     "description": "Popup no lists message."
   },
   "extensionNoTargetTab": {
-    "message": "No target tab",
+    "message": "対象タブがありません",
     "description": "Extension notification routing failure."
   },
   "extensionNotAvailablePage": {
-    "message": "Not available for this page",
+    "message": "このページでは利用できません",
     "description": "Popup unsupported page message."
   },
   "extensionOpenDesktopFlush": {
-    "message": "Open desktop to flush capture.",
+    "message": "デスクトップを開いてキャプチャをフラッシュします。",
     "description": "Connector queue full meta."
   },
   "extensionPageDataUnavailable": {
-    "message": "Page Data Unavailable",
+    "message": "ページデータが利用できません",
     "description": "Popup page data unavailable title."
   },
   "extensionPageNote": {
-    "message": "Page Note",
+    "message": "ページメモ",
     "description": "Page note overlay title."
   },
   "extensionRatePageFailed": {
-    "message": "ratePage failed",
+    "message": "rateページが失敗しました",
     "description": "Rating command failure."
   },
   "extensionRefreshFailed": {
-    "message": "Failed to refresh.",
+    "message": "更新に失敗しました。",
     "description": "Popup connector refresh failure."
   },
   "extensionResumeCaptureDesktop": {
-    "message": "Resume capture from desktop settings.",
+    "message": "デスクトップ設定からキャプチャを再開します。",
     "description": "Connector paused metadata."
   },
   "extensionRetryWindow": {
-    "message": "the retry window",
+    "message": "再試行ウィンドウ",
     "description": "Connector diagnostic retry window label."
   },
   "extensionConfigureShortcuts": {
-    "message": "Configure Shortcuts",
+    "message": "ショートカットの設定",
     "description": "Extension options button."
   },
   "extensionCurrentPageReceipt": {
-    "message": "current page receipt",
+    "message": "現在のページの領収書",
     "description": "Extension popup placeholder URL text."
   },
   "extensionDesktopControl": {
-    "message": "Desktop Control",
+    "message": "デスクトップコントロール",
     "description": "Extension options heading."
   },
   "extensionDesktopOffline": {
-    "message": "DESKTOP OFFLINE",
+    "message": "デスクトップオフライン",
     "description": "Extension popup desktop offline heading."
   },
   "extensionKeyboardShortcuts": {
-    "message": "Keyboard Shortcuts",
+    "message": "キーボードショートカット",
     "description": "Extension options heading."
   },
   "extensionMainUiRunsInDesktop": {
-    "message": "The main Browser Recall interface runs in the desktop app.",
+    "message": "メインの Browser Recall インターフェイスはデスクトップ アプリで実行されます。",
     "description": "Extension options explanatory text."
   },
   "extensionNotSet": {
-    "message": "Not set",
+    "message": "未設定",
     "description": "Keyboard shortcut missing value."
   },
   "extensionOpenBrowserRecall": {
-    "message": "Open Browser Recall",
+    "message": "Browser Recall を開く",
     "description": "Extension options open app button."
   },
   "extensionOpenDesktop": {
-    "message": "Open Desktop",
+    "message": "デスクトップを開く",
     "description": "Extension popup open desktop button."
   },
   "extensionPauseTracing": {
-    "message": "Pause tracing",
+    "message": "トレースを一時停止する",
     "description": "Extension popup recording toggle title."
   },
   "extensionStartDesktop": {
-    "message": "Start Browser Recall Desktop to resume live capture.",
+    "message": "Browser Recall Desktop を開始してライブ キャプチャを再開します。",
     "description": "Extension setup message."
   },
   "extensionStartDesktopCapture": {
-    "message": "Start Browser Recall Desktop to resume live capture.",
+    "message": "Browser Recall Desktop を開始してライブ キャプチャを再開します。",
     "description": "Connector offline metadata."
   },
   "extensionStorageUnavailable": {
-    "message": "Storage Unavailable",
+    "message": "ストレージが使用できません",
     "description": "Extension fatal error title."
   },
   "extensionSnapshotCaptured": {
-    "message": "Snapshot captured",
+    "message": "スナップショットがキャプチャされました",
     "description": "Snapshot capture success notification."
   },
   "extensionSomethingWentWrong": {
-    "message": "Something went wrong",
+    "message": "何か問題が発生しました",
     "description": "Generic extension error."
   },
   "extensionTokenRejected": {
-    "message": "Token Rejected",
+    "message": "トークンが拒否されました",
     "description": "Connector token rejected status."
   },
   "extensionUpdateFailed": {
-    "message": "Update failed",
+    "message": "アップデートに失敗しました",
     "description": "Update note failure."
   },
   "extensionWaitingApproval": {
-    "message": "Waiting for Approval",
+    "message": "承認待ち",
     "description": "Connector approval pending button."
   },
   "extensionSearchOrCreate": {
-    "message": "Search or create...",
+    "message": "検索または作成...",
     "description": "List picker search placeholder."
   },
   "extensionSnapshotMissingParams": {
-    "message": "Missing snapshot parameters.",
+    "message": "スナップショットパラメータが欠落しています。",
     "description": "Snapshot viewer error."
   },
   "extensionSnapshotNotFound": {
-    "message": "Snapshot not found.",
+    "message": "スナップショットが見つかりません。",
     "description": "Snapshot viewer error."
   },
   "extensionReloaded": {
-    "message": "Browser Recall extension reloaded. Please reload the page and try again.",
+    "message": "Browser Recall 拡張機能がリロードされました。ページをリロードして、もう一度お試しください。",
     "description": "Runtime invalidated message."
   },
   "extensionReloadExtension": {
-    "message": "Reload Extension",
+    "message": "リロード拡張機能",
     "description": "Extension fatal error reload button."
   },
   "extensionOpenAppFallback": {
-    "message": "Can't open the app? Launch it from your Applications folder, then try again.",
+    "message": "アプリを開けませんか?アプリケーション フォルダーから起動して、もう一度試してください。",
     "description": "Extension options fallback notice."
   },
   "extensionToggleRecording": {
-    "message": "Toggle recording",
+    "message": "録画の切り替え",
     "description": "Extension popup recording toggle accessibility label."
   },
   "desktopAddPageNotePlaceholder": {
-    "message": "Add a page note...",
+    "message": "ページメモを追加...",
     "description": "Localized UI text."
   },
   "desktopAlreadyPaired": {
-    "message": "Chrome is already paired with Browser Recall Desktop",
+    "message": "Chrome はすでに Browser Recall Desktop とペアリングされています",
     "description": "Localized UI text."
   },
   "desktopApprovePairing": {
-    "message": "Approve the pairing request in Browser Recall Desktop",
+    "message": "Browser Recall Desktop でペアリング リクエストを承認します。",
     "description": "Localized UI text."
   },
   "desktopAsGithubUser": {
-    "message": "as @$1",
+    "message": "@$1として",
     "description": "Connected GitHub user suffix."
   },
   "desktopAuthentication": {
-    "message": "Authentication",
+    "message": "認証",
     "description": "Localized UI text."
   },
   "desktopBookmarkPreviewPlaceholder": {
-    "message": "Select an exported bookmarks file to preview folders.",
+    "message": "エクスポートされたブックマーク ファイルを選択してフォルダーをプレビューします。",
     "description": "Localized UI text."
   },
   "desktopBridgeCheckFailed": {
-    "message": "Desktop bridge check failed: $1",
+    "message": "デスクトップ ブリッジのチェックに失敗しました: $1",
     "description": "Desktop bridge check failure."
   },
   "desktopCancelling": {
-    "message": "Cancelling...",
+    "message": "キャンセル中...",
     "description": "Localized UI text."
   },
   "desktopCannotDeleteHistory": {
-    "message": "Cannot delete history",
+    "message": "履歴を削除できません",
     "description": "Localized UI text."
   },
   "desktopCanOnlyPasteIntoList": {
-    "message": "Can only paste into a list",
+    "message": "リストにのみ貼り付けることができます",
     "description": "Localized UI text."
   },
   "desktopChildren": {
-    "message": "Children",
+    "message": "子供たち",
     "description": "Localized UI text."
   },
   "desktopClearAllDataFinalConfirm": {
-    "message": "Final confirmation: Delete all history files?",
+    "message": "最終確認: 履歴ファイルをすべて削除しますか?",
     "description": "Localized UI text."
   },
   "desktopClearAllDataWarning": {
-    "message": "Warning: this will delete all files in your storage directory.\n\nThis cannot be undone. Are you absolutely sure?",
+    "message": "警告: これにより、ストレージ ディレクトリ内のすべてのファイルが削除されます。\n\nこれを元に戻すことはできません。絶対に間違いありませんか？",
     "description": "Localized UI text."
   },
   "desktopClearDataFailed": {
-    "message": "Error clearing data: $1",
+    "message": "データ消去エラー: $1",
     "description": "Clear all data failure."
   },
   "desktopClearedFiles": {
-    "message": "Cleared $1 files/directories",
+    "message": "$1 個のファイル/ディレクトリをクリアしました",
     "description": "Clear all data success."
   },
   "desktopClearing": {
-    "message": "Clearing...",
+    "message": "クリア中...",
     "description": "Localized UI text."
   },
   "desktopClearReload": {
-    "message": "Clear & Reload",
+    "message": "クリア＆リロード",
     "description": "Localized UI text."
   },
   "desktopColumnTitle": {
-    "message": "Title",
+    "message": "タイトル",
     "description": "Localized UI text."
   },
   "desktopCurrentDevice": {
-    "message": "(current)",
+    "message": "(現在)",
     "description": "Localized UI text."
   },
   "desktopDaysAgo": {
-    "message": "$1d ago",
+    "message": "$1d 前",
     "description": "Relative time in days."
   },
   "desktopDevices": {
-    "message": "Devices",
+    "message": "デバイス",
     "description": "Localized UI text."
   },
   "desktopExperimental": {
-    "message": "Experimental",
+    "message": "実験的",
     "description": "Localized UI text."
   },
   "desktopExploreResults": {
-    "message": "Explore results",
+    "message": "結果を調べる",
     "description": "Localized UI text."
   },
   "desktopFilters": {
-    "message": "Filters",
+    "message": "フィルター",
     "description": "Localized UI text."
   },
   "desktopFirstSeen": {
-    "message": "First seen",
+    "message": "初めて見た",
     "description": "Localized UI text."
   },
   "desktopFirstVisit": {
-    "message": "First visit",
+    "message": "初めての訪問",
     "description": "Localized UI text."
   },
   "desktopFirstVisited": {
-    "message": "First visited:",
+    "message": "最初に訪れた場所:",
     "description": "Localized UI text."
   },
   "desktopFixSettingsBeforeSync": {
-    "message": "Fix settings before syncing",
+    "message": "同期する前に設定を修正する",
     "description": "Localized UI text."
   },
   "desktopFlushed": {
-    "message": "Flushed!",
+    "message": "紅潮した！",
     "description": "Localized UI text."
   },
   "desktopFlushing": {
-    "message": "Flushing...",
+    "message": "フラッシング...",
     "description": "Localized UI text."
   },
   "desktopFocus": {
-    "message": "Focus",
+    "message": "フォーカス",
     "description": "Localized UI text."
   },
   "desktopGithubAuthExpired": {
-    "message": "GitHub authorization expired - please reconnect.",
+    "message": "GitHub 認証の有効期限が切れました - 再接続してください。",
     "description": "Localized UI text."
   },
   "desktopGithubNotConnected": {
-    "message": "GitHub not connected - click \"Connect with GitHub\" first",
+    "message": "GitHub に接続されていません。先に「GitHub に接続」をクリックしてください",
     "description": "Localized UI text."
   },
   "desktopGithubPrefilled": {
-    "message": "Opens GitHub with pre-filled settings",
+    "message": "事前入力された設定で GitHub を開きます",
     "description": "Localized UI text."
   },
   "desktopHasHighlights": {
-    "message": "Has highlights",
+    "message": "ハイライトあり",
     "description": "Localized UI text."
   },
   "desktopHasSnapshots": {
-    "message": "Has snapshots",
+    "message": "スナップショットあり",
     "description": "Localized UI text."
   },
   "desktopHistoryImportHelpHtml": {
-    "message": "Import a JSON array of browser history entries. Supported entry shapes include Chrome-style objects with <code>url</code>, <code>title</code>, and <code>lastVisitTime</code>, or expanded entries with <code>visitTimes</code>.",
+    "message": "ブラウザ履歴エントリの JSON 配列をインポートします。<code>url</code>、<code>title</code>、<code>lastVisitTime</code> を持つ Chrome 形式のオブジェクト、または <code>visitTimes</code> を持つ展開済みエントリに対応しています。",
     "description": "Localized UI text."
   },
   "desktopHistoryInvalidJson": {
-    "message": "invalid JSON or unsupported history export format",
+    "message": "無効な JSON またはサポートされていない履歴エクスポート形式",
     "description": "Localized UI text."
   },
   "desktopHistoryParseFailed": {
-    "message": "Could not parse history JSON: $1",
+    "message": "履歴 JSON を解析できませんでした: $1",
     "description": "History import JSON parse failure."
   },
   "desktopHistoryReadyToImport": {
-    "message": "Ready to import $1 visits across $2 pages.",
+    "message": "$2 ページの $1 件の訪問をインポートできます。",
     "description": "History import preview summary."
   },
   "desktopHoursAgo": {
-    "message": "$1h ago",
+    "message": "$1 時間前",
     "description": "Relative time in hours."
   },
   "desktopImportBookmarksDone": {
-    "message": "Done! Imported $1 lists with $2 bookmarks.",
+    "message": "完了しました。$2 件のブックマークを含む $1 件のリストをインポートしました。",
     "description": "Bookmark import success summary."
   },
   "desktopImportHistoryDone": {
-    "message": "Done! Imported $1 visits across $2 pages.",
+    "message": "完了しました。$2 ページの $1 件の訪問をインポートしました。",
     "description": "History import success summary."
   },
   "desktopImportSkipped": {
-    "message": "$1 items skipped during parsing or import.",
+    "message": "$1 個のアイテムが解析またはインポート中にスキップされました。",
     "description": "History import skipped item summary."
   },
   "desktopInboxRulesHint": {
-    "message": "Rules automatically sort new pages into this list. Keyword rules match against page title, web address, and body text. Function rules use a custom JS predicate that returns true/false.",
+    "message": "ルールにより、新しいページがこのリストに自動的に分類されます。キーワード ルールは、ページ タイトル、Web アドレス、本文テキストと照合します。関数ルールは、true/false を返すカスタム JS 述語を使用します。",
     "description": "Localized UI text."
   },
   "desktopIntervalMinutes": {
-    "message": "Interval (min)",
+    "message": "間隔 (分)",
     "description": "Localized UI text."
   },
   "desktopInvalidToken": {
-    "message": "Invalid token: $1",
+    "message": "無効なトークン: $1",
     "description": "Sync token validation failure."
   },
   "desktopItemsSkipped": {
-    "message": "$1 items skipped",
+    "message": "$1 個のアイテムがスキップされました",
     "description": "Import skipped item summary."
   },
   "desktopJustNow": {
-    "message": "just now",
+    "message": "たった今",
     "description": "Localized UI text."
   },
   "desktopLastSeen": {
-    "message": "Last seen",
+    "message": "最後に見た",
     "description": "Localized UI text."
   },
   "desktopLastVisit": {
-    "message": "Last visit",
+    "message": "前回の訪問",
     "description": "Localized UI text."
   },
   "desktopLastVisited": {
-    "message": "Last visited:",
+    "message": "最後に訪れた場所:",
     "description": "Localized UI text."
   },
   "desktopMakePrivate": {
-    "message": "(make it private)",
+    "message": "(非公開にしてください)",
     "description": "Localized UI text."
   },
   "desktopManualSetupHtml": {
-    "message": "<li> Create a <strong>private</strong> repository on <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> (e.g. <code>portal-sync</code>). Leave it empty. </li> <li> Go to <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">Fine-grained tokens</a> and create a token: <ul> <li> Set expiration to <strong>No expiration</strong> </li> <li> Under \"Repository access\", choose <strong>Only select repositories</strong> and pick your sync repo </li> <li> Under \"Permissions\", add <strong>Contents</strong> and set to <strong>Read and write</strong> </li> </ul> </li> <li>Paste the repository address and token above.</li>",
+    "message": "<li><a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> に<strong>非公開</strong>リポジトリ（例: <code>portal-sync</code>）を作成し、空のままにします。</li><li><a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">Fine-grained token</a> を開いてトークンを作成します。<ul><li>有効期限を<strong>無期限</strong>に設定します</li><li>「Repository access」で <strong>Only select repositories</strong> を選び、同期用リポジトリを指定します</li><li>「Permissions」で <strong>Contents</strong> を追加し、<strong>Read and write</strong> に設定します</li></ul></li><li>上の欄にリポジトリのアドレスとトークンを貼り付けます。</li>",
     "description": "Localized UI text."
   },
   "desktopManualSetupInstructions": {
-    "message": "Manual setup instructions",
+    "message": "手動セットアップ手順",
     "description": "Localized UI text."
   },
   "desktopMemoryCacheHint": {
-    "message": "Settings and metadata cached in browser storage for fast access. The source of truth is settings.json in your storage directory.",
+    "message": "設定とメタデータはブラウザーのストレージにキャッシュされ、高速にアクセスできます。真実のソースは、ストレージ ディレクトリ内の settings.json です。",
     "description": "Localized UI text."
   },
   "desktopMemoryCacheHtml": {
-    "message": "<span id=\"cacheSize\">...</span> memory cache <span class=\"hint-icon\">?<span class=\"hint-tip\" data-i18n=\"desktopMemoryCacheHint\">Settings and metadata cached in browser storage for fast access. The source of truth is settings.json in your storage directory.</span></span>",
+    "message": "<span id=\"cacheSize\">...</span> メモリキャッシュ <span class=\"hint-icon\">?<span class=\"hint-tip\" data-i18n=\"desktopMemoryCacheHint\">設定とメタデータは高速アクセスのためブラウザーストレージにキャッシュされます。正しいデータはストレージディレクトリ内の settings.json に保存されています。</span></span>",
     "description": "Localized UI text."
   },
   "desktopMinutesAgo": {
-    "message": "$1m ago",
+    "message": "$1 メートル前",
     "description": "Relative time in minutes."
   },
   "desktopNoBlockedPrefixes": {
-    "message": "No blocked web address prefixes",
+    "message": "ブロックされた Web アドレス プレフィックスはありません",
     "description": "Localized UI text."
   },
   "desktopNoImportableHistory": {
-    "message": "No importable history entries found in this file.",
+    "message": "このファイルにはインポート可能な履歴エントリが見つかりません。",
     "description": "Localized UI text."
   },
   "desktopNoSyncRepo": {
-    "message": "Don't have a sync repo?",
+    "message": "同期リポジトリがありませんか?",
     "description": "Localized UI text."
   },
   "desktopNoTrimmingRules": {
-    "message": "No trimming rules",
+    "message": "トリミングルールなし",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "Select text and press <kbd>Alt+H</kbd> to highlight it, or press <kbd>Alt+H</kbd> with no selection to add a note to the current page.",
+    "message": "テキストを選択して <kbd>Alt+H</kbd> を押すとハイライトできます。何も選択せずに <kbd>Alt+H</kbd> を押すと、現在のページにメモを追加できます。",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {
-    "message": "Highlights & notes",
+    "message": "ハイライトとメモ",
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryText": {
-    "message": "Every page visit is automatically saved by Browser Recall Desktop and stays searchable by title, web address, and content.",
+    "message": "すべてのページ訪問は Browser Recall Desktop によって自動的に保存され、タイトル、Web アドレス、コンテンツで検索できる状態が維持されます。",
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryTitle": {
-    "message": "Browsing history",
+    "message": "閲覧履歴",
     "description": "Localized UI text."
   },
   "desktopOnboardingListsText": {
-    "message": "Organize pages into lists. Use automatic inbox rules to create a live-updating list.",
+    "message": "ページをリストに整理します。自動受信トレイ ルールを使用して、ライブ更新リストを作成します。",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTextHtml": {
-    "message": "Press <kbd>Alt+S</kbd> to save an offline copy of the page through the desktop bridge.",
+    "message": "<kbd>Alt+S</kbd> を押すと、デスクトップブリッジ経由でページのオフラインコピーを保存できます。",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTitle": {
-    "message": "Page snapshots",
+    "message": "ページのスナップショット",
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "Open the Browser Recall popup in Chrome and click Pair with desktop.",
+    "message": "Chrome で Browser Recall のポップアップを開き、「デスクトップとペアリング」をクリックします。",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {
-    "message": "Page properties",
+    "message": "ページのプロパティ",
     "description": "Localized UI text."
   },
   "desktopPasteExistingToken": {
-    "message": "or paste an existing token:",
+    "message": "または既存のトークンを貼り付けます。",
     "description": "Localized UI text."
   },
   "desktopPausedLower": {
-    "message": "paused",
+    "message": "一時停止した",
     "description": "Localized UI text."
   },
   "desktopPauseSync": {
-    "message": "Pause sync",
+    "message": "同期を一時停止する",
     "description": "Localized UI text."
   },
   "desktopPendingWritesHtml": {
-    "message": "<span id=\"bufferSize\">0</span> pending writes",
+    "message": "<span id=\"bufferSize\">0</span> 保留中の書き込み",
     "description": "Localized UI text."
   },
   "desktopPinTime": {
-    "message": "Pin time",
+    "message": "ピンタイム",
     "description": "Localized UI text."
   },
   "desktopProvider": {
-    "message": "Provider",
+    "message": "プロバイダー",
     "description": "Localized UI text."
   },
   "desktopPulledAgo": {
-    "message": "pulled $1",
+    "message": "引かれました $1",
     "description": "Remote sync pull timestamp."
   },
   "desktopPulling": {
-    "message": "pulling...",
+    "message": "引っ張る…",
     "description": "Localized UI text."
   },
   "desktopPushedAgo": {
-    "message": "pushed $1",
+    "message": "プッシュされました $1",
     "description": "Local sync push timestamp."
   },
   "desktopPushing": {
-    "message": "pushing...",
+    "message": "押している...",
     "description": "Localized UI text."
   },
   "desktopQuery": {
-    "message": "Query",
+    "message": "クエリ",
     "description": "Localized UI text."
   },
   "desktopRemainingWrites": {
-    "message": "$1 remaining",
+    "message": "$1 残り",
     "description": "Pending write flush remaining count."
   },
   "desktopRememberToken": {
-    "message": "Remember token",
+    "message": "トークンを記憶する",
     "description": "Localized UI text."
   },
   "desktopRememberTokenHint": {
-    "message": "When off, the token is kept in memory only and cleared on browser restart.",
+    "message": "オフの場合、トークンはメモリ内にのみ保持され、ブラウザの再起動時にクリアされます。",
     "description": "Localized UI text."
   },
   "desktopRemoveAfterPipe": {
-    "message": "Remove after |",
+    "message": "| の後に削除します。",
     "description": "Localized UI text."
   },
   "desktopRemoveBrackets": {
-    "message": "Remove [brackets]",
+    "message": "[括弧]を削除します",
     "description": "Localized UI text."
   },
   "desktopRemoveParens": {
-    "message": "Remove (parens)",
+    "message": "(括弧) を削除します",
     "description": "Localized UI text."
   },
   "desktopRepositoryAddress": {
-    "message": "Repository address",
+    "message": "リポジトリアドレス",
     "description": "Localized UI text."
   },
   "desktopResumeSync": {
-    "message": "Resume sync",
+    "message": "同期を再開する",
     "description": "Localized UI text."
   },
   "desktopRetentionDays": {
-    "message": "Retention (days)",
+    "message": "保存期間 (日)",
     "description": "Localized UI text."
   },
   "desktopSelectAllUnavailable": {
-    "message": "Select all is not available here",
+    "message": "すべて選択はここでは利用できません",
     "description": "Localized UI text."
   },
   "desktopSettingFailed": {
-    "message": "Desktop setting failed: $1",
+    "message": "デスクトップ設定に失敗しました: $1",
     "description": "Desktop shell setting failure."
   },
   "desktopSyncDisabled": {
-    "message": "Sync disabled: $1",
+    "message": "同期が無効です: $1",
     "description": "Sync disabled status detail."
   },
   "desktopSyncErrorRetry": {
-    "message": "Error (will retry): $1",
+    "message": "エラー (再試行します): $1",
     "description": "Sync retryable failure."
   },
   "desktopSyncSkipped": {
-    "message": "Sync skipped",
+    "message": "同期がスキップされました",
     "description": "Localized UI text."
   },
   "desktopTime": {
-    "message": "Time",
+    "message": "時間",
     "description": "Localized UI text."
   },
   "desktopToggleFailed": {
-    "message": "Toggle failed: $1",
+    "message": "切り替えに失敗しました: $1",
     "description": "Sync device toggle failure."
   },
   "desktopVisitedMultipleTimes": {
-    "message": "Visited multiple times",
+    "message": "複数回訪問しました",
     "description": "Localized UI text."
   },
   "desktopVisits": {
-    "message": "Visits",
+    "message": "訪問",
     "description": "Localized UI text."
   },
   "extensionFirst": {
-    "message": "First",
+    "message": "まず",
     "description": "Localized UI text."
   },
   "desktopColumnRelevance": {
-    "message": "Rel",
+    "message": "関連度",
     "description": "Search relevance column label."
   },
   "desktopColumnLastVisit": {
-    "message": "Last Visit",
+    "message": "前回の訪問",
     "description": "Last visit column label."
   },
   "desktopColumnFirstVisit": {
-    "message": "First Visit",
+    "message": "初回訪問",
     "description": "First visit column label."
   },
   "desktopColumnAttention": {
-    "message": "Att",
+    "message": "注目",
     "description": "Attention score column label."
   },
   "desktopColumnPinTime": {
-    "message": "Pin Time",
+    "message": "ピンタイム",
     "description": "Pin time column label."
   },
   "desktopDataFolderReady": {
-    "message": "Data folder ready",
+    "message": "データフォルダーの準備ができました",
     "description": "Storage setup ready status."
   },
   "desktopDeviceId": {
-    "message": "Device $1",
+    "message": "デバイス $1",
     "description": "Desktop device id label."
   },
   "desktopDeviceIdentityUnavailable": {
-    "message": "Device identity unavailable",
+    "message": "デバイス ID が利用できません",
     "description": "Missing desktop device identity status."
   },
   "desktopDeviceIdentityRestart": {
-    "message": "Device identity unavailable. Try restarting Browser Recall.",
+    "message": "デバイス ID が利用できません。 Browser Recall を再起動してみてください。",
     "description": "Startup failure when desktop device identity is unavailable."
   }
 }

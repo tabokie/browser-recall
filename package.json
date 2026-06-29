@@ -12,6 +12,7 @@
     "build": "npm run build:extension && npm run build --workspace @browser-recall/desktop",
     "build:extension": "node scripts/stage-app-assets.mjs extension",
     "build:desktop-ui": "node scripts/stage-app-assets.mjs desktop-ui",
+    "locales:check": "node scripts/stage-app-assets.mjs locales",
     "watch": "node -e \"console.log('No root watch step is required for the extension')\"",
     "dev": "npm run build:extension && node -e \"console.log('Load dist/extension/chrome in Chrome, or run npm run dev:desktop for the Tauri shell')\"",
     "dev:desktop": "npm run dev --workspace @browser-recall/desktop",

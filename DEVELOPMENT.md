@@ -165,6 +165,16 @@ Seed cases live in `seeds/` (gitignored). Each `.mjs` file exports a function re
 - **Popup**: Right-click the extension icon -> "Inspect popup"
 - **Debug logging**: Enable in Settings -> Advanced -> Debug logging. Logs go to the service worker console via `logDebug()`.
 
+## Adding a Locale
+
+Add the locale code, native display name, and any system-locale aliases to
+`SUPPORTED_LOCALES` in `packages/core/i18n.js`, then add a complete
+`packages/core/locales/<code>/messages.json` catalog. Run
+`npm run locales:check`; extension and desktop builds run the same validation
+before staging. Catalogs must preserve keys, placeholders, HTML tags,
+`<code>`/`<kbd>` contents, product names, browser names, shortcuts, and other
+protected technical terms from English.
+
 ## Formatting
 
 ```bash

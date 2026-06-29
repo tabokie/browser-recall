@@ -8,28 +8,12 @@ use crate::{
 };
 use browser_recall_replay::entities::{Entity, TreeNode};
 use browser_recall_replay::{
-    generate_slug_from_url, Context as ReplayContext, LogEntry, RuleInput,
+    generate_slug_from_url, Context as ReplayContext, LogEntry, RuleInput, PERSISTENT_SETTINGS_KEYS,
 };
 use chrono::TimeZone;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
-
-const SETTINGS_KEYS: &[&str] = &[
-    "theme",
-    "colorScheme",
-    "localeOverride",
-    "historyFileBatch",
-    "captureSnapshotVideo",
-    "blacklistEnabled",
-    "urlBlacklist",
-    "titleCleanupEnabled",
-    "titleTrimRules",
-    "syncEnabled",
-    "syncMethod",
-    "syncRepoUrl",
-    "syncRetentionDays",
-];
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -626,7 +610,7 @@ pub async fn save_settings_key(
     key: &str,
     value: Value,
 ) -> Result<(), String> {
-    if !SETTINGS_KEYS.contains(&key) {
+    if !PERSISTENT_SETTINGS_KEYS.contains(&key) {
         return Err(format!("Unknown settings key: {key}"));
     }
     replay_entry(

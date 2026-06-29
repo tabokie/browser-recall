@@ -8,1519 +8,1519 @@
     "description": "Lowercase product mark used in compact desktop UI."
   },
   "extensionDescription": {
-    "message": "Chrome connector for Browser Recall Desktop. Capture pages in the browser and open the full app locally.",
+    "message": "موصل Chrome لـ Browser Recall Desktop. التقط الصفحات في المتصفح وافتح التطبيق الكامل محليًا.",
     "description": "Extension store and browser management description."
   },
   "commandHighlightSelection": {
-    "message": "Highlight selected text or add a page note",
+    "message": "قم بتمييز النص المحدد أو أضف ملاحظة بالصفحة",
     "description": "Browser command description."
   },
   "commandCaptureSnapshot": {
-    "message": "Capture snapshot of current page",
+    "message": "التقاط لقطة من الصفحة الحالية",
     "description": "Browser command description."
   },
   "commandLikePage": {
-    "message": "Like the current page",
+    "message": "مثل الصفحة الحالية",
     "description": "Browser command description."
   },
   "commandDislikePage": {
-    "message": "Dislike the current page",
+    "message": "عدم الإعجاب بالصفحة الحالية",
     "description": "Browser command description."
   },
   "commonAdd": {
-    "message": "Add",
+    "message": "أضف",
     "description": "Generic add button label."
   },
   "commonBack": {
-    "message": "Back",
+    "message": "العودة",
     "description": "Back navigation label."
   },
   "commonCancel": {
-    "message": "Cancel",
+    "message": "إلغاء",
     "description": "Generic cancel button label."
   },
   "commonClear": {
-    "message": "Clear",
+    "message": "مسح",
     "description": "Generic clear button label."
   },
   "commonReload": {
-    "message": "Reload",
+    "message": "إعادة تحميل",
     "description": "Generic reload button label."
   },
   "commonClose": {
-    "message": "Close",
+    "message": "إغلاق",
     "description": "Close button title."
   },
   "commonConfirm": {
-    "message": "Confirm",
+    "message": "تأكيد",
     "description": "Confirm button title."
   },
   "commonContinue": {
-    "message": "Continue",
+    "message": "متابعة",
     "description": "Continue navigation label."
   },
   "commonDelete": {
-    "message": "Delete",
+    "message": "حذف",
     "description": "Generic delete button label."
   },
   "commonExplore": {
-    "message": "Explore",
+    "message": "استكشاف",
     "description": "Explore view label."
   },
   "commonFlush": {
-    "message": "Flush",
+    "message": "دافق",
     "description": "Flush pending writes button label."
   },
   "commonImportHistory": {
-    "message": "Import History",
+    "message": "تاريخ الاستيراد",
     "description": "Import history button label."
   },
   "commonImportSelected": {
-    "message": "Import Selected",
+    "message": "استيراد المحدد",
     "description": "Import selected items button label."
   },
   "commonLoading": {
-    "message": "Loading...",
+    "message": "جار التحميل...",
     "description": "Generic loading state."
   },
   "commonLists": {
-    "message": "Lists",
+    "message": "القوائم",
     "description": "Lists section label."
   },
   "commonRemove": {
-    "message": "Remove",
+    "message": "إزالة",
     "description": "Generic remove button title."
   },
   "commonSettings": {
-    "message": "Settings",
+    "message": "الإعدادات",
     "description": "Settings label."
   },
   "commonSystem": {
-    "message": "System",
+    "message": "النظام",
     "description": "Use system setting option label."
   },
   "desktopAddons": {
-    "message": "Add-ons",
+    "message": "الإضافات",
     "description": "Desktop settings group label."
   },
   "desktopAddRule": {
-    "message": "Add rule",
+    "message": "أضف القاعدة",
     "description": "Desktop inbox rule add button title."
   },
   "desktopAddPageNote": {
-    "message": "+ Add page note",
+    "message": "+ إضافة ملاحظة الصفحة",
     "description": "Page detail add page note button."
   },
   "desktopAdvanced": {
-    "message": "Advanced",
+    "message": "متقدم",
     "description": "Desktop settings group label."
   },
   "desktopAppearance": {
-    "message": "Appearance",
+    "message": "المظهر",
     "description": "Desktop settings group label."
   },
   "desktopBrowsersActiveToday": {
-    "message": "Browsers active today",
+    "message": "المتصفحات نشطة اليوم",
     "description": "Paired browser list label."
   },
   "desktopCaptureVideos": {
-    "message": "Capture videos in snapshots",
+    "message": "التقاط مقاطع الفيديو في لقطات",
     "description": "Desktop setting label."
   },
   "desktopCacheClearFailed": {
-    "message": "Cache clear failed: $1",
+    "message": "فشل مسح ذاكرة التخزين المؤقت: $1",
     "description": "Status shown when cache clearing fails."
   },
   "desktopCancelPreview": {
-    "message": "Cancel Preview",
+    "message": "إلغاء المعاينة",
     "description": "Rule preview cancel button label."
   },
   "desktopCheckDevices": {
-    "message": "Check Devices",
+    "message": "فحص الأجهزة",
     "description": "Sync devices check button."
   },
   "desktopChecking": {
-    "message": "Checking...",
+    "message": "جارٍ التحقق...",
     "description": "Button label while checking."
   },
   "desktopChooseDataFolder": {
-    "message": "Choose Data Folder",
+    "message": "اختر مجلد البيانات",
     "description": "Desktop onboarding data-folder button."
   },
   "desktopChangeDataFolder": {
-    "message": "Change Data Folder",
+    "message": "تغيير مجلد البيانات",
     "description": "Change data folder button label."
   },
   "desktopChoosing": {
-    "message": "Choosing...",
+    "message": "اختيار...",
     "description": "Button label while choosing a data folder."
   },
   "desktopClearAllData": {
-    "message": "Clear All Data",
+    "message": "مسح كافة البيانات",
     "description": "Clear all data button label."
   },
   "desktopClearCacheReload": {
-    "message": "Clear Cache & Reload",
+    "message": "مسح ذاكرة التخزين المؤقت وإعادة التحميل",
     "description": "Clear cache button label."
   },
   "desktopCollapse": {
-    "message": "Collapse",
+    "message": "طي",
     "description": "Collapse list title."
   },
   "desktopConnect": {
-    "message": "Connect",
+    "message": "الاتصال",
     "description": "Sync connect button label."
   },
   "desktopConnected": {
-    "message": "Connected",
+    "message": "متصل",
     "description": "Sync connected state label."
   },
   "desktopConnecting": {
-    "message": "Connecting...",
+    "message": "جارٍ الاتصال...",
     "description": "Sync connecting button label."
   },
   "desktopCouldNotStartSetup": {
-    "message": "Could not start setup: $1",
+    "message": "تعذر بدء الإعداد: $1",
     "description": "Onboarding setup failure."
   },
   "desktopColor": {
-    "message": "Color",
+    "message": "اللون",
     "description": "Desktop appearance color setting."
   },
   "desktopConnection": {
-    "message": "Connection",
+    "message": "اتصال",
     "description": "Desktop settings group label."
   },
   "desktopCreateList": {
-    "message": "Create list",
+    "message": "إنشاء قائمة",
     "description": "Create list button title."
   },
   "desktopCreateTokenGithub": {
-    "message": "Create Token on GitHub",
+    "message": "إنشاء رمز مميز على GitHub",
     "description": "Create GitHub token button label."
   },
   "desktopCreateGithubRepo": {
-    "message": "Create one on GitHub",
+    "message": "قم بإنشاء واحد على GitHub",
     "description": "Create GitHub repository link text."
   },
   "desktopData": {
-    "message": "Data",
+    "message": "البيانات",
     "description": "Desktop settings group label."
   },
   "desktopDataStorageHint": {
-    "message": "Stored locally as human-readable JSONL files organized by date. Open with any text editor or process with jq.",
+    "message": "تُخزَّن محليًا كملفات JSONL قابلة للقراءة ومنظمة حسب التاريخ. افتحها بأي محرر نصوص أو عالجها باستخدام jq.",
     "description": "Desktop local data storage help text."
   },
   "desktopDefaultBrowserProfile": {
-    "message": "Default profile",
+    "message": "الملف الشخصي الافتراضي",
     "description": "Fallback browser profile name."
   },
   "desktopDebugLogging": {
-    "message": "Debug logging (resets on restart)",
+    "message": "تسجيل التصحيح (إعادة التعيين عند إعادة التشغيل)",
     "description": "Desktop debug logging setting."
   },
   "desktopDeleteAllDataHint": {
-    "message": "Deletes all files in the Browser Recall Desktop data folder. This cannot be undone.",
+    "message": "يحذف جميع الملفات الموجودة في مجلد البيانات Browser Recall Desktop. لا يمكن التراجع عن هذا.",
     "description": "Desktop delete-all-data help text."
   },
   "desktopDeviceNotConfigured": {
-    "message": "Device not configured",
+    "message": "لم يتم تكوين الجهاز",
     "description": "Desktop storage status when setup is incomplete."
   },
   "desktopDisconnectedManageTokensHtml": {
-    "message": "Disconnected. <a href=\"https://github.com/settings/tokens\" target=\"_blank\" style=\"color:#1a73e8;\">Manage tokens on GitHub</a>",
+    "message": "غير متصل. <a href=\"https://github.com/settings/tokens\" target=\"_blank\" style=\"color:#1a73e8;\">إدارة الرموز المميزة على GitHub</a>",
     "description": "Sync disconnected status with link."
   },
   "desktopDisconnected": {
-    "message": "Disconnected",
+    "message": "غير متصل",
     "description": "Paired browser disconnected status."
   },
   "desktopEmptyRecycleBin": {
-    "message": "Empty Recycle Bin",
+    "message": "سلة المحذوفات فارغة",
     "description": "Recycle bin action."
   },
   "desktopErrorPrefix": {
-    "message": "Error: $1",
+    "message": "خطأ: $1",
     "description": "Generic error prefix."
   },
   "desktopExcludedSites": {
-    "message": "Excluded Sites",
+    "message": "المواقع المستبعدة",
     "description": "Desktop settings add-on title."
   },
   "desktopExcludedSitesDesc": {
-    "message": "Skip recording for matching web address prefixes",
+    "message": "تخطي التسجيل لمطابقة بادئات عناوين الويب",
     "description": "Desktop settings add-on description."
   },
   "desktopHistoryBatchSize": {
-    "message": "History loading batch size",
+    "message": "حجم دفعة تحميل التاريخ",
     "description": "Desktop advanced setting label."
   },
   "desktopHistoryBatchSizeHint": {
-    "message": "Number of daily history files loaded at once when scrolling. Higher values load more history upfront but may feel slower on large datasets.",
+    "message": "عدد ملفات السجل اليومي التي تم تحميلها مرة واحدة عند التمرير. تقوم القيم الأعلى بتحميل المزيد من السجل مقدمًا ولكنها قد تبدو أبطأ في مجموعات البيانات الكبيرة.",
     "description": "Desktop history batch size help text."
   },
   "desktopGetStarted": {
-    "message": "Get Started",
+    "message": "ابدأ",
     "description": "Onboarding completion button."
   },
   "desktopHistoryImportHelp": {
-    "message": "Import a JSON array of browser history entries. Supported entry shapes include Chrome-style objects with url, title, and lastVisitTime, or expanded entries with visitTimes.",
+    "message": "قم باستيراد مجموعة JSON من إدخالات سجل المتصفح. تتضمن أشكال الإدخال المدعومة كائنات ذات نمط Chrome مع عنوان url، والعنوان، وlastVisitTime، أو الإدخالات الموسعة مع VisitTimes.",
     "description": "History import help text."
   },
   "desktopImportBookmarks": {
-    "message": "Import Bookmarks",
+    "message": "استيراد الإشارات المرجعية",
     "description": "Import bookmarks button label."
   },
   "desktopImportBookmarksProgress": {
-    "message": "Importing bookmarks into Browser Recall...",
+    "message": "جارٍ استيراد الإشارات المرجعية إلى Browser Recall...",
     "description": "Bookmark import progress message."
   },
   "desktopImportBrowserHistoryProgress": {
-    "message": "Importing browser history into Browser Recall...",
+    "message": "جارٍ استيراد سجل المتصفح إلى Browser Recall...",
     "description": "History import progress message."
   },
   "desktopImportFailed": {
-    "message": "Import failed: $1",
+    "message": "فشل الاستيراد: $1",
     "description": "Import failure message."
   },
   "desktopImporting": {
-    "message": "Importing...",
+    "message": "جارٍ الاستيراد...",
     "description": "Import button busy label."
   },
   "desktopDataFolder": {
-    "message": "Data folder: $1",
+    "message": "مجلد البيانات: $1",
     "description": "Configured data folder status."
   },
   "desktopSelectFolderPrompt": {
-    "message": "Select the folder where Browser Recall should store its local data.",
+    "message": "حدد المجلد حيث يجب أن يقوم Browser Recall بتخزين بياناته المحلية.",
     "description": "Data folder picker prompt."
   },
   "desktopChooseFolderContinue": {
-    "message": "Choose a data folder to continue.",
+    "message": "اختر مجلد بيانات للمتابعة.",
     "description": "Data folder required message."
   },
   "desktopCouldNotUseFolder": {
-    "message": "Could not use that folder: $1",
+    "message": "تعذر استخدام هذا المجلد: $1",
     "description": "Data folder failure message."
   },
   "desktopLocalStorageFull": {
-    "message": "Local storage full",
+    "message": "التخزين المحلي ممتلئ",
     "description": "Service error message."
   },
   "desktopInboxRules": {
-    "message": "Inbox rules",
+    "message": "قواعد البريد الوارد",
     "description": "Desktop inbox rules button title and panel label."
   },
   "desktopLanguage": {
-    "message": "Language",
+    "message": "اللغة",
     "description": "Desktop appearance language setting."
   },
   "desktopLaunchAtLogin": {
-    "message": "Launch at login",
+    "message": "إطلاق عند تسجيل الدخول",
     "description": "Desktop launch-at-login setting."
   },
   "desktopLaunchAtLoginUnsupported": {
-    "message": "Launch at login is available on macOS 13 or newer.",
+    "message": "يتوفر التشغيل عند تسجيل الدخول على نظام التشغيل macOS 13 أو الأحدث.",
     "description": "Launch-at-login platform support notice."
   },
   "desktopLaunchAtLoginLong": {
-    "message": "Launch Browser Recall when you log in",
+    "message": "قم بتشغيل Browser Recall عند تسجيل الدخول",
     "description": "Onboarding launch-at-login setting."
   },
   "desktopNoBrowsersActiveToday": {
-    "message": "No browsers active today.",
+    "message": "لا توجد متصفحات نشطة اليوم.",
     "description": "Empty paired browser list text."
   },
   "desktopNoKnownChildren": {
-    "message": "No known children",
+    "message": "لا يوجد أطفال معروفين",
     "description": "Page relation empty state."
   },
   "desktopNoKnownParents": {
-    "message": "No known parents",
+    "message": "لا يوجد آباء معروفين",
     "description": "Page relation empty state."
   },
   "desktopNoDeletedItems": {
-    "message": "No deleted items",
+    "message": "لا توجد عناصر محذوفة",
     "description": "Empty recycle bin text."
   },
   "desktopNoLists": {
-    "message": "No lists",
+    "message": "لا توجد قوائم",
     "description": "List picker empty state."
   },
   "desktopNoMatches": {
-    "message": "No matches",
+    "message": "لا توجد مباريات",
     "description": "Rule preview empty state."
   },
   "desktopNoMatchingPins": {
-    "message": "No matching pins",
+    "message": "لا توجد دبابيس مطابقة",
     "description": "Filtered pin empty state."
   },
   "desktopNoPinnedPages": {
-    "message": "No pinned pages",
+    "message": "لا توجد صفحات مثبتة",
     "description": "Pinned page empty state."
   },
   "desktopNoPinnedPreview": {
-    "message": "No pinned pages available for preview",
+    "message": "لا توجد صفحات مثبتة متاحة للمعاينة",
     "description": "Rule preview empty state for pinned pages."
   },
   "desktopNoPinnedPagesPreview": {
-    "message": "No pinned pages available for preview",
+    "message": "لا توجد صفحات مثبتة متاحة للمعاينة",
     "description": "Rules pinned preview empty state."
   },
   "desktopNoResults": {
-    "message": "No results",
+    "message": "لا توجد نتائج",
     "description": "Search empty state."
   },
   "desktopNoVisitsPreview": {
-    "message": "No visits found to match against",
+    "message": "لم يتم العثور على زيارات للمطابقة",
     "description": "Rules visit preview empty state."
   },
   "desktopNoteOn": {
-    "message": "Note on $1",
+    "message": "ملاحظة على $1",
     "description": "Recycle bin note display name with URL."
   },
   "desktopNoteWithSlug": {
-    "message": "Note ($1)",
+    "message": "ملاحظة ($1)",
     "description": "Recycle bin note display name with slug."
   },
   "desktopNoAnnotation": {
-    "message": "No annotation",
+    "message": "لا يوجد تعليق توضيحي",
     "description": "Empty note annotation placeholder."
   },
   "desktopOnboardingDataHeading": {
-    "message": "Choose your data folder",
+    "message": "اختر مجلد البيانات الخاص بك",
     "description": "Onboarding data-folder heading."
   },
   "desktopOnboardingDataText": {
-    "message": "Browser Recall stores plain-text local data in the folder you choose. No default folder is used until you make this choice.",
+    "message": "يقوم Browser Recall بتخزين البيانات المحلية ذات النص العادي في المجلد الذي تختاره. لا يتم استخدام أي مجلد افتراضي حتى تقوم بهذا الاختيار.",
     "description": "Onboarding data-folder explanation."
   },
   "desktopOnboardingIntro": {
-    "message": "browser-recall saves browsing history, notes, and highlights through Browser Recall Desktop into a local plain-text data folder.",
+    "message": "يحفظ browser-recall سجل التصفح والملاحظات والتمييزات عبر Browser Recall Desktop في مجلد بيانات نصية عادية محلي.",
     "description": "Onboarding product description."
   },
   "desktopOnboardingLiveCapture": {
-    "message": "Live capture",
+    "message": "التقاط مباشر",
     "description": "Onboarding live capture heading."
   },
   "desktopOnboardingLiveCaptureText": {
-    "message": "Install the browser extension and pair it from the extension popup. Browser Recall Desktop must stay running in the background to record visits.",
+    "message": "قم بتثبيت ملحق المتصفح وقم بإقرانه من النافذة المنبثقة للامتداد. يجب أن يظل Browser Recall Desktop قيد التشغيل في الخلفية لتسجيل الزيارات.",
     "description": "Onboarding live capture explanation."
   },
   "desktopOnboardingPickColor": {
-    "message": "Pick a color",
+    "message": "اختر لونًا",
     "description": "Onboarding color picker heading."
   },
   "desktopPairFromBrowserPopup": {
-    "message": "Pair from Browser Popup",
+    "message": "إقران من نافذة المتصفح المنبثقة",
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "Open the Browser Recall popup in Chrome and click Pair with desktop.",
+    "message": "افتح نافذة Browser Recall المنبثقة في Chrome وانقر على «الإقران بسطح المكتب».",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
-    "message": "Page details unavailable",
+    "message": "تفاصيل الصفحة غير متاحة",
     "description": "Page detail empty state."
   },
   "desktopParents": {
-    "message": "Parents",
+    "message": "الآباء",
     "description": "Page relation section label."
   },
   "desktopPatternRequired": {
-    "message": "Pattern is required",
+    "message": "النمط مطلوب",
     "description": "Rule validation error."
   },
   "desktopPinned": {
-    "message": "Pinned",
+    "message": "مثبت",
     "description": "Pinned pages section label."
   },
   "desktopPinnedPages": {
-    "message": "Pinned Pages",
+    "message": "الصفحات المثبتة",
     "description": "Pinned pages rule preview label."
   },
   "desktopPinSearchCreateList": {
-    "message": "Pin a search to create a list",
+    "message": "قم بتثبيت بحث لإنشاء قائمة",
     "description": "Empty list sidebar message."
   },
   "desktopPreview": {
-    "message": "Preview",
+    "message": "معاينة",
     "description": "Preview button label."
   },
   "desktopKeyword": {
-    "message": "Keyword",
+    "message": "الكلمة الرئيسية",
     "description": "Rule type label."
   },
   "desktopFunction": {
-    "message": "Function",
+    "message": "وظيفة",
     "description": "Rule type label."
   },
   "desktopCustomFunction": {
-    "message": "(custom function)",
+    "message": "(وظيفة مخصصة)",
     "description": "Rule description fallback."
   },
   "desktopUnknown": {
-    "message": "unknown",
+    "message": "غير معروف",
     "description": "Unknown type fallback."
   },
   "desktopRemoveRuleFailed": {
-    "message": "Failed to remove rule: $1",
+    "message": "فشلت إزالة القاعدة: $1",
     "description": "Rule removal failure."
   },
   "desktopNoEditRow": {
-    "message": "No edit row",
+    "message": "لا يوجد صف تحرير",
     "description": "Rule editor internal validation shown to user."
   },
   "desktopFunctionBodyRequired": {
-    "message": "Function body is required",
+    "message": "مطلوب هيئة الوظيفة",
     "description": "Rule editor validation."
   },
   "desktopUnknownRuleType": {
-    "message": "Unknown rule type",
+    "message": "نوع القاعدة غير معروف",
     "description": "Rule editor validation."
   },
   "desktopRuleKeywordPlaceholder": {
-    "message": "keyword or /regex/",
+    "message": "الكلمة الأساسية أو /regex/",
     "description": "Keyword rule input placeholder."
   },
   "desktopRuleDescriptionPlaceholder": {
-    "message": "description",
+    "message": "الوصف",
     "description": "Function rule description placeholder."
   },
   "desktopSaveEnter": {
-    "message": "Save (Enter)",
+    "message": "حفظ (أدخل)",
     "description": "Rule editor save button title."
   },
   "desktopMatchesChecked": {
-    "message": "$1 matches ($2 checked)",
+    "message": "$1 تطابق ($2 محدد)",
     "description": "Rule preview match count."
   },
   "desktopRecentVisits": {
-    "message": "Recent Visits",
+    "message": "الزيارات الأخيرة",
     "description": "Rules preview section label."
   },
   "desktopReplayWorkerFailed": {
-    "message": "Replay worker failed",
+    "message": "فشل عامل إعادة التشغيل",
     "description": "Service error message."
   },
   "desktopResumeService": {
-    "message": "Resume Service",
+    "message": "استئناف الخدمة",
     "description": "Service error recovery button label."
   },
   "desktopRecycleBin": {
-    "message": "Recycle Bin",
+    "message": "سلة المحذوفات",
     "description": "Recycle bin view label."
   },
   "desktopRecycleBinLoadFailed": {
-    "message": "Failed to load recycle bin: $1",
+    "message": "فشل تحميل سلة المحذوفات: $1",
     "description": "Recycle bin load failure."
   },
   "desktopReloadExtension": {
-    "message": "Reload Extension",
+    "message": "إعادة تحميل الامتداد",
     "description": "Fatal error reload button."
   },
   "desktopReloading": {
-    "message": "Reloading...",
+    "message": "جارٍ إعادة التحميل...",
     "description": "Reloading button state."
   },
   "desktopRepositoryRequired": {
-    "message": "Repository address is required",
+    "message": "عنوان المستودع مطلوب",
     "description": "Sync validation message."
   },
   "desktopResults": {
-    "message": "Results",
+    "message": "النتائج",
     "description": "Results section label."
   },
   "desktopRestore": {
-    "message": "Restore",
+    "message": "استعادة",
     "description": "Recycle bin restore button."
   },
   "desktopRestoreFailed": {
-    "message": "Failed to restore item: $1",
+    "message": "فشلت استعادة العنصر: $1",
     "description": "Recycle bin restore failure."
   },
   "desktopRevoke": {
-    "message": "Revoke",
+    "message": "إبطال",
     "description": "Paired browser revoke button label."
   },
   "desktopRevokeBrowserFailed": {
-    "message": "Failed to revoke browser: $1",
+    "message": "فشل في إبطال المتصفح: $1",
     "description": "Paired browser revoke failure."
   },
   "desktopPageNotePrefix": {
-    "message": "Page note: ",
+    "message": "ملاحظة الصفحة:",
     "description": "Prefix for page-note recycle bin display names."
   },
   "desktopSelectBookmarkFile": {
-    "message": "Select an exported bookmarks file to preview folders.",
+    "message": "حدد ملف الإشارات المرجعية الذي تم تصديره لمعاينة المجلدات.",
     "description": "Bookmark import placeholder."
   },
   "desktopSettingsSaved": {
-    "message": "Settings saved",
+    "message": "تم حفظ الإعدادات",
     "description": "Status shown after saving settings."
   },
   "desktopServiceUnavailable": {
-    "message": "Service unavailable",
+    "message": "الخدمة غير متوفرة",
     "description": "Generic service unavailable message."
   },
   "desktopSessionStorageFull": {
-    "message": "Session storage full",
+    "message": "تخزين الجلسة ممتلئ",
     "description": "Service error message."
   },
   "desktopSimilar": {
-    "message": "Similar",
+    "message": "مماثل",
     "description": "Page relation section label."
   },
   "desktopSortBy": {
-    "message": "Sort by",
+    "message": "الترتيب حسب",
     "description": "Filter section label."
   },
   "desktopStarting": {
-    "message": "Starting...",
+    "message": "جارٍ البدء...",
     "description": "Startup button state."
   },
   "desktopStorageAccessFailed": {
-    "message": "Storage access failed",
+    "message": "فشل الوصول إلى التخزين",
     "description": "Service error message."
   },
   "desktopStorageUnavailable": {
-    "message": "Storage Unavailable",
+    "message": "التخزين غير متاح",
     "description": "Fatal storage error title."
   },
   "desktopSync": {
-    "message": "Sync",
+    "message": "مزامنة",
     "description": "Sync add-on title."
   },
   "desktopSyncDesc": {
-    "message": "Sync history and notes across devices, not including snapshots",
+    "message": "مزامنة السجل والملاحظات عبر الأجهزة، ولا تشمل اللقطات",
     "description": "Sync add-on description."
   },
   "desktopSyncNow": {
-    "message": "Sync Now",
+    "message": "مزامنة الآن",
     "description": "Sync now button label."
   },
   "desktopSyncing": {
-    "message": "Syncing...",
+    "message": "جارٍ المزامنة...",
     "description": "Sync button busy label."
   },
   "desktopTokenRequired": {
-    "message": "Token is required",
+    "message": "الرمز المميز مطلوب",
     "description": "Sync token validation message."
   },
   "desktopViewDetails": {
-    "message": "View details",
+    "message": "عرض التفاصيل",
     "description": "Result card detail button title."
   },
   "desktopWaitingApproval": {
-    "message": "Waiting for approval...",
+    "message": "في انتظار الموافقة...",
     "description": "Pairing button pending label."
   },
   "desktopTheme": {
-    "message": "Theme",
+    "message": "الموضوع",
     "description": "Desktop appearance theme setting."
   },
   "desktopThemeDark": {
-    "message": "Dark",
+    "message": "الظلام",
     "description": "Dark theme option."
   },
   "desktopThemeLight": {
-    "message": "Light",
+    "message": "ضوء",
     "description": "Light theme option."
   },
   "desktopTitleCleanup": {
-    "message": "Title Cleanup",
+    "message": "تنظيف العنوان",
     "description": "Desktop settings add-on title."
   },
   "desktopTitleCleanupDesc": {
-    "message": "Clean up page titles per site when recording",
+    "message": "تنظيف عناوين الصفحات لكل موقع عند التسجيل",
     "description": "Desktop settings add-on description."
   },
   "desktopTooManyResults": {
-    "message": "Too many results to select (limit: 100)",
+    "message": "هناك عدد كبير جدًا من النتائج التي يمكن تحديدها (الحد الأقصى: 100)",
     "description": "Bulk selection limit message."
   },
   "desktopToggleSidebar": {
-    "message": "Toggle sidebar",
+    "message": "تبديل الشريط الجانبي",
     "description": "Sidebar toggle title."
   },
   "desktopVisitsOverTime": {
-    "message": "Visits over time",
+    "message": "الزيارات مع مرور الوقت",
     "description": "Time chart label."
   },
   "extensionCheckAgain": {
-    "message": "Check Again",
+    "message": "تحقق مرة أخرى",
     "description": "Extension setup retry button."
   },
   "extensionActionFailedReload": {
-    "message": "$1 - please reload the extension.",
+    "message": "$1 - يرجى إعادة تحميل الامتداد.",
     "description": "Popup error with reload hint."
   },
   "extensionActionFailed": {
-    "message": "Action failed",
+    "message": "فشل الإجراء",
     "description": "Generic extension action failure."
   },
   "extensionApproveBrowserDesktop": {
-    "message": "Approve this browser in the desktop app.",
+    "message": "الموافقة على هذا المتصفح في تطبيق سطح المكتب.",
     "description": "Connector approval pending metadata."
   },
   "extensionAddNote": {
-    "message": "Add a note...",
+    "message": "إضافة ملاحظة...",
     "description": "Extension note placeholder."
   },
   "extensionAddNoteEsc": {
-    "message": "Add a note... Esc to save.",
+    "message": "أضف ملاحظة... Esc للحفظ.",
     "description": "Extension note placeholder with keyboard hint."
   },
   "extensionAddPageNote": {
-    "message": "+ Page note",
+    "message": "+ ملاحظة الصفحة",
     "description": "Popup page note add button."
   },
   "extensionAddPageNoteEsc": {
-    "message": "Add a page note... Esc to save.",
+    "message": "أضف ملاحظة صفحة... Esc للحفظ.",
     "description": "Extension page note placeholder with keyboard hint."
   },
   "extensionAddToList": {
-    "message": "Add to list",
+    "message": "أضف إلى القائمة",
     "description": "Popup add to list title."
   },
   "extensionApprovalPending": {
-    "message": "Approval Pending",
+    "message": "الموافقة معلقة",
     "description": "Connector approval pending status."
   },
   "extensionApprovalDenied": {
-    "message": "Approval Denied",
+    "message": "تم رفض الموافقة",
     "description": "Connector approval denied status."
   },
   "extensionBlacklisted": {
-    "message": "Blacklisted",
+    "message": "القائمة السوداء",
     "description": "Popup blacklisted page title."
   },
   "extensionBrowserRecallApprovalDenied": {
-    "message": "Browser Recall Desktop approval denied",
+    "message": "تم رفض الموافقة Browser Recall Desktop",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallApprovalPending": {
-    "message": "Browser Recall Desktop approval pending",
+    "message": "Browser Recall Desktop الموافقة معلقة",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallDesktopConnected": {
-    "message": "Browser Recall Desktop connected",
+    "message": "Browser Recall Desktop متصل",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallDesktopOffline": {
-    "message": "Browser Recall Desktop is offline",
+    "message": "Browser Recall Desktop غير متواجد حالياً",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallDesktopPaused": {
-    "message": "Browser Recall Desktop is paused",
+    "message": "Browser Recall Desktop متوقف مؤقتًا",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallPaused": {
-    "message": "Browser Recall is paused",
+    "message": "Browser Recall متوقف مؤقتًا",
     "description": "Paused service title."
   },
   "extensionBrowserRecallQueueFull": {
-    "message": "Browser Recall Desktop queue is full",
+    "message": "قائمة الانتظار Browser Recall Desktop ممتلئة",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallRecordingPaused": {
-    "message": "Browser Recall recording is paused",
+    "message": "Browser Recall تم إيقاف التسجيل مؤقتًا",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallTokenRejected": {
-    "message": "Browser Recall Desktop token rejected",
+    "message": "تم رفض الرمز Browser Recall Desktop",
     "description": "Extension badge title."
   },
   "extensionCannotCapturePdf": {
-    "message": "Cannot capture PDF pages",
+    "message": "لا يمكن التقاط صفحات PDF",
     "description": "Snapshot capture PDF error."
   },
   "extensionCaptureFailed": {
-    "message": "Capture failed",
+    "message": "فشل الالتقاط",
     "description": "Snapshot capture failure."
   },
   "extensionCaptureFrame": {
-    "message": "CAPTURE FRAME",
+    "message": "التقاط الإطار",
     "description": "Popup capture button."
   },
   "extensionCaptureIt": {
-    "message": "Capture It",
+    "message": "التقطها",
     "description": "Capture blacklisted page button."
   },
   "extensionCaptureNoContent": {
-    "message": "Capture failed: page returned no content",
+    "message": "فشل الالتقاط: لم تُرجع الصفحة أي محتوى",
     "description": "Snapshot capture empty page error."
   },
   "extensionCapturing": {
-    "message": "Capturing...",
+    "message": "جارٍ الالتقاط...",
     "description": "Capture busy label."
   },
   "extensionCheckAgainApproval": {
-    "message": "Check again to request approval.",
+    "message": "تحقق مرة أخرى لطلب الموافقة.",
     "description": "Connector retry approval metadata."
   },
   "extensionConnectionResetActionFailed": {
-    "message": "Browser Recall action failed because the extension connection was reset. Reload this page and try again.",
+    "message": "فشل الإجراء Browser Recall بسبب إعادة تعيين اتصال الامتداد. أعد تحميل هذه الصفحة وحاول مرة أخرى.",
     "description": "Extension action runtime failure message."
   },
   "extensionContextInvalidated": {
-    "message": "Extension context invalidated. Please refresh the page and try again.",
+    "message": "تم إبطال سياق الإضافة. يرجى تحديث الصفحة والمحاولة مرة أخرى.",
     "description": "Popup runtime invalidated message."
   },
   "extensionCreateListNamed": {
-    "message": "Create \"$1\"",
+    "message": "إنشاء \"$1\"",
     "description": "List picker create option."
   },
   "extensionCreateList": {
-    "message": "Create \"$1\"",
+    "message": "إنشاء \"$1\"",
     "description": "List picker create option."
   },
   "extensionCreateNoteFailed": {
-    "message": "Create note failed",
+    "message": "فشل إنشاء ملاحظة",
     "description": "Create note failure."
   },
   "extensionDeleteHighlight": {
-    "message": "Delete highlight",
+    "message": "حذف التمييز",
     "description": "Delete highlight button title."
   },
   "extensionDeleteSnapshot": {
-    "message": "Delete snapshot",
+    "message": "حذف لقطة",
     "description": "Delete snapshot button title."
   },
   "extensionDesktopBridgeUnavailable": {
-    "message": "Desktop bridge unavailable",
+    "message": "جسر سطح المكتب غير متاح",
     "description": "Extension desktop bridge unavailable error."
   },
   "extensionDesktopApprovedConnectionFailed": {
-    "message": "Desktop approved, but connection failed.",
+    "message": "تمت الموافقة على سطح المكتب، ولكن فشل الاتصال.",
     "description": "Connector approved but disconnected metadata."
   },
   "extensionDesktopBufferFull": {
-    "message": "Browser Recall Desktop buffer full - start the desktop app or wait for the queue to drain.",
+    "message": "Browser Recall Desktop المخزن المؤقت ممتلئ - ابدأ تشغيل تطبيق سطح المكتب أو انتظر حتى يتم استنزاف قائمة الانتظار.",
     "description": "Extension desktop command buffer full message."
   },
   "extensionDesktopEventQueueFull": {
-    "message": "Browser Recall Desktop event queue is full - start the desktop app or wait for the queue to drain.",
+    "message": "Browser Recall Desktop قائمة انتظار الأحداث ممتلئة - ابدأ تشغيل تطبيق سطح المكتب أو انتظر حتى يتم استنزاف قائمة الانتظار.",
     "description": "Extension desktop event queue full message."
   },
   "extensionDesktopConnected": {
-    "message": "Desktop Connected",
+    "message": "سطح المكتب متصل",
     "description": "Connector connected status."
   },
   "extensionDesktopConnectionActive": {
-    "message": "Desktop connection active.",
+    "message": "اتصال سطح المكتب نشط.",
     "description": "Connector connected metadata."
   },
   "extensionDesktopOfflineMixed": {
-    "message": "Browser Recall Desktop is offline.",
+    "message": "Browser Recall Desktop غير متصل.",
     "description": "Connector offline sentence."
   },
   "extensionDesktopPageDataUnavailable": {
-    "message": "Desktop page data unavailable.",
+    "message": "بيانات صفحة سطح المكتب غير متوفرة.",
     "description": "Popup bootstrap page data unavailable fallback."
   },
   "extensionDesktopPopupAccessFailed": {
-    "message": "Desktop popup access check failed",
+    "message": "فشل التحقق من الوصول إلى النافذة المنبثقة لسطح المكتب",
     "description": "Popup access check failure."
   },
   "extensionDesktopPaused": {
-    "message": "Desktop Paused",
+    "message": "سطح المكتب متوقف مؤقتًا",
     "description": "Connector paused status."
   },
   "extensionDesktopNotConnectedRefresh": {
-    "message": "Browser Recall Desktop is not connected yet. Start the desktop app and refresh from the popup.",
+    "message": "Browser Recall Desktop غير متصل بعد. ابدأ تشغيل تطبيق سطح المكتب وقم بالتحديث من النافذة المنبثقة.",
     "description": "Popup desktop disconnected failure."
   },
   "extensionDesktopQueueFull": {
-    "message": "Desktop Queue Full",
+    "message": "قائمة انتظار سطح المكتب ممتلئة",
     "description": "Connector queue full status."
   },
   "extensionDeviceId": {
-    "message": "Device $1",
+    "message": "جهاز $1",
     "description": "Connector device id metadata."
   },
   "extensionDisliked": {
-    "message": "Disliked",
+    "message": "لم يعجبني",
     "description": "Dislike notification."
   },
   "extensionEdit": {
-    "message": "Edit",
+    "message": "تحرير",
     "description": "Edit button title."
   },
   "extensionEditNote": {
-    "message": "Edit note",
+    "message": "تحرير الملاحظة",
     "description": "Edit note button title."
   },
   "extensionHighlights": {
-    "message": "Highlights",
+    "message": "أبرز",
     "description": "Highlights panel title."
   },
   "extensionHighlightsCount": {
-    "message": "Highlights ($1)",
+    "message": "أبرز النقاط ($1)",
     "description": "Highlights panel title with count."
   },
   "extensionHighlightFailed": {
-    "message": "Highlight failed",
+    "message": "فشل التمييز",
     "description": "Highlight failure."
   },
   "extensionLastCheckAuthenticatedStatusFailed": {
-    "message": "Last check: authenticated, but status failed.",
+    "message": "آخر فحص: تمت المصادقة، ولكن الحالة فشلت.",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckAuthenticatedStatusFailedDetail": {
-    "message": "Last check: authenticated, but status failed ($1).",
+    "message": "آخر فحص: تمت المصادقة، ولكن الحالة فشلت ($1).",
     "description": "Connector diagnostic with detail."
   },
   "extensionLastCheckApprovalDenied": {
-    "message": "Last check: desktop approval was denied.",
+    "message": "الفحص الأخير: تم رفض موافقة سطح المكتب.",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckCode": {
-    "message": "Last check: $1.",
+    "message": "آخر فحص: $1.",
     "description": "Connector diagnostic code fallback."
   },
   "extensionLastCheckMessage": {
-    "message": "Last check: $1",
+    "message": "الفحص الأخير: $1",
     "description": "Connector diagnostic message fallback."
   },
   "extensionLastCheckNoConnection": {
-    "message": "Last check: no usable desktop connection.",
+    "message": "الفحص الأخير: لا يوجد اتصال بسطح المكتب قابل للاستخدام.",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckNoConnectionDetail": {
-    "message": "Last check: no usable desktop connection ($1).",
+    "message": "الفحص الأخير: لا يوجد اتصال بسطح المكتب قابل للاستخدام ($1).",
     "description": "Connector diagnostic with port detail."
   },
   "extensionLastCheckReconnectFailed": {
-    "message": "Last check: desktop connection did not succeed in $1.",
+    "message": "الفحص الأخير: لم ينجح الاتصال بسطح المكتب في $1.",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckSocketClosed": {
-    "message": "Last check: socket closed.",
+    "message": "الفحص الأخير: المقبس مغلق.",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckSocketClosedDetail": {
-    "message": "Last check: socket closed ($1).",
+    "message": "آخر فحص: المقبس مغلق ($1).",
     "description": "Connector diagnostic with socket state."
   },
   "extensionLastCheckStatusRefreshFailed": {
-    "message": "Last check: status refresh failed.",
+    "message": "الفحص الأخير: فشل تحديث الحالة.",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckStatusRefreshFailedDetail": {
-    "message": "Last check: status refresh failed ($1).",
+    "message": "آخر فحص: فشل تحديث الحالة ($1).",
     "description": "Connector diagnostic with detail."
   },
   "extensionLastCheckTokenRejected": {
-    "message": "Last check: desktop rejected the saved token.",
+    "message": "الفحص الأخير: رفض سطح المكتب الرمز المميز المحفوظ.",
     "description": "Connector diagnostic."
   },
   "extensionLastDiagnostic": {
-    "message": " Last diagnostic: $1.",
+    "message": "آخر تشخيص: $1.",
     "description": "Connector diagnostic suffix."
   },
   "extensionLastPortFailures": {
-    "message": " Last port failures: $1.",
+    "message": "آخر حالات فشل المنفذ: $1.",
     "description": "Connector diagnostic suffix."
   },
   "extensionLikeFailed": {
-    "message": "Like failed",
+    "message": "مثل فشل",
     "description": "Like action failure."
   },
   "extensionLiked": {
-    "message": "Liked",
+    "message": "اعجبني",
     "description": "Like notification."
   },
   "extensionLookingForDesktop": {
-    "message": "Looking for Browser Recall Desktop",
+    "message": "أبحث عن Browser Recall Desktop",
     "description": "Extension badge title."
   },
   "extensionManageSettings": {
-    "message": "Manage in Settings",
+    "message": "إدارة في الإعدادات",
     "description": "Popup settings action."
   },
   "extensionNoAnnotation": {
-    "message": "No annotation",
+    "message": "لا يوجد تعليق توضيحي",
     "description": "Popup no annotation placeholder."
   },
   "extensionNoLists": {
-    "message": "No lists",
+    "message": "لا توجد قوائم",
     "description": "Popup no lists message."
   },
   "extensionNoTargetTab": {
-    "message": "No target tab",
+    "message": "لا توجد علامة تبويب مستهدفة",
     "description": "Extension notification routing failure."
   },
   "extensionNotAvailablePage": {
-    "message": "Not available for this page",
+    "message": "غير متوفر لهذه الصفحة",
     "description": "Popup unsupported page message."
   },
   "extensionOpenDesktopFlush": {
-    "message": "Open desktop to flush capture.",
+    "message": "افتح سطح المكتب لمسح الالتقاط.",
     "description": "Connector queue full meta."
   },
   "extensionPageDataUnavailable": {
-    "message": "Page Data Unavailable",
+    "message": "بيانات الصفحة غير متاحة",
     "description": "Popup page data unavailable title."
   },
   "extensionPageNote": {
-    "message": "Page Note",
+    "message": "ملاحظة الصفحة",
     "description": "Page note overlay title."
   },
   "extensionRatePageFailed": {
-    "message": "ratePage failed",
+    "message": "فشل معدل الصفحة",
     "description": "Rating command failure."
   },
   "extensionRefreshFailed": {
-    "message": "Failed to refresh.",
+    "message": "فشل التحديث.",
     "description": "Popup connector refresh failure."
   },
   "extensionResumeCaptureDesktop": {
-    "message": "Resume capture from desktop settings.",
+    "message": "استئناف الالتقاط من إعدادات سطح المكتب.",
     "description": "Connector paused metadata."
   },
   "extensionRetryWindow": {
-    "message": "the retry window",
+    "message": "نافذة إعادة المحاولة",
     "description": "Connector diagnostic retry window label."
   },
   "extensionConfigureShortcuts": {
-    "message": "Configure Shortcuts",
+    "message": "تكوين الاختصارات",
     "description": "Extension options button."
   },
   "extensionCurrentPageReceipt": {
-    "message": "current page receipt",
+    "message": "إيصال الصفحة الحالية",
     "description": "Extension popup placeholder URL text."
   },
   "extensionDesktopControl": {
-    "message": "Desktop Control",
+    "message": "التحكم في سطح المكتب",
     "description": "Extension options heading."
   },
   "extensionDesktopOffline": {
-    "message": "DESKTOP OFFLINE",
+    "message": "سطح المكتب غير متصل",
     "description": "Extension popup desktop offline heading."
   },
   "extensionKeyboardShortcuts": {
-    "message": "Keyboard Shortcuts",
+    "message": "اختصارات لوحة المفاتيح",
     "description": "Extension options heading."
   },
   "extensionMainUiRunsInDesktop": {
-    "message": "The main Browser Recall interface runs in the desktop app.",
+    "message": "تعمل الواجهة الرئيسية Browser Recall في تطبيق سطح المكتب.",
     "description": "Extension options explanatory text."
   },
   "extensionNotSet": {
-    "message": "Not set",
+    "message": "لم يتم ضبطه",
     "description": "Keyboard shortcut missing value."
   },
   "extensionOpenBrowserRecall": {
-    "message": "Open Browser Recall",
+    "message": "افتح Browser Recall",
     "description": "Extension options open app button."
   },
   "extensionOpenDesktop": {
-    "message": "Open Desktop",
+    "message": "افتح سطح المكتب",
     "description": "Extension popup open desktop button."
   },
   "extensionPauseTracing": {
-    "message": "Pause tracing",
+    "message": "إيقاف التتبع مؤقتًا",
     "description": "Extension popup recording toggle title."
   },
   "extensionStartDesktop": {
-    "message": "Start Browser Recall Desktop to resume live capture.",
+    "message": "ابدأ Browser Recall Desktop لاستئناف الالتقاط المباشر.",
     "description": "Extension setup message."
   },
   "extensionStartDesktopCapture": {
-    "message": "Start Browser Recall Desktop to resume live capture.",
+    "message": "ابدأ Browser Recall Desktop لاستئناف الالتقاط المباشر.",
     "description": "Connector offline metadata."
   },
   "extensionStorageUnavailable": {
-    "message": "Storage Unavailable",
+    "message": "التخزين غير متاح",
     "description": "Extension fatal error title."
   },
   "extensionSnapshotCaptured": {
-    "message": "Snapshot captured",
+    "message": "تم التقاط اللقطة",
     "description": "Snapshot capture success notification."
   },
   "extensionSomethingWentWrong": {
-    "message": "Something went wrong",
+    "message": "حدث خطأ ما",
     "description": "Generic extension error."
   },
   "extensionTokenRejected": {
-    "message": "Token Rejected",
+    "message": "تم رفض الرمز المميز",
     "description": "Connector token rejected status."
   },
   "extensionUpdateFailed": {
-    "message": "Update failed",
+    "message": "فشل التحديث",
     "description": "Update note failure."
   },
   "extensionWaitingApproval": {
-    "message": "Waiting for Approval",
+    "message": "في انتظار الموافقة",
     "description": "Connector approval pending button."
   },
   "extensionSearchOrCreate": {
-    "message": "Search or create...",
+    "message": "بحث أو إنشاء...",
     "description": "List picker search placeholder."
   },
   "extensionSnapshotMissingParams": {
-    "message": "Missing snapshot parameters.",
+    "message": "معلمات اللقطة مفقودة.",
     "description": "Snapshot viewer error."
   },
   "extensionSnapshotNotFound": {
-    "message": "Snapshot not found.",
+    "message": "لم يتم العثور على اللقطة.",
     "description": "Snapshot viewer error."
   },
   "extensionReloaded": {
-    "message": "Browser Recall extension reloaded. Please reload the page and try again.",
+    "message": "تم إعادة تحميل الامتداد Browser Recall. يرجى إعادة تحميل الصفحة والمحاولة مرة أخرى.",
     "description": "Runtime invalidated message."
   },
   "extensionReloadExtension": {
-    "message": "Reload Extension",
+    "message": "إعادة تحميل الامتداد",
     "description": "Extension fatal error reload button."
   },
   "extensionOpenAppFallback": {
-    "message": "Can't open the app? Launch it from your Applications folder, then try again.",
+    "message": "لا يمكن فتح التطبيق؟ قم بتشغيله من مجلد التطبيقات، ثم حاول مرة أخرى.",
     "description": "Extension options fallback notice."
   },
   "extensionToggleRecording": {
-    "message": "Toggle recording",
+    "message": "تبديل التسجيل",
     "description": "Extension popup recording toggle accessibility label."
   },
   "desktopAddPageNotePlaceholder": {
-    "message": "Add a page note...",
+    "message": "إضافة ملاحظة للصفحة...",
     "description": "Localized UI text."
   },
   "desktopAlreadyPaired": {
-    "message": "Chrome is already paired with Browser Recall Desktop",
+    "message": "Chrome مقترن بالفعل بتطبيق Browser Recall Desktop",
     "description": "Localized UI text."
   },
   "desktopApprovePairing": {
-    "message": "Approve the pairing request in Browser Recall Desktop",
+    "message": "الموافقة على طلب الاقتران في Browser Recall Desktop",
     "description": "Localized UI text."
   },
   "desktopAsGithubUser": {
-    "message": "as @$1",
+    "message": "مثل @$1",
     "description": "Connected GitHub user suffix."
   },
   "desktopAuthentication": {
-    "message": "Authentication",
+    "message": "المصادقة",
     "description": "Localized UI text."
   },
   "desktopBookmarkPreviewPlaceholder": {
-    "message": "Select an exported bookmarks file to preview folders.",
+    "message": "حدد ملف الإشارات المرجعية الذي تم تصديره لمعاينة المجلدات.",
     "description": "Localized UI text."
   },
   "desktopBridgeCheckFailed": {
-    "message": "Desktop bridge check failed: $1",
+    "message": "فشل فحص جسر سطح المكتب: $1",
     "description": "Desktop bridge check failure."
   },
   "desktopCancelling": {
-    "message": "Cancelling...",
+    "message": "جارٍ الإلغاء...",
     "description": "Localized UI text."
   },
   "desktopCannotDeleteHistory": {
-    "message": "Cannot delete history",
+    "message": "لا يمكن حذف التاريخ",
     "description": "Localized UI text."
   },
   "desktopCanOnlyPasteIntoList": {
-    "message": "Can only paste into a list",
+    "message": "يمكن اللصق فقط في القائمة",
     "description": "Localized UI text."
   },
   "desktopChildren": {
-    "message": "Children",
+    "message": "الأطفال",
     "description": "Localized UI text."
   },
   "desktopClearAllDataFinalConfirm": {
-    "message": "Final confirmation: Delete all history files?",
+    "message": "التأكيد النهائي: هل تريد حذف كافة ملفات السجل؟",
     "description": "Localized UI text."
   },
   "desktopClearAllDataWarning": {
-    "message": "Warning: this will delete all files in your storage directory.\n\nThis cannot be undone. Are you absolutely sure?",
+    "message": "تحذير: سيؤدي هذا إلى حذف كافة الملفات الموجودة في دليل التخزين الخاص بك.\n\nلا يمكن التراجع عن هذا. هل أنت متأكد تماما؟",
     "description": "Localized UI text."
   },
   "desktopClearDataFailed": {
-    "message": "Error clearing data: $1",
+    "message": "خطأ في مسح البيانات: $1",
     "description": "Clear all data failure."
   },
   "desktopClearedFiles": {
-    "message": "Cleared $1 files/directories",
+    "message": "مسح $1 الملفات/الدلائل",
     "description": "Clear all data success."
   },
   "desktopClearing": {
-    "message": "Clearing...",
+    "message": "المقاصة...",
     "description": "Localized UI text."
   },
   "desktopClearReload": {
-    "message": "Clear & Reload",
+    "message": "مسح وإعادة تحميل",
     "description": "Localized UI text."
   },
   "desktopColumnTitle": {
-    "message": "Title",
+    "message": "العنوان",
     "description": "Localized UI text."
   },
   "desktopCurrentDevice": {
-    "message": "(current)",
+    "message": "(الحالي)",
     "description": "Localized UI text."
   },
   "desktopDaysAgo": {
-    "message": "$1d ago",
+    "message": "$1d منذ",
     "description": "Relative time in days."
   },
   "desktopDevices": {
-    "message": "Devices",
+    "message": "الأجهزة",
     "description": "Localized UI text."
   },
   "desktopExperimental": {
-    "message": "Experimental",
+    "message": "تجريبي",
     "description": "Localized UI text."
   },
   "desktopExploreResults": {
-    "message": "Explore results",
+    "message": "استكشاف النتائج",
     "description": "Localized UI text."
   },
   "desktopFilters": {
-    "message": "Filters",
+    "message": "المرشحات",
     "description": "Localized UI text."
   },
   "desktopFirstSeen": {
-    "message": "First seen",
+    "message": "شوهد لأول مرة",
     "description": "Localized UI text."
   },
   "desktopFirstVisit": {
-    "message": "First visit",
+    "message": "الزيارة الأولى",
     "description": "Localized UI text."
   },
   "desktopFirstVisited": {
-    "message": "First visited:",
+    "message": "الزيارة الأولى:",
     "description": "Localized UI text."
   },
   "desktopFixSettingsBeforeSync": {
-    "message": "Fix settings before syncing",
+    "message": "إصلاح الإعدادات قبل المزامنة",
     "description": "Localized UI text."
   },
   "desktopFlushed": {
-    "message": "Flushed!",
+    "message": "مسح!",
     "description": "Localized UI text."
   },
   "desktopFlushing": {
-    "message": "Flushing...",
+    "message": "فلاشينغ...",
     "description": "Localized UI text."
   },
   "desktopFocus": {
-    "message": "Focus",
+    "message": "التركيز",
     "description": "Localized UI text."
   },
   "desktopGithubAuthExpired": {
-    "message": "GitHub authorization expired - please reconnect.",
+    "message": "GitHub انتهت صلاحية الترخيص - يرجى إعادة الاتصال.",
     "description": "Localized UI text."
   },
   "desktopGithubNotConnected": {
-    "message": "GitHub not connected - click \"Connect with GitHub\" first",
+    "message": "GitHub غير متصل — انقر أولًا على «الاتصال بـ GitHub»",
     "description": "Localized UI text."
   },
   "desktopGithubPrefilled": {
-    "message": "Opens GitHub with pre-filled settings",
+    "message": "يفتح GitHub بإعدادات مملوءة مسبقًا",
     "description": "Localized UI text."
   },
   "desktopHasHighlights": {
-    "message": "Has highlights",
+    "message": "لديه أبرز",
     "description": "Localized UI text."
   },
   "desktopHasSnapshots": {
-    "message": "Has snapshots",
+    "message": "لديه لقطات",
     "description": "Localized UI text."
   },
   "desktopHistoryImportHelpHtml": {
-    "message": "Import a JSON array of browser history entries. Supported entry shapes include Chrome-style objects with <code>url</code>, <code>title</code>, and <code>lastVisitTime</code>, or expanded entries with <code>visitTimes</code>.",
+    "message": "استورد مصفوفة JSON من إدخالات سجل المتصفح. تُدعم كائنات بتنسيق Chrome تحتوي على <code>url</code> و<code>title</code> و<code>lastVisitTime</code>، وكذلك الإدخالات الموسعة التي تحتوي على <code>visitTimes</code>.",
     "description": "Localized UI text."
   },
   "desktopHistoryInvalidJson": {
-    "message": "invalid JSON or unsupported history export format",
+    "message": "JSON غير صالح أو تنسيق تصدير السجل غير مدعوم",
     "description": "Localized UI text."
   },
   "desktopHistoryParseFailed": {
-    "message": "Could not parse history JSON: $1",
+    "message": "تعذر تحليل السجل JSON: $1",
     "description": "History import JSON parse failure."
   },
   "desktopHistoryReadyToImport": {
-    "message": "Ready to import $1 visits across $2 pages.",
+    "message": "جاهز لاستيراد $1 مرة عبر $2 صفحة.",
     "description": "History import preview summary."
   },
   "desktopHoursAgo": {
-    "message": "$1h ago",
+    "message": "$1h منذ",
     "description": "Relative time in hours."
   },
   "desktopImportBookmarksDone": {
-    "message": "Done! Imported $1 lists with $2 bookmarks.",
+    "message": "تم! استُوردت $1 قائمة تضم $2 إشارة مرجعية.",
     "description": "Bookmark import success summary."
   },
   "desktopImportHistoryDone": {
-    "message": "Done! Imported $1 visits across $2 pages.",
+    "message": "تم! استُوردت $1 زيارة عبر $2 صفحة.",
     "description": "History import success summary."
   },
   "desktopImportSkipped": {
-    "message": "$1 items skipped during parsing or import.",
+    "message": "$1 العناصر التي تم تخطيها أثناء التحليل أو الاستيراد.",
     "description": "History import skipped item summary."
   },
   "desktopInboxRulesHint": {
-    "message": "Rules automatically sort new pages into this list. Keyword rules match against page title, web address, and body text. Function rules use a custom JS predicate that returns true/false.",
+    "message": "تقوم القواعد تلقائيًا بفرز الصفحات الجديدة في هذه القائمة. تتطابق قواعد الكلمات الرئيسية مع عنوان الصفحة وعنوان الويب والنص الأساسي. تستخدم قواعد الدالة مسند JS مخصصًا يُرجع صواب/خطأ.",
     "description": "Localized UI text."
   },
   "desktopIntervalMinutes": {
-    "message": "Interval (min)",
+    "message": "الفاصل الزمني (دقيقة)",
     "description": "Localized UI text."
   },
   "desktopInvalidToken": {
-    "message": "Invalid token: $1",
+    "message": "رمز غير صالح: $1",
     "description": "Sync token validation failure."
   },
   "desktopItemsSkipped": {
-    "message": "$1 items skipped",
+    "message": "$1 تم تخطي العناصر",
     "description": "Import skipped item summary."
   },
   "desktopJustNow": {
-    "message": "just now",
+    "message": "الآن فقط",
     "description": "Localized UI text."
   },
   "desktopLastSeen": {
-    "message": "Last seen",
+    "message": "شوهد آخر مرة",
     "description": "Localized UI text."
   },
   "desktopLastVisit": {
-    "message": "Last visit",
+    "message": "الزيارة الأخيرة",
     "description": "Localized UI text."
   },
   "desktopLastVisited": {
-    "message": "Last visited:",
+    "message": "آخر زيارة:",
     "description": "Localized UI text."
   },
   "desktopMakePrivate": {
-    "message": "(make it private)",
+    "message": "(اجعلها خاصة)",
     "description": "Localized UI text."
   },
   "desktopManualSetupHtml": {
-    "message": "<li> Create a <strong>private</strong> repository on <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> (e.g. <code>portal-sync</code>). Leave it empty. </li> <li> Go to <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">Fine-grained tokens</a> and create a token: <ul> <li> Set expiration to <strong>No expiration</strong> </li> <li> Under \"Repository access\", choose <strong>Only select repositories</strong> and pick your sync repo </li> <li> Under \"Permissions\", add <strong>Contents</strong> and set to <strong>Read and write</strong> </li> </ul> </li> <li>Paste the repository address and token above.</li>",
+    "message": "<li>أنشئ مستودعًا <strong>خاصًا</strong> على <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> (مثل <code>portal-sync</code>) واتركه فارغًا.</li><li>افتح صفحة <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">الرموز المميزة ذات الأذونات الدقيقة</a> وأنشئ رمزًا:<ul><li>اضبط انتهاء الصلاحية على <strong>بلا انتهاء صلاحية</strong></li><li>ضمن «الوصول إلى المستودع»، اختر <strong>المستودعات المحددة فقط</strong> وحدد مستودع المزامنة</li><li>ضمن «الأذونات»، أضف <strong>المحتويات</strong> واضبطها على <strong>القراءة والكتابة</strong></li></ul></li><li>الصق عنوان المستودع والرمز المميز أعلاه.</li>",
     "description": "Localized UI text."
   },
   "desktopManualSetupInstructions": {
-    "message": "Manual setup instructions",
+    "message": "تعليمات الإعداد اليدوية",
     "description": "Localized UI text."
   },
   "desktopMemoryCacheHint": {
-    "message": "Settings and metadata cached in browser storage for fast access. The source of truth is settings.json in your storage directory.",
+    "message": "الإعدادات والبيانات التعريفية المخزنة مؤقتًا في مساحة تخزين المتصفح للوصول السريع. مصدر الحقيقة هو settings.json في دليل التخزين الخاص بك.",
     "description": "Localized UI text."
   },
   "desktopMemoryCacheHtml": {
-    "message": "<span id=\"cacheSize\">...</span> memory cache <span class=\"hint-icon\">?<span class=\"hint-tip\" data-i18n=\"desktopMemoryCacheHint\">Settings and metadata cached in browser storage for fast access. The source of truth is settings.json in your storage directory.</span></span>",
+    "message": "<span id=\"cacheSize\">...</span> ذاكرة التخزين المؤقت للذاكرة <span class=\"hint-icon\">؟<span class=\"hint-tip\" data-i18n=\"desktopMemoryCacheHint\">الإعدادات والبيانات التعريفية المخزنة مؤقتًا في مساحة تخزين المتصفح للوصول السريع. مصدر الحقيقة هو settings.json في دليل التخزين الخاص بك.</span></span>",
     "description": "Localized UI text."
   },
   "desktopMinutesAgo": {
-    "message": "$1m ago",
+    "message": "$1م مضت",
     "description": "Relative time in minutes."
   },
   "desktopNoBlockedPrefixes": {
-    "message": "No blocked web address prefixes",
+    "message": "لا توجد بادئات عنوان ويب محظورة",
     "description": "Localized UI text."
   },
   "desktopNoImportableHistory": {
-    "message": "No importable history entries found in this file.",
+    "message": "لم يتم العثور على إدخالات محفوظات قابلة للاستيراد في هذا الملف.",
     "description": "Localized UI text."
   },
   "desktopNoSyncRepo": {
-    "message": "Don't have a sync repo?",
+    "message": "ليس لديك مستودع المزامنة؟",
     "description": "Localized UI text."
   },
   "desktopNoTrimmingRules": {
-    "message": "No trimming rules",
+    "message": "لا توجد قواعد التشذيب",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "Select text and press <kbd>Alt+H</kbd> to highlight it, or press <kbd>Alt+H</kbd> with no selection to add a note to the current page.",
+    "message": "حدد النص واضغط <kbd>Alt+H</kbd> لتمييزه، أو اضغط على <kbd>Alt+H</kbd> مع عدم وجود تحديد لإضافة ملاحظة إلى الصفحة الحالية.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {
-    "message": "Highlights & notes",
+    "message": "أبرز الملاحظات والملاحظات",
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryText": {
-    "message": "Every page visit is automatically saved by Browser Recall Desktop and stays searchable by title, web address, and content.",
+    "message": "يتم حفظ كل زيارة للصفحة تلقائيًا بواسطة Browser Recall Desktop وتظل قابلة للبحث حسب العنوان وعنوان الويب والمحتوى.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryTitle": {
-    "message": "Browsing history",
+    "message": "تاريخ التصفح",
     "description": "Localized UI text."
   },
   "desktopOnboardingListsText": {
-    "message": "Organize pages into lists. Use automatic inbox rules to create a live-updating list.",
+    "message": "تنظيم الصفحات في القوائم. استخدم قواعد البريد الوارد التلقائية لإنشاء قائمة تحديث مباشر.",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTextHtml": {
-    "message": "Press <kbd>Alt+S</kbd> to save an offline copy of the page through the desktop bridge.",
+    "message": "اضغط <kbd>Alt+S</kbd> لحفظ نسخة من الصفحة دون اتصال عبر جسر سطح المكتب.",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTitle": {
-    "message": "Page snapshots",
+    "message": "لقطات الصفحة",
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "Open the Browser Recall popup in Chrome and click Pair with desktop.",
+    "message": "افتح نافذة Browser Recall المنبثقة في Chrome وانقر على «الإقران بسطح المكتب».",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {
-    "message": "Page properties",
+    "message": "خصائص الصفحة",
     "description": "Localized UI text."
   },
   "desktopPasteExistingToken": {
-    "message": "or paste an existing token:",
+    "message": "أو الصق رمزًا مميزًا موجودًا:",
     "description": "Localized UI text."
   },
   "desktopPausedLower": {
-    "message": "paused",
+    "message": "متوقف مؤقتا",
     "description": "Localized UI text."
   },
   "desktopPauseSync": {
-    "message": "Pause sync",
+    "message": "إيقاف المزامنة مؤقتًا",
     "description": "Localized UI text."
   },
   "desktopPendingWritesHtml": {
-    "message": "<span id=\"bufferSize\">0</span> pending writes",
+    "message": "<span id=\"bufferSize\">0</span> عمليات كتابة معلّقة",
     "description": "Localized UI text."
   },
   "desktopPinTime": {
-    "message": "Pin time",
+    "message": "دبوس الوقت",
     "description": "Localized UI text."
   },
   "desktopProvider": {
-    "message": "Provider",
+    "message": "مزود",
     "description": "Localized UI text."
   },
   "desktopPulledAgo": {
-    "message": "pulled $1",
+    "message": "سحبت $1",
     "description": "Remote sync pull timestamp."
   },
   "desktopPulling": {
-    "message": "pulling...",
+    "message": "سحب...",
     "description": "Localized UI text."
   },
   "desktopPushedAgo": {
-    "message": "pushed $1",
+    "message": "تم الدفع $1",
     "description": "Local sync push timestamp."
   },
   "desktopPushing": {
-    "message": "pushing...",
+    "message": "دفع...",
     "description": "Localized UI text."
   },
   "desktopQuery": {
-    "message": "Query",
+    "message": "الاستعلام",
     "description": "Localized UI text."
   },
   "desktopRemainingWrites": {
-    "message": "$1 remaining",
+    "message": "$1 المتبقية",
     "description": "Pending write flush remaining count."
   },
   "desktopRememberToken": {
-    "message": "Remember token",
+    "message": "تذكر رمزا",
     "description": "Localized UI text."
   },
   "desktopRememberTokenHint": {
-    "message": "When off, the token is kept in memory only and cleared on browser restart.",
+    "message": "عند إيقاف التشغيل، يتم الاحتفاظ بالرمز المميز في الذاكرة فقط ويتم مسحه عند إعادة تشغيل المتصفح.",
     "description": "Localized UI text."
   },
   "desktopRemoveAfterPipe": {
-    "message": "Remove after |",
+    "message": "إزالة بعد |",
     "description": "Localized UI text."
   },
   "desktopRemoveBrackets": {
-    "message": "Remove [brackets]",
+    "message": "إزالة [بين قوسين]",
     "description": "Localized UI text."
   },
   "desktopRemoveParens": {
-    "message": "Remove (parens)",
+    "message": "إزالة (الأقواس)",
     "description": "Localized UI text."
   },
   "desktopRepositoryAddress": {
-    "message": "Repository address",
+    "message": "عنوان المستودع",
     "description": "Localized UI text."
   },
   "desktopResumeSync": {
-    "message": "Resume sync",
+    "message": "استئناف المزامنة",
     "description": "Localized UI text."
   },
   "desktopRetentionDays": {
-    "message": "Retention (days)",
+    "message": "الاحتفاظ (بالأيام)",
     "description": "Localized UI text."
   },
   "desktopSelectAllUnavailable": {
-    "message": "Select all is not available here",
+    "message": "تحديد الكل غير متوفر هنا",
     "description": "Localized UI text."
   },
   "desktopSettingFailed": {
-    "message": "Desktop setting failed: $1",
+    "message": "فشل إعداد سطح المكتب: $1",
     "description": "Desktop shell setting failure."
   },
   "desktopSyncDisabled": {
-    "message": "Sync disabled: $1",
+    "message": "تم تعطيل المزامنة: $1",
     "description": "Sync disabled status detail."
   },
   "desktopSyncErrorRetry": {
-    "message": "Error (will retry): $1",
+    "message": "خطأ (ستتم إعادة المحاولة): $1",
     "description": "Sync retryable failure."
   },
   "desktopSyncSkipped": {
-    "message": "Sync skipped",
+    "message": "تم تخطي المزامنة",
     "description": "Localized UI text."
   },
   "desktopTime": {
-    "message": "Time",
+    "message": "الوقت",
     "description": "Localized UI text."
   },
   "desktopToggleFailed": {
-    "message": "Toggle failed: $1",
+    "message": "فشل التبديل: $1",
     "description": "Sync device toggle failure."
   },
   "desktopVisitedMultipleTimes": {
-    "message": "Visited multiple times",
+    "message": "تمت زيارتها عدة مرات",
     "description": "Localized UI text."
   },
   "desktopVisits": {
-    "message": "Visits",
+    "message": "الزيارات",
     "description": "Localized UI text."
   },
   "extensionFirst": {
-    "message": "First",
+    "message": "أولا",
     "description": "Localized UI text."
   },
   "desktopColumnRelevance": {
-    "message": "Rel",
+    "message": "الصلة",
     "description": "Search relevance column label."
   },
   "desktopColumnLastVisit": {
-    "message": "Last Visit",
+    "message": "الزيارة الأخيرة",
     "description": "Last visit column label."
   },
   "desktopColumnFirstVisit": {
-    "message": "First Visit",
+    "message": "الزيارة الأولى",
     "description": "First visit column label."
   },
   "desktopColumnAttention": {
-    "message": "Att",
+    "message": "انتباه",
     "description": "Attention score column label."
   },
   "desktopColumnPinTime": {
-    "message": "Pin Time",
+    "message": "دبوس الوقت",
     "description": "Pin time column label."
   },
   "desktopDataFolderReady": {
-    "message": "Data folder ready",
+    "message": "مجلد البيانات جاهز",
     "description": "Storage setup ready status."
   },
   "desktopDeviceId": {
-    "message": "Device $1",
+    "message": "جهاز $1",
     "description": "Desktop device id label."
   },
   "desktopDeviceIdentityUnavailable": {
-    "message": "Device identity unavailable",
+    "message": "هوية الجهاز غير متاحة",
     "description": "Missing desktop device identity status."
   },
   "desktopDeviceIdentityRestart": {
-    "message": "Device identity unavailable. Try restarting Browser Recall.",
+    "message": "هوية الجهاز غير متاحة. حاول إعادة تشغيل Browser Recall.",
     "description": "Startup failure when desktop device identity is unavailable."
   }
 }

@@ -1,8 +1,37 @@
 export const DEFAULT_LOCALE = 'en';
 
 export const SUPPORTED_LOCALES = Object.freeze([
-  Object.freeze({ code: 'en', labelKey: 'commonEnglish' }),
-  Object.freeze({ code: 'zh-CN', labelKey: 'commonChineseSimplified' }),
+  Object.freeze({ code: 'en', nativeName: 'English' }),
+  Object.freeze({ code: 'ar', nativeName: 'العربية' }),
+  Object.freeze({ code: 'de', nativeName: 'Deutsch' }),
+  Object.freeze({ code: 'es', nativeName: 'Español' }),
+  Object.freeze({ code: 'fr', nativeName: 'Français' }),
+  Object.freeze({ code: 'hi', nativeName: 'हिन्दी' }),
+  Object.freeze({
+    code: 'id',
+    nativeName: 'Bahasa Indonesia',
+    aliases: Object.freeze(['in']),
+  }),
+  Object.freeze({ code: 'it', nativeName: 'Italiano' }),
+  Object.freeze({ code: 'ja', nativeName: '日本語' }),
+  Object.freeze({ code: 'ko', nativeName: '한국어' }),
+  Object.freeze({
+    code: 'pt-BR',
+    nativeName: 'Português (Brasil)',
+    aliases: Object.freeze(['pt']),
+  }),
+  Object.freeze({ code: 'pt-PT', nativeName: 'Português (Portugal)' }),
+  Object.freeze({ code: 'ru', nativeName: 'Русский' }),
+  Object.freeze({
+    code: 'zh-CN',
+    nativeName: '简体中文',
+    aliases: Object.freeze(['zh', 'zh-Hans', 'zh-SG', 'zh-MY']),
+  }),
+  Object.freeze({
+    code: 'zh-TW',
+    nativeName: '繁體中文',
+    aliases: Object.freeze(['zh-Hant', 'zh-HK', 'zh-MO']),
+  }),
 ]);
 
 let activeI18n = {
@@ -28,18 +57,6 @@ function normalizeLocale(locale) {
     .join('-');
 }
 
-function localeAliases(locale) {
-  const parts = normalizeLocale(locale).split('-');
-  if (parts[0] !== 'zh') return [];
-  const lowerParts = parts.map((part) => part.toLowerCase());
-  const isSimplified =
-    lowerParts.includes('hans') ||
-    lowerParts.includes('cn') ||
-    lowerParts.includes('sg') ||
-    lowerParts.includes('my');
-  return isSimplified ? ['zh-CN'] : [];
-}
-
 function localeCandidates(locale, defaultLocale = DEFAULT_LOCALE) {
   const normalized = normalizeLocale(locale);
   const parts = normalized.split('-').filter(Boolean);
@@ -49,9 +66,7 @@ function localeCandidates(locale, defaultLocale = DEFAULT_LOCALE) {
       candidates.push(candidate);
   };
   while (parts.length > 0) {
-    const candidate = parts.join('-');
-    pushCandidate(candidate);
-    for (const alias of localeAliases(candidate)) pushCandidate(alias);
+    pushCandidate(parts.join('-'));
     parts.pop();
   }
   const normalizedDefault = normalizeLocale(defaultLocale);
@@ -60,8 +75,30 @@ function localeCandidates(locale, defaultLocale = DEFAULT_LOCALE) {
 }
 
 function supportedLocaleFor(locale, supportedLocales = SUPPORTED_LOCALES) {
-  const supported = new Set(supportedLocales.map((entry) => entry.code));
-  return localeCandidates(locale).find((candidate) => supported.has(candidate));
+  for (const candidate of localeCandidates(locale)) {
+    const match = supportedLocales.find((entry) => {
+      if (normalizeLocale(entry.code) === candidate) return true;
+      return (entry.aliases || []).some(
+        (alias) => normalizeLocale(alias) === candidate,
+      );
+    });
+    if (match) return match.code;
+  }
+  return DEFAULT_LOCALE;
+}
+
+export function canonicalRegisteredLocale(locale) {
+  if (typeof locale !== 'string' || !locale.trim()) return null;
+  const normalized = normalizeLocale(locale);
+  return (
+    SUPPORTED_LOCALES.find(
+      (entry) => normalizeLocale(entry.code) === normalized,
+    )?.code || null
+  );
+}
+
+export function toWebExtensionLocale(locale) {
+  return normalizeLocale(locale).replaceAll('-', '_');
 }
 
 function normalizeSubstitutions(substitutions) {
@@ -90,19 +127,10 @@ async function loadMessages(locale) {
 async function loadCatalog(locale, supportedLocales) {
   const selected =
     supportedLocaleFor(locale, supportedLocales) || DEFAULT_LOCALE;
-  for (const candidate of localeCandidates(selected)) {
-    try {
-      return {
-        locale: candidate,
-        messages: await loadMessages(candidate),
-      };
-    } catch (error) {
-      if (candidate === DEFAULT_LOCALE) {
-        console.warn('[i18n] default catalog unavailable:', error.message);
-      }
-    }
-  }
-  return { locale: DEFAULT_LOCALE, messages: {} };
+  return {
+    locale: selected,
+    messages: await loadMessages(selected),
+  };
 }
 
 export async function initializeCatalogI18n({
@@ -165,6 +193,27 @@ export function t(key, substitutions, fallback = '') {
 
 export function getActiveLocale() {
   return activeI18n.locale || DEFAULT_LOCALE;
+}
+
+export function populateLocaleSelect(select, { includeSystem = true } = {}) {
+  if (!select) return;
+  const selectedValue = select.value;
+  const options = [];
+  if (includeSystem) {
+    options.push({ code: 'system', nativeName: tr('commonSystem', 'System') });
+  }
+  options.push(...SUPPORTED_LOCALES);
+  select.replaceChildren(
+    ...options.map(({ code, nativeName }) => {
+      const option = document.createElement('option');
+      option.value = code;
+      option.textContent = nativeName;
+      return option;
+    }),
+  );
+  if (options.some((option) => option.code === selectedValue)) {
+    select.value = selectedValue;
+  }
 }
 
 function applyLocalizedAttribute(root, selector, attrName, targetAttr) {

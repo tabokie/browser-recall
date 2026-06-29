@@ -75,6 +75,14 @@ export async function openHelperPage(extContext, extensionId) {
   return page;
 }
 
+export async function getExtensionMessage(page, key, substitutions) {
+  return page.evaluate(
+    ({ messageKey, messageSubstitutions }) =>
+      chrome.i18n.getMessage(messageKey, messageSubstitutions),
+    { messageKey: key, messageSubstitutions: substitutions },
+  );
+}
+
 export const getSlugForUrl = generateSlugFromUrl;
 
 export function pageCheckpointPath(slug) {

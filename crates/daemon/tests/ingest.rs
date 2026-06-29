@@ -1588,8 +1588,8 @@ async fn websocket_get_entity_covers_manifest_and_child_entities() {
             "type": "run_command",
             "action": "saveSettingsKey",
             "request": {
-                "key": "titleCleanupEnabled",
-                "value": false
+                "key": "localeOverride",
+                "value": "en"
             }
         }),
     )
@@ -1617,8 +1617,8 @@ async fn websocket_get_entity_covers_manifest_and_child_entities() {
         .await
         .expect("settings entity");
     assert_eq!(
-        settings.get("titleCleanupEnabled").and_then(Value::as_bool),
-        Some(false)
+        settings.get("localeOverride").and_then(Value::as_str),
+        Some("en")
     );
 
     let name_to_id = get_entity(&mut socket, "manifest:name-to-id")

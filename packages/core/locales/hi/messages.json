@@ -1,0 +1,1526 @@
+{
+  "extensionName": {
+    "message": "Browser Recall",
+    "description": "Product name shown in extension metadata and UI."
+  },
+  "extensionShortName": {
+    "message": "browser-recall",
+    "description": "Lowercase product mark used in compact desktop UI."
+  },
+  "extensionDescription": {
+    "message": "Browser Recall Desktop के लिए Chrome कनेक्टर। ब्राउज़र में पेज कैप्चर करें और स्थानीय रूप से पूरा ऐप खोलें।",
+    "description": "Extension store and browser management description."
+  },
+  "commandHighlightSelection": {
+    "message": "चयनित टेक्स्ट को हाइलाइट करें या पेज नोट जोड़ें",
+    "description": "Browser command description."
+  },
+  "commandCaptureSnapshot": {
+    "message": "वर्तमान पृष्ठ का स्नैपशॉट कैप्चर करें",
+    "description": "Browser command description."
+  },
+  "commandLikePage": {
+    "message": "वर्तमान पृष्ठ को लाइक करें",
+    "description": "Browser command description."
+  },
+  "commandDislikePage": {
+    "message": "वर्तमान पृष्ठ को नापसंद करें",
+    "description": "Browser command description."
+  },
+  "commonAdd": {
+    "message": "जोड़ें",
+    "description": "Generic add button label."
+  },
+  "commonBack": {
+    "message": "वापस",
+    "description": "Back navigation label."
+  },
+  "commonCancel": {
+    "message": "रद्द करें",
+    "description": "Generic cancel button label."
+  },
+  "commonClear": {
+    "message": "साफ़ करें",
+    "description": "Generic clear button label."
+  },
+  "commonReload": {
+    "message": "पुनः लोड करें",
+    "description": "Generic reload button label."
+  },
+  "commonClose": {
+    "message": "बंद करें",
+    "description": "Close button title."
+  },
+  "commonConfirm": {
+    "message": "पुष्टि करें",
+    "description": "Confirm button title."
+  },
+  "commonContinue": {
+    "message": "जारी रखें",
+    "description": "Continue navigation label."
+  },
+  "commonDelete": {
+    "message": "हटाएँ",
+    "description": "Generic delete button label."
+  },
+  "commonExplore": {
+    "message": "अन्वेषण करें",
+    "description": "Explore view label."
+  },
+  "commonFlush": {
+    "message": "फ्लश",
+    "description": "Flush pending writes button label."
+  },
+  "commonImportHistory": {
+    "message": "आयात इतिहास",
+    "description": "Import history button label."
+  },
+  "commonImportSelected": {
+    "message": "आयात चयनित",
+    "description": "Import selected items button label."
+  },
+  "commonLoading": {
+    "message": "लोड हो रहा है...",
+    "description": "Generic loading state."
+  },
+  "commonLists": {
+    "message": "सूचियाँ",
+    "description": "Lists section label."
+  },
+  "commonRemove": {
+    "message": "हटाओ",
+    "description": "Generic remove button title."
+  },
+  "commonSettings": {
+    "message": "सेटिंग्स",
+    "description": "Settings label."
+  },
+  "commonSystem": {
+    "message": "सिस्टम",
+    "description": "Use system setting option label."
+  },
+  "desktopAddons": {
+    "message": "ऐड-ऑन",
+    "description": "Desktop settings group label."
+  },
+  "desktopAddRule": {
+    "message": "नियम जोड़ें",
+    "description": "Desktop inbox rule add button title."
+  },
+  "desktopAddPageNote": {
+    "message": "+ पेज नोट जोड़ें",
+    "description": "Page detail add page note button."
+  },
+  "desktopAdvanced": {
+    "message": "उन्नत",
+    "description": "Desktop settings group label."
+  },
+  "desktopAppearance": {
+    "message": "दिखावट",
+    "description": "Desktop settings group label."
+  },
+  "desktopBrowsersActiveToday": {
+    "message": "ब्राउज़र आज सक्रिय हैं",
+    "description": "Paired browser list label."
+  },
+  "desktopCaptureVideos": {
+    "message": "स्नैपशॉट में वीडियो कैप्चर करें",
+    "description": "Desktop setting label."
+  },
+  "desktopCacheClearFailed": {
+    "message": "कैश क्लियर विफल: $1",
+    "description": "Status shown when cache clearing fails."
+  },
+  "desktopCancelPreview": {
+    "message": "पूर्वावलोकन रद्द करें",
+    "description": "Rule preview cancel button label."
+  },
+  "desktopCheckDevices": {
+    "message": "उपकरणों की जाँच करें",
+    "description": "Sync devices check button."
+  },
+  "desktopChecking": {
+    "message": "जाँच हो रही है...",
+    "description": "Button label while checking."
+  },
+  "desktopChooseDataFolder": {
+    "message": "डेटा फ़ोल्डर चुनें",
+    "description": "Desktop onboarding data-folder button."
+  },
+  "desktopChangeDataFolder": {
+    "message": "डेटा फ़ोल्डर बदलें",
+    "description": "Change data folder button label."
+  },
+  "desktopChoosing": {
+    "message": "चयन...",
+    "description": "Button label while choosing a data folder."
+  },
+  "desktopClearAllData": {
+    "message": "सभी डेटा साफ़ करें",
+    "description": "Clear all data button label."
+  },
+  "desktopClearCacheReload": {
+    "message": "कैश साफ़ करें और पुनः लोड करें",
+    "description": "Clear cache button label."
+  },
+  "desktopCollapse": {
+    "message": "पतन",
+    "description": "Collapse list title."
+  },
+  "desktopConnect": {
+    "message": "कनेक्ट करें",
+    "description": "Sync connect button label."
+  },
+  "desktopConnected": {
+    "message": "जुड़ा हुआ",
+    "description": "Sync connected state label."
+  },
+  "desktopConnecting": {
+    "message": "कनेक्ट हो रहा है...",
+    "description": "Sync connecting button label."
+  },
+  "desktopCouldNotStartSetup": {
+    "message": "सेटअप प्रारंभ नहीं हो सका: $1",
+    "description": "Onboarding setup failure."
+  },
+  "desktopColor": {
+    "message": "रंग",
+    "description": "Desktop appearance color setting."
+  },
+  "desktopConnection": {
+    "message": "कनेक्शन",
+    "description": "Desktop settings group label."
+  },
+  "desktopCreateList": {
+    "message": "सूची बनाएं",
+    "description": "Create list button title."
+  },
+  "desktopCreateTokenGithub": {
+    "message": "GitHub पर टोकन बनाएं",
+    "description": "Create GitHub token button label."
+  },
+  "desktopCreateGithubRepo": {
+    "message": "GitHub पर एक बनाएं",
+    "description": "Create GitHub repository link text."
+  },
+  "desktopData": {
+    "message": "डेटा",
+    "description": "Desktop settings group label."
+  },
+  "desktopDataStorageHint": {
+    "message": "दिनांक के अनुसार व्यवस्थित, मानव-पठनीय JSONL फ़ाइलों के रूप में स्थानीय रूप से संग्रहीत। इन्हें किसी भी टेक्स्ट एडिटर में खोलें या jq से प्रोसेस करें।",
+    "description": "Desktop local data storage help text."
+  },
+  "desktopDefaultBrowserProfile": {
+    "message": "डिफ़ॉल्ट प्रोफ़ाइल",
+    "description": "Fallback browser profile name."
+  },
+  "desktopDebugLogging": {
+    "message": "डीबग लॉगिंग (पुनः आरंभ करने पर रीसेट)",
+    "description": "Desktop debug logging setting."
+  },
+  "desktopDeleteAllDataHint": {
+    "message": "Browser Recall Desktop डेटा फ़ोल्डर की सभी फ़ाइलें हटा देता है। इसे पूर्ववत नहीं किया जा सकता।",
+    "description": "Desktop delete-all-data help text."
+  },
+  "desktopDeviceNotConfigured": {
+    "message": "डिवाइस कॉन्फ़िगर नहीं किया गया",
+    "description": "Desktop storage status when setup is incomplete."
+  },
+  "desktopDisconnectedManageTokensHtml": {
+    "message": "कनेक्शन टूट गया। <a href=\"https://github.com/settings/tokens\" target=\"_blank\" style=\"color:#1a73e8;\">GitHub पर टोकन प्रबंधित करें</a>",
+    "description": "Sync disconnected status with link."
+  },
+  "desktopDisconnected": {
+    "message": "विच्छेदित",
+    "description": "Paired browser disconnected status."
+  },
+  "desktopEmptyRecycleBin": {
+    "message": "खाली रीसायकल बिन",
+    "description": "Recycle bin action."
+  },
+  "desktopErrorPrefix": {
+    "message": "त्रुटि: $1",
+    "description": "Generic error prefix."
+  },
+  "desktopExcludedSites": {
+    "message": "बहिष्कृत साइटें",
+    "description": "Desktop settings add-on title."
+  },
+  "desktopExcludedSitesDesc": {
+    "message": "मेल खाने वाले वेब एड्रेस प्रीफ़िक्स के लिए रिकॉर्डिंग छोड़ें",
+    "description": "Desktop settings add-on description."
+  },
+  "desktopHistoryBatchSize": {
+    "message": "बैच आकार लोड करने का इतिहास",
+    "description": "Desktop advanced setting label."
+  },
+  "desktopHistoryBatchSizeHint": {
+    "message": "स्क्रॉल करते समय एक बार में लोड की गई दैनिक इतिहास फ़ाइलों की संख्या। उच्च मान अधिक इतिहास को पहले से लोड करते हैं लेकिन बड़े डेटासेट पर धीमा महसूस हो सकता है।",
+    "description": "Desktop history batch size help text."
+  },
+  "desktopGetStarted": {
+    "message": "आरंभ करें",
+    "description": "Onboarding completion button."
+  },
+  "desktopHistoryImportHelp": {
+    "message": "ब्राउज़र इतिहास प्रविष्टियों की JSON सरणी आयात करें। समर्थित प्रविष्टि आकृतियों में यूआरएल, शीर्षक और अंतिम विज़िटटाइम के साथ Chrome-शैली ऑब्जेक्ट या विज़िटटाइम्स के साथ विस्तारित प्रविष्टियाँ शामिल हैं।",
+    "description": "History import help text."
+  },
+  "desktopImportBookmarks": {
+    "message": "बुकमार्क आयात करें",
+    "description": "Import bookmarks button label."
+  },
+  "desktopImportBookmarksProgress": {
+    "message": "Browser Recall में बुकमार्क आयात किया जा रहा है...",
+    "description": "Bookmark import progress message."
+  },
+  "desktopImportBrowserHistoryProgress": {
+    "message": "ब्राउज़र इतिहास को Browser Recall में आयात किया जा रहा है...",
+    "description": "History import progress message."
+  },
+  "desktopImportFailed": {
+    "message": "आयात विफल: $1",
+    "description": "Import failure message."
+  },
+  "desktopImporting": {
+    "message": "आयात किया जा रहा है...",
+    "description": "Import button busy label."
+  },
+  "desktopDataFolder": {
+    "message": "डेटा फ़ोल्डर: $1",
+    "description": "Configured data folder status."
+  },
+  "desktopSelectFolderPrompt": {
+    "message": "उस फ़ोल्डर का चयन करें जहां Browser Recall को अपना स्थानीय डेटा संग्रहीत करना चाहिए।",
+    "description": "Data folder picker prompt."
+  },
+  "desktopChooseFolderContinue": {
+    "message": "जारी रखने के लिए एक डेटा फ़ोल्डर चुनें.",
+    "description": "Data folder required message."
+  },
+  "desktopCouldNotUseFolder": {
+    "message": "उस फ़ोल्डर का उपयोग नहीं किया जा सका: $1",
+    "description": "Data folder failure message."
+  },
+  "desktopLocalStorageFull": {
+    "message": "स्थानीय भंडारण पूर्ण",
+    "description": "Service error message."
+  },
+  "desktopInboxRules": {
+    "message": "इनबॉक्स नियम",
+    "description": "Desktop inbox rules button title and panel label."
+  },
+  "desktopLanguage": {
+    "message": "भाषा",
+    "description": "Desktop appearance language setting."
+  },
+  "desktopLaunchAtLogin": {
+    "message": "लॉगिन पर लॉन्च करें",
+    "description": "Desktop launch-at-login setting."
+  },
+  "desktopLaunchAtLoginUnsupported": {
+    "message": "लॉगिन पर लॉन्च macOS 13 या नए संस्करण पर उपलब्ध है।",
+    "description": "Launch-at-login platform support notice."
+  },
+  "desktopLaunchAtLoginLong": {
+    "message": "जब आप लॉग इन करें तो Browser Recall लॉन्च करें",
+    "description": "Onboarding launch-at-login setting."
+  },
+  "desktopNoBrowsersActiveToday": {
+    "message": "आज कोई ब्राउज़र सक्रिय नहीं है.",
+    "description": "Empty paired browser list text."
+  },
+  "desktopNoKnownChildren": {
+    "message": "कोई ज्ञात संतान नहीं",
+    "description": "Page relation empty state."
+  },
+  "desktopNoKnownParents": {
+    "message": "कोई ज्ञात माता-पिता नहीं",
+    "description": "Page relation empty state."
+  },
+  "desktopNoDeletedItems": {
+    "message": "कोई हटाया गया आइटम नहीं",
+    "description": "Empty recycle bin text."
+  },
+  "desktopNoLists": {
+    "message": "कोई सूची नहीं",
+    "description": "List picker empty state."
+  },
+  "desktopNoMatches": {
+    "message": "कोई मेल नहीं",
+    "description": "Rule preview empty state."
+  },
+  "desktopNoMatchingPins": {
+    "message": "कोई मिलान पिन नहीं",
+    "description": "Filtered pin empty state."
+  },
+  "desktopNoPinnedPages": {
+    "message": "कोई पिन किया हुआ पेज नहीं",
+    "description": "Pinned page empty state."
+  },
+  "desktopNoPinnedPreview": {
+    "message": "पूर्वावलोकन के लिए कोई पिन किया हुआ पृष्ठ उपलब्ध नहीं है",
+    "description": "Rule preview empty state for pinned pages."
+  },
+  "desktopNoPinnedPagesPreview": {
+    "message": "पूर्वावलोकन के लिए कोई पिन किया हुआ पृष्ठ उपलब्ध नहीं है",
+    "description": "Rules pinned preview empty state."
+  },
+  "desktopNoResults": {
+    "message": "कोई परिणाम नहीं",
+    "description": "Search empty state."
+  },
+  "desktopNoVisitsPreview": {
+    "message": "मेल खाती कोई विज़िट नहीं मिलीं",
+    "description": "Rules visit preview empty state."
+  },
+  "desktopNoteOn": {
+    "message": "$1 पर नोट",
+    "description": "Recycle bin note display name with URL."
+  },
+  "desktopNoteWithSlug": {
+    "message": "नोट ($1)",
+    "description": "Recycle bin note display name with slug."
+  },
+  "desktopNoAnnotation": {
+    "message": "कोई टिप्पणी नहीं",
+    "description": "Empty note annotation placeholder."
+  },
+  "desktopOnboardingDataHeading": {
+    "message": "अपना डेटा फ़ोल्डर चुनें",
+    "description": "Onboarding data-folder heading."
+  },
+  "desktopOnboardingDataText": {
+    "message": "Browser Recall आपके द्वारा चुने गए फ़ोल्डर में सादा-पाठ स्थानीय डेटा संग्रहीत करता है। जब तक आप यह विकल्प नहीं चुनते तब तक किसी भी डिफ़ॉल्ट फ़ोल्डर का उपयोग नहीं किया जाता है।",
+    "description": "Onboarding data-folder explanation."
+  },
+  "desktopOnboardingIntro": {
+    "message": "browser-recall ब्राउज़िंग इतिहास, नोट्स और हाइलाइट्स को Browser Recall Desktop के माध्यम से स्थानीय सादे-पाठ डेटा फ़ोल्डर में सहेजता है।",
+    "description": "Onboarding product description."
+  },
+  "desktopOnboardingLiveCapture": {
+    "message": "लाइव कैप्चर",
+    "description": "Onboarding live capture heading."
+  },
+  "desktopOnboardingLiveCaptureText": {
+    "message": "ब्राउज़र एक्सटेंशन इंस्टॉल करें और इसे एक्सटेंशन पॉपअप से पेयर करें। विज़िट रिकॉर्ड करने के लिए Browser Recall Desktop को पृष्ठभूमि में चालू रहना चाहिए।",
+    "description": "Onboarding live capture explanation."
+  },
+  "desktopOnboardingPickColor": {
+    "message": "एक रंग चुनें",
+    "description": "Onboarding color picker heading."
+  },
+  "desktopPairFromBrowserPopup": {
+    "message": "ब्राउज़र पॉपअप से युग्मित करें",
+    "description": "Desktop pairing button label."
+  },
+  "desktopPairInstructions": {
+    "message": "Chrome में Browser Recall पॉपअप खोलें और ‘डेस्कटॉप के साथ पेयर करें’ पर क्लिक करें।",
+    "description": "Status shown when desktop pairing is ready."
+  },
+  "desktopPageDetailsUnavailable": {
+    "message": "पृष्ठ विवरण अनुपलब्ध है",
+    "description": "Page detail empty state."
+  },
+  "desktopParents": {
+    "message": "माता-पिता",
+    "description": "Page relation section label."
+  },
+  "desktopPatternRequired": {
+    "message": "पैटर्न आवश्यक है",
+    "description": "Rule validation error."
+  },
+  "desktopPinned": {
+    "message": "पिन किया गया",
+    "description": "Pinned pages section label."
+  },
+  "desktopPinnedPages": {
+    "message": "पिन किए गए पन्ने",
+    "description": "Pinned pages rule preview label."
+  },
+  "desktopPinSearchCreateList": {
+    "message": "सूची बनाने के लिए किसी खोज को पिन करें",
+    "description": "Empty list sidebar message."
+  },
+  "desktopPreview": {
+    "message": "पूर्वावलोकन",
+    "description": "Preview button label."
+  },
+  "desktopKeyword": {
+    "message": "कीवर्ड",
+    "description": "Rule type label."
+  },
+  "desktopFunction": {
+    "message": "समारोह",
+    "description": "Rule type label."
+  },
+  "desktopCustomFunction": {
+    "message": "(कस्टम फ़ंक्शन)",
+    "description": "Rule description fallback."
+  },
+  "desktopUnknown": {
+    "message": "अज्ञात",
+    "description": "Unknown type fallback."
+  },
+  "desktopRemoveRuleFailed": {
+    "message": "नियम हटाने में विफल: $1",
+    "description": "Rule removal failure."
+  },
+  "desktopNoEditRow": {
+    "message": "कोई संपादन पंक्ति नहीं",
+    "description": "Rule editor internal validation shown to user."
+  },
+  "desktopFunctionBodyRequired": {
+    "message": "फ़ंक्शन बॉडी की आवश्यकता है",
+    "description": "Rule editor validation."
+  },
+  "desktopUnknownRuleType": {
+    "message": "अज्ञात नियम प्रकार",
+    "description": "Rule editor validation."
+  },
+  "desktopRuleKeywordPlaceholder": {
+    "message": "कीवर्ड या /regex/",
+    "description": "Keyword rule input placeholder."
+  },
+  "desktopRuleDescriptionPlaceholder": {
+    "message": "विवरण",
+    "description": "Function rule description placeholder."
+  },
+  "desktopSaveEnter": {
+    "message": "सहेजें (दर्ज करें)",
+    "description": "Rule editor save button title."
+  },
+  "desktopMatchesChecked": {
+    "message": "$1 मिलान ($2 चुने गए)",
+    "description": "Rule preview match count."
+  },
+  "desktopRecentVisits": {
+    "message": "हाल के दौरे",
+    "description": "Rules preview section label."
+  },
+  "desktopReplayWorkerFailed": {
+    "message": "रीप्ले वर्कर विफल रहा",
+    "description": "Service error message."
+  },
+  "desktopResumeService": {
+    "message": "सेवा फिर से शुरू करें",
+    "description": "Service error recovery button label."
+  },
+  "desktopRecycleBin": {
+    "message": "रीसायकल बिन",
+    "description": "Recycle bin view label."
+  },
+  "desktopRecycleBinLoadFailed": {
+    "message": "रीसायकल बिन लोड करने में विफल: $1",
+    "description": "Recycle bin load failure."
+  },
+  "desktopReloadExtension": {
+    "message": "एक्सटेंशन पुनः लोड करें",
+    "description": "Fatal error reload button."
+  },
+  "desktopReloading": {
+    "message": "पुनः लोड हो रहा है...",
+    "description": "Reloading button state."
+  },
+  "desktopRepositoryRequired": {
+    "message": "रिपोजिटरी पता आवश्यक है",
+    "description": "Sync validation message."
+  },
+  "desktopResults": {
+    "message": "परिणाम",
+    "description": "Results section label."
+  },
+  "desktopRestore": {
+    "message": "पुनर्स्थापित करें",
+    "description": "Recycle bin restore button."
+  },
+  "desktopRestoreFailed": {
+    "message": "आइटम पुनर्स्थापित करने में विफल: $1",
+    "description": "Recycle bin restore failure."
+  },
+  "desktopRevoke": {
+    "message": "निरस्त करें",
+    "description": "Paired browser revoke button label."
+  },
+  "desktopRevokeBrowserFailed": {
+    "message": "ब्राउज़र को निरस्त करने में विफल: $1",
+    "description": "Paired browser revoke failure."
+  },
+  "desktopPageNotePrefix": {
+    "message": "पेज नोट:",
+    "description": "Prefix for page-note recycle bin display names."
+  },
+  "desktopSelectBookmarkFile": {
+    "message": "फ़ोल्डरों का पूर्वावलोकन करने के लिए निर्यात की गई बुकमार्क फ़ाइल का चयन करें।",
+    "description": "Bookmark import placeholder."
+  },
+  "desktopSettingsSaved": {
+    "message": "सेटिंग्स सहेजी गईं",
+    "description": "Status shown after saving settings."
+  },
+  "desktopServiceUnavailable": {
+    "message": "सेवा अनुपलब्ध",
+    "description": "Generic service unavailable message."
+  },
+  "desktopSessionStorageFull": {
+    "message": "सत्र भंडारण पूर्ण",
+    "description": "Service error message."
+  },
+  "desktopSimilar": {
+    "message": "समान",
+    "description": "Page relation section label."
+  },
+  "desktopSortBy": {
+    "message": "क्रमबद्ध करें",
+    "description": "Filter section label."
+  },
+  "desktopStarting": {
+    "message": "प्रारंभ...",
+    "description": "Startup button state."
+  },
+  "desktopStorageAccessFailed": {
+    "message": "संग्रहण पहुंच विफल रही",
+    "description": "Service error message."
+  },
+  "desktopStorageUnavailable": {
+    "message": "भंडारण अनुपलब्ध",
+    "description": "Fatal storage error title."
+  },
+  "desktopSync": {
+    "message": "सिंक करें",
+    "description": "Sync add-on title."
+  },
+  "desktopSyncDesc": {
+    "message": "स्नैपशॉट सहित, सभी डिवाइसों में इतिहास और नोट्स को सिंक करें",
+    "description": "Sync add-on description."
+  },
+  "desktopSyncNow": {
+    "message": "अभी सिंक करें",
+    "description": "Sync now button label."
+  },
+  "desktopSyncing": {
+    "message": "सिंक हो रहा है...",
+    "description": "Sync button busy label."
+  },
+  "desktopTokenRequired": {
+    "message": "टोकन आवश्यक है",
+    "description": "Sync token validation message."
+  },
+  "desktopViewDetails": {
+    "message": "विवरण देखें",
+    "description": "Result card detail button title."
+  },
+  "desktopWaitingApproval": {
+    "message": "अनुमोदन की प्रतीक्षा है...",
+    "description": "Pairing button pending label."
+  },
+  "desktopTheme": {
+    "message": "थीम",
+    "description": "Desktop appearance theme setting."
+  },
+  "desktopThemeDark": {
+    "message": "अंधेरा",
+    "description": "Dark theme option."
+  },
+  "desktopThemeLight": {
+    "message": "रोशनी",
+    "description": "Light theme option."
+  },
+  "desktopTitleCleanup": {
+    "message": "शीर्षक सफ़ाई",
+    "description": "Desktop settings add-on title."
+  },
+  "desktopTitleCleanupDesc": {
+    "message": "रिकॉर्डिंग करते समय प्रति साइट पृष्ठ शीर्षक साफ़ करें",
+    "description": "Desktop settings add-on description."
+  },
+  "desktopTooManyResults": {
+    "message": "चुनने के लिए बहुत सारे परिणाम (सीमा: 100)",
+    "description": "Bulk selection limit message."
+  },
+  "desktopToggleSidebar": {
+    "message": "साइडबार टॉगल करें",
+    "description": "Sidebar toggle title."
+  },
+  "desktopVisitsOverTime": {
+    "message": "समय के साथ दौरा",
+    "description": "Time chart label."
+  },
+  "extensionCheckAgain": {
+    "message": "दोबारा जांचें",
+    "description": "Extension setup retry button."
+  },
+  "extensionActionFailedReload": {
+    "message": "$1 - कृपया एक्सटेंशन पुनः लोड करें।",
+    "description": "Popup error with reload hint."
+  },
+  "extensionActionFailed": {
+    "message": "कार्रवाई विफल रही",
+    "description": "Generic extension action failure."
+  },
+  "extensionApproveBrowserDesktop": {
+    "message": "डेस्कटॉप ऐप में इस ब्राउज़र को स्वीकृत करें.",
+    "description": "Connector approval pending metadata."
+  },
+  "extensionAddNote": {
+    "message": "एक नोट जोड़ें...",
+    "description": "Extension note placeholder."
+  },
+  "extensionAddNoteEsc": {
+    "message": "एक नोट जोड़ें... सहेजने के लिए Esc.",
+    "description": "Extension note placeholder with keyboard hint."
+  },
+  "extensionAddPageNote": {
+    "message": "+ पेज नोट",
+    "description": "Popup page note add button."
+  },
+  "extensionAddPageNoteEsc": {
+    "message": "एक पेज नोट जोड़ें... सहेजने के लिए Esc।",
+    "description": "Extension page note placeholder with keyboard hint."
+  },
+  "extensionAddToList": {
+    "message": "सूची में जोड़ें",
+    "description": "Popup add to list title."
+  },
+  "extensionApprovalPending": {
+    "message": "अनुमोदन लंबित",
+    "description": "Connector approval pending status."
+  },
+  "extensionApprovalDenied": {
+    "message": "अनुमोदन अस्वीकृत",
+    "description": "Connector approval denied status."
+  },
+  "extensionBlacklisted": {
+    "message": "काली सूची में डाल दिया गया",
+    "description": "Popup blacklisted page title."
+  },
+  "extensionBrowserRecallApprovalDenied": {
+    "message": "Browser Recall Desktop अनुमोदन अस्वीकृत",
+    "description": "Extension badge title."
+  },
+  "extensionBrowserRecallApprovalPending": {
+    "message": "Browser Recall Desktop अनुमोदन लंबित",
+    "description": "Extension badge title."
+  },
+  "extensionBrowserRecallDesktopConnected": {
+    "message": "Browser Recall Desktop कनेक्टेड",
+    "description": "Extension badge title."
+  },
+  "extensionBrowserRecallDesktopOffline": {
+    "message": "Browser Recall Desktop ऑफ़लाइन है",
+    "description": "Extension badge title."
+  },
+  "extensionBrowserRecallDesktopPaused": {
+    "message": "Browser Recall Desktop रुका हुआ है",
+    "description": "Extension badge title."
+  },
+  "extensionBrowserRecallPaused": {
+    "message": "Browser Recall रुका हुआ है",
+    "description": "Paused service title."
+  },
+  "extensionBrowserRecallQueueFull": {
+    "message": "Browser Recall Desktop कतार भर गई है",
+    "description": "Extension badge title."
+  },
+  "extensionBrowserRecallRecordingPaused": {
+    "message": "Browser Recall रिकॉर्डिंग रोक दी गई है",
+    "description": "Extension badge title."
+  },
+  "extensionBrowserRecallTokenRejected": {
+    "message": "Browser Recall Desktop टोकन अस्वीकृत",
+    "description": "Extension badge title."
+  },
+  "extensionCannotCapturePdf": {
+    "message": "पीडीएफ पेज कैप्चर नहीं कर सकते",
+    "description": "Snapshot capture PDF error."
+  },
+  "extensionCaptureFailed": {
+    "message": "कैप्चर विफल रहा",
+    "description": "Snapshot capture failure."
+  },
+  "extensionCaptureFrame": {
+    "message": "फ़्रेम कैप्चर करें",
+    "description": "Popup capture button."
+  },
+  "extensionCaptureIt": {
+    "message": "इसे पकड़ो",
+    "description": "Capture blacklisted page button."
+  },
+  "extensionCaptureNoContent": {
+    "message": "कैप्चर विफल: पृष्ठ पर कोई सामग्री नहीं आई",
+    "description": "Snapshot capture empty page error."
+  },
+  "extensionCapturing": {
+    "message": "कैप्चरिंग...",
+    "description": "Capture busy label."
+  },
+  "extensionCheckAgainApproval": {
+    "message": "अनुमोदन का अनुरोध करने के लिए पुनः जाँच करें।",
+    "description": "Connector retry approval metadata."
+  },
+  "extensionConnectionResetActionFailed": {
+    "message": "Browser Recall कार्रवाई विफल रही क्योंकि एक्सटेंशन कनेक्शन रीसेट हो गया था। इस पृष्ठ को पुनः लोड करें और पुनः प्रयास करें।",
+    "description": "Extension action runtime failure message."
+  },
+  "extensionContextInvalidated": {
+    "message": "एक्सटेंशन संदर्भ अमान्य किया गया. पृष्ठ को रीफ्रेश करें और पुन: प्रयास करें।",
+    "description": "Popup runtime invalidated message."
+  },
+  "extensionCreateListNamed": {
+    "message": "\"$1\" बनाएं",
+    "description": "List picker create option."
+  },
+  "extensionCreateList": {
+    "message": "\"$1\" बनाएं",
+    "description": "List picker create option."
+  },
+  "extensionCreateNoteFailed": {
+    "message": "नोट बनाना विफल रहा",
+    "description": "Create note failure."
+  },
+  "extensionDeleteHighlight": {
+    "message": "हाइलाइट हटाएँ",
+    "description": "Delete highlight button title."
+  },
+  "extensionDeleteSnapshot": {
+    "message": "स्नैपशॉट हटाएँ",
+    "description": "Delete snapshot button title."
+  },
+  "extensionDesktopBridgeUnavailable": {
+    "message": "डेस्कटॉप ब्रिज अनुपलब्ध",
+    "description": "Extension desktop bridge unavailable error."
+  },
+  "extensionDesktopApprovedConnectionFailed": {
+    "message": "डेस्कटॉप स्वीकृत, लेकिन कनेक्शन विफल रहा.",
+    "description": "Connector approved but disconnected metadata."
+  },
+  "extensionDesktopBufferFull": {
+    "message": "Browser Recall Desktop बफ़र पूर्ण - डेस्कटॉप ऐप प्रारंभ करें या कतार समाप्त होने तक प्रतीक्षा करें।",
+    "description": "Extension desktop command buffer full message."
+  },
+  "extensionDesktopEventQueueFull": {
+    "message": "Browser Recall Desktop ईवेंट कतार भर गई है - डेस्कटॉप ऐप प्रारंभ करें या कतार समाप्त होने तक प्रतीक्षा करें।",
+    "description": "Extension desktop event queue full message."
+  },
+  "extensionDesktopConnected": {
+    "message": "डेस्कटॉप कनेक्टेड",
+    "description": "Connector connected status."
+  },
+  "extensionDesktopConnectionActive": {
+    "message": "डेस्कटॉप कनेक्शन सक्रिय.",
+    "description": "Connector connected metadata."
+  },
+  "extensionDesktopOfflineMixed": {
+    "message": "Browser Recall Desktop ऑफ़लाइन है।",
+    "description": "Connector offline sentence."
+  },
+  "extensionDesktopPageDataUnavailable": {
+    "message": "डेस्कटॉप पेज डेटा अनुपलब्ध है.",
+    "description": "Popup bootstrap page data unavailable fallback."
+  },
+  "extensionDesktopPopupAccessFailed": {
+    "message": "डेस्कटॉप पॉपअप एक्सेस जांच विफल रही",
+    "description": "Popup access check failure."
+  },
+  "extensionDesktopPaused": {
+    "message": "डेस्कटॉप रोका गया",
+    "description": "Connector paused status."
+  },
+  "extensionDesktopNotConnectedRefresh": {
+    "message": "Browser Recall Desktop अभी तक कनेक्ट नहीं हुआ है। डेस्कटॉप ऐप प्रारंभ करें और पॉपअप से रीफ़्रेश करें।",
+    "description": "Popup desktop disconnected failure."
+  },
+  "extensionDesktopQueueFull": {
+    "message": "डेस्कटॉप कतार पूर्ण",
+    "description": "Connector queue full status."
+  },
+  "extensionDeviceId": {
+    "message": "डिवाइस $1",
+    "description": "Connector device id metadata."
+  },
+  "extensionDisliked": {
+    "message": "नापसंद",
+    "description": "Dislike notification."
+  },
+  "extensionEdit": {
+    "message": "संपादित करें",
+    "description": "Edit button title."
+  },
+  "extensionEditNote": {
+    "message": "नोट संपादित करें",
+    "description": "Edit note button title."
+  },
+  "extensionHighlights": {
+    "message": "हाइलाइट्स",
+    "description": "Highlights panel title."
+  },
+  "extensionHighlightsCount": {
+    "message": "हाइलाइट्स ($1)",
+    "description": "Highlights panel title with count."
+  },
+  "extensionHighlightFailed": {
+    "message": "हाइलाइट विफल",
+    "description": "Highlight failure."
+  },
+  "extensionLastCheckAuthenticatedStatusFailed": {
+    "message": "अंतिम जाँच: प्रमाणित, लेकिन स्थिति विफल रही।",
+    "description": "Connector diagnostic."
+  },
+  "extensionLastCheckAuthenticatedStatusFailedDetail": {
+    "message": "अंतिम जाँच: प्रमाणित, लेकिन स्थिति विफल ($1)।",
+    "description": "Connector diagnostic with detail."
+  },
+  "extensionLastCheckApprovalDenied": {
+    "message": "अंतिम जाँच: डेस्कटॉप अनुमोदन अस्वीकार कर दिया गया था।",
+    "description": "Connector diagnostic."
+  },
+  "extensionLastCheckCode": {
+    "message": "अंतिम जाँच: $1।",
+    "description": "Connector diagnostic code fallback."
+  },
+  "extensionLastCheckMessage": {
+    "message": "अंतिम जाँच: $1",
+    "description": "Connector diagnostic message fallback."
+  },
+  "extensionLastCheckNoConnection": {
+    "message": "अंतिम जाँच: कोई प्रयोग करने योग्य डेस्कटॉप कनेक्शन नहीं।",
+    "description": "Connector diagnostic."
+  },
+  "extensionLastCheckNoConnectionDetail": {
+    "message": "अंतिम जाँच: कोई प्रयोग करने योग्य डेस्कटॉप कनेक्शन नहीं ($1)।",
+    "description": "Connector diagnostic with port detail."
+  },
+  "extensionLastCheckReconnectFailed": {
+    "message": "अंतिम जाँच: डेस्कटॉप कनेक्शन $1 में सफल नहीं हुआ।",
+    "description": "Connector diagnostic."
+  },
+  "extensionLastCheckSocketClosed": {
+    "message": "अंतिम जांच: सॉकेट बंद है।",
+    "description": "Connector diagnostic."
+  },
+  "extensionLastCheckSocketClosedDetail": {
+    "message": "अंतिम जाँच: सॉकेट बंद ($1)।",
+    "description": "Connector diagnostic with socket state."
+  },
+  "extensionLastCheckStatusRefreshFailed": {
+    "message": "अंतिम जाँच: स्थिति ताज़ा करना विफल रहा।",
+    "description": "Connector diagnostic."
+  },
+  "extensionLastCheckStatusRefreshFailedDetail": {
+    "message": "अंतिम जाँच: स्थिति ताज़ा विफल ($1)।",
+    "description": "Connector diagnostic with detail."
+  },
+  "extensionLastCheckTokenRejected": {
+    "message": "अंतिम जाँच: डेस्कटॉप ने सहेजे गए टोकन को अस्वीकार कर दिया।",
+    "description": "Connector diagnostic."
+  },
+  "extensionLastDiagnostic": {
+    "message": "अंतिम निदान: $1।",
+    "description": "Connector diagnostic suffix."
+  },
+  "extensionLastPortFailures": {
+    "message": "अंतिम पोर्ट विफलता: $1।",
+    "description": "Connector diagnostic suffix."
+  },
+  "extensionLikeFailed": {
+    "message": "फेल की तरह",
+    "description": "Like action failure."
+  },
+  "extensionLiked": {
+    "message": "पसंद आया",
+    "description": "Like notification."
+  },
+  "extensionLookingForDesktop": {
+    "message": "Browser Recall Desktop की तलाश है",
+    "description": "Extension badge title."
+  },
+  "extensionManageSettings": {
+    "message": "सेटिंग्स में प्रबंधित करें",
+    "description": "Popup settings action."
+  },
+  "extensionNoAnnotation": {
+    "message": "कोई टिप्पणी नहीं",
+    "description": "Popup no annotation placeholder."
+  },
+  "extensionNoLists": {
+    "message": "कोई सूची नहीं",
+    "description": "Popup no lists message."
+  },
+  "extensionNoTargetTab": {
+    "message": "कोई लक्ष्य टैब नहीं",
+    "description": "Extension notification routing failure."
+  },
+  "extensionNotAvailablePage": {
+    "message": "इस पेज के लिए उपलब्ध नहीं है",
+    "description": "Popup unsupported page message."
+  },
+  "extensionOpenDesktopFlush": {
+    "message": "कैप्चर फ्लश करने के लिए डेस्कटॉप खोलें.",
+    "description": "Connector queue full meta."
+  },
+  "extensionPageDataUnavailable": {
+    "message": "पेज डेटा अनुपलब्ध",
+    "description": "Popup page data unavailable title."
+  },
+  "extensionPageNote": {
+    "message": "पेज नोट",
+    "description": "Page note overlay title."
+  },
+  "extensionRatePageFailed": {
+    "message": "रेटपेज विफल",
+    "description": "Rating command failure."
+  },
+  "extensionRefreshFailed": {
+    "message": "ताज़ा करने में विफल.",
+    "description": "Popup connector refresh failure."
+  },
+  "extensionResumeCaptureDesktop": {
+    "message": "डेस्कटॉप सेटिंग्स से कैप्चर फिर से शुरू करें।",
+    "description": "Connector paused metadata."
+  },
+  "extensionRetryWindow": {
+    "message": "पुनः प्रयास विंडो",
+    "description": "Connector diagnostic retry window label."
+  },
+  "extensionConfigureShortcuts": {
+    "message": "शॉर्टकट कॉन्फ़िगर करें",
+    "description": "Extension options button."
+  },
+  "extensionCurrentPageReceipt": {
+    "message": "वर्तमान पृष्ठ रसीद",
+    "description": "Extension popup placeholder URL text."
+  },
+  "extensionDesktopControl": {
+    "message": "डेस्कटॉप नियंत्रण",
+    "description": "Extension options heading."
+  },
+  "extensionDesktopOffline": {
+    "message": "डेस्कटॉप ऑफ़लाइन",
+    "description": "Extension popup desktop offline heading."
+  },
+  "extensionKeyboardShortcuts": {
+    "message": "कीबोर्ड शॉर्टकट",
+    "description": "Extension options heading."
+  },
+  "extensionMainUiRunsInDesktop": {
+    "message": "मुख्य Browser Recall इंटरफ़ेस डेस्कटॉप ऐप में चलता है।",
+    "description": "Extension options explanatory text."
+  },
+  "extensionNotSet": {
+    "message": "सेट नहीं",
+    "description": "Keyboard shortcut missing value."
+  },
+  "extensionOpenBrowserRecall": {
+    "message": "खुला Browser Recall",
+    "description": "Extension options open app button."
+  },
+  "extensionOpenDesktop": {
+    "message": "डेस्कटॉप खोलें",
+    "description": "Extension popup open desktop button."
+  },
+  "extensionPauseTracing": {
+    "message": "ट्रेसिंग रोकें",
+    "description": "Extension popup recording toggle title."
+  },
+  "extensionStartDesktop": {
+    "message": "लाइव कैप्चर फिर से शुरू करने के लिए Browser Recall Desktop प्रारंभ करें।",
+    "description": "Extension setup message."
+  },
+  "extensionStartDesktopCapture": {
+    "message": "लाइव कैप्चर फिर से शुरू करने के लिए Browser Recall Desktop प्रारंभ करें।",
+    "description": "Connector offline metadata."
+  },
+  "extensionStorageUnavailable": {
+    "message": "भंडारण अनुपलब्ध",
+    "description": "Extension fatal error title."
+  },
+  "extensionSnapshotCaptured": {
+    "message": "स्नैपशॉट कैप्चर किया गया",
+    "description": "Snapshot capture success notification."
+  },
+  "extensionSomethingWentWrong": {
+    "message": "कुछ ग़लत हो गया",
+    "description": "Generic extension error."
+  },
+  "extensionTokenRejected": {
+    "message": "टोकन अस्वीकृत",
+    "description": "Connector token rejected status."
+  },
+  "extensionUpdateFailed": {
+    "message": "अद्यतन विफल रहा",
+    "description": "Update note failure."
+  },
+  "extensionWaitingApproval": {
+    "message": "अनुमोदन की प्रतीक्षा है",
+    "description": "Connector approval pending button."
+  },
+  "extensionSearchOrCreate": {
+    "message": "खोजें या बनाएं...",
+    "description": "List picker search placeholder."
+  },
+  "extensionSnapshotMissingParams": {
+    "message": "स्नैपशॉट पैरामीटर गुम.",
+    "description": "Snapshot viewer error."
+  },
+  "extensionSnapshotNotFound": {
+    "message": "स्नैपशॉट नहीं मिला.",
+    "description": "Snapshot viewer error."
+  },
+  "extensionReloaded": {
+    "message": "Browser Recall एक्सटेंशन पुनः लोड किया गया। कृपया पेज लोड करें और पुन: प्रयास करें।",
+    "description": "Runtime invalidated message."
+  },
+  "extensionReloadExtension": {
+    "message": "एक्सटेंशन पुनः लोड करें",
+    "description": "Extension fatal error reload button."
+  },
+  "extensionOpenAppFallback": {
+    "message": "ऐप नहीं खुल रहा? इसे अपने एप्लिकेशन फ़ोल्डर से लॉन्च करें, फिर पुनः प्रयास करें।",
+    "description": "Extension options fallback notice."
+  },
+  "extensionToggleRecording": {
+    "message": "रिकॉर्डिंग टॉगल करें",
+    "description": "Extension popup recording toggle accessibility label."
+  },
+  "desktopAddPageNotePlaceholder": {
+    "message": "एक पेज नोट जोड़ें...",
+    "description": "Localized UI text."
+  },
+  "desktopAlreadyPaired": {
+    "message": "Chrome पहले से Browser Recall Desktop के साथ पेयर है",
+    "description": "Localized UI text."
+  },
+  "desktopApprovePairing": {
+    "message": "Browser Recall Desktop में युग्मन अनुरोध स्वीकृत करें",
+    "description": "Localized UI text."
+  },
+  "desktopAsGithubUser": {
+    "message": "@$1 के रूप में",
+    "description": "Connected GitHub user suffix."
+  },
+  "desktopAuthentication": {
+    "message": "प्रमाणीकरण",
+    "description": "Localized UI text."
+  },
+  "desktopBookmarkPreviewPlaceholder": {
+    "message": "फ़ोल्डरों का पूर्वावलोकन करने के लिए निर्यात की गई बुकमार्क फ़ाइल का चयन करें।",
+    "description": "Localized UI text."
+  },
+  "desktopBridgeCheckFailed": {
+    "message": "डेस्कटॉप ब्रिज जाँच विफल: $1",
+    "description": "Desktop bridge check failure."
+  },
+  "desktopCancelling": {
+    "message": "रद्द किया जा रहा है...",
+    "description": "Localized UI text."
+  },
+  "desktopCannotDeleteHistory": {
+    "message": "इतिहास मिटाया नहीं जा सकता",
+    "description": "Localized UI text."
+  },
+  "desktopCanOnlyPasteIntoList": {
+    "message": "केवल सूची में चिपकाया जा सकता है",
+    "description": "Localized UI text."
+  },
+  "desktopChildren": {
+    "message": "बच्चे",
+    "description": "Localized UI text."
+  },
+  "desktopClearAllDataFinalConfirm": {
+    "message": "अंतिम पुष्टि: सभी इतिहास फ़ाइलें हटाएं?",
+    "description": "Localized UI text."
+  },
+  "desktopClearAllDataWarning": {
+    "message": "चेतावनी: यह आपकी संग्रहण निर्देशिका की सभी फ़ाइलें हटा देगा।\n\nइसे असंपादित नहीं किया जा सकता है। क्या आप पूर्णतः आश्वस्त हैं?",
+    "description": "Localized UI text."
+  },
+  "desktopClearDataFailed": {
+    "message": "डेटा साफ़ करने में त्रुटि: $1",
+    "description": "Clear all data failure."
+  },
+  "desktopClearedFiles": {
+    "message": "$1 फ़ाइलें/निर्देशिकाएँ साफ़ की गईं",
+    "description": "Clear all data success."
+  },
+  "desktopClearing": {
+    "message": "समाशोधन...",
+    "description": "Localized UI text."
+  },
+  "desktopClearReload": {
+    "message": "साफ़ करें और पुनः लोड करें",
+    "description": "Localized UI text."
+  },
+  "desktopColumnTitle": {
+    "message": "शीर्षक",
+    "description": "Localized UI text."
+  },
+  "desktopCurrentDevice": {
+    "message": "(वर्तमान)",
+    "description": "Localized UI text."
+  },
+  "desktopDaysAgo": {
+    "message": "$1d पहले",
+    "description": "Relative time in days."
+  },
+  "desktopDevices": {
+    "message": "उपकरण",
+    "description": "Localized UI text."
+  },
+  "desktopExperimental": {
+    "message": "प्रायोगिक",
+    "description": "Localized UI text."
+  },
+  "desktopExploreResults": {
+    "message": "परिणामों का अन्वेषण करें",
+    "description": "Localized UI text."
+  },
+  "desktopFilters": {
+    "message": "फिल्टर",
+    "description": "Localized UI text."
+  },
+  "desktopFirstSeen": {
+    "message": "पहली बार देखा",
+    "description": "Localized UI text."
+  },
+  "desktopFirstVisit": {
+    "message": "पहली यात्रा",
+    "description": "Localized UI text."
+  },
+  "desktopFirstVisited": {
+    "message": "पहली बार दौरा किया:",
+    "description": "Localized UI text."
+  },
+  "desktopFixSettingsBeforeSync": {
+    "message": "सिंक करने से पहले सेटिंग्स ठीक करें",
+    "description": "Localized UI text."
+  },
+  "desktopFlushed": {
+    "message": "धुल गया!",
+    "description": "Localized UI text."
+  },
+  "desktopFlushing": {
+    "message": "निस्तब्धता...",
+    "description": "Localized UI text."
+  },
+  "desktopFocus": {
+    "message": "फोकस",
+    "description": "Localized UI text."
+  },
+  "desktopGithubAuthExpired": {
+    "message": "GitHub प्राधिकरण समाप्त हो गया - कृपया पुनः कनेक्ट करें।",
+    "description": "Localized UI text."
+  },
+  "desktopGithubNotConnected": {
+    "message": "GitHub कनेक्ट नहीं है — पहले “GitHub से कनेक्ट करें” पर क्लिक करें",
+    "description": "Localized UI text."
+  },
+  "desktopGithubPrefilled": {
+    "message": "पहले से भरी हुई सेटिंग्स के साथ GitHub खुलता है",
+    "description": "Localized UI text."
+  },
+  "desktopHasHighlights": {
+    "message": "हाइलाइट्स हैं",
+    "description": "Localized UI text."
+  },
+  "desktopHasSnapshots": {
+    "message": "स्नैपशॉट हैं",
+    "description": "Localized UI text."
+  },
+  "desktopHistoryImportHelpHtml": {
+    "message": "ब्राउज़र इतिहास प्रविष्टियों की JSON सरणी आयात करें। <code>url</code>, <code>title</code> और <code>lastVisitTime</code> वाले Chrome-प्रारूप ऑब्जेक्ट तथा <code>visitTimes</code> वाली विस्तृत प्रविष्टियाँ समर्थित हैं।",
+    "description": "Localized UI text."
+  },
+  "desktopHistoryInvalidJson": {
+    "message": "अमान्य JSON या असमर्थित इतिहास निर्यात प्रारूप",
+    "description": "Localized UI text."
+  },
+  "desktopHistoryParseFailed": {
+    "message": "इतिहास JSON को पार्स नहीं किया जा सका: $1",
+    "description": "History import JSON parse failure."
+  },
+  "desktopHistoryReadyToImport": {
+    "message": "$2 पृष्ठों पर $1 विज़िट आयात करने के लिए तैयार।",
+    "description": "History import preview summary."
+  },
+  "desktopHoursAgo": {
+    "message": "$1h पहले",
+    "description": "Relative time in hours."
+  },
+  "desktopImportBookmarksDone": {
+    "message": "हो गया! $2 बुकमार्क वाली $1 सूचियाँ आयात की गईं।",
+    "description": "Bookmark import success summary."
+  },
+  "desktopImportHistoryDone": {
+    "message": "हो गया! $2 पृष्ठों की $1 विज़िट आयात की गईं।",
+    "description": "History import success summary."
+  },
+  "desktopImportSkipped": {
+    "message": "$1 आइटम पार्सिंग या आयात के दौरान छूट गए।",
+    "description": "History import skipped item summary."
+  },
+  "desktopInboxRulesHint": {
+    "message": "नियम स्वचालित रूप से नए पृष्ठों को इस सूची में क्रमबद्ध करते हैं। कीवर्ड नियम पृष्ठ शीर्षक, वेब पते और मुख्य पाठ से मेल खाते हैं। फ़ंक्शन नियम एक कस्टम JS विधेय का उपयोग करते हैं जो सही/गलत रिटर्न देता है।",
+    "description": "Localized UI text."
+  },
+  "desktopIntervalMinutes": {
+    "message": "अंतराल (मिनट)",
+    "description": "Localized UI text."
+  },
+  "desktopInvalidToken": {
+    "message": "अमान्य टोकन: $1",
+    "description": "Sync token validation failure."
+  },
+  "desktopItemsSkipped": {
+    "message": "$1 आइटम छोड़े गए",
+    "description": "Import skipped item summary."
+  },
+  "desktopJustNow": {
+    "message": "अभी अभी",
+    "description": "Localized UI text."
+  },
+  "desktopLastSeen": {
+    "message": "आखिरी बार देखा गया",
+    "description": "Localized UI text."
+  },
+  "desktopLastVisit": {
+    "message": "अंतिम यात्रा",
+    "description": "Localized UI text."
+  },
+  "desktopLastVisited": {
+    "message": "अंतिम बार देखा गया:",
+    "description": "Localized UI text."
+  },
+  "desktopMakePrivate": {
+    "message": "(इसे निजी बनाएं)",
+    "description": "Localized UI text."
+  },
+  "desktopManualSetupHtml": {
+    "message": "<li><a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> पर एक <strong>निजी</strong> रिपॉजिटरी (जैसे <code>portal-sync</code>) बनाएँ और उसे खाली छोड़ दें।</li><li><a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">सूक्ष्म अनुमतियों वाले टोकन</a> पृष्ठ पर जाकर टोकन बनाएँ:<ul><li>समाप्ति को <strong>कोई समाप्ति नहीं</strong> पर सेट करें</li><li>“रिपॉजिटरी एक्सेस” में <strong>केवल चुनी गई रिपॉजिटरी</strong> चुनें और अपनी सिंक रिपॉजिटरी चुनें</li><li>“अनुमतियाँ” में <strong>सामग्री</strong> जोड़ें और इसे <strong>पढ़ें और लिखें</strong> पर सेट करें</li></ul></li><li>ऊपर रिपॉजिटरी का पता और टोकन चिपकाएँ।</li>",
+    "description": "Localized UI text."
+  },
+  "desktopManualSetupInstructions": {
+    "message": "मैन्युअल सेटअप निर्देश",
+    "description": "Localized UI text."
+  },
+  "desktopMemoryCacheHint": {
+    "message": "तेज पहुंच के लिए ब्राउज़र स्टोरेज में सेटिंग्स और मेटाडेटा कैश किया गया। सत्य का स्रोत आपकी संग्रहण निर्देशिका में settings.json है।",
+    "description": "Localized UI text."
+  },
+  "desktopMemoryCacheHtml": {
+    "message": "<span id=\"cacheSize\">...</span> मेमोरी कैश <span class=\"hint-icon\">?<span class=\"hint-tip\" data-i18n=\"desktopMemoryCacheHint\">तेज़ पहुँच के लिए सेटिंग और मेटाडेटा ब्राउज़र स्टोरेज में कैश किए जाते हैं। सही डेटा आपकी स्टोरेज डायरेक्टरी की settings.json फ़ाइल में रहता है।</span></span>",
+    "description": "Localized UI text."
+  },
+  "desktopMinutesAgo": {
+    "message": "$1m पहले",
+    "description": "Relative time in minutes."
+  },
+  "desktopNoBlockedPrefixes": {
+    "message": "कोई अवरुद्ध वेब पता उपसर्ग नहीं",
+    "description": "Localized UI text."
+  },
+  "desktopNoImportableHistory": {
+    "message": "इस फ़ाइल में कोई आयात योग्य इतिहास प्रविष्टियाँ नहीं मिलीं।",
+    "description": "Localized UI text."
+  },
+  "desktopNoSyncRepo": {
+    "message": "क्या आपके पास सिंक रेपो नहीं है?",
+    "description": "Localized UI text."
+  },
+  "desktopNoTrimmingRules": {
+    "message": "कोई ट्रिमिंग नियम नहीं",
+    "description": "Localized UI text."
+  },
+  "desktopOnboardingHighlightsTextHtml": {
+    "message": "टेक्स्ट चुनकर उसे हाइलाइट करने के लिए <kbd>Alt+H</kbd> दबाएँ। कुछ भी चुने बिना <kbd>Alt+H</kbd> दबाने पर वर्तमान पृष्ठ में नोट जुड़ता है।",
+    "description": "Localized UI text."
+  },
+  "desktopOnboardingHighlightsTitle": {
+    "message": "हाइलाइट्स और नोट्स",
+    "description": "Localized UI text."
+  },
+  "desktopOnboardingHistoryText": {
+    "message": "प्रत्येक पृष्ठ विज़िट Browser Recall Desktop द्वारा स्वचालित रूप से सहेजी जाती है और शीर्षक, वेब पते और सामग्री द्वारा खोजने योग्य रहती है।",
+    "description": "Localized UI text."
+  },
+  "desktopOnboardingHistoryTitle": {
+    "message": "ब्राउज़िंग इतिहास",
+    "description": "Localized UI text."
+  },
+  "desktopOnboardingListsText": {
+    "message": "पृष्ठों को सूचियों में व्यवस्थित करें. लाइव-अपडेटिंग सूची बनाने के लिए स्वचालित इनबॉक्स नियमों का उपयोग करें।",
+    "description": "Localized UI text."
+  },
+  "desktopOnboardingSnapshotsTextHtml": {
+    "message": "डेस्कटॉप ब्रिज के माध्यम से पृष्ठ की ऑफ़लाइन प्रति सहेजने के लिए <kbd>Alt+S</kbd> दबाएँ।",
+    "description": "Localized UI text."
+  },
+  "desktopOnboardingSnapshotsTitle": {
+    "message": "पेज स्नैपशॉट",
+    "description": "Localized UI text."
+  },
+  "desktopOpenPopupPair": {
+    "message": "Chrome में Browser Recall पॉपअप खोलें और ‘डेस्कटॉप के साथ पेयर करें’ पर क्लिक करें।",
+    "description": "Localized UI text."
+  },
+  "desktopPageProperties": {
+    "message": "पृष्ठ गुण",
+    "description": "Localized UI text."
+  },
+  "desktopPasteExistingToken": {
+    "message": "या कोई मौजूदा टोकन चिपकाएँ:",
+    "description": "Localized UI text."
+  },
+  "desktopPausedLower": {
+    "message": "रुका हुआ",
+    "description": "Localized UI text."
+  },
+  "desktopPauseSync": {
+    "message": "समन्वयन रोकें",
+    "description": "Localized UI text."
+  },
+  "desktopPendingWritesHtml": {
+    "message": "<span id=\"bufferSize\">0</span> लंबित लेखन",
+    "description": "Localized UI text."
+  },
+  "desktopPinTime": {
+    "message": "पिन समय",
+    "description": "Localized UI text."
+  },
+  "desktopProvider": {
+    "message": "प्रदाता",
+    "description": "Localized UI text."
+  },
+  "desktopPulledAgo": {
+    "message": "खींचा गया $1",
+    "description": "Remote sync pull timestamp."
+  },
+  "desktopPulling": {
+    "message": "खींच रहा हूँ...",
+    "description": "Localized UI text."
+  },
+  "desktopPushedAgo": {
+    "message": "धक्का दिया $1",
+    "description": "Local sync push timestamp."
+  },
+  "desktopPushing": {
+    "message": "धकेलना...",
+    "description": "Localized UI text."
+  },
+  "desktopQuery": {
+    "message": "प्रश्न",
+    "description": "Localized UI text."
+  },
+  "desktopRemainingWrites": {
+    "message": "$1 शेष",
+    "description": "Pending write flush remaining count."
+  },
+  "desktopRememberToken": {
+    "message": "टोकन याद रखें",
+    "description": "Localized UI text."
+  },
+  "desktopRememberTokenHint": {
+    "message": "बंद होने पर, टोकन को केवल मेमोरी में रखा जाता है और ब्राउज़र पुनरारंभ होने पर साफ़ कर दिया जाता है।",
+    "description": "Localized UI text."
+  },
+  "desktopRemoveAfterPipe": {
+    "message": "के बाद हटाएं |",
+    "description": "Localized UI text."
+  },
+  "desktopRemoveBrackets": {
+    "message": "[कोष्ठक] हटाएँ",
+    "description": "Localized UI text."
+  },
+  "desktopRemoveParens": {
+    "message": "हटाएं (माता-पिता)",
+    "description": "Localized UI text."
+  },
+  "desktopRepositoryAddress": {
+    "message": "भंडार का पता",
+    "description": "Localized UI text."
+  },
+  "desktopResumeSync": {
+    "message": "समन्वयन फिर से शुरू करें",
+    "description": "Localized UI text."
+  },
+  "desktopRetentionDays": {
+    "message": "अवधारण (दिन)",
+    "description": "Localized UI text."
+  },
+  "desktopSelectAllUnavailable": {
+    "message": "सभी का चयन यहां उपलब्ध नहीं है",
+    "description": "Localized UI text."
+  },
+  "desktopSettingFailed": {
+    "message": "डेस्कटॉप सेटिंग विफल: $1",
+    "description": "Desktop shell setting failure."
+  },
+  "desktopSyncDisabled": {
+    "message": "सिंक अक्षम: $1",
+    "description": "Sync disabled status detail."
+  },
+  "desktopSyncErrorRetry": {
+    "message": "त्रुटि (पुनः प्रयास करेगा): $1",
+    "description": "Sync retryable failure."
+  },
+  "desktopSyncSkipped": {
+    "message": "समन्वयन छोड़ दिया गया",
+    "description": "Localized UI text."
+  },
+  "desktopTime": {
+    "message": "समय",
+    "description": "Localized UI text."
+  },
+  "desktopToggleFailed": {
+    "message": "टॉगल विफल: $1",
+    "description": "Sync device toggle failure."
+  },
+  "desktopVisitedMultipleTimes": {
+    "message": "कई बार दौरा किया",
+    "description": "Localized UI text."
+  },
+  "desktopVisits": {
+    "message": "दौरा",
+    "description": "Localized UI text."
+  },
+  "extensionFirst": {
+    "message": "पहला",
+    "description": "Localized UI text."
+  },
+  "desktopColumnRelevance": {
+    "message": "प्रासंगिकता",
+    "description": "Search relevance column label."
+  },
+  "desktopColumnLastVisit": {
+    "message": "अंतिम मुलाकात",
+    "description": "Last visit column label."
+  },
+  "desktopColumnFirstVisit": {
+    "message": "पहला दौरा",
+    "description": "First visit column label."
+  },
+  "desktopColumnAttention": {
+    "message": "ध्यान",
+    "description": "Attention score column label."
+  },
+  "desktopColumnPinTime": {
+    "message": "पिन समय",
+    "description": "Pin time column label."
+  },
+  "desktopDataFolderReady": {
+    "message": "डेटा फ़ोल्डर तैयार",
+    "description": "Storage setup ready status."
+  },
+  "desktopDeviceId": {
+    "message": "डिवाइस $1",
+    "description": "Desktop device id label."
+  },
+  "desktopDeviceIdentityUnavailable": {
+    "message": "डिवाइस पहचान अनुपलब्ध",
+    "description": "Missing desktop device identity status."
+  },
+  "desktopDeviceIdentityRestart": {
+    "message": "डिवाइस पहचान अनुपलब्ध. Browser Recall को पुनः आरंभ करने का प्रयास करें।",
+    "description": "Startup failure when desktop device identity is unavailable."
+  }
+}

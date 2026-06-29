@@ -41,6 +41,7 @@ function desktopVisualSeed(colorScheme = 'amber', options = {}) {
   const deletedSnapshotSlug = generateSlugFromUrl(deletedSnapshotUrl);
   const settings = {
     colorScheme,
+    localeOverride: options.localeOverride || 'system',
     historyFileBatch: options.historyFileBatch || 10,
     captureSnapshotVideo: false,
     blacklistEnabled: true,
@@ -301,6 +302,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       loadHistoryBatchDelayMs,
       readDesktopValueDelayMs,
       initialRoute,
+      systemLocale,
     }) => {
       if (initialRoute) window.__BR_STATE__ = { route: initialRoute };
       const listeners = new Map();
@@ -578,6 +580,8 @@ async function installDesktopBridgeMock(page, options = {}) {
 
       async function bridgeAction(request = {}) {
         switch (request.action) {
+          case 'getDesktopSystemLocale':
+            return { success: true, locale: systemLocale };
           case 'getDeviceId':
             return {
               success: true,
@@ -942,6 +946,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       loadHistoryBatchDelayMs: options.loadHistoryBatchDelayMs || 0,
       readDesktopValueDelayMs: options.readDesktopValueDelayMs || 0,
       initialRoute: options.initialRoute || '',
+      systemLocale: options.systemLocale || 'en',
     },
   );
 }
@@ -1799,6 +1804,82 @@ test.describe('desktop visual regression', () => {
       await expect(page.locator('#storageDeviceName')).toHaveText(
         'Device visual-device',
       );
+    });
+  });
+
+  test('settings localizes help text, destructive action, and browser statuses', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        localeOverride: 'zh-CN',
+        pairedBrowsers: [
+          {
+            browserId: 'connected-chrome',
+            browserName: 'Chrome',
+            extensionId: 'abcdefghijklmnop',
+            lastSeen: now - 60_000,
+            connected: true,
+          },
+          {
+            browserId: 'disconnected-brave',
+            browserName: 'Brave',
+            extensionId: 'abcdefghijklmnop',
+            lastSeen: now - 120_000,
+            connected: false,
+          },
+        ],
+      });
+
+      await page.locator('#settingsBtn').click();
+
+      await expect(
+        page.locator('[data-i18n="desktopDataStorageHint"]'),
+      ).toHaveText(
+        '数据以按日期组织的人类可读 JSONL 文件形式存储在本地。可使用任何文本编辑器打开，或使用 jq 处理。',
+      );
+      await expect(
+        page.locator('[data-i18n="desktopDeleteAllDataHint"]'),
+      ).toHaveText(
+        '删除 Browser Recall Desktop 数据文件夹中的所有文件。此操作无法撤销。',
+      );
+      await expect(
+        page.locator('[data-i18n="desktopHistoryBatchSizeHint"]'),
+      ).toHaveText(
+        '滚动时一次加载的每日历史文件数量。较大的值会预先加载更多历史记录，但在大型数据集上可能感觉较慢。',
+      );
+      await expect(page.locator('#clearBtn')).toContainText('删除');
+      await expect(page.locator('#launchAtLoginUnsupported')).toHaveText(
+        '登录时启动仅适用于 macOS 13 或更高版本。',
+      );
+      await expect(page.locator('#syncAuthConnected')).toContainText('已连接');
+      await expect(page.locator('#syncDisconnectBtn')).toHaveText('清除');
+      await expect(page.locator('#syncPatSaveBtn')).toHaveText('连接');
+      await expect(page.locator('#syncCheckDevicesBtn')).toHaveText('检查设备');
+      await expect(page.locator('#syncNowBtn')).toHaveText('立即同步');
+      await expect(page.locator('#syncCancelBtn')).toHaveText('取消');
+      await expect(page.locator('#serviceErrorReloadBtn')).toHaveText(
+        '重新加载',
+      );
+      await expect(page.locator('#serviceErrorResumeBtn')).toHaveText(
+        '恢复服务',
+      );
+      await expect(
+        page.locator('#onboardingLaunchAtLoginUnsupported'),
+      ).toHaveText('登录时启动仅适用于 macOS 13 或更高版本。');
+      await expect(page.locator('.paired-browser-status')).toHaveText([
+        '· 已连接',
+        '· 已断开',
+      ]);
+      await expect(
+        page.locator('.paired-browser-profile').first(),
+      ).toContainText('默认配置文件');
+      await expect(page.locator('.paired-browser-revoke')).toHaveText([
+        '撤销',
+        '撤销',
+      ]);
     });
   });
 

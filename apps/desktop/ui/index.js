@@ -56,9 +56,11 @@ import {
 import { logDebug, logError } from './logger.js';
 import { applyTheme } from './theme.js';
 import {
+  canonicalRegisteredLocale,
   getActiveLocale,
   initializeCatalogI18n,
   localizeDocument,
+  populateLocaleSelect,
   tr as translate,
 } from '../../../packages/core/i18n.js';
 
@@ -71,28 +73,36 @@ function revealApp() {
 }
 // parseBookmarkHtml imported dynamically inside the block below
 
-let desktopSystemLocale = 'en';
+let desktopSystemLocale = null;
 
 function tr(key, fallback, substitutions) {
   return translate(key, fallback, substitutions);
 }
 
-async function initializeDesktopLocalization({ allowOverride = false } = {}) {
-  try {
+async function initializeDesktopLocalization({
+  localeOverride = 'system',
+} = {}) {
+  if (!desktopSystemLocale) {
     const resp = await sendAction({ action: 'getDesktopSystemLocale' });
-    desktopSystemLocale = resp?.locale || desktopSystemLocale;
-  } catch (error) {
-    logDebug('[i18n] failed to read system locale:', error.message);
+    if (typeof resp?.locale !== 'string' || !resp.locale.trim()) {
+      throw new Error('Desktop system locale is unavailable');
+    }
+    desktopSystemLocale = resp.locale;
   }
-  const override = allowOverride
-    ? await loadSettingsValue('localeOverride', 'system')
-    : 'system';
+  let selectedOverride = localeOverride;
+  if (localeOverride !== 'system') {
+    selectedOverride = canonicalRegisteredLocale(localeOverride);
+    if (!selectedOverride) {
+      throw new Error(`Unsupported locale override: ${String(localeOverride)}`);
+    }
+  }
   const effectiveLocale =
-    override && override !== 'system' ? override : desktopSystemLocale;
+    selectedOverride !== 'system' ? selectedOverride : desktopSystemLocale;
   await initializeCatalogI18n({ locale: effectiveLocale });
   localizeDocument();
   const select = document.getElementById('localeSelect');
-  if (select) select.value = override || 'system';
+  populateLocaleSelect(select);
+  if (select) select.value = selectedOverride;
 }
 
 // ─── Utility ─────────────────────────────────────────────────────────
@@ -5699,26 +5709,33 @@ function renderPairedBrowsers(browsers) {
   const list = document.getElementById('pairedBrowsersList');
   const activeToday = (browsers || []).filter(isBrowserActiveToday);
   if (activeToday.length === 0) {
-    list.innerHTML =
-      '<div style="color: var(--text-muted)">No browsers active today.</div>';
+    list.innerHTML = `<div style="color: var(--text-muted)">${escapeHtml(tr('desktopNoBrowsersActiveToday', 'No browsers active today.'))}</div>`;
     return;
   }
   list.innerHTML = activeToday
     .map((browser) => {
       const lastSeen = browser.lastSeen
-        ? new Date(browser.lastSeen).toLocaleString()
-        : 'Unknown';
-      const profile = browser.browserProfile || 'Default profile';
+        ? new Date(browser.lastSeen).toLocaleString(getActiveLocale())
+        : tr('desktopUnknown', 'Unknown');
+      const profile =
+        browser.browserProfile ||
+        tr('desktopDefaultBrowserProfile', 'Default profile');
       const browserName = formatBrowserName(browser.browserName);
+      const connectionStatus = browser.connected
+        ? tr('desktopConnected', 'Connected')
+        : tr('desktopDisconnected', 'Disconnected');
+      const connectionColor = browser.connected
+        ? 'var(--accent-primary)'
+        : 'var(--text-muted)';
       return `
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
           <div style="min-width:0;">
             <div style="font-weight:600;color:var(--text-primary);">
-              ${escapeHtml(browserName)}
-              ${browser.connected ? '<span style="color: var(--accent-primary); font-weight: 500;">· connected</span>' : ''}
+              <span class="paired-browser-name">${escapeHtml(browserName)}</span>
+              <span class="paired-browser-status" style="color: ${connectionColor}; font-weight: 500;">· ${escapeHtml(connectionStatus)}</span>
             </div>
-            <div style="color:var(--text-muted);font-size:11px;">
-              ${escapeHtml(profile)} · ${escapeHtml(browser.browserId)} · last seen ${escapeHtml(lastSeen)}
+            <div class="paired-browser-profile" style="color:var(--text-muted);font-size:11px;">
+              ${escapeHtml(profile)} · ${escapeHtml(browser.browserId)} · ${escapeHtml(tr('desktopLastSeen', 'Last seen'))} ${escapeHtml(lastSeen)}
             </div>
           </div>
           <button
@@ -5727,7 +5744,7 @@ function renderPairedBrowsers(browsers) {
             data-extension-id="${escapeHtml(browser.extensionId)}"
             style="padding:3px 8px;flex-shrink:0;"
           >
-            Revoke
+            ${escapeHtml(tr('desktopRevoke', 'Revoke'))}
           </button>
         </div>
       `;
@@ -5745,7 +5762,14 @@ function renderPairedBrowsers(browsers) {
         });
         await refreshDesktopShellSettings();
       } catch (error) {
-        showStatus(`Failed to revoke browser: ${error.message}`, 'error');
+        showStatus(
+          tr(
+            'desktopRevokeBrowserFailed',
+            `Failed to revoke browser: ${error.message}`,
+            [error.message],
+          ),
+          'error',
+        );
         button.disabled = false;
       }
     });
@@ -8558,7 +8582,6 @@ async function initialize() {
     return;
   }
 
-  await initializeDesktopLocalization({ allowOverride: true });
   await initializeMain(currentTheme, deviceResp);
 }
 
@@ -8569,6 +8592,9 @@ function settingsValue(settings, key, defaultValue) {
 
 async function hydrateStartupSettings(currentTheme) {
   const settings = await loadSettings();
+  await initializeDesktopLocalization({
+    localeOverride: settingsValue(settings, 'localeOverride', 'system'),
+  });
   const persistedTheme = settingsValue(settings, 'theme', 'system');
   await chrome.storage.session.set({ theme: persistedTheme });
   currentTheme = await applyTheme();

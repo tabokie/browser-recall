@@ -8,1519 +8,1519 @@
     "description": "Lowercase product mark used in compact desktop UI."
   },
   "extensionDescription": {
-    "message": "Chrome connector for Browser Recall Desktop. Capture pages in the browser and open the full app locally.",
+    "message": "Browser Recall Desktop용 Chrome 커넥터입니다. 브라우저에서 페이지를 캡처하고 전체 앱을 로컬에서 여세요.",
     "description": "Extension store and browser management description."
   },
   "commandHighlightSelection": {
-    "message": "Highlight selected text or add a page note",
+    "message": "선택한 텍스트를 강조 표시하거나 페이지 메모를 추가하세요.",
     "description": "Browser command description."
   },
   "commandCaptureSnapshot": {
-    "message": "Capture snapshot of current page",
+    "message": "현재 페이지의 스냅샷 캡처",
     "description": "Browser command description."
   },
   "commandLikePage": {
-    "message": "Like the current page",
+    "message": "현재 페이지 좋아요",
     "description": "Browser command description."
   },
   "commandDislikePage": {
-    "message": "Dislike the current page",
+    "message": "현재 페이지를 싫어함",
     "description": "Browser command description."
   },
   "commonAdd": {
-    "message": "Add",
+    "message": "추가",
     "description": "Generic add button label."
   },
   "commonBack": {
-    "message": "Back",
+    "message": "뒤로",
     "description": "Back navigation label."
   },
   "commonCancel": {
-    "message": "Cancel",
+    "message": "취소",
     "description": "Generic cancel button label."
   },
   "commonClear": {
-    "message": "Clear",
+    "message": "지우기",
     "description": "Generic clear button label."
   },
   "commonReload": {
-    "message": "Reload",
+    "message": "새로고침",
     "description": "Generic reload button label."
   },
   "commonClose": {
-    "message": "Close",
+    "message": "닫기",
     "description": "Close button title."
   },
   "commonConfirm": {
-    "message": "Confirm",
+    "message": "확인",
     "description": "Confirm button title."
   },
   "commonContinue": {
-    "message": "Continue",
+    "message": "계속",
     "description": "Continue navigation label."
   },
   "commonDelete": {
-    "message": "Delete",
+    "message": "삭제",
     "description": "Generic delete button label."
   },
   "commonExplore": {
-    "message": "Explore",
+    "message": "탐색",
     "description": "Explore view label."
   },
   "commonFlush": {
-    "message": "Flush",
+    "message": "플러시",
     "description": "Flush pending writes button label."
   },
   "commonImportHistory": {
-    "message": "Import History",
+    "message": "수입 내역",
     "description": "Import history button label."
   },
   "commonImportSelected": {
-    "message": "Import Selected",
+    "message": "선택 항목 가져오기",
     "description": "Import selected items button label."
   },
   "commonLoading": {
-    "message": "Loading...",
+    "message": "로드 중...",
     "description": "Generic loading state."
   },
   "commonLists": {
-    "message": "Lists",
+    "message": "목록",
     "description": "Lists section label."
   },
   "commonRemove": {
-    "message": "Remove",
+    "message": "제거",
     "description": "Generic remove button title."
   },
   "commonSettings": {
-    "message": "Settings",
+    "message": "설정",
     "description": "Settings label."
   },
   "commonSystem": {
-    "message": "System",
+    "message": "시스템",
     "description": "Use system setting option label."
   },
   "desktopAddons": {
-    "message": "Add-ons",
+    "message": "부가기능",
     "description": "Desktop settings group label."
   },
   "desktopAddRule": {
-    "message": "Add rule",
+    "message": "규칙 추가",
     "description": "Desktop inbox rule add button title."
   },
   "desktopAddPageNote": {
-    "message": "+ Add page note",
+    "message": "+ 페이지 메모 추가",
     "description": "Page detail add page note button."
   },
   "desktopAdvanced": {
-    "message": "Advanced",
+    "message": "고급",
     "description": "Desktop settings group label."
   },
   "desktopAppearance": {
-    "message": "Appearance",
+    "message": "외관",
     "description": "Desktop settings group label."
   },
   "desktopBrowsersActiveToday": {
-    "message": "Browsers active today",
+    "message": "오늘 활성화된 브라우저",
     "description": "Paired browser list label."
   },
   "desktopCaptureVideos": {
-    "message": "Capture videos in snapshots",
+    "message": "스냅샷으로 비디오 캡처",
     "description": "Desktop setting label."
   },
   "desktopCacheClearFailed": {
-    "message": "Cache clear failed: $1",
+    "message": "캐시 지우기 실패: $1",
     "description": "Status shown when cache clearing fails."
   },
   "desktopCancelPreview": {
-    "message": "Cancel Preview",
+    "message": "미리보기 취소",
     "description": "Rule preview cancel button label."
   },
   "desktopCheckDevices": {
-    "message": "Check Devices",
+    "message": "장치 확인",
     "description": "Sync devices check button."
   },
   "desktopChecking": {
-    "message": "Checking...",
+    "message": "확인 중...",
     "description": "Button label while checking."
   },
   "desktopChooseDataFolder": {
-    "message": "Choose Data Folder",
+    "message": "데이터 폴더 선택",
     "description": "Desktop onboarding data-folder button."
   },
   "desktopChangeDataFolder": {
-    "message": "Change Data Folder",
+    "message": "데이터 폴더 변경",
     "description": "Change data folder button label."
   },
   "desktopChoosing": {
-    "message": "Choosing...",
+    "message": "선택 중...",
     "description": "Button label while choosing a data folder."
   },
   "desktopClearAllData": {
-    "message": "Clear All Data",
+    "message": "모든 데이터 지우기",
     "description": "Clear all data button label."
   },
   "desktopClearCacheReload": {
-    "message": "Clear Cache & Reload",
+    "message": "캐시 지우기 및 다시 로드",
     "description": "Clear cache button label."
   },
   "desktopCollapse": {
-    "message": "Collapse",
+    "message": "접기",
     "description": "Collapse list title."
   },
   "desktopConnect": {
-    "message": "Connect",
+    "message": "연결하다",
     "description": "Sync connect button label."
   },
   "desktopConnected": {
-    "message": "Connected",
+    "message": "연결됨",
     "description": "Sync connected state label."
   },
   "desktopConnecting": {
-    "message": "Connecting...",
+    "message": "연결 중...",
     "description": "Sync connecting button label."
   },
   "desktopCouldNotStartSetup": {
-    "message": "Could not start setup: $1",
+    "message": "설정을 시작할 수 없습니다: $1",
     "description": "Onboarding setup failure."
   },
   "desktopColor": {
-    "message": "Color",
+    "message": "색상",
     "description": "Desktop appearance color setting."
   },
   "desktopConnection": {
-    "message": "Connection",
+    "message": "연결",
     "description": "Desktop settings group label."
   },
   "desktopCreateList": {
-    "message": "Create list",
+    "message": "목록 만들기",
     "description": "Create list button title."
   },
   "desktopCreateTokenGithub": {
-    "message": "Create Token on GitHub",
+    "message": "GitHub에 토큰 생성",
     "description": "Create GitHub token button label."
   },
   "desktopCreateGithubRepo": {
-    "message": "Create one on GitHub",
+    "message": "GitHub에서 하나 생성",
     "description": "Create GitHub repository link text."
   },
   "desktopData": {
-    "message": "Data",
+    "message": "데이터",
     "description": "Desktop settings group label."
   },
   "desktopDataStorageHint": {
-    "message": "Stored locally as human-readable JSONL files organized by date. Open with any text editor or process with jq.",
+    "message": "날짜별로 정리된 사람이 읽을 수 있는 JSONL 파일로 로컬에 저장됩니다. 텍스트 편집기로 열거나 jq로 처리할 수 있습니다.",
     "description": "Desktop local data storage help text."
   },
   "desktopDefaultBrowserProfile": {
-    "message": "Default profile",
+    "message": "기본 프로필",
     "description": "Fallback browser profile name."
   },
   "desktopDebugLogging": {
-    "message": "Debug logging (resets on restart)",
+    "message": "디버그 로깅(다시 시작 시 재설정)",
     "description": "Desktop debug logging setting."
   },
   "desktopDeleteAllDataHint": {
-    "message": "Deletes all files in the Browser Recall Desktop data folder. This cannot be undone.",
+    "message": "Browser Recall Desktop 데이터 폴더의 모든 파일을 삭제합니다. 이 작업은 취소할 수 없습니다.",
     "description": "Desktop delete-all-data help text."
   },
   "desktopDeviceNotConfigured": {
-    "message": "Device not configured",
+    "message": "장치가 구성되지 않았습니다.",
     "description": "Desktop storage status when setup is incomplete."
   },
   "desktopDisconnectedManageTokensHtml": {
-    "message": "Disconnected. <a href=\"https://github.com/settings/tokens\" target=\"_blank\" style=\"color:#1a73e8;\">Manage tokens on GitHub</a>",
+    "message": "연결이 끊어졌습니다. <a href=\"https://github.com/settings/tokens\" target=\"_blank\" style=\"color:#1a73e8;\">GitHub에서 토큰 관리</a>",
     "description": "Sync disconnected status with link."
   },
   "desktopDisconnected": {
-    "message": "Disconnected",
+    "message": "연결이 끊김",
     "description": "Paired browser disconnected status."
   },
   "desktopEmptyRecycleBin": {
-    "message": "Empty Recycle Bin",
+    "message": "휴지통 비우기",
     "description": "Recycle bin action."
   },
   "desktopErrorPrefix": {
-    "message": "Error: $1",
+    "message": "오류: $1",
     "description": "Generic error prefix."
   },
   "desktopExcludedSites": {
-    "message": "Excluded Sites",
+    "message": "제외된 사이트",
     "description": "Desktop settings add-on title."
   },
   "desktopExcludedSitesDesc": {
-    "message": "Skip recording for matching web address prefixes",
+    "message": "일치하는 웹 주소 접두어에 대한 녹음 건너뛰기",
     "description": "Desktop settings add-on description."
   },
   "desktopHistoryBatchSize": {
-    "message": "History loading batch size",
+    "message": "기록 로딩 배치 크기",
     "description": "Desktop advanced setting label."
   },
   "desktopHistoryBatchSizeHint": {
-    "message": "Number of daily history files loaded at once when scrolling. Higher values load more history upfront but may feel slower on large datasets.",
+    "message": "스크롤 시 한번에 로드되는 일일 이력 파일 개수입니다. 값이 높을수록 더 많은 기록을 미리 로드하지만 대규모 데이터 세트에서는 속도가 느려질 수 있습니다.",
     "description": "Desktop history batch size help text."
   },
   "desktopGetStarted": {
-    "message": "Get Started",
+    "message": "시작하기",
     "description": "Onboarding completion button."
   },
   "desktopHistoryImportHelp": {
-    "message": "Import a JSON array of browser history entries. Supported entry shapes include Chrome-style objects with url, title, and lastVisitTime, or expanded entries with visitTimes.",
+    "message": "브라우저 기록 항목의 JSON 배열을 가져옵니다. 지원되는 항목 형태에는 URL, 제목 및 lastVisitTime이 포함된 Chrome 스타일 개체 또는 VisitTimes가 포함된 확장된 항목이 포함됩니다.",
     "description": "History import help text."
   },
   "desktopImportBookmarks": {
-    "message": "Import Bookmarks",
+    "message": "북마크 가져오기",
     "description": "Import bookmarks button label."
   },
   "desktopImportBookmarksProgress": {
-    "message": "Importing bookmarks into Browser Recall...",
+    "message": "북마크를 Browser Recall으로 가져오는 중...",
     "description": "Bookmark import progress message."
   },
   "desktopImportBrowserHistoryProgress": {
-    "message": "Importing browser history into Browser Recall...",
+    "message": "브라우저 기록을 Browser Recall으로 가져오는 중...",
     "description": "History import progress message."
   },
   "desktopImportFailed": {
-    "message": "Import failed: $1",
+    "message": "가져오기 실패: $1",
     "description": "Import failure message."
   },
   "desktopImporting": {
-    "message": "Importing...",
+    "message": "가져오는 중...",
     "description": "Import button busy label."
   },
   "desktopDataFolder": {
-    "message": "Data folder: $1",
+    "message": "데이터 폴더: $1",
     "description": "Configured data folder status."
   },
   "desktopSelectFolderPrompt": {
-    "message": "Select the folder where Browser Recall should store its local data.",
+    "message": "Browser Recall이 로컬 데이터를 저장할 폴더를 선택합니다.",
     "description": "Data folder picker prompt."
   },
   "desktopChooseFolderContinue": {
-    "message": "Choose a data folder to continue.",
+    "message": "계속하려면 데이터 폴더를 선택하세요.",
     "description": "Data folder required message."
   },
   "desktopCouldNotUseFolder": {
-    "message": "Could not use that folder: $1",
+    "message": "해당 폴더를 사용할 수 없습니다: $1",
     "description": "Data folder failure message."
   },
   "desktopLocalStorageFull": {
-    "message": "Local storage full",
+    "message": "로컬 저장소가 가득 찼습니다.",
     "description": "Service error message."
   },
   "desktopInboxRules": {
-    "message": "Inbox rules",
+    "message": "받은 편지함 규칙",
     "description": "Desktop inbox rules button title and panel label."
   },
   "desktopLanguage": {
-    "message": "Language",
+    "message": "언어",
     "description": "Desktop appearance language setting."
   },
   "desktopLaunchAtLogin": {
-    "message": "Launch at login",
+    "message": "로그인 시 실행",
     "description": "Desktop launch-at-login setting."
   },
   "desktopLaunchAtLoginUnsupported": {
-    "message": "Launch at login is available on macOS 13 or newer.",
+    "message": "로그인 시 실행은 macOS 13 이상에서 사용할 수 있습니다.",
     "description": "Launch-at-login platform support notice."
   },
   "desktopLaunchAtLoginLong": {
-    "message": "Launch Browser Recall when you log in",
+    "message": "로그인할 때 Browser Recall을 실행하세요.",
     "description": "Onboarding launch-at-login setting."
   },
   "desktopNoBrowsersActiveToday": {
-    "message": "No browsers active today.",
+    "message": "오늘은 활성화된 브라우저가 없습니다.",
     "description": "Empty paired browser list text."
   },
   "desktopNoKnownChildren": {
-    "message": "No known children",
+    "message": "알려진 어린이 없음",
     "description": "Page relation empty state."
   },
   "desktopNoKnownParents": {
-    "message": "No known parents",
+    "message": "알려진 부모 없음",
     "description": "Page relation empty state."
   },
   "desktopNoDeletedItems": {
-    "message": "No deleted items",
+    "message": "삭제된 항목 없음",
     "description": "Empty recycle bin text."
   },
   "desktopNoLists": {
-    "message": "No lists",
+    "message": "목록 없음",
     "description": "List picker empty state."
   },
   "desktopNoMatches": {
-    "message": "No matches",
+    "message": "일치하는 항목 없음",
     "description": "Rule preview empty state."
   },
   "desktopNoMatchingPins": {
-    "message": "No matching pins",
+    "message": "일치하는 핀이 없습니다.",
     "description": "Filtered pin empty state."
   },
   "desktopNoPinnedPages": {
-    "message": "No pinned pages",
+    "message": "고정된 페이지 없음",
     "description": "Pinned page empty state."
   },
   "desktopNoPinnedPreview": {
-    "message": "No pinned pages available for preview",
+    "message": "미리 볼 수 있는 고정된 페이지가 없습니다.",
     "description": "Rule preview empty state for pinned pages."
   },
   "desktopNoPinnedPagesPreview": {
-    "message": "No pinned pages available for preview",
+    "message": "미리 볼 수 있는 고정된 페이지가 없습니다.",
     "description": "Rules pinned preview empty state."
   },
   "desktopNoResults": {
-    "message": "No results",
+    "message": "결과 없음",
     "description": "Search empty state."
   },
   "desktopNoVisitsPreview": {
-    "message": "No visits found to match against",
+    "message": "일치하는 방문이 없습니다.",
     "description": "Rules visit preview empty state."
   },
   "desktopNoteOn": {
-    "message": "Note on $1",
+    "message": "$1에 대한 참고 사항",
     "description": "Recycle bin note display name with URL."
   },
   "desktopNoteWithSlug": {
-    "message": "Note ($1)",
+    "message": "참고 ($1)",
     "description": "Recycle bin note display name with slug."
   },
   "desktopNoAnnotation": {
-    "message": "No annotation",
+    "message": "주석 없음",
     "description": "Empty note annotation placeholder."
   },
   "desktopOnboardingDataHeading": {
-    "message": "Choose your data folder",
+    "message": "데이터 폴더를 선택하세요",
     "description": "Onboarding data-folder heading."
   },
   "desktopOnboardingDataText": {
-    "message": "Browser Recall stores plain-text local data in the folder you choose. No default folder is used until you make this choice.",
+    "message": "Browser Recall은 선택한 폴더에 일반 텍스트 로컬 데이터를 저장합니다. 이 항목을 선택할 때까지는 기본 폴더가 사용되지 않습니다.",
     "description": "Onboarding data-folder explanation."
   },
   "desktopOnboardingIntro": {
-    "message": "browser-recall saves browsing history, notes, and highlights through Browser Recall Desktop into a local plain-text data folder.",
+    "message": "browser-recall은 Browser Recall Desktop을 통해 검색 기록, 메모, 하이라이트를 로컬 일반 텍스트 데이터 폴더에 저장합니다.",
     "description": "Onboarding product description."
   },
   "desktopOnboardingLiveCapture": {
-    "message": "Live capture",
+    "message": "라이브 캡처",
     "description": "Onboarding live capture heading."
   },
   "desktopOnboardingLiveCaptureText": {
-    "message": "Install the browser extension and pair it from the extension popup. Browser Recall Desktop must stay running in the background to record visits.",
+    "message": "브라우저 확장 프로그램을 설치하고 확장 팝업에서 페어링하세요. Browser Recall Desktop은 방문을 기록하기 위해 백그라운드에서 계속 실행되어야 합니다.",
     "description": "Onboarding live capture explanation."
   },
   "desktopOnboardingPickColor": {
-    "message": "Pick a color",
+    "message": "색상을 선택하세요",
     "description": "Onboarding color picker heading."
   },
   "desktopPairFromBrowserPopup": {
-    "message": "Pair from Browser Popup",
+    "message": "브라우저 팝업에서 페어링",
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "Open the Browser Recall popup in Chrome and click Pair with desktop.",
+    "message": "Chrome에서 Browser Recall 팝업을 열고 ‘데스크톱과 페어링’을 클릭하세요.",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
-    "message": "Page details unavailable",
+    "message": "페이지 세부정보를 확인할 수 없습니다.",
     "description": "Page detail empty state."
   },
   "desktopParents": {
-    "message": "Parents",
+    "message": "부모",
     "description": "Page relation section label."
   },
   "desktopPatternRequired": {
-    "message": "Pattern is required",
+    "message": "패턴은 필수 항목입니다.",
     "description": "Rule validation error."
   },
   "desktopPinned": {
-    "message": "Pinned",
+    "message": "고정됨",
     "description": "Pinned pages section label."
   },
   "desktopPinnedPages": {
-    "message": "Pinned Pages",
+    "message": "고정된 페이지",
     "description": "Pinned pages rule preview label."
   },
   "desktopPinSearchCreateList": {
-    "message": "Pin a search to create a list",
+    "message": "검색어를 고정하여 목록을 만드세요",
     "description": "Empty list sidebar message."
   },
   "desktopPreview": {
-    "message": "Preview",
+    "message": "미리보기",
     "description": "Preview button label."
   },
   "desktopKeyword": {
-    "message": "Keyword",
+    "message": "키워드",
     "description": "Rule type label."
   },
   "desktopFunction": {
-    "message": "Function",
+    "message": "기능",
     "description": "Rule type label."
   },
   "desktopCustomFunction": {
-    "message": "(custom function)",
+    "message": "(커스텀 기능)",
     "description": "Rule description fallback."
   },
   "desktopUnknown": {
-    "message": "unknown",
+    "message": "알 수 없음",
     "description": "Unknown type fallback."
   },
   "desktopRemoveRuleFailed": {
-    "message": "Failed to remove rule: $1",
+    "message": "규칙 제거 실패: $1",
     "description": "Rule removal failure."
   },
   "desktopNoEditRow": {
-    "message": "No edit row",
+    "message": "편집 행 없음",
     "description": "Rule editor internal validation shown to user."
   },
   "desktopFunctionBodyRequired": {
-    "message": "Function body is required",
+    "message": "함수 본문은 필수 항목입니다.",
     "description": "Rule editor validation."
   },
   "desktopUnknownRuleType": {
-    "message": "Unknown rule type",
+    "message": "알 수 없는 규칙 유형",
     "description": "Rule editor validation."
   },
   "desktopRuleKeywordPlaceholder": {
-    "message": "keyword or /regex/",
+    "message": "키워드 또는 /regex/",
     "description": "Keyword rule input placeholder."
   },
   "desktopRuleDescriptionPlaceholder": {
-    "message": "description",
+    "message": "설명",
     "description": "Function rule description placeholder."
   },
   "desktopSaveEnter": {
-    "message": "Save (Enter)",
+    "message": "저장(Enter)",
     "description": "Rule editor save button title."
   },
   "desktopMatchesChecked": {
-    "message": "$1 matches ($2 checked)",
+    "message": "$1개 일치($2개 선택됨)",
     "description": "Rule preview match count."
   },
   "desktopRecentVisits": {
-    "message": "Recent Visits",
+    "message": "최근 방문",
     "description": "Rules preview section label."
   },
   "desktopReplayWorkerFailed": {
-    "message": "Replay worker failed",
+    "message": "재생 작업자 실패",
     "description": "Service error message."
   },
   "desktopResumeService": {
-    "message": "Resume Service",
+    "message": "서비스 재개",
     "description": "Service error recovery button label."
   },
   "desktopRecycleBin": {
-    "message": "Recycle Bin",
+    "message": "휴지통",
     "description": "Recycle bin view label."
   },
   "desktopRecycleBinLoadFailed": {
-    "message": "Failed to load recycle bin: $1",
+    "message": "휴지통을 로드하지 못했습니다: $1",
     "description": "Recycle bin load failure."
   },
   "desktopReloadExtension": {
-    "message": "Reload Extension",
+    "message": "확장 프로그램 다시 로드",
     "description": "Fatal error reload button."
   },
   "desktopReloading": {
-    "message": "Reloading...",
+    "message": "새로고침 중...",
     "description": "Reloading button state."
   },
   "desktopRepositoryRequired": {
-    "message": "Repository address is required",
+    "message": "저장소 주소가 필요합니다",
     "description": "Sync validation message."
   },
   "desktopResults": {
-    "message": "Results",
+    "message": "결과",
     "description": "Results section label."
   },
   "desktopRestore": {
-    "message": "Restore",
+    "message": "복원",
     "description": "Recycle bin restore button."
   },
   "desktopRestoreFailed": {
-    "message": "Failed to restore item: $1",
+    "message": "항목 복원 실패: $1",
     "description": "Recycle bin restore failure."
   },
   "desktopRevoke": {
-    "message": "Revoke",
+    "message": "취소",
     "description": "Paired browser revoke button label."
   },
   "desktopRevokeBrowserFailed": {
-    "message": "Failed to revoke browser: $1",
+    "message": "브라우저 취소 실패: $1",
     "description": "Paired browser revoke failure."
   },
   "desktopPageNotePrefix": {
-    "message": "Page note: ",
+    "message": "페이지 참고사항:",
     "description": "Prefix for page-note recycle bin display names."
   },
   "desktopSelectBookmarkFile": {
-    "message": "Select an exported bookmarks file to preview folders.",
+    "message": "폴더를 미리 보려면 내보낸 북마크 파일을 선택하세요.",
     "description": "Bookmark import placeholder."
   },
   "desktopSettingsSaved": {
-    "message": "Settings saved",
+    "message": "설정이 저장되었습니다.",
     "description": "Status shown after saving settings."
   },
   "desktopServiceUnavailable": {
-    "message": "Service unavailable",
+    "message": "서비스 이용 불가",
     "description": "Generic service unavailable message."
   },
   "desktopSessionStorageFull": {
-    "message": "Session storage full",
+    "message": "세션 저장공간이 가득 참",
     "description": "Service error message."
   },
   "desktopSimilar": {
-    "message": "Similar",
+    "message": "유사한",
     "description": "Page relation section label."
   },
   "desktopSortBy": {
-    "message": "Sort by",
+    "message": "정렬 기준",
     "description": "Filter section label."
   },
   "desktopStarting": {
-    "message": "Starting...",
+    "message": "시작 중...",
     "description": "Startup button state."
   },
   "desktopStorageAccessFailed": {
-    "message": "Storage access failed",
+    "message": "저장소 액세스 실패",
     "description": "Service error message."
   },
   "desktopStorageUnavailable": {
-    "message": "Storage Unavailable",
+    "message": "저장공간을 사용할 수 없음",
     "description": "Fatal storage error title."
   },
   "desktopSync": {
-    "message": "Sync",
+    "message": "동기화",
     "description": "Sync add-on title."
   },
   "desktopSyncDesc": {
-    "message": "Sync history and notes across devices, not including snapshots",
+    "message": "스냅샷을 포함하지 않고 기기 전체에 걸쳐 기록 및 메모 동기화",
     "description": "Sync add-on description."
   },
   "desktopSyncNow": {
-    "message": "Sync Now",
+    "message": "지금 동기화",
     "description": "Sync now button label."
   },
   "desktopSyncing": {
-    "message": "Syncing...",
+    "message": "동기화 중...",
     "description": "Sync button busy label."
   },
   "desktopTokenRequired": {
-    "message": "Token is required",
+    "message": "토큰이 필요합니다",
     "description": "Sync token validation message."
   },
   "desktopViewDetails": {
-    "message": "View details",
+    "message": "세부정보 보기",
     "description": "Result card detail button title."
   },
   "desktopWaitingApproval": {
-    "message": "Waiting for approval...",
+    "message": "승인을 기다리는 중...",
     "description": "Pairing button pending label."
   },
   "desktopTheme": {
-    "message": "Theme",
+    "message": "테마",
     "description": "Desktop appearance theme setting."
   },
   "desktopThemeDark": {
-    "message": "Dark",
+    "message": "어둠",
     "description": "Dark theme option."
   },
   "desktopThemeLight": {
-    "message": "Light",
+    "message": "빛",
     "description": "Light theme option."
   },
   "desktopTitleCleanup": {
-    "message": "Title Cleanup",
+    "message": "제목 정리",
     "description": "Desktop settings add-on title."
   },
   "desktopTitleCleanupDesc": {
-    "message": "Clean up page titles per site when recording",
+    "message": "녹화 시 사이트별 페이지 제목 정리",
     "description": "Desktop settings add-on description."
   },
   "desktopTooManyResults": {
-    "message": "Too many results to select (limit: 100)",
+    "message": "선택할 결과가 너무 많습니다(한도: 100).",
     "description": "Bulk selection limit message."
   },
   "desktopToggleSidebar": {
-    "message": "Toggle sidebar",
+    "message": "사이드바 전환",
     "description": "Sidebar toggle title."
   },
   "desktopVisitsOverTime": {
-    "message": "Visits over time",
+    "message": "시간 경과에 따른 방문",
     "description": "Time chart label."
   },
   "extensionCheckAgain": {
-    "message": "Check Again",
+    "message": "다시 확인하세요",
     "description": "Extension setup retry button."
   },
   "extensionActionFailedReload": {
-    "message": "$1 - please reload the extension.",
+    "message": "$1 - 확장 프로그램을 다시 로드하세요.",
     "description": "Popup error with reload hint."
   },
   "extensionActionFailed": {
-    "message": "Action failed",
+    "message": "작업 실패",
     "description": "Generic extension action failure."
   },
   "extensionApproveBrowserDesktop": {
-    "message": "Approve this browser in the desktop app.",
+    "message": "데스크톱 앱에서 이 브라우저를 승인하세요.",
     "description": "Connector approval pending metadata."
   },
   "extensionAddNote": {
-    "message": "Add a note...",
+    "message": "메모 추가...",
     "description": "Extension note placeholder."
   },
   "extensionAddNoteEsc": {
-    "message": "Add a note... Esc to save.",
+    "message": "메모 추가... 저장하려면 Esc를 누르세요.",
     "description": "Extension note placeholder with keyboard hint."
   },
   "extensionAddPageNote": {
-    "message": "+ Page note",
+    "message": "+ 페이지 노트",
     "description": "Popup page note add button."
   },
   "extensionAddPageNoteEsc": {
-    "message": "Add a page note... Esc to save.",
+    "message": "페이지 메모를 추가하세요... 저장하려면 Esc를 누르세요.",
     "description": "Extension page note placeholder with keyboard hint."
   },
   "extensionAddToList": {
-    "message": "Add to list",
+    "message": "목록에 추가",
     "description": "Popup add to list title."
   },
   "extensionApprovalPending": {
-    "message": "Approval Pending",
+    "message": "승인 보류 중",
     "description": "Connector approval pending status."
   },
   "extensionApprovalDenied": {
-    "message": "Approval Denied",
+    "message": "승인 거부됨",
     "description": "Connector approval denied status."
   },
   "extensionBlacklisted": {
-    "message": "Blacklisted",
+    "message": "블랙리스트에 등록됨",
     "description": "Popup blacklisted page title."
   },
   "extensionBrowserRecallApprovalDenied": {
-    "message": "Browser Recall Desktop approval denied",
+    "message": "Browser Recall Desktop 승인이 거부되었습니다.",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallApprovalPending": {
-    "message": "Browser Recall Desktop approval pending",
+    "message": "Browser Recall Desktop 승인 보류 중",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallDesktopConnected": {
-    "message": "Browser Recall Desktop connected",
+    "message": "Browser Recall Desktop 연결됨",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallDesktopOffline": {
-    "message": "Browser Recall Desktop is offline",
+    "message": "Browser Recall Desktop은(는) 오프라인입니다",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallDesktopPaused": {
-    "message": "Browser Recall Desktop is paused",
+    "message": "Browser Recall Desktop이 일시중지되었습니다.",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallPaused": {
-    "message": "Browser Recall is paused",
+    "message": "Browser Recall이 일시중지되었습니다.",
     "description": "Paused service title."
   },
   "extensionBrowserRecallQueueFull": {
-    "message": "Browser Recall Desktop queue is full",
+    "message": "Browser Recall Desktop 대기열이 꽉 찼습니다.",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallRecordingPaused": {
-    "message": "Browser Recall recording is paused",
+    "message": "Browser Recall 녹음이 일시 중지되었습니다.",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallTokenRejected": {
-    "message": "Browser Recall Desktop token rejected",
+    "message": "Browser Recall Desktop 토큰이 거부되었습니다.",
     "description": "Extension badge title."
   },
   "extensionCannotCapturePdf": {
-    "message": "Cannot capture PDF pages",
+    "message": "PDF 페이지를 캡처할 수 없습니다",
     "description": "Snapshot capture PDF error."
   },
   "extensionCaptureFailed": {
-    "message": "Capture failed",
+    "message": "캡처 실패",
     "description": "Snapshot capture failure."
   },
   "extensionCaptureFrame": {
-    "message": "CAPTURE FRAME",
+    "message": "캡처 프레임",
     "description": "Popup capture button."
   },
   "extensionCaptureIt": {
-    "message": "Capture It",
+    "message": "캡처해 보세요",
     "description": "Capture blacklisted page button."
   },
   "extensionCaptureNoContent": {
-    "message": "Capture failed: page returned no content",
+    "message": "캡처 실패: 페이지에서 콘텐츠가 반환되지 않았습니다.",
     "description": "Snapshot capture empty page error."
   },
   "extensionCapturing": {
-    "message": "Capturing...",
+    "message": "캡처 중...",
     "description": "Capture busy label."
   },
   "extensionCheckAgainApproval": {
-    "message": "Check again to request approval.",
+    "message": "승인을 요청하려면 다시 확인하세요.",
     "description": "Connector retry approval metadata."
   },
   "extensionConnectionResetActionFailed": {
-    "message": "Browser Recall action failed because the extension connection was reset. Reload this page and try again.",
+    "message": "Browser Recall 확장 연결이 재설정되었기 때문에 작업이 실패했습니다. 이 페이지를 새로고침하고 다시 시도하세요.",
     "description": "Extension action runtime failure message."
   },
   "extensionContextInvalidated": {
-    "message": "Extension context invalidated. Please refresh the page and try again.",
+    "message": "확장 컨텍스트가 무효화되었습니다. 페이지를 새로고침한 후 다시 시도하세요.",
     "description": "Popup runtime invalidated message."
   },
   "extensionCreateListNamed": {
-    "message": "Create \"$1\"",
+    "message": "\"$1\" 생성",
     "description": "List picker create option."
   },
   "extensionCreateList": {
-    "message": "Create \"$1\"",
+    "message": "\"$1\" 생성",
     "description": "List picker create option."
   },
   "extensionCreateNoteFailed": {
-    "message": "Create note failed",
+    "message": "메모 작성 실패",
     "description": "Create note failure."
   },
   "extensionDeleteHighlight": {
-    "message": "Delete highlight",
+    "message": "하이라이트 삭제",
     "description": "Delete highlight button title."
   },
   "extensionDeleteSnapshot": {
-    "message": "Delete snapshot",
+    "message": "스냅샷 삭제",
     "description": "Delete snapshot button title."
   },
   "extensionDesktopBridgeUnavailable": {
-    "message": "Desktop bridge unavailable",
+    "message": "데스크톱 브리지를 사용할 수 없음",
     "description": "Extension desktop bridge unavailable error."
   },
   "extensionDesktopApprovedConnectionFailed": {
-    "message": "Desktop approved, but connection failed.",
+    "message": "데스크톱이 승인되었지만 연결에 실패했습니다.",
     "description": "Connector approved but disconnected metadata."
   },
   "extensionDesktopBufferFull": {
-    "message": "Browser Recall Desktop buffer full - start the desktop app or wait for the queue to drain.",
+    "message": "Browser Recall Desktop 버퍼 가득 참 - 데스크톱 앱을 시작하거나 대기열이 비워질 때까지 기다립니다.",
     "description": "Extension desktop command buffer full message."
   },
   "extensionDesktopEventQueueFull": {
-    "message": "Browser Recall Desktop event queue is full - start the desktop app or wait for the queue to drain.",
+    "message": "Browser Recall Desktop 이벤트 큐가 꽉 찼습니다. 데스크톱 앱을 시작하거나 큐가 비워질 때까지 기다립니다.",
     "description": "Extension desktop event queue full message."
   },
   "extensionDesktopConnected": {
-    "message": "Desktop Connected",
+    "message": "데스크톱 연결됨",
     "description": "Connector connected status."
   },
   "extensionDesktopConnectionActive": {
-    "message": "Desktop connection active.",
+    "message": "데스크톱 연결이 활성화되었습니다.",
     "description": "Connector connected metadata."
   },
   "extensionDesktopOfflineMixed": {
-    "message": "Browser Recall Desktop is offline.",
+    "message": "Browser Recall Desktop은(는) 오프라인입니다.",
     "description": "Connector offline sentence."
   },
   "extensionDesktopPageDataUnavailable": {
-    "message": "Desktop page data unavailable.",
+    "message": "데스크톱 페이지 데이터를 사용할 수 없습니다.",
     "description": "Popup bootstrap page data unavailable fallback."
   },
   "extensionDesktopPopupAccessFailed": {
-    "message": "Desktop popup access check failed",
+    "message": "데스크톱 팝업 액세스 확인에 실패했습니다.",
     "description": "Popup access check failure."
   },
   "extensionDesktopPaused": {
-    "message": "Desktop Paused",
+    "message": "데스크톱이 일시중지되었습니다.",
     "description": "Connector paused status."
   },
   "extensionDesktopNotConnectedRefresh": {
-    "message": "Browser Recall Desktop is not connected yet. Start the desktop app and refresh from the popup.",
+    "message": "Browser Recall Desktop은 아직 연결되지 않았습니다. 데스크톱 앱을 시작하고 팝업에서 새로 고칩니다.",
     "description": "Popup desktop disconnected failure."
   },
   "extensionDesktopQueueFull": {
-    "message": "Desktop Queue Full",
+    "message": "데스크톱 대기열이 가득 참",
     "description": "Connector queue full status."
   },
   "extensionDeviceId": {
-    "message": "Device $1",
+    "message": "장치 $1",
     "description": "Connector device id metadata."
   },
   "extensionDisliked": {
-    "message": "Disliked",
+    "message": "싫어함",
     "description": "Dislike notification."
   },
   "extensionEdit": {
-    "message": "Edit",
+    "message": "편집",
     "description": "Edit button title."
   },
   "extensionEditNote": {
-    "message": "Edit note",
+    "message": "메모 수정",
     "description": "Edit note button title."
   },
   "extensionHighlights": {
-    "message": "Highlights",
+    "message": "하이라이트",
     "description": "Highlights panel title."
   },
   "extensionHighlightsCount": {
-    "message": "Highlights ($1)",
+    "message": "하이라이트($1)",
     "description": "Highlights panel title with count."
   },
   "extensionHighlightFailed": {
-    "message": "Highlight failed",
+    "message": "하이라이트 실패",
     "description": "Highlight failure."
   },
   "extensionLastCheckAuthenticatedStatusFailed": {
-    "message": "Last check: authenticated, but status failed.",
+    "message": "마지막 확인: 인증되었지만 상태가 실패했습니다.",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckAuthenticatedStatusFailedDetail": {
-    "message": "Last check: authenticated, but status failed ($1).",
+    "message": "마지막 확인: 인증되었지만 상태가 실패했습니다($1).",
     "description": "Connector diagnostic with detail."
   },
   "extensionLastCheckApprovalDenied": {
-    "message": "Last check: desktop approval was denied.",
+    "message": "마지막 확인: 데스크톱 승인이 거부되었습니다.",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckCode": {
-    "message": "Last check: $1.",
+    "message": "마지막 확인: $1.",
     "description": "Connector diagnostic code fallback."
   },
   "extensionLastCheckMessage": {
-    "message": "Last check: $1",
+    "message": "마지막 확인: $1",
     "description": "Connector diagnostic message fallback."
   },
   "extensionLastCheckNoConnection": {
-    "message": "Last check: no usable desktop connection.",
+    "message": "마지막 확인: 사용 가능한 데스크톱 연결이 없습니다.",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckNoConnectionDetail": {
-    "message": "Last check: no usable desktop connection ($1).",
+    "message": "마지막 확인: 사용 가능한 데스크톱 연결이 없습니다($1).",
     "description": "Connector diagnostic with port detail."
   },
   "extensionLastCheckReconnectFailed": {
-    "message": "Last check: desktop connection did not succeed in $1.",
+    "message": "마지막 확인: $1에서 데스크톱 연결이 성공하지 못했습니다.",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckSocketClosed": {
-    "message": "Last check: socket closed.",
+    "message": "마지막 확인: 소켓이 닫혔습니다.",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckSocketClosedDetail": {
-    "message": "Last check: socket closed ($1).",
+    "message": "마지막 확인: 소켓이 닫혔습니다($1).",
     "description": "Connector diagnostic with socket state."
   },
   "extensionLastCheckStatusRefreshFailed": {
-    "message": "Last check: status refresh failed.",
+    "message": "마지막 확인: 상태 새로 고침에 실패했습니다.",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckStatusRefreshFailedDetail": {
-    "message": "Last check: status refresh failed ($1).",
+    "message": "마지막 확인: 상태 새로 고침에 실패했습니다($1).",
     "description": "Connector diagnostic with detail."
   },
   "extensionLastCheckTokenRejected": {
-    "message": "Last check: desktop rejected the saved token.",
+    "message": "마지막 확인: 데스크톱이 저장된 토큰을 거부했습니다.",
     "description": "Connector diagnostic."
   },
   "extensionLastDiagnostic": {
-    "message": " Last diagnostic: $1.",
+    "message": "마지막 진단: $1.",
     "description": "Connector diagnostic suffix."
   },
   "extensionLastPortFailures": {
-    "message": " Last port failures: $1.",
+    "message": "마지막 포트 실패: $1.",
     "description": "Connector diagnostic suffix."
   },
   "extensionLikeFailed": {
-    "message": "Like failed",
+    "message": "실패한 것처럼",
     "description": "Like action failure."
   },
   "extensionLiked": {
-    "message": "Liked",
+    "message": "좋아요를 누른",
     "description": "Like notification."
   },
   "extensionLookingForDesktop": {
-    "message": "Looking for Browser Recall Desktop",
+    "message": "Browser Recall Desktop을 찾고 있습니다.",
     "description": "Extension badge title."
   },
   "extensionManageSettings": {
-    "message": "Manage in Settings",
+    "message": "설정에서 관리",
     "description": "Popup settings action."
   },
   "extensionNoAnnotation": {
-    "message": "No annotation",
+    "message": "주석 없음",
     "description": "Popup no annotation placeholder."
   },
   "extensionNoLists": {
-    "message": "No lists",
+    "message": "목록 없음",
     "description": "Popup no lists message."
   },
   "extensionNoTargetTab": {
-    "message": "No target tab",
+    "message": "타겟 탭 없음",
     "description": "Extension notification routing failure."
   },
   "extensionNotAvailablePage": {
-    "message": "Not available for this page",
+    "message": "이 페이지에서는 사용할 수 없습니다.",
     "description": "Popup unsupported page message."
   },
   "extensionOpenDesktopFlush": {
-    "message": "Open desktop to flush capture.",
+    "message": "캡처를 플러시하려면 데스크톱을 엽니다.",
     "description": "Connector queue full meta."
   },
   "extensionPageDataUnavailable": {
-    "message": "Page Data Unavailable",
+    "message": "페이지 데이터를 사용할 수 없음",
     "description": "Popup page data unavailable title."
   },
   "extensionPageNote": {
-    "message": "Page Note",
+    "message": "페이지 참고",
     "description": "Page note overlay title."
   },
   "extensionRatePageFailed": {
-    "message": "ratePage failed",
+    "message": "rate페이지 실패",
     "description": "Rating command failure."
   },
   "extensionRefreshFailed": {
-    "message": "Failed to refresh.",
+    "message": "새로고침하지 못했습니다.",
     "description": "Popup connector refresh failure."
   },
   "extensionResumeCaptureDesktop": {
-    "message": "Resume capture from desktop settings.",
+    "message": "데스크탑 설정에서 캡처를 재개합니다.",
     "description": "Connector paused metadata."
   },
   "extensionRetryWindow": {
-    "message": "the retry window",
+    "message": "재시도 창",
     "description": "Connector diagnostic retry window label."
   },
   "extensionConfigureShortcuts": {
-    "message": "Configure Shortcuts",
+    "message": "바로가기 구성",
     "description": "Extension options button."
   },
   "extensionCurrentPageReceipt": {
-    "message": "current page receipt",
+    "message": "현재 페이지 영수증",
     "description": "Extension popup placeholder URL text."
   },
   "extensionDesktopControl": {
-    "message": "Desktop Control",
+    "message": "데스크탑 제어",
     "description": "Extension options heading."
   },
   "extensionDesktopOffline": {
-    "message": "DESKTOP OFFLINE",
+    "message": "데스크탑 오프라인",
     "description": "Extension popup desktop offline heading."
   },
   "extensionKeyboardShortcuts": {
-    "message": "Keyboard Shortcuts",
+    "message": "키보드 단축키",
     "description": "Extension options heading."
   },
   "extensionMainUiRunsInDesktop": {
-    "message": "The main Browser Recall interface runs in the desktop app.",
+    "message": "기본 Browser Recall 인터페이스는 데스크톱 앱에서 실행됩니다.",
     "description": "Extension options explanatory text."
   },
   "extensionNotSet": {
-    "message": "Not set",
+    "message": "설정되지 않음",
     "description": "Keyboard shortcut missing value."
   },
   "extensionOpenBrowserRecall": {
-    "message": "Open Browser Recall",
+    "message": "Browser Recall 열기",
     "description": "Extension options open app button."
   },
   "extensionOpenDesktop": {
-    "message": "Open Desktop",
+    "message": "데스크탑 열기",
     "description": "Extension popup open desktop button."
   },
   "extensionPauseTracing": {
-    "message": "Pause tracing",
+    "message": "추적 일시중지",
     "description": "Extension popup recording toggle title."
   },
   "extensionStartDesktop": {
-    "message": "Start Browser Recall Desktop to resume live capture.",
+    "message": "라이브 캡처를 재개하려면 Browser Recall Desktop을 시작하세요.",
     "description": "Extension setup message."
   },
   "extensionStartDesktopCapture": {
-    "message": "Start Browser Recall Desktop to resume live capture.",
+    "message": "라이브 캡처를 재개하려면 Browser Recall Desktop을 시작하세요.",
     "description": "Connector offline metadata."
   },
   "extensionStorageUnavailable": {
-    "message": "Storage Unavailable",
+    "message": "저장공간을 사용할 수 없음",
     "description": "Extension fatal error title."
   },
   "extensionSnapshotCaptured": {
-    "message": "Snapshot captured",
+    "message": "스냅샷이 캡처되었습니다.",
     "description": "Snapshot capture success notification."
   },
   "extensionSomethingWentWrong": {
-    "message": "Something went wrong",
+    "message": "문제가 발생했습니다.",
     "description": "Generic extension error."
   },
   "extensionTokenRejected": {
-    "message": "Token Rejected",
+    "message": "토큰이 거부됨",
     "description": "Connector token rejected status."
   },
   "extensionUpdateFailed": {
-    "message": "Update failed",
+    "message": "업데이트 실패",
     "description": "Update note failure."
   },
   "extensionWaitingApproval": {
-    "message": "Waiting for Approval",
+    "message": "승인을 기다리는 중",
     "description": "Connector approval pending button."
   },
   "extensionSearchOrCreate": {
-    "message": "Search or create...",
+    "message": "검색하거나 생성하세요...",
     "description": "List picker search placeholder."
   },
   "extensionSnapshotMissingParams": {
-    "message": "Missing snapshot parameters.",
+    "message": "스냅샷 매개변수가 누락되었습니다.",
     "description": "Snapshot viewer error."
   },
   "extensionSnapshotNotFound": {
-    "message": "Snapshot not found.",
+    "message": "스냅샷을 찾을 수 없습니다.",
     "description": "Snapshot viewer error."
   },
   "extensionReloaded": {
-    "message": "Browser Recall extension reloaded. Please reload the page and try again.",
+    "message": "Browser Recall 확장 프로그램이 다시 로드되었습니다. 페이지를 새로고침하고 다시 시도하세요.",
     "description": "Runtime invalidated message."
   },
   "extensionReloadExtension": {
-    "message": "Reload Extension",
+    "message": "확장 프로그램 다시 로드",
     "description": "Extension fatal error reload button."
   },
   "extensionOpenAppFallback": {
-    "message": "Can't open the app? Launch it from your Applications folder, then try again.",
+    "message": "앱을 열 수 없나요? 응용 프로그램 폴더에서 실행한 후 다시 시도하세요.",
     "description": "Extension options fallback notice."
   },
   "extensionToggleRecording": {
-    "message": "Toggle recording",
+    "message": "녹화 전환",
     "description": "Extension popup recording toggle accessibility label."
   },
   "desktopAddPageNotePlaceholder": {
-    "message": "Add a page note...",
+    "message": "페이지 메모 추가...",
     "description": "Localized UI text."
   },
   "desktopAlreadyPaired": {
-    "message": "Chrome is already paired with Browser Recall Desktop",
+    "message": "Chrome은 이미 Browser Recall Desktop과 페어링되어 있습니다",
     "description": "Localized UI text."
   },
   "desktopApprovePairing": {
-    "message": "Approve the pairing request in Browser Recall Desktop",
+    "message": "Browser Recall Desktop에서 페어링 요청을 승인합니다.",
     "description": "Localized UI text."
   },
   "desktopAsGithubUser": {
-    "message": "as @$1",
+    "message": "@$1",
     "description": "Connected GitHub user suffix."
   },
   "desktopAuthentication": {
-    "message": "Authentication",
+    "message": "인증",
     "description": "Localized UI text."
   },
   "desktopBookmarkPreviewPlaceholder": {
-    "message": "Select an exported bookmarks file to preview folders.",
+    "message": "폴더를 미리 보려면 내보낸 북마크 파일을 선택하세요.",
     "description": "Localized UI text."
   },
   "desktopBridgeCheckFailed": {
-    "message": "Desktop bridge check failed: $1",
+    "message": "데스크톱 브리지 확인 실패: $1",
     "description": "Desktop bridge check failure."
   },
   "desktopCancelling": {
-    "message": "Cancelling...",
+    "message": "취소 중...",
     "description": "Localized UI text."
   },
   "desktopCannotDeleteHistory": {
-    "message": "Cannot delete history",
+    "message": "기록을 삭제할 수 없습니다",
     "description": "Localized UI text."
   },
   "desktopCanOnlyPasteIntoList": {
-    "message": "Can only paste into a list",
+    "message": "목록에만 붙여넣을 수 있습니다.",
     "description": "Localized UI text."
   },
   "desktopChildren": {
-    "message": "Children",
+    "message": "어린이",
     "description": "Localized UI text."
   },
   "desktopClearAllDataFinalConfirm": {
-    "message": "Final confirmation: Delete all history files?",
+    "message": "최종 확인: 모든 기록 파일을 삭제하시겠습니까?",
     "description": "Localized UI text."
   },
   "desktopClearAllDataWarning": {
-    "message": "Warning: this will delete all files in your storage directory.\n\nThis cannot be undone. Are you absolutely sure?",
+    "message": "경고: 이렇게 하면 저장소 디렉터리의 모든 파일이 삭제됩니다.\n\n이 작업은 취소할 수 없습니다. 정말 확신하시나요?",
     "description": "Localized UI text."
   },
   "desktopClearDataFailed": {
-    "message": "Error clearing data: $1",
+    "message": "데이터 지우기 오류: $1",
     "description": "Clear all data failure."
   },
   "desktopClearedFiles": {
-    "message": "Cleared $1 files/directories",
+    "message": "$1개의 파일/디렉터리를 삭제했습니다.",
     "description": "Clear all data success."
   },
   "desktopClearing": {
-    "message": "Clearing...",
+    "message": "지우는 중...",
     "description": "Localized UI text."
   },
   "desktopClearReload": {
-    "message": "Clear & Reload",
+    "message": "지우고 새로고침",
     "description": "Localized UI text."
   },
   "desktopColumnTitle": {
-    "message": "Title",
+    "message": "제목",
     "description": "Localized UI text."
   },
   "desktopCurrentDevice": {
-    "message": "(current)",
+    "message": "(현재)",
     "description": "Localized UI text."
   },
   "desktopDaysAgo": {
-    "message": "$1d ago",
+    "message": "$1d 전",
     "description": "Relative time in days."
   },
   "desktopDevices": {
-    "message": "Devices",
+    "message": "장치",
     "description": "Localized UI text."
   },
   "desktopExperimental": {
-    "message": "Experimental",
+    "message": "실험적",
     "description": "Localized UI text."
   },
   "desktopExploreResults": {
-    "message": "Explore results",
+    "message": "결과 살펴보기",
     "description": "Localized UI text."
   },
   "desktopFilters": {
-    "message": "Filters",
+    "message": "필터",
     "description": "Localized UI text."
   },
   "desktopFirstSeen": {
-    "message": "First seen",
+    "message": "처음 본",
     "description": "Localized UI text."
   },
   "desktopFirstVisit": {
-    "message": "First visit",
+    "message": "첫 방문",
     "description": "Localized UI text."
   },
   "desktopFirstVisited": {
-    "message": "First visited:",
+    "message": "처음 방문:",
     "description": "Localized UI text."
   },
   "desktopFixSettingsBeforeSync": {
-    "message": "Fix settings before syncing",
+    "message": "동기화하기 전에 설정 수정",
     "description": "Localized UI text."
   },
   "desktopFlushed": {
-    "message": "Flushed!",
+    "message": "플러시!",
     "description": "Localized UI text."
   },
   "desktopFlushing": {
-    "message": "Flushing...",
+    "message": "플러싱...",
     "description": "Localized UI text."
   },
   "desktopFocus": {
-    "message": "Focus",
+    "message": "초점",
     "description": "Localized UI text."
   },
   "desktopGithubAuthExpired": {
-    "message": "GitHub authorization expired - please reconnect.",
+    "message": "GitHub 인증이 만료되었습니다. 다시 연결하세요.",
     "description": "Localized UI text."
   },
   "desktopGithubNotConnected": {
-    "message": "GitHub not connected - click \"Connect with GitHub\" first",
+    "message": "GitHub에 연결되지 않았습니다. 먼저 ‘GitHub에 연결’을 클릭하세요",
     "description": "Localized UI text."
   },
   "desktopGithubPrefilled": {
-    "message": "Opens GitHub with pre-filled settings",
+    "message": "미리 채워진 설정으로 GitHub을 엽니다.",
     "description": "Localized UI text."
   },
   "desktopHasHighlights": {
-    "message": "Has highlights",
+    "message": "하이라이트 있음",
     "description": "Localized UI text."
   },
   "desktopHasSnapshots": {
-    "message": "Has snapshots",
+    "message": "스냅샷 있음",
     "description": "Localized UI text."
   },
   "desktopHistoryImportHelpHtml": {
-    "message": "Import a JSON array of browser history entries. Supported entry shapes include Chrome-style objects with <code>url</code>, <code>title</code>, and <code>lastVisitTime</code>, or expanded entries with <code>visitTimes</code>.",
+    "message": "브라우저 방문 기록 항목의 JSON 배열을 가져옵니다. <code>url</code>, <code>title</code>, <code>lastVisitTime</code>이 있는 Chrome 형식 객체와 <code>visitTimes</code>가 있는 확장 항목을 지원합니다.",
     "description": "Localized UI text."
   },
   "desktopHistoryInvalidJson": {
-    "message": "invalid JSON or unsupported history export format",
+    "message": "잘못된 JSON 또는 지원되지 않는 기록 내보내기 형식",
     "description": "Localized UI text."
   },
   "desktopHistoryParseFailed": {
-    "message": "Could not parse history JSON: $1",
+    "message": "기록 JSON을 구문 분석할 수 없습니다: $1",
     "description": "History import JSON parse failure."
   },
   "desktopHistoryReadyToImport": {
-    "message": "Ready to import $1 visits across $2 pages.",
+    "message": "$2개 페이지의 방문 기록 $1건을 가져올 준비가 되었습니다.",
     "description": "History import preview summary."
   },
   "desktopHoursAgo": {
-    "message": "$1h ago",
+    "message": "$1시간 전",
     "description": "Relative time in hours."
   },
   "desktopImportBookmarksDone": {
-    "message": "Done! Imported $1 lists with $2 bookmarks.",
+    "message": "완료! 북마크 $2개가 포함된 목록 $1개를 가져왔습니다.",
     "description": "Bookmark import success summary."
   },
   "desktopImportHistoryDone": {
-    "message": "Done! Imported $1 visits across $2 pages.",
+    "message": "완료! $2개 페이지의 방문 기록 $1건을 가져왔습니다.",
     "description": "History import success summary."
   },
   "desktopImportSkipped": {
-    "message": "$1 items skipped during parsing or import.",
+    "message": "$1 항목을 구문 분석하거나 가져오는 동안 건너뛰었습니다.",
     "description": "History import skipped item summary."
   },
   "desktopInboxRulesHint": {
-    "message": "Rules automatically sort new pages into this list. Keyword rules match against page title, web address, and body text. Function rules use a custom JS predicate that returns true/false.",
+    "message": "규칙은 새 페이지를 이 목록에 자동으로 정렬합니다. 키워드 규칙은 페이지 제목, 웹 주소 및 본문 텍스트와 일치합니다. 함수 규칙은 true/false를 반환하는 사용자 정의 JS 조건자를 사용합니다.",
     "description": "Localized UI text."
   },
   "desktopIntervalMinutes": {
-    "message": "Interval (min)",
+    "message": "간격(분)",
     "description": "Localized UI text."
   },
   "desktopInvalidToken": {
-    "message": "Invalid token: $1",
+    "message": "잘못된 토큰: $1",
     "description": "Sync token validation failure."
   },
   "desktopItemsSkipped": {
-    "message": "$1 items skipped",
+    "message": "$1 항목 건너뛰기",
     "description": "Import skipped item summary."
   },
   "desktopJustNow": {
-    "message": "just now",
+    "message": "지금 막",
     "description": "Localized UI text."
   },
   "desktopLastSeen": {
-    "message": "Last seen",
+    "message": "마지막으로 본",
     "description": "Localized UI text."
   },
   "desktopLastVisit": {
-    "message": "Last visit",
+    "message": "마지막 방문",
     "description": "Localized UI text."
   },
   "desktopLastVisited": {
-    "message": "Last visited:",
+    "message": "마지막 방문:",
     "description": "Localized UI text."
   },
   "desktopMakePrivate": {
-    "message": "(make it private)",
+    "message": "(비공개로 설정)",
     "description": "Localized UI text."
   },
   "desktopManualSetupHtml": {
-    "message": "<li> Create a <strong>private</strong> repository on <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> (e.g. <code>portal-sync</code>). Leave it empty. </li> <li> Go to <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">Fine-grained tokens</a> and create a token: <ul> <li> Set expiration to <strong>No expiration</strong> </li> <li> Under \"Repository access\", choose <strong>Only select repositories</strong> and pick your sync repo </li> <li> Under \"Permissions\", add <strong>Contents</strong> and set to <strong>Read and write</strong> </li> </ul> </li> <li>Paste the repository address and token above.</li>",
+    "message": "<li><a href=\"https://github.com/new\" target=\"_blank\">GitHub</a>에 <strong>비공개</strong> 저장소(예: <code>portal-sync</code>)를 만들고 비워 둡니다.</li><li><a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">세분화된 토큰</a> 페이지에서 토큰을 만듭니다.<ul><li>만료를 <strong>만료 없음</strong>으로 설정합니다</li><li>‘저장소 액세스’에서 <strong>선택한 저장소만</strong>을 선택한 뒤 동기화 저장소를 지정합니다</li><li>‘권한’에서 <strong>콘텐츠</strong>를 추가하고 <strong>읽기 및 쓰기</strong>로 설정합니다</li></ul></li><li>위에 저장소 주소와 토큰을 붙여 넣습니다.</li>",
     "description": "Localized UI text."
   },
   "desktopManualSetupInstructions": {
-    "message": "Manual setup instructions",
+    "message": "수동 설정 지침",
     "description": "Localized UI text."
   },
   "desktopMemoryCacheHint": {
-    "message": "Settings and metadata cached in browser storage for fast access. The source of truth is settings.json in your storage directory.",
+    "message": "빠른 액세스를 위해 브라우저 저장소에 캐시된 설정 및 메타데이터. 정보의 출처는 스토리지 디렉터리의 settings.json입니다.",
     "description": "Localized UI text."
   },
   "desktopMemoryCacheHtml": {
-    "message": "<span id=\"cacheSize\">...</span> memory cache <span class=\"hint-icon\">?<span class=\"hint-tip\" data-i18n=\"desktopMemoryCacheHint\">Settings and metadata cached in browser storage for fast access. The source of truth is settings.json in your storage directory.</span></span>",
+    "message": "<span id=\"cacheSize\">...</span> 메모리 캐시 <span class=\"hint-icon\">?<span class=\"hint-tip\" data-i18n=\"desktopMemoryCacheHint\">빠른 접근을 위해 설정과 메타데이터를 브라우저 저장소에 캐시합니다. 원본 데이터는 저장 디렉터리의 settings.json에 있습니다.</span></span>",
     "description": "Localized UI text."
   },
   "desktopMinutesAgo": {
-    "message": "$1m ago",
+    "message": "$1m 전",
     "description": "Relative time in minutes."
   },
   "desktopNoBlockedPrefixes": {
-    "message": "No blocked web address prefixes",
+    "message": "차단된 웹 주소 접두어 없음",
     "description": "Localized UI text."
   },
   "desktopNoImportableHistory": {
-    "message": "No importable history entries found in this file.",
+    "message": "이 파일에는 가져올 수 있는 기록 항목이 없습니다.",
     "description": "Localized UI text."
   },
   "desktopNoSyncRepo": {
-    "message": "Don't have a sync repo?",
+    "message": "동기화 저장소가 없나요?",
     "description": "Localized UI text."
   },
   "desktopNoTrimmingRules": {
-    "message": "No trimming rules",
+    "message": "트리밍 규칙 없음",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "Select text and press <kbd>Alt+H</kbd> to highlight it, or press <kbd>Alt+H</kbd> with no selection to add a note to the current page.",
+    "message": "텍스트를 선택하고 <kbd>Alt+H</kbd>를 누르면 강조 표시됩니다. 아무것도 선택하지 않고 <kbd>Alt+H</kbd>를 누르면 현재 페이지에 메모가 추가됩니다.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {
-    "message": "Highlights & notes",
+    "message": "하이라이트 및 메모",
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryText": {
-    "message": "Every page visit is automatically saved by Browser Recall Desktop and stays searchable by title, web address, and content.",
+    "message": "모든 페이지 방문은 Browser Recall Desktop에 의해 자동으로 저장되며 제목, 웹 주소 및 콘텐츠로 검색 가능한 상태로 유지됩니다.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryTitle": {
-    "message": "Browsing history",
+    "message": "검색 기록",
     "description": "Localized UI text."
   },
   "desktopOnboardingListsText": {
-    "message": "Organize pages into lists. Use automatic inbox rules to create a live-updating list.",
+    "message": "페이지를 목록으로 구성합니다. 자동 받은 편지함 규칙을 사용하여 실시간 업데이트 목록을 만듭니다.",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTextHtml": {
-    "message": "Press <kbd>Alt+S</kbd> to save an offline copy of the page through the desktop bridge.",
+    "message": "<kbd>Alt+S</kbd>를 누르면 데스크톱 브리지를 통해 페이지의 오프라인 사본이 저장됩니다.",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTitle": {
-    "message": "Page snapshots",
+    "message": "페이지 스냅샷",
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "Open the Browser Recall popup in Chrome and click Pair with desktop.",
+    "message": "Chrome에서 Browser Recall 팝업을 열고 ‘데스크톱과 페어링’을 클릭하세요.",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {
-    "message": "Page properties",
+    "message": "페이지 속성",
     "description": "Localized UI text."
   },
   "desktopPasteExistingToken": {
-    "message": "or paste an existing token:",
+    "message": "또는 기존 토큰을 붙여넣습니다.",
     "description": "Localized UI text."
   },
   "desktopPausedLower": {
-    "message": "paused",
+    "message": "일시중지됨",
     "description": "Localized UI text."
   },
   "desktopPauseSync": {
-    "message": "Pause sync",
+    "message": "동기화 일시중지",
     "description": "Localized UI text."
   },
   "desktopPendingWritesHtml": {
-    "message": "<span id=\"bufferSize\">0</span> pending writes",
+    "message": "<span id=\"bufferSize\">0</span> 보류 중인 쓰기",
     "description": "Localized UI text."
   },
   "desktopPinTime": {
-    "message": "Pin time",
+    "message": "시간 고정",
     "description": "Localized UI text."
   },
   "desktopProvider": {
-    "message": "Provider",
+    "message": "공급자",
     "description": "Localized UI text."
   },
   "desktopPulledAgo": {
-    "message": "pulled $1",
+    "message": "$1을 뽑았습니다.",
     "description": "Remote sync pull timestamp."
   },
   "desktopPulling": {
-    "message": "pulling...",
+    "message": "당기다...",
     "description": "Localized UI text."
   },
   "desktopPushedAgo": {
-    "message": "pushed $1",
+    "message": "$1 푸시됨",
     "description": "Local sync push timestamp."
   },
   "desktopPushing": {
-    "message": "pushing...",
+    "message": "밀고...",
     "description": "Localized UI text."
   },
   "desktopQuery": {
-    "message": "Query",
+    "message": "쿼리",
     "description": "Localized UI text."
   },
   "desktopRemainingWrites": {
-    "message": "$1 remaining",
+    "message": "$1 남음",
     "description": "Pending write flush remaining count."
   },
   "desktopRememberToken": {
-    "message": "Remember token",
+    "message": "토큰 기억",
     "description": "Localized UI text."
   },
   "desktopRememberTokenHint": {
-    "message": "When off, the token is kept in memory only and cleared on browser restart.",
+    "message": "끄면 토큰이 메모리에만 유지되고 브라우저를 다시 시작할 때 지워집니다.",
     "description": "Localized UI text."
   },
   "desktopRemoveAfterPipe": {
-    "message": "Remove after |",
+    "message": "이후 제거 |",
     "description": "Localized UI text."
   },
   "desktopRemoveBrackets": {
-    "message": "Remove [brackets]",
+    "message": "[괄호] 제거",
     "description": "Localized UI text."
   },
   "desktopRemoveParens": {
-    "message": "Remove (parens)",
+    "message": "제거(괄호)",
     "description": "Localized UI text."
   },
   "desktopRepositoryAddress": {
-    "message": "Repository address",
+    "message": "저장소 주소",
     "description": "Localized UI text."
   },
   "desktopResumeSync": {
-    "message": "Resume sync",
+    "message": "동기화 재개",
     "description": "Localized UI text."
   },
   "desktopRetentionDays": {
-    "message": "Retention (days)",
+    "message": "보존 기간(일)",
     "description": "Localized UI text."
   },
   "desktopSelectAllUnavailable": {
-    "message": "Select all is not available here",
+    "message": "여기서는 모두 선택을 사용할 수 없습니다",
     "description": "Localized UI text."
   },
   "desktopSettingFailed": {
-    "message": "Desktop setting failed: $1",
+    "message": "데스크탑 설정 실패: $1",
     "description": "Desktop shell setting failure."
   },
   "desktopSyncDisabled": {
-    "message": "Sync disabled: $1",
+    "message": "동기화 비활성화됨: $1",
     "description": "Sync disabled status detail."
   },
   "desktopSyncErrorRetry": {
-    "message": "Error (will retry): $1",
+    "message": "오류(다시 시도합니다): $1",
     "description": "Sync retryable failure."
   },
   "desktopSyncSkipped": {
-    "message": "Sync skipped",
+    "message": "동기화를 건너뛰었습니다.",
     "description": "Localized UI text."
   },
   "desktopTime": {
-    "message": "Time",
+    "message": "시간",
     "description": "Localized UI text."
   },
   "desktopToggleFailed": {
-    "message": "Toggle failed: $1",
+    "message": "토글 실패: $1",
     "description": "Sync device toggle failure."
   },
   "desktopVisitedMultipleTimes": {
-    "message": "Visited multiple times",
+    "message": "여러 번 방문함",
     "description": "Localized UI text."
   },
   "desktopVisits": {
-    "message": "Visits",
+    "message": "방문",
     "description": "Localized UI text."
   },
   "extensionFirst": {
-    "message": "First",
+    "message": "첫 번째",
     "description": "Localized UI text."
   },
   "desktopColumnRelevance": {
-    "message": "Rel",
+    "message": "관련도",
     "description": "Search relevance column label."
   },
   "desktopColumnLastVisit": {
-    "message": "Last Visit",
+    "message": "마지막 방문",
     "description": "Last visit column label."
   },
   "desktopColumnFirstVisit": {
-    "message": "First Visit",
+    "message": "첫 방문",
     "description": "First visit column label."
   },
   "desktopColumnAttention": {
-    "message": "Att",
+    "message": "집중",
     "description": "Attention score column label."
   },
   "desktopColumnPinTime": {
-    "message": "Pin Time",
+    "message": "핀 시간",
     "description": "Pin time column label."
   },
   "desktopDataFolderReady": {
-    "message": "Data folder ready",
+    "message": "데이터 폴더 준비됨",
     "description": "Storage setup ready status."
   },
   "desktopDeviceId": {
-    "message": "Device $1",
+    "message": "장치 $1",
     "description": "Desktop device id label."
   },
   "desktopDeviceIdentityUnavailable": {
-    "message": "Device identity unavailable",
+    "message": "장치 ID를 사용할 수 없음",
     "description": "Missing desktop device identity status."
   },
   "desktopDeviceIdentityRestart": {
-    "message": "Device identity unavailable. Try restarting Browser Recall.",
+    "message": "장치 ID를 사용할 수 없습니다. Browser Recall을 다시 시작해 보세요.",
     "description": "Startup failure when desktop device identity is unavailable."
   }
 }

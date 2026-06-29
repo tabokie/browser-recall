@@ -8,1519 +8,1519 @@
     "description": "Lowercase product mark used in compact desktop UI."
   },
   "extensionDescription": {
-    "message": "Chrome connector for Browser Recall Desktop. Capture pages in the browser and open the full app locally.",
+    "message": "Browser Recall Desktop 的 Chrome 連接器。在瀏覽器中擷取頁面，並在本機開啟完整應用程式。",
     "description": "Extension store and browser management description."
   },
   "commandHighlightSelection": {
-    "message": "Highlight selected text or add a page note",
+    "message": "反白顯示所選文字或新增頁面註釋",
     "description": "Browser command description."
   },
   "commandCaptureSnapshot": {
-    "message": "Capture snapshot of current page",
+    "message": "捕獲當前頁面的快照",
     "description": "Browser command description."
   },
   "commandLikePage": {
-    "message": "Like the current page",
+    "message": "喜歡當前頁面",
     "description": "Browser command description."
   },
   "commandDislikePage": {
-    "message": "Dislike the current page",
+    "message": "不喜歡當前頁面",
     "description": "Browser command description."
   },
   "commonAdd": {
-    "message": "Add",
+    "message": "添加",
     "description": "Generic add button label."
   },
   "commonBack": {
-    "message": "Back",
+    "message": "返回",
     "description": "Back navigation label."
   },
   "commonCancel": {
-    "message": "Cancel",
+    "message": "取消",
     "description": "Generic cancel button label."
   },
   "commonClear": {
-    "message": "Clear",
+    "message": "清除",
     "description": "Generic clear button label."
   },
   "commonReload": {
-    "message": "Reload",
+    "message": "重新載入",
     "description": "Generic reload button label."
   },
   "commonClose": {
-    "message": "Close",
+    "message": "關閉",
     "description": "Close button title."
   },
   "commonConfirm": {
-    "message": "Confirm",
+    "message": "確認",
     "description": "Confirm button title."
   },
   "commonContinue": {
-    "message": "Continue",
+    "message": "繼續",
     "description": "Continue navigation label."
   },
   "commonDelete": {
-    "message": "Delete",
+    "message": "刪除",
     "description": "Generic delete button label."
   },
   "commonExplore": {
-    "message": "Explore",
+    "message": "探索",
     "description": "Explore view label."
   },
   "commonFlush": {
-    "message": "Flush",
+    "message": "沖洗",
     "description": "Flush pending writes button label."
   },
   "commonImportHistory": {
-    "message": "Import History",
+    "message": "導入歷史記錄",
     "description": "Import history button label."
   },
   "commonImportSelected": {
-    "message": "Import Selected",
+    "message": "導入所選內容",
     "description": "Import selected items button label."
   },
   "commonLoading": {
-    "message": "Loading...",
+    "message": "正在加載...",
     "description": "Generic loading state."
   },
   "commonLists": {
-    "message": "Lists",
+    "message": "清單",
     "description": "Lists section label."
   },
   "commonRemove": {
-    "message": "Remove",
+    "message": "刪除",
     "description": "Generic remove button title."
   },
   "commonSettings": {
-    "message": "Settings",
+    "message": "設定",
     "description": "Settings label."
   },
   "commonSystem": {
-    "message": "System",
+    "message": "系統",
     "description": "Use system setting option label."
   },
   "desktopAddons": {
-    "message": "Add-ons",
+    "message": "附加元件",
     "description": "Desktop settings group label."
   },
   "desktopAddRule": {
-    "message": "Add rule",
+    "message": "新增規則",
     "description": "Desktop inbox rule add button title."
   },
   "desktopAddPageNote": {
-    "message": "+ Add page note",
+    "message": "+ 新增頁面註釋",
     "description": "Page detail add page note button."
   },
   "desktopAdvanced": {
-    "message": "Advanced",
+    "message": "進階",
     "description": "Desktop settings group label."
   },
   "desktopAppearance": {
-    "message": "Appearance",
+    "message": "外觀",
     "description": "Desktop settings group label."
   },
   "desktopBrowsersActiveToday": {
-    "message": "Browsers active today",
+    "message": "今天活躍的瀏覽器",
     "description": "Paired browser list label."
   },
   "desktopCaptureVideos": {
-    "message": "Capture videos in snapshots",
+    "message": "在快照中捕捉視頻",
     "description": "Desktop setting label."
   },
   "desktopCacheClearFailed": {
-    "message": "Cache clear failed: $1",
+    "message": "快取清除失敗：$1",
     "description": "Status shown when cache clearing fails."
   },
   "desktopCancelPreview": {
-    "message": "Cancel Preview",
+    "message": "取消預覽",
     "description": "Rule preview cancel button label."
   },
   "desktopCheckDevices": {
-    "message": "Check Devices",
+    "message": "檢查設備",
     "description": "Sync devices check button."
   },
   "desktopChecking": {
-    "message": "Checking...",
+    "message": "正在檢查...",
     "description": "Button label while checking."
   },
   "desktopChooseDataFolder": {
-    "message": "Choose Data Folder",
+    "message": "選擇資料資料夾",
     "description": "Desktop onboarding data-folder button."
   },
   "desktopChangeDataFolder": {
-    "message": "Change Data Folder",
+    "message": "更改資料資料夾",
     "description": "Change data folder button label."
   },
   "desktopChoosing": {
-    "message": "Choosing...",
+    "message": "選擇...",
     "description": "Button label while choosing a data folder."
   },
   "desktopClearAllData": {
-    "message": "Clear All Data",
+    "message": "清除所有數據",
     "description": "Clear all data button label."
   },
   "desktopClearCacheReload": {
-    "message": "Clear Cache & Reload",
+    "message": "清除快取並重新加載",
     "description": "Clear cache button label."
   },
   "desktopCollapse": {
-    "message": "Collapse",
+    "message": "崩潰",
     "description": "Collapse list title."
   },
   "desktopConnect": {
-    "message": "Connect",
+    "message": "連接",
     "description": "Sync connect button label."
   },
   "desktopConnected": {
-    "message": "Connected",
+    "message": "已連接",
     "description": "Sync connected state label."
   },
   "desktopConnecting": {
-    "message": "Connecting...",
+    "message": "正在連接...",
     "description": "Sync connecting button label."
   },
   "desktopCouldNotStartSetup": {
-    "message": "Could not start setup: $1",
+    "message": "無法開始安裝：$1",
     "description": "Onboarding setup failure."
   },
   "desktopColor": {
-    "message": "Color",
+    "message": "顏色",
     "description": "Desktop appearance color setting."
   },
   "desktopConnection": {
-    "message": "Connection",
+    "message": "連接方式",
     "description": "Desktop settings group label."
   },
   "desktopCreateList": {
-    "message": "Create list",
+    "message": "創建列表",
     "description": "Create list button title."
   },
   "desktopCreateTokenGithub": {
-    "message": "Create Token on GitHub",
+    "message": "在 GitHub 上建立令牌",
     "description": "Create GitHub token button label."
   },
   "desktopCreateGithubRepo": {
-    "message": "Create one on GitHub",
+    "message": "在 GitHub 上建立一個",
     "description": "Create GitHub repository link text."
   },
   "desktopData": {
-    "message": "Data",
+    "message": "數據",
     "description": "Desktop settings group label."
   },
   "desktopDataStorageHint": {
-    "message": "Stored locally as human-readable JSONL files organized by date. Open with any text editor or process with jq.",
+    "message": "以人類可讀的 JSONL 檔案儲存在本機，並按日期整理。可使用任何文字編輯器開啟，或使用 jq 處理。",
     "description": "Desktop local data storage help text."
   },
   "desktopDefaultBrowserProfile": {
-    "message": "Default profile",
+    "message": "預設設定檔",
     "description": "Fallback browser profile name."
   },
   "desktopDebugLogging": {
-    "message": "Debug logging (resets on restart)",
+    "message": "調試日誌記錄（重啟時重置）",
     "description": "Desktop debug logging setting."
   },
   "desktopDeleteAllDataHint": {
-    "message": "Deletes all files in the Browser Recall Desktop data folder. This cannot be undone.",
+    "message": "刪除 Browser Recall Desktop 資料夾中的所有檔案。此操作無法撤銷。",
     "description": "Desktop delete-all-data help text."
   },
   "desktopDeviceNotConfigured": {
-    "message": "Device not configured",
+    "message": "設備未配置",
     "description": "Desktop storage status when setup is incomplete."
   },
   "desktopDisconnectedManageTokensHtml": {
-    "message": "Disconnected. <a href=\"https://github.com/settings/tokens\" target=\"_blank\" style=\"color:#1a73e8;\">Manage tokens on GitHub</a>",
+    "message": "已中斷連線。<a href=\"https://github.com/settings/tokens\" target=\"_blank\" style=\"color:#1a73e8;\">在 GitHub 管理權杖</a>",
     "description": "Sync disconnected status with link."
   },
   "desktopDisconnected": {
-    "message": "Disconnected",
+    "message": "已斷開連接",
     "description": "Paired browser disconnected status."
   },
   "desktopEmptyRecycleBin": {
-    "message": "Empty Recycle Bin",
+    "message": "清空回收站",
     "description": "Recycle bin action."
   },
   "desktopErrorPrefix": {
-    "message": "Error: $1",
+    "message": "錯誤：$1",
     "description": "Generic error prefix."
   },
   "desktopExcludedSites": {
-    "message": "Excluded Sites",
+    "message": "排除站點",
     "description": "Desktop settings add-on title."
   },
   "desktopExcludedSitesDesc": {
-    "message": "Skip recording for matching web address prefixes",
+    "message": "跳過匹配網址前綴的記錄",
     "description": "Desktop settings add-on description."
   },
   "desktopHistoryBatchSize": {
-    "message": "History loading batch size",
+    "message": "歷史載入批量大小",
     "description": "Desktop advanced setting label."
   },
   "desktopHistoryBatchSizeHint": {
-    "message": "Number of daily history files loaded at once when scrolling. Higher values load more history upfront but may feel slower on large datasets.",
+    "message": "滾動時一次載入的每日歷史記錄檔數。較高的值會預先載入更多歷史記錄，但在大型資料集上可能會感覺較慢。",
     "description": "Desktop history batch size help text."
   },
   "desktopGetStarted": {
-    "message": "Get Started",
+    "message": "開始使用",
     "description": "Onboarding completion button."
   },
   "desktopHistoryImportHelp": {
-    "message": "Import a JSON array of browser history entries. Supported entry shapes include Chrome-style objects with url, title, and lastVisitTime, or expanded entries with visitTimes.",
+    "message": "匯入瀏覽器歷史記錄條目的 JSON 陣列。支援的條目形狀包括帶有 url、標題和lastVisitTime 的Chrome 樣式對象，或帶有visitTimes 的擴展條目。",
     "description": "History import help text."
   },
   "desktopImportBookmarks": {
-    "message": "Import Bookmarks",
+    "message": "導入書籤",
     "description": "Import bookmarks button label."
   },
   "desktopImportBookmarksProgress": {
-    "message": "Importing bookmarks into Browser Recall...",
+    "message": "正在將書籤匯入到 Browser Recall...",
     "description": "Bookmark import progress message."
   },
   "desktopImportBrowserHistoryProgress": {
-    "message": "Importing browser history into Browser Recall...",
+    "message": "正在將瀏覽器歷史記錄匯入 Browser Recall...",
     "description": "History import progress message."
   },
   "desktopImportFailed": {
-    "message": "Import failed: $1",
+    "message": "導入失敗：$1",
     "description": "Import failure message."
   },
   "desktopImporting": {
-    "message": "Importing...",
+    "message": "正在導入...",
     "description": "Import button busy label."
   },
   "desktopDataFolder": {
-    "message": "Data folder: $1",
+    "message": "資料資料夾：$1",
     "description": "Configured data folder status."
   },
   "desktopSelectFolderPrompt": {
-    "message": "Select the folder where Browser Recall should store its local data.",
+    "message": "選擇 Browser Recall 應儲存其本機資料的資料夾。",
     "description": "Data folder picker prompt."
   },
   "desktopChooseFolderContinue": {
-    "message": "Choose a data folder to continue.",
+    "message": "選擇一個資料資料夾以繼續。",
     "description": "Data folder required message."
   },
   "desktopCouldNotUseFolder": {
-    "message": "Could not use that folder: $1",
+    "message": "無法使用該資料夾：$1",
     "description": "Data folder failure message."
   },
   "desktopLocalStorageFull": {
-    "message": "Local storage full",
+    "message": "本地儲存已滿",
     "description": "Service error message."
   },
   "desktopInboxRules": {
-    "message": "Inbox rules",
+    "message": "收件匣規則",
     "description": "Desktop inbox rules button title and panel label."
   },
   "desktopLanguage": {
-    "message": "Language",
+    "message": "語言",
     "description": "Desktop appearance language setting."
   },
   "desktopLaunchAtLogin": {
-    "message": "Launch at login",
+    "message": "登入時啟動",
     "description": "Desktop launch-at-login setting."
   },
   "desktopLaunchAtLoginUnsupported": {
-    "message": "Launch at login is available on macOS 13 or newer.",
+    "message": "登入時啟動可在 macOS 13 或更高版本上使用。",
     "description": "Launch-at-login platform support notice."
   },
   "desktopLaunchAtLoginLong": {
-    "message": "Launch Browser Recall when you log in",
+    "message": "登入時啟動 Browser Recall",
     "description": "Onboarding launch-at-login setting."
   },
   "desktopNoBrowsersActiveToday": {
-    "message": "No browsers active today.",
+    "message": "今天沒有活動的瀏覽器。",
     "description": "Empty paired browser list text."
   },
   "desktopNoKnownChildren": {
-    "message": "No known children",
+    "message": "沒有已知的孩子",
     "description": "Page relation empty state."
   },
   "desktopNoKnownParents": {
-    "message": "No known parents",
+    "message": "沒有已知的父母",
     "description": "Page relation empty state."
   },
   "desktopNoDeletedItems": {
-    "message": "No deleted items",
+    "message": "沒有刪除的項目",
     "description": "Empty recycle bin text."
   },
   "desktopNoLists": {
-    "message": "No lists",
+    "message": "沒有列表",
     "description": "List picker empty state."
   },
   "desktopNoMatches": {
-    "message": "No matches",
+    "message": "沒有匹配項",
     "description": "Rule preview empty state."
   },
   "desktopNoMatchingPins": {
-    "message": "No matching pins",
+    "message": "沒有匹配的引腳",
     "description": "Filtered pin empty state."
   },
   "desktopNoPinnedPages": {
-    "message": "No pinned pages",
+    "message": "沒有固定頁面",
     "description": "Pinned page empty state."
   },
   "desktopNoPinnedPreview": {
-    "message": "No pinned pages available for preview",
+    "message": "沒有可用於預覽的固定頁面",
     "description": "Rule preview empty state for pinned pages."
   },
   "desktopNoPinnedPagesPreview": {
-    "message": "No pinned pages available for preview",
+    "message": "沒有可用於預覽的固定頁面",
     "description": "Rules pinned preview empty state."
   },
   "desktopNoResults": {
-    "message": "No results",
+    "message": "沒有結果",
     "description": "Search empty state."
   },
   "desktopNoVisitsPreview": {
-    "message": "No visits found to match against",
+    "message": "未找到匹配的訪問",
     "description": "Rules visit preview empty state."
   },
   "desktopNoteOn": {
-    "message": "Note on $1",
+    "message": "關於 $1 的註釋",
     "description": "Recycle bin note display name with URL."
   },
   "desktopNoteWithSlug": {
-    "message": "Note ($1)",
+    "message": "註（$1）",
     "description": "Recycle bin note display name with slug."
   },
   "desktopNoAnnotation": {
-    "message": "No annotation",
+    "message": "無註釋",
     "description": "Empty note annotation placeholder."
   },
   "desktopOnboardingDataHeading": {
-    "message": "Choose your data folder",
+    "message": "選擇您的資料資料夾",
     "description": "Onboarding data-folder heading."
   },
   "desktopOnboardingDataText": {
-    "message": "Browser Recall stores plain-text local data in the folder you choose. No default folder is used until you make this choice.",
+    "message": "Browser Recall 將純文字本機資料儲存在您選擇的資料夾中。在您做出此選擇之前，不會使用預設資料夾。",
     "description": "Onboarding data-folder explanation."
   },
   "desktopOnboardingIntro": {
-    "message": "browser-recall saves browsing history, notes, and highlights through Browser Recall Desktop into a local plain-text data folder.",
+    "message": "browser-recall 透過 Browser Recall Desktop，將瀏覽記錄、筆記與醒目提示儲存到本機純文字資料夾。",
     "description": "Onboarding product description."
   },
   "desktopOnboardingLiveCapture": {
-    "message": "Live capture",
+    "message": "即時捕捉",
     "description": "Onboarding live capture heading."
   },
   "desktopOnboardingLiveCaptureText": {
-    "message": "Install the browser extension and pair it from the extension popup. Browser Recall Desktop must stay running in the background to record visits.",
+    "message": "安裝瀏覽器擴充功能並從擴充功能彈出視窗中進行配對。 Browser Recall Desktop 必須在後台保持運作以記錄存取。",
     "description": "Onboarding live capture explanation."
   },
   "desktopOnboardingPickColor": {
-    "message": "Pick a color",
+    "message": "選擇一種顏色",
     "description": "Onboarding color picker heading."
   },
   "desktopPairFromBrowserPopup": {
-    "message": "Pair from Browser Popup",
+    "message": "從瀏覽器彈出視窗配對",
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "Open the Browser Recall popup in Chrome and click Pair with desktop.",
+    "message": "在 Chrome 中開啟 Browser Recall 彈出視窗，然後按一下「與桌面配對」。",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
-    "message": "Page details unavailable",
+    "message": "頁面詳細資訊不可用",
     "description": "Page detail empty state."
   },
   "desktopParents": {
-    "message": "Parents",
+    "message": "家長",
     "description": "Page relation section label."
   },
   "desktopPatternRequired": {
-    "message": "Pattern is required",
+    "message": "需要圖案",
     "description": "Rule validation error."
   },
   "desktopPinned": {
-    "message": "Pinned",
+    "message": "已固定",
     "description": "Pinned pages section label."
   },
   "desktopPinnedPages": {
-    "message": "Pinned Pages",
+    "message": "固定頁面",
     "description": "Pinned pages rule preview label."
   },
   "desktopPinSearchCreateList": {
-    "message": "Pin a search to create a list",
+    "message": "固定搜尋以建立列表",
     "description": "Empty list sidebar message."
   },
   "desktopPreview": {
-    "message": "Preview",
+    "message": "預覽",
     "description": "Preview button label."
   },
   "desktopKeyword": {
-    "message": "Keyword",
+    "message": "關鍵字",
     "description": "Rule type label."
   },
   "desktopFunction": {
-    "message": "Function",
+    "message": "功能",
     "description": "Rule type label."
   },
   "desktopCustomFunction": {
-    "message": "(custom function)",
+    "message": "（自訂功能）",
     "description": "Rule description fallback."
   },
   "desktopUnknown": {
-    "message": "unknown",
+    "message": "未知",
     "description": "Unknown type fallback."
   },
   "desktopRemoveRuleFailed": {
-    "message": "Failed to remove rule: $1",
+    "message": "無法刪除規則：$1",
     "description": "Rule removal failure."
   },
   "desktopNoEditRow": {
-    "message": "No edit row",
+    "message": "無編輯行",
     "description": "Rule editor internal validation shown to user."
   },
   "desktopFunctionBodyRequired": {
-    "message": "Function body is required",
+    "message": "函數體為必填項",
     "description": "Rule editor validation."
   },
   "desktopUnknownRuleType": {
-    "message": "Unknown rule type",
+    "message": "未知的規則類型",
     "description": "Rule editor validation."
   },
   "desktopRuleKeywordPlaceholder": {
-    "message": "keyword or /regex/",
+    "message": "關鍵字或/正規表示式/",
     "description": "Keyword rule input placeholder."
   },
   "desktopRuleDescriptionPlaceholder": {
-    "message": "description",
+    "message": "描述",
     "description": "Function rule description placeholder."
   },
   "desktopSaveEnter": {
-    "message": "Save (Enter)",
+    "message": "儲存（輸入）",
     "description": "Rule editor save button title."
   },
   "desktopMatchesChecked": {
-    "message": "$1 matches ($2 checked)",
+    "message": "$1 個相符項目（已選取 $2 個）",
     "description": "Rule preview match count."
   },
   "desktopRecentVisits": {
-    "message": "Recent Visits",
+    "message": "最近訪問",
     "description": "Rules preview section label."
   },
   "desktopReplayWorkerFailed": {
-    "message": "Replay worker failed",
+    "message": "重播工作執行緒失敗",
     "description": "Service error message."
   },
   "desktopResumeService": {
-    "message": "Resume Service",
+    "message": "恢復服務",
     "description": "Service error recovery button label."
   },
   "desktopRecycleBin": {
-    "message": "Recycle Bin",
+    "message": "回收站",
     "description": "Recycle bin view label."
   },
   "desktopRecycleBinLoadFailed": {
-    "message": "Failed to load recycle bin: $1",
+    "message": "無法載入回收站：$1",
     "description": "Recycle bin load failure."
   },
   "desktopReloadExtension": {
-    "message": "Reload Extension",
+    "message": "重新加載擴充功能",
     "description": "Fatal error reload button."
   },
   "desktopReloading": {
-    "message": "Reloading...",
+    "message": "正在重新加載...",
     "description": "Reloading button state."
   },
   "desktopRepositoryRequired": {
-    "message": "Repository address is required",
+    "message": "需要儲存庫地址",
     "description": "Sync validation message."
   },
   "desktopResults": {
-    "message": "Results",
+    "message": "結果",
     "description": "Results section label."
   },
   "desktopRestore": {
-    "message": "Restore",
+    "message": "恢復",
     "description": "Recycle bin restore button."
   },
   "desktopRestoreFailed": {
-    "message": "Failed to restore item: $1",
+    "message": "無法恢復項目：$1",
     "description": "Recycle bin restore failure."
   },
   "desktopRevoke": {
-    "message": "Revoke",
+    "message": "撤銷",
     "description": "Paired browser revoke button label."
   },
   "desktopRevokeBrowserFailed": {
-    "message": "Failed to revoke browser: $1",
+    "message": "無法撤銷瀏覽器：$1",
     "description": "Paired browser revoke failure."
   },
   "desktopPageNotePrefix": {
-    "message": "Page note: ",
+    "message": "頁面註釋：",
     "description": "Prefix for page-note recycle bin display names."
   },
   "desktopSelectBookmarkFile": {
-    "message": "Select an exported bookmarks file to preview folders.",
+    "message": "選擇匯出的書籤檔案以預覽資料夾。",
     "description": "Bookmark import placeholder."
   },
   "desktopSettingsSaved": {
-    "message": "Settings saved",
+    "message": "設定已儲存",
     "description": "Status shown after saving settings."
   },
   "desktopServiceUnavailable": {
-    "message": "Service unavailable",
+    "message": "服務不可用",
     "description": "Generic service unavailable message."
   },
   "desktopSessionStorageFull": {
-    "message": "Session storage full",
+    "message": "會話儲存已滿",
     "description": "Service error message."
   },
   "desktopSimilar": {
-    "message": "Similar",
+    "message": "類似",
     "description": "Page relation section label."
   },
   "desktopSortBy": {
-    "message": "Sort by",
+    "message": "排序依據",
     "description": "Filter section label."
   },
   "desktopStarting": {
-    "message": "Starting...",
+    "message": "開始...",
     "description": "Startup button state."
   },
   "desktopStorageAccessFailed": {
-    "message": "Storage access failed",
+    "message": "儲存存取失敗",
     "description": "Service error message."
   },
   "desktopStorageUnavailable": {
-    "message": "Storage Unavailable",
+    "message": "儲存不可用",
     "description": "Fatal storage error title."
   },
   "desktopSync": {
-    "message": "Sync",
+    "message": "同步",
     "description": "Sync add-on title."
   },
   "desktopSyncDesc": {
-    "message": "Sync history and notes across devices, not including snapshots",
+    "message": "跨裝置同步歷史記錄和筆記，不包括快照",
     "description": "Sync add-on description."
   },
   "desktopSyncNow": {
-    "message": "Sync Now",
+    "message": "立即同步",
     "description": "Sync now button label."
   },
   "desktopSyncing": {
-    "message": "Syncing...",
+    "message": "正在同步...",
     "description": "Sync button busy label."
   },
   "desktopTokenRequired": {
-    "message": "Token is required",
+    "message": "需要令牌",
     "description": "Sync token validation message."
   },
   "desktopViewDetails": {
-    "message": "View details",
+    "message": "看詳情",
     "description": "Result card detail button title."
   },
   "desktopWaitingApproval": {
-    "message": "Waiting for approval...",
+    "message": "等待批准...",
     "description": "Pairing button pending label."
   },
   "desktopTheme": {
-    "message": "Theme",
+    "message": "主題",
     "description": "Desktop appearance theme setting."
   },
   "desktopThemeDark": {
-    "message": "Dark",
+    "message": "黑暗",
     "description": "Dark theme option."
   },
   "desktopThemeLight": {
-    "message": "Light",
+    "message": "光",
     "description": "Light theme option."
   },
   "desktopTitleCleanup": {
-    "message": "Title Cleanup",
+    "message": "標題清理",
     "description": "Desktop settings add-on title."
   },
   "desktopTitleCleanupDesc": {
-    "message": "Clean up page titles per site when recording",
+    "message": "錄製時清理每個網站的頁面標題",
     "description": "Desktop settings add-on description."
   },
   "desktopTooManyResults": {
-    "message": "Too many results to select (limit: 100)",
+    "message": "太多結果無法選擇（限制：100）",
     "description": "Bulk selection limit message."
   },
   "desktopToggleSidebar": {
-    "message": "Toggle sidebar",
+    "message": "切換側邊欄",
     "description": "Sidebar toggle title."
   },
   "desktopVisitsOverTime": {
-    "message": "Visits over time",
+    "message": "隨著時間的推移訪問次數",
     "description": "Time chart label."
   },
   "extensionCheckAgain": {
-    "message": "Check Again",
+    "message": "再次檢查",
     "description": "Extension setup retry button."
   },
   "extensionActionFailedReload": {
-    "message": "$1 - please reload the extension.",
+    "message": "$1 - 請重新載入擴充功能。",
     "description": "Popup error with reload hint."
   },
   "extensionActionFailed": {
-    "message": "Action failed",
+    "message": "操作失敗",
     "description": "Generic extension action failure."
   },
   "extensionApproveBrowserDesktop": {
-    "message": "Approve this browser in the desktop app.",
+    "message": "在桌面應用程式中批准此瀏覽器。",
     "description": "Connector approval pending metadata."
   },
   "extensionAddNote": {
-    "message": "Add a note...",
+    "message": "新增註釋...",
     "description": "Extension note placeholder."
   },
   "extensionAddNoteEsc": {
-    "message": "Add a note... Esc to save.",
+    "message": "新增註解... Esc 進行儲存。",
     "description": "Extension note placeholder with keyboard hint."
   },
   "extensionAddPageNote": {
-    "message": "+ Page note",
+    "message": "+ 頁面註釋",
     "description": "Popup page note add button."
   },
   "extensionAddPageNoteEsc": {
-    "message": "Add a page note... Esc to save.",
+    "message": "新增頁面註解... Esc 儲存。",
     "description": "Extension page note placeholder with keyboard hint."
   },
   "extensionAddToList": {
-    "message": "Add to list",
+    "message": "添加到列表",
     "description": "Popup add to list title."
   },
   "extensionApprovalPending": {
-    "message": "Approval Pending",
+    "message": "待批准",
     "description": "Connector approval pending status."
   },
   "extensionApprovalDenied": {
-    "message": "Approval Denied",
+    "message": "批准被拒絕",
     "description": "Connector approval denied status."
   },
   "extensionBlacklisted": {
-    "message": "Blacklisted",
+    "message": "列入黑名單",
     "description": "Popup blacklisted page title."
   },
   "extensionBrowserRecallApprovalDenied": {
-    "message": "Browser Recall Desktop approval denied",
+    "message": "Browser Recall Desktop 批准被拒絕",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallApprovalPending": {
-    "message": "Browser Recall Desktop approval pending",
+    "message": "Browser Recall Desktop 待核准",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallDesktopConnected": {
-    "message": "Browser Recall Desktop connected",
+    "message": "Browser Recall Desktop 已連接",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallDesktopOffline": {
-    "message": "Browser Recall Desktop is offline",
+    "message": "Browser Recall Desktop 已離線",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallDesktopPaused": {
-    "message": "Browser Recall Desktop is paused",
+    "message": "Browser Recall Desktop 已暫停",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallPaused": {
-    "message": "Browser Recall is paused",
+    "message": "Browser Recall 已暫停",
     "description": "Paused service title."
   },
   "extensionBrowserRecallQueueFull": {
-    "message": "Browser Recall Desktop queue is full",
+    "message": "Browser Recall Desktop 隊列已滿",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallRecordingPaused": {
-    "message": "Browser Recall recording is paused",
+    "message": "Browser Recall 錄音已暫停",
     "description": "Extension badge title."
   },
   "extensionBrowserRecallTokenRejected": {
-    "message": "Browser Recall Desktop token rejected",
+    "message": "Browser Recall Desktop 令牌被拒絕",
     "description": "Extension badge title."
   },
   "extensionCannotCapturePdf": {
-    "message": "Cannot capture PDF pages",
+    "message": "無法擷取 PDF 頁面",
     "description": "Snapshot capture PDF error."
   },
   "extensionCaptureFailed": {
-    "message": "Capture failed",
+    "message": "捕獲失敗",
     "description": "Snapshot capture failure."
   },
   "extensionCaptureFrame": {
-    "message": "CAPTURE FRAME",
+    "message": "捕捉幀",
     "description": "Popup capture button."
   },
   "extensionCaptureIt": {
-    "message": "Capture It",
+    "message": "捕捉它",
     "description": "Capture blacklisted page button."
   },
   "extensionCaptureNoContent": {
-    "message": "Capture failed: page returned no content",
+    "message": "捕獲失敗：頁面沒有回傳內容",
     "description": "Snapshot capture empty page error."
   },
   "extensionCapturing": {
-    "message": "Capturing...",
+    "message": "捕捉...",
     "description": "Capture busy label."
   },
   "extensionCheckAgainApproval": {
-    "message": "Check again to request approval.",
+    "message": "再次檢查以請求批准。",
     "description": "Connector retry approval metadata."
   },
   "extensionConnectionResetActionFailed": {
-    "message": "Browser Recall action failed because the extension connection was reset. Reload this page and try again.",
+    "message": "Browser Recall 操作失敗，因為分機連接已重設。重新載入此頁面並重試。",
     "description": "Extension action runtime failure message."
   },
   "extensionContextInvalidated": {
-    "message": "Extension context invalidated. Please refresh the page and try again.",
+    "message": "擴展上下文無效。請刷新頁面並重試。",
     "description": "Popup runtime invalidated message."
   },
   "extensionCreateListNamed": {
-    "message": "Create \"$1\"",
+    "message": "創建“$1”",
     "description": "List picker create option."
   },
   "extensionCreateList": {
-    "message": "Create \"$1\"",
+    "message": "創建“$1”",
     "description": "List picker create option."
   },
   "extensionCreateNoteFailed": {
-    "message": "Create note failed",
+    "message": "建立筆記失敗",
     "description": "Create note failure."
   },
   "extensionDeleteHighlight": {
-    "message": "Delete highlight",
+    "message": "刪除突出顯示",
     "description": "Delete highlight button title."
   },
   "extensionDeleteSnapshot": {
-    "message": "Delete snapshot",
+    "message": "刪除快照",
     "description": "Delete snapshot button title."
   },
   "extensionDesktopBridgeUnavailable": {
-    "message": "Desktop bridge unavailable",
+    "message": "桌面橋不可用",
     "description": "Extension desktop bridge unavailable error."
   },
   "extensionDesktopApprovedConnectionFailed": {
-    "message": "Desktop approved, but connection failed.",
+    "message": "桌面已獲批准，但連線失敗。",
     "description": "Connector approved but disconnected metadata."
   },
   "extensionDesktopBufferFull": {
-    "message": "Browser Recall Desktop buffer full - start the desktop app or wait for the queue to drain.",
+    "message": "Browser Recall Desktop 緩衝區已滿 - 啟動桌面應用程式或等待佇列耗盡。",
     "description": "Extension desktop command buffer full message."
   },
   "extensionDesktopEventQueueFull": {
-    "message": "Browser Recall Desktop event queue is full - start the desktop app or wait for the queue to drain.",
+    "message": "Browser Recall Desktop 事件佇列已滿 - 啟動桌面應用程式或等待佇列耗盡。",
     "description": "Extension desktop event queue full message."
   },
   "extensionDesktopConnected": {
-    "message": "Desktop Connected",
+    "message": "桌面連接",
     "description": "Connector connected status."
   },
   "extensionDesktopConnectionActive": {
-    "message": "Desktop connection active.",
+    "message": "桌面連線處於活動狀態。",
     "description": "Connector connected metadata."
   },
   "extensionDesktopOfflineMixed": {
-    "message": "Browser Recall Desktop is offline.",
+    "message": "Browser Recall Desktop 已離線。",
     "description": "Connector offline sentence."
   },
   "extensionDesktopPageDataUnavailable": {
-    "message": "Desktop page data unavailable.",
+    "message": "桌面頁面資料不可用。",
     "description": "Popup bootstrap page data unavailable fallback."
   },
   "extensionDesktopPopupAccessFailed": {
-    "message": "Desktop popup access check failed",
+    "message": "桌面彈出存取檢查失敗",
     "description": "Popup access check failure."
   },
   "extensionDesktopPaused": {
-    "message": "Desktop Paused",
+    "message": "桌面已暫停",
     "description": "Connector paused status."
   },
   "extensionDesktopNotConnectedRefresh": {
-    "message": "Browser Recall Desktop is not connected yet. Start the desktop app and refresh from the popup.",
+    "message": "Browser Recall Desktop 尚未連接。啟動桌面應用程式並從彈出視窗刷新。",
     "description": "Popup desktop disconnected failure."
   },
   "extensionDesktopQueueFull": {
-    "message": "Desktop Queue Full",
+    "message": "桌面隊列已滿",
     "description": "Connector queue full status."
   },
   "extensionDeviceId": {
-    "message": "Device $1",
+    "message": "設備 $1",
     "description": "Connector device id metadata."
   },
   "extensionDisliked": {
-    "message": "Disliked",
+    "message": "不喜歡",
     "description": "Dislike notification."
   },
   "extensionEdit": {
-    "message": "Edit",
+    "message": "編輯",
     "description": "Edit button title."
   },
   "extensionEditNote": {
-    "message": "Edit note",
+    "message": "編輯備註",
     "description": "Edit note button title."
   },
   "extensionHighlights": {
-    "message": "Highlights",
+    "message": "亮點",
     "description": "Highlights panel title."
   },
   "extensionHighlightsCount": {
-    "message": "Highlights ($1)",
+    "message": "亮點 ($1)",
     "description": "Highlights panel title with count."
   },
   "extensionHighlightFailed": {
-    "message": "Highlight failed",
+    "message": "突出顯示失敗",
     "description": "Highlight failure."
   },
   "extensionLastCheckAuthenticatedStatusFailed": {
-    "message": "Last check: authenticated, but status failed.",
+    "message": "上次檢查：已通過身份驗證，但狀態失敗。",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckAuthenticatedStatusFailedDetail": {
-    "message": "Last check: authenticated, but status failed ($1).",
+    "message": "上次檢查：已通過身份驗證，但狀態失敗 ($1)。",
     "description": "Connector diagnostic with detail."
   },
   "extensionLastCheckApprovalDenied": {
-    "message": "Last check: desktop approval was denied.",
+    "message": "最後一次檢查：桌面批准被拒絕。",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckCode": {
-    "message": "Last check: $1.",
+    "message": "最後檢查：$1。",
     "description": "Connector diagnostic code fallback."
   },
   "extensionLastCheckMessage": {
-    "message": "Last check: $1",
+    "message": "最後檢查：$1",
     "description": "Connector diagnostic message fallback."
   },
   "extensionLastCheckNoConnection": {
-    "message": "Last check: no usable desktop connection.",
+    "message": "最後檢查：沒有可用的桌面連線。",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckNoConnectionDetail": {
-    "message": "Last check: no usable desktop connection ($1).",
+    "message": "最後檢查：沒有可用的桌面連線（$1）。",
     "description": "Connector diagnostic with port detail."
   },
   "extensionLastCheckReconnectFailed": {
-    "message": "Last check: desktop connection did not succeed in $1.",
+    "message": "最後檢查：桌面連線在 $1 中未成功。",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckSocketClosed": {
-    "message": "Last check: socket closed.",
+    "message": "最後一次檢查：套接字已關閉。",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckSocketClosedDetail": {
-    "message": "Last check: socket closed ($1).",
+    "message": "最後檢查：套接字已關閉（$1）。",
     "description": "Connector diagnostic with socket state."
   },
   "extensionLastCheckStatusRefreshFailed": {
-    "message": "Last check: status refresh failed.",
+    "message": "最後檢查：狀態刷新失敗。",
     "description": "Connector diagnostic."
   },
   "extensionLastCheckStatusRefreshFailedDetail": {
-    "message": "Last check: status refresh failed ($1).",
+    "message": "上次檢查：狀態刷新失敗 ($1)。",
     "description": "Connector diagnostic with detail."
   },
   "extensionLastCheckTokenRejected": {
-    "message": "Last check: desktop rejected the saved token.",
+    "message": "最後一次檢查：桌面拒絕了已儲存的令牌。",
     "description": "Connector diagnostic."
   },
   "extensionLastDiagnostic": {
-    "message": " Last diagnostic: $1.",
+    "message": "最後診斷：$1。",
     "description": "Connector diagnostic suffix."
   },
   "extensionLastPortFailures": {
-    "message": " Last port failures: $1.",
+    "message": "上次連接埠故障：$1。",
     "description": "Connector diagnostic suffix."
   },
   "extensionLikeFailed": {
-    "message": "Like failed",
+    "message": "喜歡失敗",
     "description": "Like action failure."
   },
   "extensionLiked": {
-    "message": "Liked",
+    "message": "喜歡",
     "description": "Like notification."
   },
   "extensionLookingForDesktop": {
-    "message": "Looking for Browser Recall Desktop",
+    "message": "尋找 Browser Recall Desktop",
     "description": "Extension badge title."
   },
   "extensionManageSettings": {
-    "message": "Manage in Settings",
+    "message": "在設定中管理",
     "description": "Popup settings action."
   },
   "extensionNoAnnotation": {
-    "message": "No annotation",
+    "message": "無註釋",
     "description": "Popup no annotation placeholder."
   },
   "extensionNoLists": {
-    "message": "No lists",
+    "message": "沒有列表",
     "description": "Popup no lists message."
   },
   "extensionNoTargetTab": {
-    "message": "No target tab",
+    "message": "無目標選項卡",
     "description": "Extension notification routing failure."
   },
   "extensionNotAvailablePage": {
-    "message": "Not available for this page",
+    "message": "不適用於該頁面",
     "description": "Popup unsupported page message."
   },
   "extensionOpenDesktopFlush": {
-    "message": "Open desktop to flush capture.",
+    "message": "打開桌面以刷新捕獲。",
     "description": "Connector queue full meta."
   },
   "extensionPageDataUnavailable": {
-    "message": "Page Data Unavailable",
+    "message": "頁面資料不可用",
     "description": "Popup page data unavailable title."
   },
   "extensionPageNote": {
-    "message": "Page Note",
+    "message": "頁註",
     "description": "Page note overlay title."
   },
   "extensionRatePageFailed": {
-    "message": "ratePage failed",
+    "message": "評分頁面失敗",
     "description": "Rating command failure."
   },
   "extensionRefreshFailed": {
-    "message": "Failed to refresh.",
+    "message": "刷新失敗。",
     "description": "Popup connector refresh failure."
   },
   "extensionResumeCaptureDesktop": {
-    "message": "Resume capture from desktop settings.",
+    "message": "從桌面設定恢復捕獲。",
     "description": "Connector paused metadata."
   },
   "extensionRetryWindow": {
-    "message": "the retry window",
+    "message": "重試視窗",
     "description": "Connector diagnostic retry window label."
   },
   "extensionConfigureShortcuts": {
-    "message": "Configure Shortcuts",
+    "message": "配置快捷方式",
     "description": "Extension options button."
   },
   "extensionCurrentPageReceipt": {
-    "message": "current page receipt",
+    "message": "目前頁收據",
     "description": "Extension popup placeholder URL text."
   },
   "extensionDesktopControl": {
-    "message": "Desktop Control",
+    "message": "桌面控制",
     "description": "Extension options heading."
   },
   "extensionDesktopOffline": {
-    "message": "DESKTOP OFFLINE",
+    "message": "桌面離線",
     "description": "Extension popup desktop offline heading."
   },
   "extensionKeyboardShortcuts": {
-    "message": "Keyboard Shortcuts",
+    "message": "鍵盤快速鍵",
     "description": "Extension options heading."
   },
   "extensionMainUiRunsInDesktop": {
-    "message": "The main Browser Recall interface runs in the desktop app.",
+    "message": "主 Browser Recall 介面在桌面應用程式中運作。",
     "description": "Extension options explanatory text."
   },
   "extensionNotSet": {
-    "message": "Not set",
+    "message": "未設定",
     "description": "Keyboard shortcut missing value."
   },
   "extensionOpenBrowserRecall": {
-    "message": "Open Browser Recall",
+    "message": "打開Browser Recall",
     "description": "Extension options open app button."
   },
   "extensionOpenDesktop": {
-    "message": "Open Desktop",
+    "message": "開啟桌面",
     "description": "Extension popup open desktop button."
   },
   "extensionPauseTracing": {
-    "message": "Pause tracing",
+    "message": "暫停追蹤",
     "description": "Extension popup recording toggle title."
   },
   "extensionStartDesktop": {
-    "message": "Start Browser Recall Desktop to resume live capture.",
+    "message": "啟動 Browser Recall Desktop 以恢復即時擷取。",
     "description": "Extension setup message."
   },
   "extensionStartDesktopCapture": {
-    "message": "Start Browser Recall Desktop to resume live capture.",
+    "message": "啟動 Browser Recall Desktop 以恢復即時擷取。",
     "description": "Connector offline metadata."
   },
   "extensionStorageUnavailable": {
-    "message": "Storage Unavailable",
+    "message": "儲存不可用",
     "description": "Extension fatal error title."
   },
   "extensionSnapshotCaptured": {
-    "message": "Snapshot captured",
+    "message": "捕捉到的快照",
     "description": "Snapshot capture success notification."
   },
   "extensionSomethingWentWrong": {
-    "message": "Something went wrong",
+    "message": "出了點問題",
     "description": "Generic extension error."
   },
   "extensionTokenRejected": {
-    "message": "Token Rejected",
+    "message": "令牌被拒絕",
     "description": "Connector token rejected status."
   },
   "extensionUpdateFailed": {
-    "message": "Update failed",
+    "message": "更新失敗",
     "description": "Update note failure."
   },
   "extensionWaitingApproval": {
-    "message": "Waiting for Approval",
+    "message": "等待批准",
     "description": "Connector approval pending button."
   },
   "extensionSearchOrCreate": {
-    "message": "Search or create...",
+    "message": "搜尋或創建...",
     "description": "List picker search placeholder."
   },
   "extensionSnapshotMissingParams": {
-    "message": "Missing snapshot parameters.",
+    "message": "缺少快照參數。",
     "description": "Snapshot viewer error."
   },
   "extensionSnapshotNotFound": {
-    "message": "Snapshot not found.",
+    "message": "未找到快照。",
     "description": "Snapshot viewer error."
   },
   "extensionReloaded": {
-    "message": "Browser Recall extension reloaded. Please reload the page and try again.",
+    "message": "Browser Recall 擴充已重新載入。請重新載入頁面並重試。",
     "description": "Runtime invalidated message."
   },
   "extensionReloadExtension": {
-    "message": "Reload Extension",
+    "message": "重新加載擴充功能",
     "description": "Extension fatal error reload button."
   },
   "extensionOpenAppFallback": {
-    "message": "Can't open the app? Launch it from your Applications folder, then try again.",
+    "message": "無法打開應用程式？從“應用程式”資料夾啟動它，然後重試。",
     "description": "Extension options fallback notice."
   },
   "extensionToggleRecording": {
-    "message": "Toggle recording",
+    "message": "切換錄音",
     "description": "Extension popup recording toggle accessibility label."
   },
   "desktopAddPageNotePlaceholder": {
-    "message": "Add a page note...",
+    "message": "新增頁面註釋...",
     "description": "Localized UI text."
   },
   "desktopAlreadyPaired": {
-    "message": "Chrome is already paired with Browser Recall Desktop",
+    "message": "Chrome 已與 Browser Recall Desktop 配對",
     "description": "Localized UI text."
   },
   "desktopApprovePairing": {
-    "message": "Approve the pairing request in Browser Recall Desktop",
+    "message": "批准 Browser Recall Desktop 中的配對請求",
     "description": "Localized UI text."
   },
   "desktopAsGithubUser": {
-    "message": "as @$1",
+    "message": "如@$1",
     "description": "Connected GitHub user suffix."
   },
   "desktopAuthentication": {
-    "message": "Authentication",
+    "message": "認證",
     "description": "Localized UI text."
   },
   "desktopBookmarkPreviewPlaceholder": {
-    "message": "Select an exported bookmarks file to preview folders.",
+    "message": "選擇匯出的書籤檔案以預覽資料夾。",
     "description": "Localized UI text."
   },
   "desktopBridgeCheckFailed": {
-    "message": "Desktop bridge check failed: $1",
+    "message": "桌面橋檢查失敗：$1",
     "description": "Desktop bridge check failure."
   },
   "desktopCancelling": {
-    "message": "Cancelling...",
+    "message": "正在取消...",
     "description": "Localized UI text."
   },
   "desktopCannotDeleteHistory": {
-    "message": "Cannot delete history",
+    "message": "無法刪除歷史記錄",
     "description": "Localized UI text."
   },
   "desktopCanOnlyPasteIntoList": {
-    "message": "Can only paste into a list",
+    "message": "只能貼到清單中",
     "description": "Localized UI text."
   },
   "desktopChildren": {
-    "message": "Children",
+    "message": "兒童",
     "description": "Localized UI text."
   },
   "desktopClearAllDataFinalConfirm": {
-    "message": "Final confirmation: Delete all history files?",
+    "message": "最後確認：刪除所有歷史文件？",
     "description": "Localized UI text."
   },
   "desktopClearAllDataWarning": {
-    "message": "Warning: this will delete all files in your storage directory.\n\nThis cannot be undone. Are you absolutely sure?",
+    "message": "警告：這將刪除儲存目錄中的所有檔案。\n\n此操作無法撤銷。你絕對確定嗎？",
     "description": "Localized UI text."
   },
   "desktopClearDataFailed": {
-    "message": "Error clearing data: $1",
+    "message": "清除資料時發生錯誤：$1",
     "description": "Clear all data failure."
   },
   "desktopClearedFiles": {
-    "message": "Cleared $1 files/directories",
+    "message": "已清除 $1 個檔案/目錄",
     "description": "Clear all data success."
   },
   "desktopClearing": {
-    "message": "Clearing...",
+    "message": "清算...",
     "description": "Localized UI text."
   },
   "desktopClearReload": {
-    "message": "Clear & Reload",
+    "message": "清除並重新加載",
     "description": "Localized UI text."
   },
   "desktopColumnTitle": {
-    "message": "Title",
+    "message": "標題",
     "description": "Localized UI text."
   },
   "desktopCurrentDevice": {
-    "message": "(current)",
+    "message": "（當前）",
     "description": "Localized UI text."
   },
   "desktopDaysAgo": {
-    "message": "$1d ago",
+    "message": "$1d 前",
     "description": "Relative time in days."
   },
   "desktopDevices": {
-    "message": "Devices",
+    "message": "裝置",
     "description": "Localized UI text."
   },
   "desktopExperimental": {
-    "message": "Experimental",
+    "message": "實驗性的",
     "description": "Localized UI text."
   },
   "desktopExploreResults": {
-    "message": "Explore results",
+    "message": "探索結果",
     "description": "Localized UI text."
   },
   "desktopFilters": {
-    "message": "Filters",
+    "message": "過濾器",
     "description": "Localized UI text."
   },
   "desktopFirstSeen": {
-    "message": "First seen",
+    "message": "第一次見到",
     "description": "Localized UI text."
   },
   "desktopFirstVisit": {
-    "message": "First visit",
+    "message": "第一次訪問",
     "description": "Localized UI text."
   },
   "desktopFirstVisited": {
-    "message": "First visited:",
+    "message": "首次訪問：",
     "description": "Localized UI text."
   },
   "desktopFixSettingsBeforeSync": {
-    "message": "Fix settings before syncing",
+    "message": "同步前修復設定",
     "description": "Localized UI text."
   },
   "desktopFlushed": {
-    "message": "Flushed!",
+    "message": "臉紅了！",
     "description": "Localized UI text."
   },
   "desktopFlushing": {
-    "message": "Flushing...",
+    "message": "沖水...",
     "description": "Localized UI text."
   },
   "desktopFocus": {
-    "message": "Focus",
+    "message": "焦點",
     "description": "Localized UI text."
   },
   "desktopGithubAuthExpired": {
-    "message": "GitHub authorization expired - please reconnect.",
+    "message": "GitHub 授權已過期 - 請重新連線。",
     "description": "Localized UI text."
   },
   "desktopGithubNotConnected": {
-    "message": "GitHub not connected - click \"Connect with GitHub\" first",
+    "message": "GitHub 尚未連線，請先按一下「連線至 GitHub」",
     "description": "Localized UI text."
   },
   "desktopGithubPrefilled": {
-    "message": "Opens GitHub with pre-filled settings",
+    "message": "開啟 GitHub 並預先填入設置",
     "description": "Localized UI text."
   },
   "desktopHasHighlights": {
-    "message": "Has highlights",
+    "message": "有亮點",
     "description": "Localized UI text."
   },
   "desktopHasSnapshots": {
-    "message": "Has snapshots",
+    "message": "有快照",
     "description": "Localized UI text."
   },
   "desktopHistoryImportHelpHtml": {
-    "message": "Import a JSON array of browser history entries. Supported entry shapes include Chrome-style objects with <code>url</code>, <code>title</code>, and <code>lastVisitTime</code>, or expanded entries with <code>visitTimes</code>.",
+    "message": "匯入瀏覽器歷史記錄項目的 JSON 陣列。支援包含 <code>url</code>、<code>title</code> 和 <code>lastVisitTime</code> 的 Chrome 格式物件，或包含 <code>visitTimes</code> 的展開項目。",
     "description": "Localized UI text."
   },
   "desktopHistoryInvalidJson": {
-    "message": "invalid JSON or unsupported history export format",
+    "message": "無效的 JSON 或不支援的歷史匯出格式",
     "description": "Localized UI text."
   },
   "desktopHistoryParseFailed": {
-    "message": "Could not parse history JSON: $1",
+    "message": "無法解析歷史記錄 JSON：$1",
     "description": "History import JSON parse failure."
   },
   "desktopHistoryReadyToImport": {
-    "message": "Ready to import $1 visits across $2 pages.",
+    "message": "已準備好匯入 $2 個頁面的 $1 筆瀏覽記錄。",
     "description": "History import preview summary."
   },
   "desktopHoursAgo": {
-    "message": "$1h ago",
+    "message": "$1小時前",
     "description": "Relative time in hours."
   },
   "desktopImportBookmarksDone": {
-    "message": "Done! Imported $1 lists with $2 bookmarks.",
+    "message": "完成！已匯入 $1 個清單及其中的 $2 個書籤。",
     "description": "Bookmark import success summary."
   },
   "desktopImportHistoryDone": {
-    "message": "Done! Imported $1 visits across $2 pages.",
+    "message": "完成！已匯入 $2 個頁面的 $1 筆瀏覽記錄。",
     "description": "History import success summary."
   },
   "desktopImportSkipped": {
-    "message": "$1 items skipped during parsing or import.",
+    "message": "解析或導入期間跳過了 $1 個項目。",
     "description": "History import skipped item summary."
   },
   "desktopInboxRulesHint": {
-    "message": "Rules automatically sort new pages into this list. Keyword rules match against page title, web address, and body text. Function rules use a custom JS predicate that returns true/false.",
+    "message": "規則會自動將新頁面排序到此清單中。關鍵字規則與頁面標題、網址和正文相符。函數規則使用傳回 true/false 的自訂 JS 謂詞。",
     "description": "Localized UI text."
   },
   "desktopIntervalMinutes": {
-    "message": "Interval (min)",
+    "message": "間隔（分鐘）",
     "description": "Localized UI text."
   },
   "desktopInvalidToken": {
-    "message": "Invalid token: $1",
+    "message": "無效令牌：$1",
     "description": "Sync token validation failure."
   },
   "desktopItemsSkipped": {
-    "message": "$1 items skipped",
+    "message": "$1 項目已跳過",
     "description": "Import skipped item summary."
   },
   "desktopJustNow": {
-    "message": "just now",
+    "message": "剛才",
     "description": "Localized UI text."
   },
   "desktopLastSeen": {
-    "message": "Last seen",
+    "message": "最後一次見到",
     "description": "Localized UI text."
   },
   "desktopLastVisit": {
-    "message": "Last visit",
+    "message": "上次訪問",
     "description": "Localized UI text."
   },
   "desktopLastVisited": {
-    "message": "Last visited:",
+    "message": "上次造訪：",
     "description": "Localized UI text."
   },
   "desktopMakePrivate": {
-    "message": "(make it private)",
+    "message": "（將其設為私有）",
     "description": "Localized UI text."
   },
   "desktopManualSetupHtml": {
-    "message": "<li> Create a <strong>private</strong> repository on <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> (e.g. <code>portal-sync</code>). Leave it empty. </li> <li> Go to <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">Fine-grained tokens</a> and create a token: <ul> <li> Set expiration to <strong>No expiration</strong> </li> <li> Under \"Repository access\", choose <strong>Only select repositories</strong> and pick your sync repo </li> <li> Under \"Permissions\", add <strong>Contents</strong> and set to <strong>Read and write</strong> </li> </ul> </li> <li>Paste the repository address and token above.</li>",
+    "message": "<li>在 <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> 建立一個<strong>私人</strong>儲存庫（例如 <code>portal-sync</code>），並保持空白。</li><li>前往<a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">細粒度權杖</a>頁面建立權杖：<ul><li>將到期日設為<strong>永不過期</strong></li><li>在「儲存庫存取權」中選擇<strong>僅選取儲存庫</strong>，再選擇同步儲存庫</li><li>在「權限」中新增<strong>內容</strong>，並設為<strong>讀取及寫入</strong></li></ul></li><li>在上方貼上儲存庫位址和權杖。</li>",
     "description": "Localized UI text."
   },
   "desktopManualSetupInstructions": {
-    "message": "Manual setup instructions",
+    "message": "手動設定說明",
     "description": "Localized UI text."
   },
   "desktopMemoryCacheHint": {
-    "message": "Settings and metadata cached in browser storage for fast access. The source of truth is settings.json in your storage directory.",
+    "message": "設定和元資料快取在瀏覽器儲存中，以便快速存取。事實來源是儲存目錄中的 settings.json 。",
     "description": "Localized UI text."
   },
   "desktopMemoryCacheHtml": {
-    "message": "<span id=\"cacheSize\">...</span> memory cache <span class=\"hint-icon\">?<span class=\"hint-tip\" data-i18n=\"desktopMemoryCacheHint\">Settings and metadata cached in browser storage for fast access. The source of truth is settings.json in your storage directory.</span></span>",
+    "message": "<span id=\"cacheSize\">…</span> 記憶體快取 <span class=\"hint-icon\">？<span class=\"hint-tip\" data-i18n=\"desktopMemoryCacheHint\">設定和中繼資料會快取在瀏覽器儲存空間中，以便快速存取。正確資料以儲存目錄中的 settings.json 為準。</span></span>",
     "description": "Localized UI text."
   },
   "desktopMinutesAgo": {
-    "message": "$1m ago",
+    "message": "$1公尺前",
     "description": "Relative time in minutes."
   },
   "desktopNoBlockedPrefixes": {
-    "message": "No blocked web address prefixes",
+    "message": "沒有被封鎖的網址前綴",
     "description": "Localized UI text."
   },
   "desktopNoImportableHistory": {
-    "message": "No importable history entries found in this file.",
+    "message": "在此文件中找不到可匯入的歷史記錄條目。",
     "description": "Localized UI text."
   },
   "desktopNoSyncRepo": {
-    "message": "Don't have a sync repo?",
+    "message": "沒有同步儲存庫？",
     "description": "Localized UI text."
   },
   "desktopNoTrimmingRules": {
-    "message": "No trimming rules",
+    "message": "沒有修剪規則",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "Select text and press <kbd>Alt+H</kbd> to highlight it, or press <kbd>Alt+H</kbd> with no selection to add a note to the current page.",
+    "message": "選取文字並按 <kbd>Alt+H</kbd> 即可醒目提示；未選取文字時按 <kbd>Alt+H</kbd>，即可在目前頁面新增筆記。",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {
-    "message": "Highlights & notes",
+    "message": "亮點和註釋",
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryText": {
-    "message": "Every page visit is automatically saved by Browser Recall Desktop and stays searchable by title, web address, and content.",
+    "message": "每次頁面訪問都會由 Browser Recall Desktop 自動儲存，並可透過標題、網址和內容進行搜尋。",
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryTitle": {
-    "message": "Browsing history",
+    "message": "瀏覽紀錄",
     "description": "Localized UI text."
   },
   "desktopOnboardingListsText": {
-    "message": "Organize pages into lists. Use automatic inbox rules to create a live-updating list.",
+    "message": "將頁面組織到清單中。使用自動收件匣規則建立即時更新清單。",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTextHtml": {
-    "message": "Press <kbd>Alt+S</kbd> to save an offline copy of the page through the desktop bridge.",
+    "message": "按 <kbd>Alt+S</kbd> 可透過桌面橋接器儲存頁面的離線副本。",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTitle": {
-    "message": "Page snapshots",
+    "message": "頁面快照",
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "Open the Browser Recall popup in Chrome and click Pair with desktop.",
+    "message": "在 Chrome 中開啟 Browser Recall 彈出視窗，然後按一下「與桌面配對」。",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {
-    "message": "Page properties",
+    "message": "頁面屬性",
     "description": "Localized UI text."
   },
   "desktopPasteExistingToken": {
-    "message": "or paste an existing token:",
+    "message": "或貼上現有令牌：",
     "description": "Localized UI text."
   },
   "desktopPausedLower": {
-    "message": "paused",
+    "message": "暫停",
     "description": "Localized UI text."
   },
   "desktopPauseSync": {
-    "message": "Pause sync",
+    "message": "暫停同步",
     "description": "Localized UI text."
   },
   "desktopPendingWritesHtml": {
-    "message": "<span id=\"bufferSize\">0</span> pending writes",
+    "message": "<span id=\"bufferSize\">0</span> 筆待處理寫入",
     "description": "Localized UI text."
   },
   "desktopPinTime": {
-    "message": "Pin time",
+    "message": "釘時間",
     "description": "Localized UI text."
   },
   "desktopProvider": {
-    "message": "Provider",
+    "message": "提供者",
     "description": "Localized UI text."
   },
   "desktopPulledAgo": {
-    "message": "pulled $1",
+    "message": "拉$1",
     "description": "Remote sync pull timestamp."
   },
   "desktopPulling": {
-    "message": "pulling...",
+    "message": "拉...",
     "description": "Localized UI text."
   },
   "desktopPushedAgo": {
-    "message": "pushed $1",
+    "message": "推 $1",
     "description": "Local sync push timestamp."
   },
   "desktopPushing": {
-    "message": "pushing...",
+    "message": "推...",
     "description": "Localized UI text."
   },
   "desktopQuery": {
-    "message": "Query",
+    "message": "查詢",
     "description": "Localized UI text."
   },
   "desktopRemainingWrites": {
-    "message": "$1 remaining",
+    "message": "$1 剩餘",
     "description": "Pending write flush remaining count."
   },
   "desktopRememberToken": {
-    "message": "Remember token",
+    "message": "記住令牌",
     "description": "Localized UI text."
   },
   "desktopRememberTokenHint": {
-    "message": "When off, the token is kept in memory only and cleared on browser restart.",
+    "message": "關閉時，令牌僅保留在記憶體中，並在瀏覽器重新啟動時清除。",
     "description": "Localized UI text."
   },
   "desktopRemoveAfterPipe": {
-    "message": "Remove after |",
+    "message": "刪除後 |",
     "description": "Localized UI text."
   },
   "desktopRemoveBrackets": {
-    "message": "Remove [brackets]",
+    "message": "刪除[括號]",
     "description": "Localized UI text."
   },
   "desktopRemoveParens": {
-    "message": "Remove (parens)",
+    "message": "刪除（括號）",
     "description": "Localized UI text."
   },
   "desktopRepositoryAddress": {
-    "message": "Repository address",
+    "message": "倉庫地址",
     "description": "Localized UI text."
   },
   "desktopResumeSync": {
-    "message": "Resume sync",
+    "message": "恢復同步",
     "description": "Localized UI text."
   },
   "desktopRetentionDays": {
-    "message": "Retention (days)",
+    "message": "保留（天）",
     "description": "Localized UI text."
   },
   "desktopSelectAllUnavailable": {
-    "message": "Select all is not available here",
+    "message": "此處無法全選",
     "description": "Localized UI text."
   },
   "desktopSettingFailed": {
-    "message": "Desktop setting failed: $1",
+    "message": "桌面設定失敗：$1",
     "description": "Desktop shell setting failure."
   },
   "desktopSyncDisabled": {
-    "message": "Sync disabled: $1",
+    "message": "同步已停用：$1",
     "description": "Sync disabled status detail."
   },
   "desktopSyncErrorRetry": {
-    "message": "Error (will retry): $1",
+    "message": "錯誤（將重試）：$1",
     "description": "Sync retryable failure."
   },
   "desktopSyncSkipped": {
-    "message": "Sync skipped",
+    "message": "同步已跳過",
     "description": "Localized UI text."
   },
   "desktopTime": {
-    "message": "Time",
+    "message": "時間",
     "description": "Localized UI text."
   },
   "desktopToggleFailed": {
-    "message": "Toggle failed: $1",
+    "message": "切換失敗：$1",
     "description": "Sync device toggle failure."
   },
   "desktopVisitedMultipleTimes": {
-    "message": "Visited multiple times",
+    "message": "多次訪問",
     "description": "Localized UI text."
   },
   "desktopVisits": {
-    "message": "Visits",
+    "message": "訪問量",
     "description": "Localized UI text."
   },
   "extensionFirst": {
-    "message": "First",
+    "message": "第一",
     "description": "Localized UI text."
   },
   "desktopColumnRelevance": {
-    "message": "Rel",
+    "message": "相關度",
     "description": "Search relevance column label."
   },
   "desktopColumnLastVisit": {
-    "message": "Last Visit",
+    "message": "最後一次訪問",
     "description": "Last visit column label."
   },
   "desktopColumnFirstVisit": {
-    "message": "First Visit",
+    "message": "第一次訪問",
     "description": "First visit column label."
   },
   "desktopColumnAttention": {
-    "message": "Att",
+    "message": "關注",
     "description": "Attention score column label."
   },
   "desktopColumnPinTime": {
-    "message": "Pin Time",
+    "message": "固定時間",
     "description": "Pin time column label."
   },
   "desktopDataFolderReady": {
-    "message": "Data folder ready",
+    "message": "資料資料夾準備就緒",
     "description": "Storage setup ready status."
   },
   "desktopDeviceId": {
-    "message": "Device $1",
+    "message": "設備 $1",
     "description": "Desktop device id label."
   },
   "desktopDeviceIdentityUnavailable": {
-    "message": "Device identity unavailable",
+    "message": "設備身份不可用",
     "description": "Missing desktop device identity status."
   },
   "desktopDeviceIdentityRestart": {
-    "message": "Device identity unavailable. Try restarting Browser Recall.",
+    "message": "設備身份不可用。嘗試重新啟動 Browser Recall。",
     "description": "Startup failure when desktop device identity is unavailable."
   }
 }

@@ -1,0 +1,31 @@
+- There're a few things missing from localization work in last commit. For extension part, "+ PAGE NOTE" button is not localized.
+- Fix test failures
+- There're some more missing localization in desktop app's setting UI. (1) Some help messages behind the question mark, (2) The delete button, (3) browser status for each connection
+- The manual locale setting doesn't work when I set to English from auto in desktop setting page.
+- Have you covered this bug with real E2E test?
+- Update the bugfix skill so that you always try to use E2E testing to cover the issue in the actual context.
+- Here is a test policy I wrote for another repo, incorporate this into the bugfix skill as well, but keep it lean and succinct:
+
+Keep tests organized around two test types:
+
+- E2E tests are the primary coverage style. They exercise product workflows through the real filesystem and real Git wherever the behavior crosses storage, persistence, or versioning boundaries. Put them under `Tests/JournalE2ETests/`.
+- Property/state tests cover state-space traversal with fast deterministic mocks, fakes, fixed clocks, and schedulers. Use them for parser invariants, metadata round trips, projection edits, surface state, capture state, undo/redo, and persistence coordinator state machines.
+
+Prefer adding new workflow coverage as E2E first. Add property/state tests when the behavior has many edge cases, benefits from deterministic fuzzing, or would be too slow or brittle with real external boundaries.
+- Try again to update the skill
+- Good, now revisit the previous locale setting bug and properly cover it.
+- What languages do we support?
+- Shouldn't we support all the main languages?
+- I thought adding language support is simply adding to the messages.json manifest?
+- Could we reorganize so that adding new language is easier, doing so without complicating the other parts of the code of course. Think about it, don't implement yet
+- Go ahead, reorganize and add support for more mainstream languages.
+- In the setting menu, the options should be listed in their respective language, not translated version.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them all thoroughly
+- Please review my uncommitted changes
+- Fix them all
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.5 Codex
+- Fix the two items
+- Add it as code comments for the test, not in AGENTS.md. Then continue the finish up.
+- Add it
+- Add it

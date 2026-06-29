@@ -64,7 +64,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `crates/replay/src/lib.rs` | Production replay engine |
 | `crates/replay/src/bin/replay-verify.rs` | Full-log checkpoint verifier using the production replay and checkpoint policy |
 | `crates/search/src/lib.rs` | Native search primitives |
-| `scripts/stage-app-assets.mjs` | Stages loadable app assets under `dist/extension/{chrome,firefox}/` and `dist/desktop/ui/`, including filtered WebExtension locale files and the generated content-script page identity bridge |
+| `scripts/stage-app-assets.mjs` | Stages loadable app assets under `dist/extension/{chrome,firefox}/` and `dist/desktop/ui/`, validates registered locale catalog parity, and generates filtered WebExtension locale files and the content-script page identity bridge |
 | `scripts/collect-desktop-artifacts.mjs` | Collects Tauri release binaries and bundles into `dist/desktop/<platform>/` |
 | `scripts/migrate-browser-data-schema.mjs` | Browser data migration utility for log/view/object schema changes, including URL identity canonicalization |
 | `scripts/test-coverage-monitor.mjs` | Test investment and JS/Rust uncovered-line monitor; enforces no JS or inline Rust unit-test LoC growth |
@@ -74,9 +74,9 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `packages/core/utils.js` | Shared utility helpers that re-export page identity and provide connector request canonicalization |
 | `packages/core/rule-engine.js` | Shared rule validation/matching helpers; keyword rules are title-only |
 | `packages/core/search-helpers.js` | Shared query parsing/search helper logic |
-| `packages/core/i18n.js` | Shared UI localization runtime for catalog lookup, document localization, and WebExtension i18n adaptation |
+| `packages/core/i18n.js` | Shared locale registry and UI localization runtime for catalog lookup, desktop language options, document localization, and WebExtension i18n adaptation |
 | `packages/core/locales/en/messages.json` | Canonical English message catalog, used by desktop UI assets and filtered into extension `/_locales` |
-| `packages/core/locales/zh-CN/messages.json` | Simplified Chinese message catalog with the same keys and placeholders as English |
+| `packages/core/locales/<locale>/messages.json` | Complete catalogs for `en`, `ar`, `de`, `es`, `fr`, `hi`, `id`, `it`, `ja`, `ko`, `pt-BR`, `pt-PT`, `ru`, `zh-CN`, and `zh-TW`; all must match English keys, placeholders, HTML structure, protected literals, and product terms |
 | `packages/core/time-chart.js` | Shared history chart rendering helpers |
 | `packages/core/virtual-scroller.js` | Shared virtual scrolling helper |
 | `packages/core/theme.js` | Shared theme/session helpers |
@@ -86,7 +86,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 ### Desktop UI
 
 - `apps/desktop/ui/index.js` owns history rendering, lists, search, settings, recycle bin, imports, and mutation dispatch.
-- Desktop UI localization uses `packages/core/i18n.js`; system locale comes from the Tauri shell, while `localeOverride` persists in daemon settings. Supported catalogs are `en` and `zh-CN`.
+- Desktop UI localization uses the registry in `packages/core/i18n.js`; system locale comes from the Tauri shell, while `localeOverride` persists in daemon settings. The settings selector is generated from the registry rather than maintained separately in HTML.
 - `apps/desktop/ui/desktop-bridge.js` owns direct Tauri command dispatch for desktop product actions.
 - `apps/desktop/ui/extension-api-shim.js` keeps only the remaining `chrome.*` compatibility surfaces needed by the ported UI.
 - `apps/desktop/src-tauri/src/main.rs` forwards command results, change events, and storage updates into the webview.
@@ -147,6 +147,8 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `tests/e2e/badge.spec.js` | Popup/badge behavior in the shipped connector |
 | `tests/e2e/extension-error-popouts.spec.js` | Browser-level extension popup and snapshot error popout styling |
 | `tests/e2e/seeded-combination-workflows.spec.js` | Seeded randomized extension workflow combining visits, notes, list pins, and popup reads |
+| `tests/e2e/desktop-locale-setting.spec.js` | Registry-complete desktop locale workflow through the real connector, daemon, settings checkpoints, UI reloads, invalid-override reporting, and RTL verification |
+| `tests/e2e/extension-localization.spec.js` | Browser-native WebExtension catalog selection using the packaged extension and the browser-reported UI locale |
 | `scripts/test-coverage-monitor.mjs` | Test-suite LoC mix and JS/Rust uncovered production line reporting |
 | `crates/daemon/tests/commands.rs` | Desktop command-surface coverage |
 | `crates/daemon/tests/sync_controller.rs` | Daemon sync-controller coverage |

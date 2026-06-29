@@ -4112,6 +4112,7 @@
       <span id="serviceErrorMessage" style="flex: 1"></span>
       <button
         id="serviceErrorReloadBtn"
+        data-i18n="commonReload"
         style="
           display: none;
           padding: 4px 12px;
@@ -4127,6 +4128,7 @@
       </button>
       <button
         id="serviceErrorResumeBtn"
+        data-i18n="desktopResumeService"
         style="
           display: none;
           padding: 4px 12px;
@@ -4208,7 +4210,10 @@
               </label>
             </div>
           </div>
-          <p id="onboardingLaunchAtLoginUnsupported">
+          <p
+            id="onboardingLaunchAtLoginUnsupported"
+            data-i18n="desktopLaunchAtLoginUnsupported"
+          >
             Launch at login is available on macOS 13 or newer.
           </p>
         </div>
@@ -4680,12 +4685,6 @@
                     <option value="system" data-i18n="commonSystem">
                       System
                     </option>
-                    <option value="en" data-i18n="commonEnglish">
-                      English
-                    </option>
-                    <option value="zh-CN" data-i18n="commonChineseSimplified">
-                      简体中文
-                    </option>
                   </select>
                 </div>
               </div>
@@ -4708,6 +4707,7 @@
                 </div>
                 <div
                   id="launchAtLoginUnsupported"
+                  data-i18n="desktopLaunchAtLoginUnsupported"
                   style="
                     display: none;
                     margin-top: 6px;
@@ -4751,7 +4751,7 @@
             <div class="modal-group-label">
               <span data-i18n="desktopData">Data</span>
               <span class="hint-icon"
-                >?<span class="hint-tip"
+                >?<span class="hint-tip" data-i18n="desktopDataStorageHint"
                   >Stored locally as human-readable JSONL files organized by
                   date. Open with any text editor or process with jq.</span
                 ></span
@@ -4793,14 +4793,16 @@
                   Import History
                 </button>
                 <button id="clearBtn" class="btn btn-danger btn-sm">
-                  Delete
+                  <span data-i18n="commonDelete">Delete</span>
                   <span
                     class="hint-icon"
                     style="
                       color: inherit;
                       border-color: rgba(255, 255, 255, 0.5);
                     "
-                    >?<span class="hint-tip"
+                    >?<span
+                      class="hint-tip"
+                      data-i18n="desktopDeleteAllDataHint"
                       >Deletes all files in the Browser Recall Desktop data
                       folder. This cannot be undone.</span
                     ></span
@@ -5249,7 +5251,8 @@
                     >
                       <div style="font-size: 13px; color: var(--text-primary)">
                         <span style="color: var(--accent-green)">&#10003;</span>
-                        Connected <span id="syncAuthDetail"></span>
+                        <span data-i18n="desktopConnected">Connected</span>
+                        <span id="syncAuthDetail"></span>
                       </div>
                       <div
                         style="
@@ -5261,6 +5264,7 @@
                         <button
                           id="syncDisconnectBtn"
                           class="btn btn-secondary btn-sm"
+                          data-i18n="commonClear"
                         >
                           Clear
                         </button>
@@ -5269,21 +5273,31 @@
                   </div>
                 </div>
                 <div class="data-row data-btn-row" style="margin-top: 10px">
-                  <button id="syncPatSaveBtn" class="btn btn-secondary btn-sm">
+                  <button
+                    id="syncPatSaveBtn"
+                    class="btn btn-secondary btn-sm"
+                    data-i18n="desktopConnect"
+                  >
                     Connect
                   </button>
                   <button
                     id="syncCheckDevicesBtn"
                     class="btn btn-secondary btn-sm"
+                    data-i18n="desktopCheckDevices"
                   >
                     Check Devices
                   </button>
-                  <button id="syncNowBtn" class="btn btn-primary btn-sm">
+                  <button
+                    id="syncNowBtn"
+                    class="btn btn-primary btn-sm"
+                    data-i18n="desktopSyncNow"
+                  >
                     Sync Now
                   </button>
                   <button
                     id="syncCancelBtn"
                     class="btn btn-secondary btn-sm"
+                    data-i18n="commonCancel"
                     style="display: none"
                   >
                     Cancel
@@ -5321,7 +5335,9 @@
                       >History loading batch size</span
                     >
                     <span class="hint-icon"
-                      >?<span class="hint-tip"
+                      >?<span
+                        class="hint-tip"
+                        data-i18n="desktopHistoryBatchSizeHint"
                         >Number of daily history files loaded at once when
                         scrolling. Higher values load more history upfront but
                         may feel slower on large datasets.</span

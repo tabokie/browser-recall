@@ -2,6 +2,7 @@ import { test, expect } from './fixtures.js';
 import {
   resetAndSeed,
   openHelperPage,
+  getExtensionMessage,
   getSlugForUrl,
   pageCheckpointPath,
 } from './helpers.js';
@@ -98,9 +99,9 @@ async function waitForContentScript(helper, page, url) {
   throw new Error(`content script did not load for ${url}`);
 }
 
-async function countReloadWarnings(page) {
+async function countReloadWarnings(page, reloadMessage) {
   return page
-    .locator('[aria-label*="reload the page"]')
+    .getByLabel(reloadMessage, { exact: true })
     .count()
     .catch(() => 0);
 }
@@ -665,6 +666,10 @@ test.describe('extension same-tab navigation regressions', () => {
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
+    const reloadMessage = await getExtensionMessage(
+      helper,
+      'extensionReloaded',
+    );
     const page = await extContext.newPage();
     await page.goto(url);
     await waitForContentScript(helper, page, url);
@@ -691,7 +696,7 @@ test.describe('extension same-tab navigation regressions', () => {
       await chrome.tabs.sendMessage(tab.id, { action: 'highlightSelection' });
     }, url);
 
-    await expect(page.locator('[aria-label*="reload the page"]')).toBeVisible();
+    await expect(page.getByLabel(reloadMessage, { exact: true })).toBeVisible();
 
     await page.close();
     await helper.close();
@@ -714,6 +719,10 @@ test.describe('extension same-tab navigation regressions', () => {
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
+    const reloadMessage = await getExtensionMessage(
+      helper,
+      'extensionReloaded',
+    );
     const page = await extContext.newPage();
     await page.goto(url);
     await waitForContentScript(helper, page, url);
@@ -742,7 +751,7 @@ test.describe('extension same-tab navigation regressions', () => {
       await chrome.tabs.sendMessage(tab.id, { action: 'highlightSelection' });
     }, url);
 
-    await expect(page.locator('[aria-label*="reload the page"]')).toBeVisible();
+    await expect(page.getByLabel(reloadMessage, { exact: true })).toBeVisible();
     await expect(page.locator('mark.portal-highlight')).toHaveCount(0);
 
     await page.close();
@@ -766,6 +775,10 @@ test.describe('extension same-tab navigation regressions', () => {
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
+    const reloadMessage = await getExtensionMessage(
+      helper,
+      'extensionReloaded',
+    );
     const page = await extContext.newPage();
     await page.goto(url);
     await waitForContentScript(helper, page, url);
@@ -787,7 +800,7 @@ test.describe('extension same-tab navigation regressions', () => {
       await chrome.tabs.sendMessage(tab.id, { action: 'highlightSelection' });
     }, url);
 
-    await expect(page.locator('[aria-label*="reload the page"]')).toBeVisible();
+    await expect(page.getByLabel(reloadMessage, { exact: true })).toBeVisible();
     await expect(page.locator('#portal-highlight-overlay')).toHaveCount(0);
 
     await page.close();
@@ -809,6 +822,10 @@ test.describe('extension same-tab navigation regressions', () => {
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
+    const reloadMessage = await getExtensionMessage(
+      helper,
+      'extensionReloaded',
+    );
     const page = await extContext.newPage();
     await page.goto(url);
     await waitForContentScript(helper, page, url);
@@ -830,7 +847,7 @@ test.describe('extension same-tab navigation regressions', () => {
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(300);
 
-    expect(await countReloadWarnings(page)).toBe(0);
+    expect(await countReloadWarnings(page, reloadMessage)).toBe(0);
 
     await page.close();
     await helper.close();
@@ -854,6 +871,11 @@ test.describe('extension same-tab navigation regressions', () => {
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
+    const reloadMessage = await getExtensionMessage(
+      helper,
+      'extensionReloaded',
+    );
+    const likedMessage = await getExtensionMessage(helper, 'extensionLiked');
     const page = await extContext.newPage();
     await page.goto(url);
     await waitForContentScript(helper, page, url);
@@ -892,13 +914,13 @@ test.describe('extension same-tab navigation regressions', () => {
     );
     expect(commandResp.success).toBe(true);
 
-    await expect(page.locator('[aria-label="Liked"]')).toBeVisible();
+    await expect(page.getByLabel(likedMessage, { exact: true })).toBeVisible();
     await page.waitForTimeout(300);
-    expect(await countReloadWarnings(page)).toBe(0);
+    expect(await countReloadWarnings(page, reloadMessage)).toBe(0);
     await page.reload();
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(300);
-    expect(await countReloadWarnings(page)).toBe(0);
+    expect(await countReloadWarnings(page, reloadMessage)).toBe(0);
 
     const pageEntity = await helper.evaluate(
       (key) => chrome.runtime.sendMessage({ action: 'readDesktopValue', key }),

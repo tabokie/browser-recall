@@ -1,5 +1,10 @@
 import { test, expect } from './fixtures.js';
-import { getSlugForUrl, pageCheckpointPath, resetAndSeed } from './helpers.js';
+import {
+  getExtensionMessage,
+  getSlugForUrl,
+  pageCheckpointPath,
+  resetAndSeed,
+} from './helpers.js';
 import crypto from 'crypto';
 
 function snapshotSidecarPath(slug, timestamp, ext) {
@@ -159,7 +164,9 @@ test.describe('extension error popouts', () => {
     await frame.locator('mark').click();
 
     const banner = viewer.locator('#snapshotRuntimeError');
-    await expect(banner).toContainText('Browser Recall extension reloaded');
+    await expect(banner).toHaveText(
+      await getExtensionMessage(viewer, 'extensionReloaded'),
+    );
     await expect(banner).toHaveCSS('background-color', 'rgb(247, 244, 234)');
     await expect(banner).toHaveCSS('color', 'rgb(255, 45, 32)');
 

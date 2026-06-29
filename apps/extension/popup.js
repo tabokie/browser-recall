@@ -910,7 +910,7 @@ function renderPageNoteWrap(globalNote) {
   const noteSlug = globalNote?.slug || '';
 
   if (!noteText && !noteSlug) {
-    wrap.innerHTML = `<button class="page-note-add" id="pageNoteAddBtn">+ Page note</button>`;
+    wrap.innerHTML = `<button class="page-note-add" id="pageNoteAddBtn">${escapeHtml(tr('extensionAddPageNote', '+ Page note'))}</button>`;
     wrap.querySelector('#pageNoteAddBtn').addEventListener('click', () => {
       openPageNoteEditor(wrap, '', '');
     });

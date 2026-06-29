@@ -437,9 +437,7 @@ test.describe('Highlight note edit', () => {
     });
 
     expect(panelState).not.toBeNull();
-    expect(panelState.text).toContain(
-      'PDF panel highlight text 1',
-    );
+    expect(panelState.text).toContain('PDF panel highlight text 1');
     expect(panelState.markCount).toBe(0);
     expect(panelState.scrollTop).toBeGreaterThan(0);
 

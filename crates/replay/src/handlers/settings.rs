@@ -5,23 +5,8 @@ use serde_json::Value;
 use crate::{
     entities::{Entity, SettingsEntity},
     load_settings, touch_timestamp_map, Context, EntityEffect, EntityMap, ReplayError,
-    SETTINGS_KEY,
+    PERSISTENT_SETTINGS_KEYS, SETTINGS_KEY,
 };
-
-const SETTINGS_KEYS: &[&str] = &[
-    "theme",
-    "colorScheme",
-    "historyFileBatch",
-    "captureSnapshotVideo",
-    "blacklistEnabled",
-    "urlBlacklist",
-    "titleCleanupEnabled",
-    "titleTrimRules",
-    "syncEnabled",
-    "syncMethod",
-    "syncRepoUrl",
-    "syncRetentionDays",
-];
 
 pub(crate) async fn handle_update_setting<L, Fut>(
     timestamp: i64,
@@ -34,7 +19,7 @@ where
     L: Fn(&str) -> Fut,
     Fut: Future<Output = Option<Entity>>,
 {
-    if !SETTINGS_KEYS.contains(&key) {
+    if !PERSISTENT_SETTINGS_KEYS.contains(&key) {
         return Ok(EntityMap::new());
     }
 

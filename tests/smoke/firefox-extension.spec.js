@@ -15,6 +15,27 @@ const FIREFOX_USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0';
 const NON_FIREFOX_USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15';
+const EN_MESSAGES = JSON.parse(
+  readFileSync(
+    path.join(process.cwd(), 'packages/core/locales/en/messages.json'),
+    'utf8',
+  ),
+);
+
+function createEnglishI18n() {
+  return {
+    getUILanguage: () => 'en',
+    getMessage(key, substitutions = []) {
+      const values = Array.isArray(substitutions)
+        ? substitutions
+        : [substitutions];
+      return (EN_MESSAGES[key]?.message || '').replace(
+        /\$(\d+)/g,
+        (match, index) => values[Number(index) - 1] ?? match,
+      );
+    },
+  };
+}
 
 function navigatorWithUserAgent(base, userAgent) {
   return Object.create(base || {}, {
@@ -180,6 +201,7 @@ function createFirefoxWebExtensionApi({
 
   const browserApi = {
     badgeState,
+    i18n: createEnglishI18n(),
     action: {
       async setBadgeBackgroundColor(details) {
         assertFirefoxArgs('setBadgeBackgroundColor', arguments, 1);
@@ -356,6 +378,7 @@ function createOrionCallbackWebExtensionApi({
   };
   return {
     badgeState,
+    i18n: createEnglishI18n(),
     action,
     alarms: {
       onAlarm: createEvent(),

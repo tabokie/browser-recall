@@ -4,6 +4,11 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import {
+  DEFAULT_LOCALE,
+  SUPPORTED_LOCALES,
+  toWebExtensionLocale,
+} from '../packages/core/i18n.js';
 import { createPageIdentityGlobalScript } from '../packages/core/page-identity.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -97,25 +102,179 @@ function extensionLocaleMessages(messages) {
   );
 }
 
+function messagePlaceholders(message) {
+  return [...String(message).matchAll(/\$(\d+)/g)]
+    .map((match) => match[1])
+    .sort();
+}
+
+function messageTagStructure(message) {
+  const roots = [];
+  const stack = [];
+  const voidTags = new Set([
+    'area',
+    'base',
+    'br',
+    'col',
+    'embed',
+    'hr',
+    'img',
+    'input',
+    'link',
+    'meta',
+    'param',
+    'source',
+    'track',
+    'wbr',
+  ]);
+  for (const match of String(message).matchAll(/<[^>]+>/g)) {
+    const tag = match[0];
+    const name = tag.match(/^<\/?\s*([A-Za-z][\w:-]*)/)?.[1]?.toLowerCase();
+    if (!name) continue;
+    if (/^<\//.test(tag)) {
+      if (stack.pop()?.name !== name) return null;
+      continue;
+    }
+    const node = { name, tag, children: [] };
+    const parent = stack.at(-1);
+    (parent ? parent.children : roots).push(node);
+    if (!/\/\s*>$/.test(tag) && !voidTags.has(name)) stack.push(node);
+  }
+  if (stack.length > 0) return null;
+  const signature = (node) =>
+    `${node.tag}[${node.children.map(signature).sort().join(',')}]`;
+  return roots.map(signature).sort();
+}
+
+function messageProtectedLiterals(message) {
+  return [...String(message).matchAll(/<(code|kbd)>(.*?)<\/\1>/g)]
+    .map((match) => `${match[1]}:${match[2]}`)
+    .sort();
+}
+
+function messageProtectedTerms(message) {
+  return [
+    ...String(message).matchAll(
+      /Browser Recall Desktop|Browser Recall|browser-recall|Chrome|Firefox|GitHub|JSONL|settings\.json|\bjq\b|Alt\+[A-Z]/g,
+    ),
+  ]
+    .map((match) => match[0])
+    .sort();
+}
+
+export function validateLocaleMessage(
+  code,
+  key,
+  defaultMessage,
+  localizedMessage,
+) {
+  // Translate placeholders, protected terms, and HTML as complete sentences.
+  // Translating fragments around tokens preserves structure but breaks grammar.
+  const expectedPlaceholders = messagePlaceholders(defaultMessage);
+  const actualPlaceholders = messagePlaceholders(localizedMessage);
+  if (
+    JSON.stringify(actualPlaceholders) !== JSON.stringify(expectedPlaceholders)
+  ) {
+    throw new Error(`Locale ${code} has incompatible placeholders for ${key}`);
+  }
+  const expectedStructure = messageTagStructure(defaultMessage);
+  const actualStructure = messageTagStructure(localizedMessage);
+  if (
+    !expectedStructure ||
+    !actualStructure ||
+    JSON.stringify(actualStructure) !== JSON.stringify(expectedStructure)
+  ) {
+    throw new Error(
+      `Locale ${code} has incompatible HTML structure for ${key}`,
+    );
+  }
+  const expectedLiterals = messageProtectedLiterals(defaultMessage);
+  const actualLiterals = messageProtectedLiterals(localizedMessage);
+  if (JSON.stringify(actualLiterals) !== JSON.stringify(expectedLiterals)) {
+    throw new Error(
+      `Locale ${code} has incompatible protected literals for ${key}`,
+    );
+  }
+  const expectedTerms = messageProtectedTerms(defaultMessage);
+  const actualTerms = messageProtectedTerms(localizedMessage);
+  if (JSON.stringify(actualTerms) !== JSON.stringify(expectedTerms)) {
+    throw new Error(
+      `Locale ${code} has incompatible protected terms for ${key}`,
+    );
+  }
+}
+
+export function validateLocaleCatalogs() {
+  const registeredCodes = SUPPORTED_LOCALES.map((locale) => locale.code);
+  if (new Set(registeredCodes).size !== registeredCodes.length) {
+    throw new Error('Locale registry contains duplicate codes');
+  }
+  if (!registeredCodes.includes(DEFAULT_LOCALE)) {
+    throw new Error(`Default locale ${DEFAULT_LOCALE} is not registered`);
+  }
+
+  const catalogDirectories = fs
+    .readdirSync(sharedLocaleDir, { withFileTypes: true })
+    .filter(
+      (entry) =>
+        entry.isDirectory() &&
+        fs.existsSync(path.join(sharedLocaleDir, entry.name, 'messages.json')),
+    )
+    .map((entry) => entry.name)
+    .sort();
+  const unregistered = catalogDirectories.filter(
+    (code) => !registeredCodes.includes(code),
+  );
+  if (unregistered.length > 0) {
+    throw new Error(`Unregistered locale catalogs: ${unregistered.join(', ')}`);
+  }
+
+  const catalogs = new Map();
+  for (const code of registeredCodes) {
+    const source = path.join(sharedLocaleDir, code, 'messages.json');
+    if (!fs.existsSync(source)) {
+      throw new Error(`Missing locale catalog: ${code}`);
+    }
+    catalogs.set(code, JSON.parse(fs.readFileSync(source, 'utf8')));
+  }
+
+  const defaultCatalog = catalogs.get(DEFAULT_LOCALE);
+  const defaultKeys = Object.keys(defaultCatalog).sort();
+  for (const [code, catalog] of catalogs) {
+    const keys = Object.keys(catalog).sort();
+    if (JSON.stringify(keys) !== JSON.stringify(defaultKeys)) {
+      throw new Error(`Locale ${code} does not match ${DEFAULT_LOCALE} keys`);
+    }
+    for (const key of defaultKeys) {
+      if (!catalog[key]?.message) {
+        throw new Error(`Locale ${code} has an empty message for ${key}`);
+      }
+      validateLocaleMessage(
+        code,
+        key,
+        defaultCatalog[key].message,
+        catalog[key].message,
+      );
+    }
+  }
+  return catalogs;
+}
+
 function writeFilteredExtensionLocales(
   outDir,
   { browserLocaleNames = false } = {},
 ) {
   const localesOutDir = outDir;
+  const catalogs = validateLocaleCatalogs();
   fs.rmSync(localesOutDir, { recursive: true, force: true });
   fs.mkdirSync(localesOutDir, { recursive: true });
-  for (const entry of fs.readdirSync(sharedLocaleDir, {
-    withFileTypes: true,
-  })) {
-    if (!entry.isDirectory()) continue;
-    const source = path.join(sharedLocaleDir, entry.name, 'messages.json');
-    if (!fs.existsSync(source)) continue;
+  for (const locale of SUPPORTED_LOCALES) {
     const extensionLocale = browserLocaleNames
-      ? entry.name.replaceAll('-', '_')
-      : entry.name;
+      ? toWebExtensionLocale(locale.code)
+      : locale.code;
     const targetDir = path.join(localesOutDir, extensionLocale);
     fs.mkdirSync(targetDir, { recursive: true });
-    const messages = JSON.parse(fs.readFileSync(source, 'utf8'));
+    const messages = catalogs.get(locale.code);
     fs.writeFileSync(
       path.join(targetDir, 'messages.json'),
       `${JSON.stringify(extensionLocaleMessages(messages), null, 2)}\n`,
@@ -146,7 +305,7 @@ function writeExtensionManifest(outDir, browser = 'chrome') {
   const manifestPath = path.join(outDir, 'manifest.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   ensurePageIdentityContentScript(manifest);
-  manifest.default_locale = 'en';
+  manifest.default_locale = toWebExtensionLocale(DEFAULT_LOCALE);
 
   if (browser === 'firefox') {
     manifest.action = {
@@ -178,6 +337,7 @@ function writeExtensionManifest(outDir, browser = 'chrome') {
 
 function stageTarget(name, outDir = targets[name].defaultOutDir) {
   const target = targets[name];
+  validateLocaleCatalogs();
   copyDir(target.sourceDir, outDir);
   fs.cpSync(sharedCoreDir, path.join(outDir, 'core'), {
     recursive: true,
@@ -238,6 +398,11 @@ function runCli() {
     console.log(stageDesktopUiAssets());
     return;
   }
+  if (target === 'locales') {
+    const catalogs = validateLocaleCatalogs();
+    console.log(`Validated ${catalogs.size} locale catalogs`);
+    return;
+  }
   if (target === 'all') {
     console.log(stageExtensionAssets());
     console.log(stageFirefoxExtensionAssets());
@@ -245,7 +410,7 @@ function runCli() {
     return;
   }
   console.error(
-    'Usage: node scripts/stage-app-assets.mjs [extension|extension-chrome|extension-firefox|desktop-ui|all]',
+    'Usage: node scripts/stage-app-assets.mjs [extension|extension-chrome|extension-firefox|desktop-ui|locales|all]',
   );
   process.exit(1);
 }

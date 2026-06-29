@@ -1,6 +1,7 @@
 import { test, expect } from './fixtures.js';
 import {
   resetAndSeed,
+  getExtensionMessage,
   getSlugForUrl,
   openHelperPage,
   pageCheckpointPath,
@@ -15,11 +16,11 @@ const POPUP_MUTATION_SEED = 'popup-live-mutation-20260505-a';
 async function openPopupForUrl(
   extContext,
   extensionId,
-  { url, title, expectedTitle = title },
+  { url, title, expectedTitle = title, locale, messages = {} },
 ) {
   const popup = await extContext.newPage();
   await popup.addInitScript(
-    ({ url, title }) => {
+    ({ url, title, locale, messages }) => {
       const patchTabsQuery = () => {
         if (!globalThis.chrome?.tabs?.query) {
           setTimeout(patchTabsQuery, 0);
@@ -32,10 +33,14 @@ async function openPopupForUrl(
           }
           return originalQuery(queryInfo);
         };
+        if (locale) {
+          chrome.i18n.getUILanguage = () => locale;
+          chrome.i18n.getMessage = (key) => messages[key] || '';
+        }
       };
       patchTabsQuery();
     },
-    { url, title },
+    { url, title, locale, messages },
   );
   await popup.goto(`chrome-extension://${extensionId}/popup.html`);
   await expect(popup.locator('#dashboard')).toBeVisible();
@@ -102,6 +107,38 @@ async function waitForContentScript(helper, page, url) {
 }
 
 test.describe('Popup list chip behavior', () => {
+  test('localizes the dynamically rendered add page note button', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    localServer.addPage('/localized-page-note', {
+      title: 'Localized Page Note',
+      body: '<main>Localized page note</main>',
+    });
+    const url = localServer.url('/localized-page-note');
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    const popup = await openPopupForUrl(extContext, extensionId, {
+      url,
+      title: 'Localized Page Note',
+      locale: 'zh-CN',
+      messages: { extensionAddPageNote: '+ 页面笔记' },
+    });
+
+    await expect(popup.locator('#pageNoteAddBtn')).toHaveText('+ 页面笔记');
+
+    await popup.close();
+    await page.close();
+  });
+
   test('startup keeps one static ticket shell until connected page data is ready', async ({
     extContext,
     extensionId,
@@ -1473,8 +1510,8 @@ test.describe('Popup list chip behavior', () => {
     await expect(popup.locator('#listPickerList .list-picker-row')).toHaveCount(
       0,
     );
-    await expect(popup.locator('#listPickerCreate')).toContainText(
-      'Create "Create Only"',
+    await expect(popup.locator('#listPickerCreate')).toHaveText(
+      await getExtensionMessage(popup, 'extensionCreateList', ['Create Only']),
     );
     const createOnly = await popup.evaluate(() => {
       const picker = document.getElementById('listPicker');
@@ -2424,7 +2461,11 @@ test.describe('Popup list chip behavior', () => {
     }, activeTabId);
 
     await popup.locator('#captureBtn').click();
-    await expect(page.locator('[aria-label*="Reload this page"]')).toBeVisible({
+    const resetMessage = await getExtensionMessage(
+      popup,
+      'extensionConnectionResetActionFailed',
+    );
+    await expect(page.getByLabel(resetMessage, { exact: true })).toBeVisible({
       timeout: 5000,
     });
 
@@ -2660,8 +2701,8 @@ test.describe('Popup list chip behavior', () => {
     });
 
     await expect(popup.locator('#listPicker')).toBeVisible();
-    await expect(popup.locator('#listPickerCreate')).toContainText(
-      'Create "阅读"',
+    await expect(popup.locator('#listPickerCreate')).toHaveText(
+      await getExtensionMessage(popup, 'extensionCreateList', ['阅读']),
     );
     expect(
       await popup.evaluate(() => window.__saveListMetaRequests.length),
@@ -2820,6 +2861,11 @@ test.describe('Popup list chip behavior', () => {
     await popup.locator('#listAddBtn').click();
     const input = popup.locator('#listPickerInput');
     await input.fill('Keyboard');
+    const createKeyboardLabel = await getExtensionMessage(
+      popup,
+      'extensionCreateList',
+      ['Keyboard'],
+    );
     await expect(input).toHaveAttribute('role', 'combobox');
     await expect(input).toHaveAttribute('aria-controls', 'listPickerList');
     await expect(
@@ -2850,7 +2896,7 @@ test.describe('Popup list chip behavior', () => {
     await expect.poll(activeText).toBe('Keyboard Alpha');
 
     await input.press('ArrowUp');
-    await expect.poll(activeText).toBe('Create "Keyboard"');
+    await expect.poll(activeText).toBe(createKeyboardLabel);
 
     await popup.keyboard.press('ArrowDown');
     await expect.poll(activeText).toBe('Keyboard Alpha');
@@ -2868,7 +2914,7 @@ test.describe('Popup list chip behavior', () => {
     await expect.poll(activeText).toBe('Keyboard Alpha');
 
     await popup.keyboard.press('ArrowUp');
-    await expect.poll(activeText).toBe('Create "Keyboard"');
+    await expect.poll(activeText).toBe(createKeyboardLabel);
 
     await expect(input).toHaveAttribute('aria-disabled', 'false');
     await input.press('Enter');

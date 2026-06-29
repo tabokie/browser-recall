@@ -151,6 +151,11 @@ export async function waitForDesktopConnector(
         if (attempt === 2 || !retryableNavigation) {
           throw error;
         }
+        await page
+          .waitForLoadState('domcontentloaded', { timeout: 1000 })
+          .catch(() => {});
+        if (page.url() === helperUrl) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
       }
     }
     await page.waitForFunction(

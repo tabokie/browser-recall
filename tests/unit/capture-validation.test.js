@@ -141,7 +141,7 @@ describe('popup.js shows capture errors via page notifications', () => {
     // When captureCurrentPageFromPopup returns { success: false }, popup should
     // notify the content script rather than silently logging
     const captureHandler = popupSource.match(
-      /captureBtn[\s\S]*?btn\.textContent\s*=\s*['"]CAPTURE FRAME['"]/,
+      /captureBtn[\s\S]*?btn\.textContent\s*=\s*tr\('extensionCaptureFrame'/,
     );
     expect(captureHandler).not.toBeNull();
     expect(captureHandler[0]).toContain('notifyActivePageError');

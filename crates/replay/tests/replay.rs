@@ -1732,6 +1732,27 @@ async fn update_setting_persists_dynamic_value_with_timestamp() {
 }
 
 #[tokio::test]
+async fn update_setting_persists_desktop_locale_override() {
+    let result = effect_of(
+        LogEntry::UpdateSetting {
+            timestamp: 100,
+            key: "localeOverride".to_string(),
+            value: json!("en"),
+        },
+        |_| ready(None),
+        context(),
+    )
+    .await
+    .expect("locale override replay succeeds");
+
+    let settings = result
+        .get("manifest:settings")
+        .and_then(EntityEffect::as_settings)
+        .expect("locale override updates settings");
+    assert_eq!(settings.values.get("localeOverride"), Some(&json!("en")));
+}
+
+#[tokio::test]
 async fn update_setting_preserves_higher_existing_timestamp() {
     let store = BTreeMap::from([(
         "manifest:settings".to_string(),
