@@ -99,6 +99,7 @@ test.describe('extension error popouts', () => {
     await expect(bubble).toContainText('Paper popout failure');
     await expect(bubble).toHaveCSS('background-color', 'rgb(247, 244, 234)');
     await expect(bubble).toHaveCSS('color', 'rgb(255, 45, 32)');
+    await expect(bubble).toHaveCSS('border-top-width', '2px');
 
     await popup.close();
   });
@@ -169,6 +170,7 @@ test.describe('extension error popouts', () => {
     );
     await expect(banner).toHaveCSS('background-color', 'rgb(247, 244, 234)');
     await expect(banner).toHaveCSS('color', 'rgb(255, 45, 32)');
+    await expect(banner).toHaveCSS('border-top-width', '2px');
 
     await viewer.close();
   });

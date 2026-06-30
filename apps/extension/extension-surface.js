@@ -6,6 +6,7 @@
       --br-bg-base: #f7f4ea;
       --br-bg-surface-active: rgba(23, 23, 19, 0.08);
       --br-border-section: rgba(23, 23, 19, 0.22);
+      --br-floating-border: 2px solid var(--br-text-primary);
       --br-text-primary: #171713;
       --br-text-muted: #77746a;
       --br-accent-primary: #171713;

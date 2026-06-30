@@ -227,7 +227,7 @@ const OVERLAY_STYLE = `
   ${extensionSurface.shadowCss}
   .overlay {
     width: 300px;
-    background: var(--br-bg-base); border: 1px solid var(--br-border-section);
+    background: var(--br-bg-base); border: var(--br-floating-border);
     border-radius: 2px; color: var(--br-text-primary);
     font-family: var(--br-font-body); font-size: 12px; line-height: 1.45;
     padding: 8px;

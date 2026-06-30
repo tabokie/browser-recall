@@ -83,6 +83,54 @@ export async function getExtensionMessage(page, key, substitutions) {
   );
 }
 
+export async function longestLeftBorderRun(
+  locator,
+  expectedColor = [23, 23, 19, 255],
+  scanWidth = 8,
+) {
+  const screenshot = await locator.screenshot({ animations: 'disabled' });
+  return locator.evaluate(
+    async (_, { base64, expectedColor: color, scanWidth: width }) => {
+      const binary = atob(base64);
+      const bytes = Uint8Array.from(binary, (character) =>
+        character.charCodeAt(0),
+      );
+      const bitmap = await createImageBitmap(
+        new Blob([bytes], { type: 'image/png' }),
+      );
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const context = canvas.getContext('2d');
+      context.drawImage(bitmap, 0, 0);
+      const data = context.getImageData(
+        0,
+        Math.floor(bitmap.height / 2),
+        Math.min(width, bitmap.width),
+        1,
+      ).data;
+      const pixels = Array.from(
+        { length: Math.min(width, bitmap.width) },
+        (_, index) => {
+          const offset = index * 4;
+          return Array.from(data.slice(offset, offset + 4));
+        },
+      );
+      let longest = 0;
+      let current = 0;
+      for (const pixel of pixels) {
+        const matches = pixel.every(
+          (component, index) => Math.abs(component - color[index]) <= 2,
+        );
+        current = matches ? current + 1 : 0;
+        longest = Math.max(longest, current);
+      }
+      return longest;
+    },
+    { base64: screenshot.toString('base64'), expectedColor, scanWidth },
+  );
+}
+
 export const getSlugForUrl = generateSlugFromUrl;
 
 export function pageCheckpointPath(slug) {

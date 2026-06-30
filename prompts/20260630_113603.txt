@@ -1,0 +1,9 @@
+- A few minor issues with extension. (1) Sometimes when I attempt to take a snapshot, it says desktop bridge is unavailable. But the desktop is up and running. The situation self-resolves after I open the popup. (2) I want all floating windows in extension (like the highlight edit window and highlight list window) to use a bold borderline just like the menu in popup.
+- Take a look at the history prompt files under ./prompts. Recently I noticed it gets bloated compared to before, because some system prompts are saved e.g. "Generate 0 to 3 hyperpersonalized suggestions". I want you to (1) Scan and remove them from the Git history, (2) Update the global hook file to filter out these system prompts.
+- No need to use bugfix, this issue is part of codex product, not related to this project.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them all
+- Please review my uncommitted changes
+- Fix them
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.5 Codex
+- Ignore 1, run full tests, save the specific lesson as code comments somewhere.

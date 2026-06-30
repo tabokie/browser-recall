@@ -257,54 +257,7 @@ async function enqueueCommand(action, request) {
   }
 }
 
-async function canCallDesktopPopupRpc() {
-  let connector = await getConnectorBridgeState();
-  if (
-    connector.state !== 'connected' &&
-    connector.hasToken &&
-    !connector.refuseMode
-  ) {
-    await connectDesktopBridge().catch((error) => {
-      logDebug('[connector] popup rpc reconnect failed:', error.message);
-    });
-    connector = await getConnectorBridgeState();
-  }
-  syncDesktopConnectorPauseState(connector);
-  return connector.state === 'connected' && !connector.refuseMode;
-}
-
-async function canCallDesktopStreamingReadRpc() {
-  const connector = await getConnectorBridgeState();
-  syncDesktopConnectorPauseState(connector);
-  return connector.state === 'connected' && !connector.refuseMode;
-}
-
-async function canCallDesktopMutationRpc() {
-  let connector = await getConnectorBridgeState();
-  if (
-    connector.state !== 'connected' &&
-    connector.hasToken &&
-    !connector.refuseMode
-  ) {
-    await connectDesktopBridge().catch((error) => {
-      logDebug('[connector] mutation rpc reconnect failed:', error.message);
-    });
-    connector = await getConnectorBridgeState();
-  }
-  syncDesktopConnectorPauseState(connector);
-  return connector.state === 'connected' && !connector.refuseMode;
-}
-
 async function runDesktopCommand(action, request = {}) {
-  if (!(await canCallDesktopMutationRpc())) {
-    return {
-      success: false,
-      error: tr(
-        'extensionDesktopBridgeUnavailable',
-        'Desktop bridge unavailable',
-      ),
-    };
-  }
   try {
     const response = await requestDesktopCommand(action, request);
     if (!response?.success) {
@@ -319,14 +272,7 @@ async function runDesktopCommand(action, request = {}) {
   }
 }
 
-async function loadDesktopEntityValue(key, { allowStale = false } = {}) {
-  const canRead = allowStale
-    ? await canCallDesktopStreamingReadRpc()
-    : await canCallDesktopPopupRpc();
-  if (!canRead)
-    throw new Error(
-      tr('extensionDesktopBridgeUnavailable', 'Desktop bridge unavailable'),
-    );
+async function loadDesktopEntityValue(key) {
   try {
     const desktopResp = await requestDesktopEntity(key);
     if (!desktopResp?.success) {
@@ -343,11 +289,6 @@ async function loadDesktopEntityValue(key, { allowStale = false } = {}) {
 }
 
 async function loadDesktopHistoryRange(from, to) {
-  if (!(await canCallDesktopStreamingReadRpc())) {
-    throw new Error(
-      tr('extensionDesktopBridgeUnavailable', 'Desktop bridge unavailable'),
-    );
-  }
   const filesResp = await requestDesktopHistoryFiles(false);
   if (!filesResp?.success) {
     throw new Error(filesResp?.error || 'Desktop history file list failed');
@@ -375,7 +316,7 @@ async function readDesktopValueFromDaemon(key) {
     const desktop = await loadDesktopHistoryRange(dateStr, dateStr);
     return desktop.entries;
   }
-  const desktop = await loadDesktopEntityValue(key, { allowStale: true });
+  const desktop = await loadDesktopEntityValue(key);
   return desktop.hit ? desktop.value : undefined;
 }
 
@@ -436,7 +377,7 @@ async function injectUserActionNotification(
     maxWidth = 'min(360px, calc(100vw - 32px))',
     background = '#fffaf3',
     color = '#b3261e',
-    border = '1px solid #d93025',
+    border = '2px solid #d93025',
     boxShadow = 'none',
   },
 ) {
@@ -535,7 +476,7 @@ async function injectUserActionSuccessNotification(tabId, message) {
     maxWidth: 'min(320px, calc(100vw - 32px))',
     background: '#ffffff',
     color: '#111111',
-    border: '1px solid rgba(0, 0, 0, 0.18)',
+    border: '2px solid #171713',
     boxShadow:
       '0 16px 40px rgba(0, 0, 0, 0.18), 0 2px 10px rgba(0, 0, 0, 0.12)',
   });
@@ -612,8 +553,6 @@ async function drainNow() {
 }
 
 async function flushInteractiveWrites() {
-  const connector = await getConnectorBridgeState();
-  if (connector.state !== 'connected') return connector;
   return await drainNow();
 }
 
@@ -1215,13 +1154,6 @@ function handleGetReportedUrl(request) {
 }
 
 async function handleGetPageInfo(request) {
-  if (!(await canCallDesktopPopupRpc())) {
-    return {
-      success: false,
-      error: 'Desktop popup page info unavailable',
-    };
-  }
-
   try {
     const desktopResp = await requestDesktopPageInfo(request.slug);
     if (!desktopResp?.success) {
@@ -1246,13 +1178,6 @@ async function handleGetPageInfo(request) {
 }
 
 async function handleGetPageSummary(request) {
-  if (!(await canCallDesktopPopupRpc())) {
-    return {
-      success: false,
-      error: 'Desktop popup page summary unavailable',
-    };
-  }
-
   try {
     const desktopResp = await requestDesktopPageSummary(request.url);
     if (!desktopResp?.success) {
@@ -1281,12 +1206,6 @@ async function handleGetPageSummary(request) {
 }
 
 async function handleGetPopupLists() {
-  if (!(await canCallDesktopPopupRpc())) {
-    return {
-      success: false,
-      error: 'Desktop popup lists unavailable',
-    };
-  }
   try {
     const desktopResp = await requestDesktopPopupLists();
     if (!desktopResp?.success) {
@@ -1749,10 +1668,6 @@ globalThis.browserRecallPreparedPopupForTest = {
 
 async function handleLoadPageNotes(request) {
   const t0 = performance.now();
-  if (!(await canCallDesktopPopupRpc())) {
-    return { success: false, error: 'Desktop page info unavailable' };
-  }
-
   let notes;
   try {
     const desktopResp = await requestDesktopPageInfo(request.slug);
@@ -1774,10 +1689,6 @@ async function handleLoadPageNotes(request) {
 
 async function handleListSnapshots(request) {
   const t0 = performance.now();
-  if (!(await canCallDesktopPopupRpc())) {
-    return { success: false, error: 'Desktop page info unavailable' };
-  }
-
   let snapshots;
   try {
     const desktopResp = await requestDesktopPageInfo(request.slug);
@@ -1798,12 +1709,6 @@ async function handleListSnapshots(request) {
 }
 
 async function handleGetSnapshotUrl(request) {
-  if (!(await canCallDesktopStreamingReadRpc())) {
-    return {
-      success: false,
-      error: 'Desktop snapshot url unavailable',
-    };
-  }
   try {
     const desktopResp = await requestDesktopSnapshotHtml(
       request.slug,
@@ -1829,12 +1734,6 @@ async function handleGetSnapshotUrl(request) {
 }
 
 async function handleGetSnapshotHtml(request) {
-  if (!(await canCallDesktopStreamingReadRpc())) {
-    return {
-      success: false,
-      error: 'Desktop snapshot html unavailable',
-    };
-  }
   try {
     const desktopResp = await requestDesktopSnapshotHtml(
       request.slug,
@@ -1994,7 +1893,7 @@ async function handleUpdateListTree(request) {
 // ─── Message Handlers: Filesystem ────────────────────────────────────
 
 async function handleInitializeFilesystem(request) {
-  const connector = await getConnectorBridgeState();
+  const connector = await refreshConnectorBridgeState();
   syncDesktopConnectorPauseState(connector);
   if (connector.state !== 'connected') {
     return { success: false, error: 'Browser Recall Desktop is not connected' };

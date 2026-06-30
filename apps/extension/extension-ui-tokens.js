@@ -23,7 +23,7 @@ export function paperErrorPopoutCss({
     `z-index:${zIndex}`,
     `background:${EXTENSION_PAPER_COLOR}`,
     `color:${EXTENSION_ERROR_COLOR}`,
-    `border:1px solid ${EXTENSION_ERROR_COLOR}`,
+    `border:2px solid ${EXTENSION_ERROR_COLOR}`,
     `font:${fontSize}/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif`,
     `padding:${padding}`,
     'border-radius:6px',

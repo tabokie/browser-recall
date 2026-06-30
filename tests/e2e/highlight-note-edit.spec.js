@@ -4,6 +4,7 @@ import {
   getSlugForUrl,
   openHelperPage,
   pageCheckpointPath,
+  longestLeftBorderRun,
 } from './helpers.js';
 
 test.describe('Highlight note edit', () => {
@@ -65,6 +66,11 @@ test.describe('Highlight note edit', () => {
     // Click the highlight mark to open the edit overlay
     await page.click('mark.portal-highlight');
     await page.waitForSelector('#portal-highlight-overlay', { timeout: 3000 });
+
+    const overlayBorderRun = await longestLeftBorderRun(
+      page.locator('#portal-highlight-overlay'),
+    );
+    expect(overlayBorderRun).toBeGreaterThanOrEqual(2);
 
     // Textarea is auto-focused — type a note
     await page.keyboard.type('my important note');

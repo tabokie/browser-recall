@@ -5,6 +5,7 @@ import {
   getSlugForUrl,
   openHelperPage,
   pageCheckpointPath,
+  longestLeftBorderRun,
 } from './helpers.js';
 
 function snapshotSidecarPath(slug, timestamp, ext) {
@@ -45,6 +46,110 @@ async function openPopupForUrl(extContext, extensionId, { url, title }) {
 }
 
 test.describe('Snapshot slug meta tag', () => {
+  test('snapshot shortcut reconnects during connector cold start', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/capture-cold-start-shortcut', {
+      title: 'Capture Cold Start Shortcut',
+      body: '<p>Cold-start shortcut snapshot content.</p>',
+    });
+    const pageUrl = localServer.url('/capture-cold-start-shortcut');
+    const slug = getSlugForUrl(pageUrl);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(pageUrl);
+    await page.waitForLoadState('load');
+    const helper = await openHelperPage(extContext, extensionId);
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'restartConnectorRuntimeForTest' }),
+    );
+    await page.bringToFront();
+
+    const commandResp = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'triggerCommandForTest',
+        command: 'capture-snapshot',
+      }),
+    );
+    expect(commandResp).toEqual({ success: true });
+
+    await expect
+      .poll(() =>
+        helper.evaluate(
+          (key) =>
+            chrome.runtime.sendMessage({ action: 'readDesktopValue', key }),
+          `page:${slug}`,
+        ),
+      )
+      .toMatchObject({
+        success: true,
+        value: { childIds: [expect.stringMatching(/^snapshot:/)] },
+      });
+
+    await helper.close();
+    await page.close();
+  });
+
+  test('capture reconnects when cached connector state is stale', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/capture-stale-connector', {
+      title: 'Capture Stale Connector',
+      body: '<p>Snapshot content survives stale connector state.</p>',
+    });
+    const pageUrl = localServer.url('/capture-stale-connector');
+    const slug = getSlugForUrl(pageUrl);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(pageUrl);
+    await page.waitForLoadState('load');
+
+    const helper = await openHelperPage(extContext, extensionId);
+    await helper.evaluate(() =>
+      chrome.storage.local.set({ connectorState: 'offline' }),
+    );
+    await page.bringToFront();
+
+    const captureResp = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' }),
+    );
+    expect(captureResp, JSON.stringify(captureResp)).toMatchObject({
+      success: true,
+    });
+
+    await expect
+      .poll(() =>
+        helper.evaluate(
+          (key) =>
+            chrome.runtime.sendMessage({ action: 'readDesktopValue', key }),
+          `page:${slug}`,
+        ),
+      )
+      .toMatchObject({
+        success: true,
+        value: {
+          childIds: [expect.stringMatching(/^snapshot:/)],
+        },
+      });
+
+    await helper.close();
+    await page.close();
+  });
+
   // Content script resolves slug from x-portal-slug meta tag and reapplies highlights.
   // Simulates the snapshot viewer scenario: the page URL doesn't match the original,
   // but the embedded meta tag tells content.js which page entity to load notes from.
@@ -288,6 +393,12 @@ test.describe('Snapshot slug meta tag', () => {
     const frame = viewer.frameLocator('iframe');
     await expect(frame.locator('body')).toContainText(highlightText);
     await expect(frame.locator('mark')).toHaveText(highlightText);
+    await frame.locator('mark').click();
+    const viewerOverlayBorderRun = await longestLeftBorderRun(
+      frame.locator('#portal-highlight-overlay'),
+    );
+    expect(viewerOverlayBorderRun).toBeGreaterThanOrEqual(2);
+    await viewer.keyboard.press('Escape');
 
     const viewerPopup = await openPopupForUrl(extContext, extensionId, {
       url: viewer.url(),

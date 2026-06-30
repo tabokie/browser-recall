@@ -50,7 +50,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `apps/extension/extension-surface.js` | Shared shadow-DOM styling and overlay placement helpers for extension content surfaces |
 | `apps/extension/extension-ui-tokens.js` | Shared extension paper/error tokens and transient error popout styling |
 | `apps/extension/savepage-bridge.js` | Save Page WE capture bridge |
-| `apps/extension/connector/ws-client.js` | Connector websocket transport to daemon |
+| `apps/extension/connector/ws-client.js` | Connector websocket transport, request readiness, and reconnect handling for daemon RPC |
 | `apps/extension/connector/pairing.js` | Pairing bootstrap and session helpers |
 | `apps/extension/connector/command-buffer.js` | Outbound command buffering/flush helpers |
 | `apps/extension/options-stub.html` | Stub page that points users to the desktop app |

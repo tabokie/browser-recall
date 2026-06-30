@@ -2,6 +2,7 @@ import {
   requestDesktopSetDeviceId,
   requestDesktopTestReset,
   requestDesktopTestSeed,
+  restartConnectorRuntimeForTest,
 } from './connector/ws-client.js';
 import { BACKGROUND_TEST_ACTIONS } from './background-test-actions.js';
 import { getBrowserCapabilities } from './browser-capabilities.js';
@@ -179,6 +180,10 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
           break;
         case 'triggerCommandForTest':
           sendResponse(await handleTriggerCommandForTest(request));
+          break;
+        case 'restartConnectorRuntimeForTest':
+          await restartConnectorRuntimeForTest();
+          sendResponse({ success: true });
           break;
       }
     } catch (error) {

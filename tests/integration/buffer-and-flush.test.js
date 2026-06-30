@@ -917,6 +917,115 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(store.connectorState).toBe('connected');
   }, 30_000);
 
+  it('reconnects instead of trusting status from a socket that closes', async () => {
+    const dir = mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-status-close-race-'),
+    );
+    tempDirs.push(dir);
+
+    originalWebSocket = globalThis.WebSocket;
+    originalChrome = globalThis.chrome;
+    originalNavigator = globalThis.navigator;
+    originalSetTimeout = globalThis.setTimeout;
+
+    const { chrome, store } = createChromeMock();
+    globalThis.chrome = chrome;
+    globalThis.WebSocket = BrowserLikeWebSocket;
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { userAgent: 'Chrome/123.0.0.0 Safari/537.36' },
+      configurable: true,
+    });
+    globalThis.setTimeout = (fn, delay, ...args) => {
+      const timer = originalSetTimeout(fn, delay, ...args);
+      timer?.unref?.();
+      return timer;
+    };
+
+    const wsClient =
+      await import('../../apps/extension/connector/ws-client.js');
+
+    const child = launchDaemon(dir, 'allow');
+    childProcesses.push(child);
+    store.connectorDaemonPort = await waitForListening(child);
+
+    await wsClient.initConnectorBridge();
+    await waitFor(async () => {
+      const state = await wsClient.getConnectorBridgeState();
+      return state.state === 'connected' && state.hasToken;
+    });
+
+    const setStorage = chrome.storage.local.set;
+    let closeDuringConnectedWrite = true;
+    chrome.storage.local.set = async (values) => {
+      if (closeDuringConnectedWrite && values.connectorState === 'connected') {
+        closeDuringConnectedWrite = false;
+        BrowserLikeWebSocket.instances.at(-1).socket.close();
+        await waitFor(
+          () =>
+            BrowserLikeWebSocket.instances.length > 1 &&
+            BrowserLikeWebSocket.instances.at(-1)._authenticated,
+        );
+      }
+      await setStorage(values);
+    };
+    store.connectorState = 'offline';
+    const state = await wsClient.refreshConnectorBridgeState(250);
+
+    expect(state.state).toBe('connected');
+    expect(BrowserLikeWebSocket.instances).toHaveLength(2);
+  }, 30_000);
+
+  it('preserves a paused connector state after a successful status refresh', async () => {
+    const dir = mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-status-preserves-pause-'),
+    );
+    tempDirs.push(dir);
+
+    originalWebSocket = globalThis.WebSocket;
+    originalChrome = globalThis.chrome;
+    originalNavigator = globalThis.navigator;
+    originalSetTimeout = globalThis.setTimeout;
+
+    const { chrome, store } = createChromeMock();
+    globalThis.chrome = chrome;
+    globalThis.WebSocket = BrowserLikeWebSocket;
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { userAgent: 'Chrome/123.0.0.0 Safari/537.36' },
+      configurable: true,
+    });
+    globalThis.setTimeout = (fn, delay, ...args) => {
+      const timer = originalSetTimeout(fn, delay, ...args);
+      timer?.unref?.();
+      return timer;
+    };
+
+    const wsClient =
+      await import('../../apps/extension/connector/ws-client.js');
+
+    const child = launchDaemon(dir, 'allow');
+    childProcesses.push(child);
+    store.connectorDaemonPort = await waitForListening(child);
+
+    await wsClient.initConnectorBridge();
+    await waitFor(async () => {
+      const state = await wsClient.getConnectorBridgeState();
+      return state.state === 'connected' && state.hasToken;
+    });
+
+    store.connectorState = 'paused';
+    store.connectorLastError = 'Replay storage failed';
+    store.connectorLastErrorCode = 'replay_error';
+    await wsClient.getConnectorBridgeState();
+
+    const state = await wsClient.refreshConnectorBridgeState();
+
+    expect(state).toMatchObject({
+      state: 'paused',
+      lastError: 'Replay storage failed',
+      lastErrorCode: 'replay_error',
+    });
+  }, 30_000);
+
   it('recovers from offline state when the reconnect alarm fires after desktop restarts', async () => {
     const dir = mkdtempSync(
       path.join(tmpdir(), 'browser-recall-alarm-recover-'),

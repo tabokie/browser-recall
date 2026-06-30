@@ -7,6 +7,7 @@ export const BACKGROUND_TEST_ACTIONS = [
   'preparePopupBootstrapForTest',
   'failNextTabMessageForTest',
   'triggerCommandForTest',
+  'restartConnectorRuntimeForTest',
 ];
 
 globalThis.browserRecallBackgroundTestActions = new Set(

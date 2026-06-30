@@ -380,7 +380,7 @@ function initContentScript() {
       .overlay {
         width: 300px;
         background: var(--br-bg-base);
-        border: 1px solid var(--br-border-section);
+        border: var(--br-floating-border);
         border-radius: 2px;
         color: var(--br-text-primary);
         font-family: var(--br-font-body);
@@ -1428,7 +1428,7 @@ function initContentScript() {
         max-width: min(360px, calc(100vw - 32px));
         background: var(--br-bg-base);
         color: var(--br-text-primary);
-        border: 1px solid var(--br-border-section);
+        border: var(--br-floating-border);
         border-radius: 2px;
         font-family: var(--br-font-body);
         font-size: 11px;
@@ -1476,7 +1476,7 @@ function initContentScript() {
         z-index: 2147483647;
         background: var(--br-bg-base);
         color: var(--br-text-primary);
-        border: 1px solid var(--br-border-section);
+        border: var(--br-floating-border);
         border-radius: 2px;
         font-family: var(--br-font-body);
         font-size: 11px;
@@ -1598,7 +1598,7 @@ function initContentScript() {
     shadow.innerHTML = `
     <style>
       ${extensionSurface.shadowCss}
-      .panel { width: 300px; max-height: 400px; overflow-y: auto; background: var(--br-bg-base); border: 1px solid var(--br-border-section); border-radius: 2px; color: var(--br-text-primary); font-family: var(--br-font-body); font-size: 12px; line-height: 1.45; }
+      .panel { width: 300px; max-height: 400px; overflow-y: auto; background: var(--br-bg-base); border: var(--br-floating-border); border-radius: 2px; color: var(--br-text-primary); font-family: var(--br-font-body); font-size: 12px; line-height: 1.45; }
       .panel-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--br-border-section); color: var(--br-text-primary); cursor: move; font-size: 10px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; user-select: none; }
       .close-btn { width: 22px; height: 22px; background: none; border: none; border-radius: 2px; cursor: pointer; color: var(--br-text-muted); font-size: 16px; line-height: 1; padding: 0; }
       .close-btn:hover { background: var(--br-bg-surface-active); color: var(--br-text-primary); }

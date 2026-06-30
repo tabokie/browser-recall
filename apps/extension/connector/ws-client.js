@@ -265,9 +265,15 @@ async function refreshAuthenticatedSocketStatus({
   logMessage,
   awaitFlush,
 }) {
+  const socket = currentSocket;
   if (!hasAuthenticatedOpenSocket()) return false;
   clearReconnect();
-  if (pendingRequest) return true;
+  if (pendingRequest) {
+    await bridgeRequestQueue.catch(() => {});
+    if (currentSocket !== socket || !hasAuthenticatedOpenSocket()) {
+      return false;
+    }
+  }
   const status = await requestStatus().catch(async (error) => {
     await setDiagnostic(diagnosticCode, {
       message: error.message,
@@ -277,6 +283,20 @@ async function refreshAuthenticatedSocketStatus({
     return null;
   });
   if (!status) return false;
+  if (currentSocket !== socket || !hasAuthenticatedOpenSocket()) return false;
+  // A successful status probe proves transport liveness, not daemon write
+  // health. Preserve stronger states such as PAUSED until a new session auth.
+  if (cachedConnectorState().state !== CONNECTOR_STATES.PAUSED) {
+    await setState(CONNECTOR_STATES.CONNECTED, {
+      [STORAGE_KEYS.lastError]: null,
+      [STORAGE_KEYS.lastErrorCode]: null,
+    });
+  }
+  // An await above can let close handling authenticate a replacement socket.
+  // Never publish fallback state here that could overwrite that newer session.
+  if (currentSocket !== socket || !hasAuthenticatedOpenSocket()) {
+    return false;
+  }
   const flush = flushBufferedMessages();
   if (awaitFlush) await flush;
   else void flush;
@@ -701,15 +721,18 @@ async function requestStatus() {
     'status',
     'error',
   ]);
-  await writeState({
+  const statePatch = {
     [STORAGE_KEYS.daemonBufferDepth]:
       payload.daemonBufferDepth ?? payload.bufferDepth,
     [STORAGE_KEYS.lastDrainedAt]: payload.lastDrainedAt,
     [STORAGE_KEYS.dataFolder]: payload.dataFolder,
     [STORAGE_KEYS.deviceId]: payload.deviceId,
-    [STORAGE_KEYS.lastError]: null,
-    [STORAGE_KEYS.lastErrorCode]: null,
-  });
+  };
+  if (cachedConnectorState().state !== CONNECTOR_STATES.PAUSED) {
+    statePatch[STORAGE_KEYS.lastError] = null;
+    statePatch[STORAGE_KEYS.lastErrorCode] = null;
+  }
+  await writeState(statePatch);
   await clearDiagnostic();
   return payload;
 }
@@ -839,6 +862,16 @@ export async function initConnectorBridge() {
   started = true;
   await setState(CONNECTOR_STATES.STARTING);
   await connect();
+}
+
+export async function restartConnectorRuntimeForTest() {
+  clearReconnect();
+  if (currentSocket) await closeSocketForReconnect(currentSocket);
+  started = false;
+  connectPromise = null;
+  flushPromise = null;
+  await setState(CONNECTOR_STATES.STARTING);
+  void initConnectorBridge();
 }
 
 export async function refreshConnectorBridgeState(

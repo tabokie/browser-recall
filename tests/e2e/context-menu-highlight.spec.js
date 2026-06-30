@@ -4,6 +4,7 @@ import {
   getSlugForUrl,
   openHelperPage,
   pageCheckpointPath,
+  longestLeftBorderRun,
 } from './helpers.js';
 
 const TEST_URL = 'https://example.com/article';
@@ -185,7 +186,10 @@ test.describe('Context menu highlight', () => {
       return panel?.shadowRoot?.textContent || '';
     });
     expect(panelText).toContain('important excerpt');
-
+    const panelBorderRun = await longestLeftBorderRun(
+      page.locator('#portal-highlights-panel'),
+    );
+    expect(panelBorderRun).toBeGreaterThanOrEqual(2);
     await page.close();
     await helper.close();
   });
