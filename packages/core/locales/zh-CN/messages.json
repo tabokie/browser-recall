@@ -863,6 +863,22 @@
     "message": "高亮失败",
     "description": "Highlight failure."
   },
+  "extensionHighlightSelected": {
+    "message": "高亮所选内容",
+    "description": "Selection context menu label."
+  },
+  "extensionResumeTracing": {
+    "message": "恢复跟踪",
+    "description": "Extension popup recording resume title."
+  },
+  "extensionUpdatingTracing": {
+    "message": "正在更新跟踪",
+    "description": "Extension popup recording update title."
+  },
+  "extensionPdfHighlightHint": {
+    "message": "选择文本并右键单击以高亮",
+    "description": "PDF highlight panel instruction."
+  },
   "extensionLastCheckAuthenticatedStatusFailed": {
     "message": "上次检查：已认证，但状态获取失败。",
     "description": "Connector diagnostic."
@@ -1522,5 +1538,66 @@
   "desktopDeviceIdentityRestart": {
     "message": "设备身份不可用。请重启 Browser Recall。",
     "description": "Startup failure when desktop device identity is unavailable."
+  },
+  "extensionCouldNotLoadNotes": {
+    "message": "无法加载笔记。",
+    "description": "无法加载笔记时显示的错误。"
+  },
+  "extensionCouldNotLoadHighlights": {
+    "message": "无法加载高亮。",
+    "description": "无法加载高亮时显示的错误。"
+  },
+  "extensionCouldNotLoadLists": {
+    "message": "无法加载列表。",
+    "description": "无法加载列表时显示的错误。"
+  },
+  "extensionCouldNotLoadShortcuts": {
+    "message": "无法加载快捷键：$1",
+    "description": "无法加载快捷键时显示的错误。"
+  },
+  "extensionPopupDataTimedOut": {
+    "message": "弹出窗口数据加载超时。请重试。",
+    "description": "弹出窗口数据加载超时错误。"
+  },
+  "desktopAddColumns": {
+    "message": "添加列",
+    "description": "添加列按钮标题。"
+  },
+  "desktopClearSearch": {
+    "message": "清除搜索",
+    "description": "清除搜索按钮标签。"
+  },
+  "desktopExpand": { "message": "展开", "description": "展开列表标题。" },
+  "desktopFailedToLoadPageDetails": {
+    "message": "无法加载页面详情",
+    "description": "Page detail load failure."
+  },
+  "desktopAutoTag": {
+    "message": "自动",
+    "description": "Automatically pinned result tag."
+  },
+  "desktopLikedTag": {
+    "message": "已点赞",
+    "description": "Liked result tag."
+  },
+  "desktopNoteTag": {
+    "message": "笔记",
+    "description": "Result tag indicating a note."
+  },
+  "desktopSnapshotTag": {
+    "message": "快照",
+    "description": "Result tag indicating a snapshot."
+  },
+  "desktopMatchedInNoteTag": {
+    "message": "在笔记中匹配",
+    "description": "Search result tag for a note match."
+  },
+  "desktopMatchedInSnapshotTag": {
+    "message": "在快照中匹配",
+    "description": "Search result tag for a snapshot match."
+  },
+  "desktopListNamePlaceholder": {
+    "message": "列表名称...",
+    "description": "列表名称输入占位符。"
   }
 }

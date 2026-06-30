@@ -863,6 +863,22 @@
     "message": "突出顯示失敗",
     "description": "Highlight failure."
   },
+  "extensionHighlightSelected": {
+    "message": "醒目提示所選內容",
+    "description": "Selection context menu label."
+  },
+  "extensionResumeTracing": {
+    "message": "繼續追蹤",
+    "description": "Extension popup recording resume title."
+  },
+  "extensionUpdatingTracing": {
+    "message": "正在更新追蹤",
+    "description": "Extension popup recording update title."
+  },
+  "extensionPdfHighlightHint": {
+    "message": "選取文字並按一下滑鼠右鍵以醒目提示",
+    "description": "PDF highlight panel instruction."
+  },
   "extensionLastCheckAuthenticatedStatusFailed": {
     "message": "上次檢查：已通過身份驗證，但狀態失敗。",
     "description": "Connector diagnostic."
@@ -1522,5 +1538,66 @@
   "desktopDeviceIdentityRestart": {
     "message": "設備身份不可用。嘗試重新啟動 Browser Recall。",
     "description": "Startup failure when desktop device identity is unavailable."
+  },
+  "extensionCouldNotLoadNotes": {
+    "message": "無法載入筆記。",
+    "description": "無法載入筆記時顯示的錯誤。"
+  },
+  "extensionCouldNotLoadHighlights": {
+    "message": "無法載入醒目提示。",
+    "description": "無法載入醒目提示時顯示的錯誤。"
+  },
+  "extensionCouldNotLoadLists": {
+    "message": "無法載入清單。",
+    "description": "無法載入清單時顯示的錯誤。"
+  },
+  "extensionCouldNotLoadShortcuts": {
+    "message": "無法載入快速鍵：$1",
+    "description": "無法載入快速鍵時顯示的錯誤。"
+  },
+  "extensionPopupDataTimedOut": {
+    "message": "彈出視窗資料載入逾時。請再試一次。",
+    "description": "彈出視窗資料載入逾時錯誤。"
+  },
+  "desktopAddColumns": {
+    "message": "新增欄",
+    "description": "新增欄按鈕標題。"
+  },
+  "desktopClearSearch": {
+    "message": "清除搜尋",
+    "description": "清除搜尋按鈕標籤。"
+  },
+  "desktopExpand": { "message": "展開", "description": "展開清單標題。" },
+  "desktopFailedToLoadPageDetails": {
+    "message": "無法載入頁面詳細資料",
+    "description": "Page detail load failure."
+  },
+  "desktopAutoTag": {
+    "message": "自動",
+    "description": "Automatically pinned result tag."
+  },
+  "desktopLikedTag": {
+    "message": "已按讚",
+    "description": "Liked result tag."
+  },
+  "desktopNoteTag": {
+    "message": "筆記",
+    "description": "Result tag indicating a note."
+  },
+  "desktopSnapshotTag": {
+    "message": "快照",
+    "description": "Result tag indicating a snapshot."
+  },
+  "desktopMatchedInNoteTag": {
+    "message": "在筆記中相符",
+    "description": "Search result tag for a note match."
+  },
+  "desktopMatchedInSnapshotTag": {
+    "message": "在快照中相符",
+    "description": "Search result tag for a snapshot match."
+  },
+  "desktopListNamePlaceholder": {
+    "message": "清單名稱...",
+    "description": "清單名稱輸入預留位置。"
   }
 }

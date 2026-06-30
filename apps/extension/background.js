@@ -761,14 +761,47 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 // ─── Initialization ───────────────────────────────────────────────────
 
+function callContextMenuMethod(methodName, ...args) {
+  const method = chrome.contextMenus[methodName].bind(chrome.contextMenus);
+  // Firefox exposes context-menu promises; Chromium-compatible engines may
+  // report callback-only failures through runtime.lastError.
+  if (globalThis.browserRecallWebExtension?.engine === 'firefox') {
+    return Promise.resolve(method(...args));
+  }
+  return new Promise((resolve, reject) => {
+    try {
+      method(...args, () => {
+        const error =
+          globalThis.browser?.runtime?.lastError || chrome.runtime.lastError;
+        if (error) {
+          reject(new Error(error.message));
+          return;
+        }
+        resolve();
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+async function ensureLocalizedHighlightContextMenu() {
+  const item = {
+    id: 'portal-highlight',
+    title: tr('extensionHighlightSelected', 'Highlight Selected'),
+    contexts: ['selection'],
+  };
+  try {
+    await callContextMenuMethod('update', item.id, { title: item.title });
+  } catch {
+    await callContextMenuMethod('create', item);
+  }
+}
+
 chrome.runtime.onInstalled.addListener(async (details = {}) => {
   logDebug('browser-recall extension installed');
 
-  chrome.contextMenus.create({
-    id: 'portal-highlight',
-    title: 'Highlight Selected',
-    contexts: ['selection'],
-  });
+  await ensureLocalizedHighlightContextMenu();
 
   if (details.reason === 'install') {
     await chrome.runtime.openOptionsPage().catch((error) => {
@@ -783,6 +816,8 @@ chrome.runtime.onInstalled.addListener(async (details = {}) => {
 
 chrome.runtime.onStartup.addListener(async () => {
   logDebug('Extension started');
+
+  await ensureLocalizedHighlightContextMenu();
 
   startConnectorBridge('browser start');
 });
@@ -1159,7 +1194,12 @@ async function handleGetPageInfo(request) {
     if (!desktopResp?.success) {
       return {
         success: false,
-        error: desktopResp?.error || 'Desktop popup page info failed',
+        error:
+          desktopResp?.error ||
+          tr(
+            'extensionDesktopPageDataUnavailable',
+            'Desktop page data unavailable.',
+          ),
       };
     }
     return {
@@ -1172,7 +1212,12 @@ async function handleGetPageInfo(request) {
   } catch (error) {
     return {
       success: false,
-      error: error.message || 'Desktop popup page info failed',
+      error:
+        error.message ||
+        tr(
+          'extensionDesktopPageDataUnavailable',
+          'Desktop page data unavailable.',
+        ),
     };
   }
 }
@@ -1200,7 +1245,12 @@ async function handleGetPageSummary(request) {
   } catch (error) {
     return {
       success: false,
-      error: error.message || 'Desktop popup page summary failed',
+      error:
+        error.message ||
+        tr(
+          'extensionDesktopPageDataUnavailable',
+          'Desktop page data unavailable.',
+        ),
     };
   }
 }
@@ -1211,7 +1261,9 @@ async function handleGetPopupLists() {
     if (!desktopResp?.success) {
       return {
         success: false,
-        error: desktopResp?.error || 'Desktop popup lists failed',
+        error:
+          desktopResp?.error ||
+          tr('extensionCouldNotLoadLists', 'Could not load lists.'),
       };
     }
     return {
@@ -1221,7 +1273,9 @@ async function handleGetPopupLists() {
   } catch (error) {
     return {
       success: false,
-      error: error.message || 'Desktop popup lists failed',
+      error:
+        error.message ||
+        tr('extensionCouldNotLoadLists', 'Could not load lists.'),
     };
   }
 }
@@ -1232,7 +1286,11 @@ async function handleCaptureCurrentPageFromPopup() {
       active: true,
       currentWindow: true,
     });
-    if (!tab) return { success: false, error: 'No active tab' };
+    if (!tab)
+      return {
+        success: false,
+        error: tr('extensionNoTargetTab', 'No target tab'),
+      };
     const slug = generateSlugFromUrl(tab.url);
     const timestamp = await nextLogTimestamp();
     await captureAndLog(tab.id, slug, timestamp, tab.url, tab.title);
@@ -1250,7 +1308,7 @@ async function handleRecordPageActivity(request, sender) {
     if (isServicePaused()) {
       return {
         success: false,
-        error: 'Service paused',
+        error: tr('extensionBrowserRecallPaused', 'Browser Recall is paused'),
         code: serviceError.code,
       };
     }
@@ -1525,7 +1583,12 @@ async function preparePopupBootstrapForTab(tab) {
       connector,
       tab: preparedTab,
       identity,
-      error: access.error || 'Desktop popup access check failed.',
+      error:
+        access.error ||
+        tr(
+          'extensionDesktopPopupAccessFailed',
+          'Desktop popup access check failed',
+        ),
       diagnostic: {
         reason: 'popup-access-check-failed',
         access,
@@ -1545,7 +1608,12 @@ async function preparePopupBootstrapForTab(tab) {
       connector,
       tab: preparedTab,
       identity,
-      error: summary?.error || 'Desktop page summary failed.',
+      error:
+        summary?.error ||
+        tr(
+          'extensionDesktopPageDataUnavailable',
+          'Desktop page data unavailable.',
+        ),
       diagnostic: {
         reason: 'popup-page-summary-failed',
         summary,
@@ -1583,7 +1651,7 @@ function timeoutPopupBootstrap(tab) {
         }
       : null,
     identity,
-    error: 'Popup data timed out. Try again.',
+    error: tr('extensionPopupDataTimedOut', 'Popup data timed out. Try again.'),
     diagnostic: {
       reason: 'popup-prepare-timeout',
       timeoutMs: POPUP_PREPARE_TIMEOUT_MS,
@@ -1674,7 +1742,12 @@ async function handleLoadPageNotes(request) {
     if (!desktopResp?.success) {
       return {
         success: false,
-        error: desktopResp?.error || 'Desktop page info unavailable',
+        error:
+          desktopResp?.error ||
+          tr(
+            'extensionDesktopPageDataUnavailable',
+            'Desktop page data unavailable.',
+          ),
       };
     }
     notes = desktopResp.notes || [];
@@ -1695,7 +1768,12 @@ async function handleListSnapshots(request) {
     if (!desktopResp?.success) {
       return {
         success: false,
-        error: desktopResp?.error || 'Desktop page info unavailable',
+        error:
+          desktopResp?.error ||
+          tr(
+            'extensionDesktopPageDataUnavailable',
+            'Desktop page data unavailable.',
+          ),
       };
     }
     snapshots = desktopResp.snapshots || [];
@@ -1896,7 +1974,13 @@ async function handleInitializeFilesystem(request) {
   const connector = await refreshConnectorBridgeState();
   syncDesktopConnectorPauseState(connector);
   if (connector.state !== 'connected') {
-    return { success: false, error: 'Browser Recall Desktop is not connected' };
+    return {
+      success: false,
+      error: tr(
+        'extensionDesktopNotConnectedRefresh',
+        'Browser Recall Desktop is not connected yet. Start the desktop app and refresh from the popup.',
+      ),
+    };
   }
   if (connector.deviceId) localDeviceId = connector.deviceId;
   await ensureDefaultLists();

@@ -1,0 +1,19 @@
+- Localization is still not thorough, e.g. "Select test and right-click to highlight", "Highlight Selected". Fix them and check thoroughly again.
+- Good, let's also fix GitHub CI in this session. Right now all pipelines are failing. You can check the specifics at [https://github.com/tabokie/browser-recall/actions/runs/28418552621/job/84206683907](https://github.com/tabokie/browser-recall/actions/runs/28418552621/job/84206683907) using my browser credentials.
+-
+# In app browser:
+- The user has the in-app browser open with 1 tab.
+- Current URL: https://github.com/tabokie/browser-recall/actions/runs/28418552621/job/84206683907
+
+## My request for Codex:
+Couldn't you computer-use my default browser?
+- You don't need browser control, you can use computer-use.
+- resume
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them all
+- Please review my uncommitted changes
+- Fix them all
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.5 Codex
+- Add it as comments somewhere
+- Go ahead
+- Sure

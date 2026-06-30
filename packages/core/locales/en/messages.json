@@ -423,6 +423,34 @@
     "message": "Page details unavailable",
     "description": "Page detail empty state."
   },
+  "desktopFailedToLoadPageDetails": {
+    "message": "Failed to load page details",
+    "description": "Page detail load failure."
+  },
+  "desktopAutoTag": {
+    "message": "auto",
+    "description": "Automatically pinned result tag."
+  },
+  "desktopLikedTag": {
+    "message": "liked",
+    "description": "Liked result tag."
+  },
+  "desktopNoteTag": {
+    "message": "note",
+    "description": "Result tag indicating a note."
+  },
+  "desktopSnapshotTag": {
+    "message": "snapshot",
+    "description": "Result tag indicating a snapshot."
+  },
+  "desktopMatchedInNoteTag": {
+    "message": "matched in note",
+    "description": "Search result tag for a note match."
+  },
+  "desktopMatchedInSnapshotTag": {
+    "message": "matched in snapshot",
+    "description": "Search result tag for a snapshot match."
+  },
   "desktopParents": {
     "message": "Parents",
     "description": "Page relation section label."
@@ -862,6 +890,22 @@
   "extensionHighlightFailed": {
     "message": "Highlight failed",
     "description": "Highlight failure."
+  },
+  "extensionHighlightSelected": {
+    "message": "Highlight Selected",
+    "description": "Selection context menu label."
+  },
+  "extensionResumeTracing": {
+    "message": "Resume tracing",
+    "description": "Extension popup recording resume title."
+  },
+  "extensionUpdatingTracing": {
+    "message": "Updating tracing",
+    "description": "Extension popup recording update title."
+  },
+  "extensionPdfHighlightHint": {
+    "message": "Select text and right-click to highlight",
+    "description": "PDF highlight panel instruction."
   },
   "extensionLastCheckAuthenticatedStatusFailed": {
     "message": "Last check: authenticated, but status failed.",
@@ -1522,5 +1566,38 @@
   "desktopDeviceIdentityRestart": {
     "message": "Device identity unavailable. Try restarting Browser Recall.",
     "description": "Startup failure when desktop device identity is unavailable."
+  },
+  "extensionCouldNotLoadNotes": {
+    "message": "Could not load notes.",
+    "description": "Error shown when page notes cannot be loaded."
+  },
+  "extensionCouldNotLoadHighlights": {
+    "message": "Could not load highlights.",
+    "description": "Error shown when page highlights cannot be loaded."
+  },
+  "extensionCouldNotLoadLists": {
+    "message": "Could not load lists.",
+    "description": "Error shown when lists cannot be loaded."
+  },
+  "extensionCouldNotLoadShortcuts": {
+    "message": "Could not load shortcuts: $1",
+    "description": "Error shown when browser shortcuts cannot be loaded. $1 is the underlying error."
+  },
+  "extensionPopupDataTimedOut": {
+    "message": "Popup data timed out. Try again.",
+    "description": "Error shown when loading popup data times out."
+  },
+  "desktopAddColumns": {
+    "message": "Add columns",
+    "description": "Add table columns button title."
+  },
+  "desktopClearSearch": {
+    "message": "Clear search",
+    "description": "Clear search button label."
+  },
+  "desktopExpand": { "message": "Expand", "description": "Expand list title." },
+  "desktopListNamePlaceholder": {
+    "message": "List name...",
+    "description": "New list name input placeholder."
   }
 }

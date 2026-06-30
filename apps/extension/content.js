@@ -1015,7 +1015,7 @@ function initContentScript() {
           if (
             showUserActionFailureFromResponse(
               resp,
-              'Could not load highlight note',
+              tr('extensionCouldNotLoadNotes', 'Could not load notes.'),
             )
           ) {
             console.warn('[content] loadPageNotes failed:', resp.error);
@@ -1189,11 +1189,14 @@ function initContentScript() {
       .delete-btn { flex-shrink:0; width:30px; height:30px; display:flex; align-items:center; justify-content:center; background:none; border:1px solid var(--br-border-section); border-radius:2px; cursor:pointer; color:var(--br-text-muted); padding:0; }
       .delete-btn:hover { background:var(--br-bg-surface-active); border-color:var(--br-text-primary); color:var(--br-text-primary); }
       .delete-btn svg { width:16px; height:16px; fill:currentColor; }`,
-      beforeTextareaHtml: extensionSurface.trashButtonHtml(),
+      beforeTextareaHtml: extensionSurface.trashButtonHtml(
+        tr('commonDelete', 'Delete'),
+      ),
       bodyHtml: extensionSurface.noteOverlayHtml({
         excerpt: text || '',
         placeholder: tr('extensionAddNoteEsc', 'Add a note... Esc to save.'),
         includeDelete: true,
+        deleteTitle: tr('commonDelete', 'Delete'),
       }),
       placeholder: tr('extensionAddNoteEsc', 'Add a note... Esc to save.'),
       existingNote,
@@ -1896,7 +1899,7 @@ function initContentScript() {
             if (
               showUserActionFailureFromResponse(
                 resp,
-                'Could not load page note',
+                tr('extensionCouldNotLoadNotes', 'Could not load notes.'),
               )
             ) {
               console.warn('[content] loadPageNotes failed:', resp.error);
@@ -1983,23 +1986,35 @@ function initContentScript() {
             if (
               showUserActionFailureFromResponse(
                 resp,
-                'Could not load highlights',
+                tr(
+                  'extensionCouldNotLoadHighlights',
+                  'Could not load highlights.',
+                ),
               )
             ) {
               showHighlightsPanel([], pdfSlug, {
-                hint: 'Select text and right-click to highlight',
+                hint: tr(
+                  'extensionPdfHighlightHint',
+                  'Select text and right-click to highlight',
+                ),
               });
               return;
             }
             const notes = resp?.notes || [];
             showHighlightsPanel(notes, pdfSlug, {
-              hint: 'Select text and right-click to highlight',
+              hint: tr(
+                'extensionPdfHighlightHint',
+                'Select text and right-click to highlight',
+              ),
             });
           })
           .catch((error) => {
             if (showExtensionReloadNotification(error)) return;
             showHighlightsPanel([], pdfSlug, {
-              hint: 'Select text and right-click to highlight',
+              hint: tr(
+                'extensionPdfHighlightHint',
+                'Select text and right-click to highlight',
+              ),
             });
           });
       }

@@ -1,5 +1,5 @@
-export const EXTENSION_PAPER_COLOR = '#f7f4ea';
-export const EXTENSION_ERROR_COLOR = '#ff2d20';
+const EXTENSION_PAPER_COLOR = '#f7f4ea';
+const EXTENSION_ERROR_COLOR = '#ff2d20';
 
 export function applyPaperErrorPopoutStyle(element) {
   element.style.backgroundColor = EXTENSION_PAPER_COLOR;

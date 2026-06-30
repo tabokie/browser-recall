@@ -863,6 +863,22 @@
     "message": "Resaltado fallido",
     "description": "Highlight failure."
   },
+  "extensionHighlightSelected": {
+    "message": "Resaltar selección",
+    "description": "Selection context menu label."
+  },
+  "extensionResumeTracing": {
+    "message": "Reanudar el rastreo",
+    "description": "Extension popup recording resume title."
+  },
+  "extensionUpdatingTracing": {
+    "message": "Actualizando el rastreo",
+    "description": "Extension popup recording update title."
+  },
+  "extensionPdfHighlightHint": {
+    "message": "Seleccione texto y haga clic derecho para resaltarlo",
+    "description": "PDF highlight panel instruction."
+  },
   "extensionLastCheckAuthenticatedStatusFailed": {
     "message": "Última comprobación: autenticado, pero el estado falló.",
     "description": "Connector diagnostic."
@@ -1522,5 +1538,69 @@
   "desktopDeviceIdentityRestart": {
     "message": "La identidad del dispositivo no está disponible. Intente reiniciar Browser Recall.",
     "description": "Startup failure when desktop device identity is unavailable."
+  },
+  "extensionCouldNotLoadNotes": {
+    "message": "No se pudieron cargar las notas.",
+    "description": "Error al cargar las notas."
+  },
+  "extensionCouldNotLoadHighlights": {
+    "message": "No se pudieron cargar los elementos resaltados.",
+    "description": "Error al cargar los elementos resaltados."
+  },
+  "extensionCouldNotLoadLists": {
+    "message": "No se pudieron cargar las listas.",
+    "description": "Error al cargar las listas."
+  },
+  "extensionCouldNotLoadShortcuts": {
+    "message": "No se pudieron cargar los atajos: $1",
+    "description": "Error al cargar los atajos."
+  },
+  "extensionPopupDataTimedOut": {
+    "message": "Se agotó el tiempo de espera al cargar los datos de la ventana emergente. Inténtelo de nuevo.",
+    "description": "Tiempo de espera agotado al cargar la ventana emergente."
+  },
+  "desktopAddColumns": {
+    "message": "Añadir columnas",
+    "description": "Título del botón para añadir columnas."
+  },
+  "desktopClearSearch": {
+    "message": "Borrar búsqueda",
+    "description": "Etiqueta para borrar la búsqueda."
+  },
+  "desktopExpand": {
+    "message": "Expandir",
+    "description": "Título para expandir una lista."
+  },
+  "desktopFailedToLoadPageDetails": {
+    "message": "No se pudieron cargar los detalles de la página",
+    "description": "Page detail load failure."
+  },
+  "desktopAutoTag": {
+    "message": "automático",
+    "description": "Automatically pinned result tag."
+  },
+  "desktopLikedTag": {
+    "message": "me gusta",
+    "description": "Liked result tag."
+  },
+  "desktopNoteTag": {
+    "message": "nota",
+    "description": "Result tag indicating a note."
+  },
+  "desktopSnapshotTag": {
+    "message": "instantánea",
+    "description": "Result tag indicating a snapshot."
+  },
+  "desktopMatchedInNoteTag": {
+    "message": "coincidencia en nota",
+    "description": "Search result tag for a note match."
+  },
+  "desktopMatchedInSnapshotTag": {
+    "message": "coincidencia en instantánea",
+    "description": "Search result tag for a snapshot match."
+  },
+  "desktopListNamePlaceholder": {
+    "message": "Nombre de la lista...",
+    "description": "Marcador del nombre de la lista."
   }
 }

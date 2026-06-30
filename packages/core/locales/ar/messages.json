@@ -863,6 +863,22 @@
     "message": "فشل التمييز",
     "description": "Highlight failure."
   },
+  "extensionHighlightSelected": {
+    "message": "تمييز النص المحدد",
+    "description": "Selection context menu label."
+  },
+  "extensionResumeTracing": {
+    "message": "استئناف التتبع",
+    "description": "Extension popup recording resume title."
+  },
+  "extensionUpdatingTracing": {
+    "message": "جارٍ تحديث التتبع",
+    "description": "Extension popup recording update title."
+  },
+  "extensionPdfHighlightHint": {
+    "message": "حدد النص وانقر بزر الماوس الأيمن لتمييزه",
+    "description": "PDF highlight panel instruction."
+  },
   "extensionLastCheckAuthenticatedStatusFailed": {
     "message": "آخر فحص: تمت المصادقة، ولكن الحالة فشلت.",
     "description": "Connector diagnostic."
@@ -1522,5 +1538,69 @@
   "desktopDeviceIdentityRestart": {
     "message": "هوية الجهاز غير متاحة. حاول إعادة تشغيل Browser Recall.",
     "description": "Startup failure when desktop device identity is unavailable."
+  },
+  "extensionCouldNotLoadNotes": {
+    "message": "تعذر تحميل الملاحظات.",
+    "description": "خطأ عند تعذر تحميل الملاحظات."
+  },
+  "extensionCouldNotLoadHighlights": {
+    "message": "تعذر تحميل التمييزات.",
+    "description": "خطأ عند تعذر تحميل التمييزات."
+  },
+  "extensionCouldNotLoadLists": {
+    "message": "تعذر تحميل القوائم.",
+    "description": "خطأ عند تعذر تحميل القوائم."
+  },
+  "extensionCouldNotLoadShortcuts": {
+    "message": "تعذر تحميل الاختصارات: $1",
+    "description": "خطأ عند تعذر تحميل الاختصارات."
+  },
+  "extensionPopupDataTimedOut": {
+    "message": "انتهت مهلة تحميل بيانات النافذة المنبثقة. حاول مرة أخرى.",
+    "description": "خطأ انتهاء مهلة بيانات النافذة المنبثقة."
+  },
+  "desktopAddColumns": {
+    "message": "إضافة أعمدة",
+    "description": "عنوان زر إضافة أعمدة."
+  },
+  "desktopClearSearch": {
+    "message": "مسح البحث",
+    "description": "تسمية زر مسح البحث."
+  },
+  "desktopExpand": {
+    "message": "توسيع",
+    "description": "عنوان توسيع القائمة."
+  },
+  "desktopFailedToLoadPageDetails": {
+    "message": "تعذر تحميل تفاصيل الصفحة",
+    "description": "Page detail load failure."
+  },
+  "desktopAutoTag": {
+    "message": "تلقائي",
+    "description": "Automatically pinned result tag."
+  },
+  "desktopLikedTag": {
+    "message": "أعجبني",
+    "description": "Liked result tag."
+  },
+  "desktopNoteTag": {
+    "message": "ملاحظة",
+    "description": "Result tag indicating a note."
+  },
+  "desktopSnapshotTag": {
+    "message": "لقطة",
+    "description": "Result tag indicating a snapshot."
+  },
+  "desktopMatchedInNoteTag": {
+    "message": "تطابق في ملاحظة",
+    "description": "Search result tag for a note match."
+  },
+  "desktopMatchedInSnapshotTag": {
+    "message": "تطابق في لقطة",
+    "description": "Search result tag for a snapshot match."
+  },
+  "desktopListNamePlaceholder": {
+    "message": "اسم القائمة...",
+    "description": "عنصر نائب لاسم القائمة."
   }
 }

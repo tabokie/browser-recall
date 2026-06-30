@@ -863,6 +863,22 @@
     "message": "Falha no destaque",
     "description": "Highlight failure."
   },
+  "extensionHighlightSelected": {
+    "message": "Destacar seleção",
+    "description": "Selection context menu label."
+  },
+  "extensionResumeTracing": {
+    "message": "Retomar rastreamento",
+    "description": "Extension popup recording resume title."
+  },
+  "extensionUpdatingTracing": {
+    "message": "Atualizando rastreamento",
+    "description": "Extension popup recording update title."
+  },
+  "extensionPdfHighlightHint": {
+    "message": "Selecione o texto e clique com o botão direito para destacar",
+    "description": "PDF highlight panel instruction."
+  },
   "extensionLastCheckAuthenticatedStatusFailed": {
     "message": "Última verificação: autenticado, mas o status falhou.",
     "description": "Connector diagnostic."
@@ -1522,5 +1538,69 @@
   "desktopDeviceIdentityRestart": {
     "message": "Identidade do dispositivo indisponível. Tente reiniciar Browser Recall.",
     "description": "Startup failure when desktop device identity is unavailable."
+  },
+  "extensionCouldNotLoadNotes": {
+    "message": "Não foi possível carregar as notas.",
+    "description": "Erro ao carregar as notas."
+  },
+  "extensionCouldNotLoadHighlights": {
+    "message": "Não foi possível carregar os destaques.",
+    "description": "Erro ao carregar os destaques."
+  },
+  "extensionCouldNotLoadLists": {
+    "message": "Não foi possível carregar as listas.",
+    "description": "Erro ao carregar as listas."
+  },
+  "extensionCouldNotLoadShortcuts": {
+    "message": "Não foi possível carregar os atalhos: $1",
+    "description": "Erro ao carregar os atalhos."
+  },
+  "extensionPopupDataTimedOut": {
+    "message": "O carregamento dos dados do pop-up expirou. Tente novamente.",
+    "description": "Tempo esgotado ao carregar os dados do pop-up."
+  },
+  "desktopAddColumns": {
+    "message": "Adicionar colunas",
+    "description": "Título do botão para adicionar colunas."
+  },
+  "desktopClearSearch": {
+    "message": "Limpar pesquisa",
+    "description": "Rótulo para limpar a pesquisa."
+  },
+  "desktopExpand": {
+    "message": "Expandir",
+    "description": "Título para expandir uma lista."
+  },
+  "desktopFailedToLoadPageDetails": {
+    "message": "Não foi possível carregar os detalhes da página",
+    "description": "Page detail load failure."
+  },
+  "desktopAutoTag": {
+    "message": "automático",
+    "description": "Automatically pinned result tag."
+  },
+  "desktopLikedTag": {
+    "message": "curtido",
+    "description": "Liked result tag."
+  },
+  "desktopNoteTag": {
+    "message": "nota",
+    "description": "Result tag indicating a note."
+  },
+  "desktopSnapshotTag": {
+    "message": "captura",
+    "description": "Result tag indicating a snapshot."
+  },
+  "desktopMatchedInNoteTag": {
+    "message": "correspondência na nota",
+    "description": "Search result tag for a note match."
+  },
+  "desktopMatchedInSnapshotTag": {
+    "message": "correspondência na captura",
+    "description": "Search result tag for a snapshot match."
+  },
+  "desktopListNamePlaceholder": {
+    "message": "Nome da lista...",
+    "description": "Espaço reservado para o nome da lista."
   }
 }

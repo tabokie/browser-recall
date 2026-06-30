@@ -11,35 +11,17 @@ import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import NodeWebSocket from 'ws';
 import { generateSlugFromUrl } from '../../packages/core/utils.js';
+import {
+  ensureTestDaemonBuilt,
+  launchTestDaemon,
+  stopTestDaemon,
+  waitForDaemonListening as waitForListening,
+} from './daemon-test-harness.js';
 
-const ROOT = process.cwd();
-const BINARY_PATH = path.join(ROOT, 'target', 'debug', 'browser-recall-daemon');
 const TEST_PORTS = [38472, 38473];
-
-function waitForListening(child) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error('daemon did not start')),
-      15_000,
-    );
-    child.stdout.on('data', (chunk) => {
-      const text = chunk.toString();
-      const match = text.match(/listening on (\d+)/);
-      if (match) {
-        clearTimeout(timer);
-        resolve(Number(match[1]));
-      }
-    });
-    child.once('exit', (code) => {
-      clearTimeout(timer);
-      reject(new Error(`daemon exited early with code ${code}`));
-    });
-  });
-}
 
 function waitForExit(child) {
   return new Promise((resolve) => {
@@ -71,18 +53,7 @@ function nextRawJson(socket) {
 }
 
 function launchDaemon(configDir, approveMode = 'allow') {
-  return spawn(
-    BINARY_PATH,
-    ['--config-dir', configDir, '--approve-mode', approveMode],
-    {
-      cwd: ROOT,
-      env: {
-        ...process.env,
-        BROWSER_RECALL_PORTS: TEST_PORTS.join(','),
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  );
+  return launchTestDaemon(configDir, { ports: TEST_PORTS, approveMode });
 }
 
 async function waitFor(predicate, timeoutMs = 15_000, stepMs = 50) {
@@ -308,23 +279,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
   let originalSetTimeout;
   let originalConnectorPorts;
 
-  beforeAll(() => {
-    const build = spawnSync(
-      'cargo',
-      [
-        'build',
-        '-p',
-        'browser-recall-daemon',
-        '--bin',
-        'browser-recall-daemon',
-      ],
-      {
-        cwd: ROOT,
-        stdio: 'inherit',
-      },
-    );
-    expect(build.status).toBe(0);
-  });
+  beforeAll(() => ensureTestDaemonBuilt(), 300_000);
 
   beforeEach(() => {
     originalConnectorPorts = globalThis.__BROWSER_RECALL_CONNECTOR_PORTS;
@@ -333,8 +288,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
 
   afterEach(async () => {
     for (const child of childProcesses.splice(0)) {
-      child.kill('SIGINT');
-      await waitForExit(child).catch(() => {});
+      await stopTestDaemon(child);
     }
     await new Promise((resolve) => originalSetTimeout(resolve, 25));
 

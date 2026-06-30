@@ -863,6 +863,22 @@
     "message": "हाइलाइट विफल",
     "description": "Highlight failure."
   },
+  "extensionHighlightSelected": {
+    "message": "चयनित टेक्स्ट हाइलाइट करें",
+    "description": "Selection context menu label."
+  },
+  "extensionResumeTracing": {
+    "message": "ट्रेसिंग फिर शुरू करें",
+    "description": "Extension popup recording resume title."
+  },
+  "extensionUpdatingTracing": {
+    "message": "ट्रेसिंग अपडेट हो रही है",
+    "description": "Extension popup recording update title."
+  },
+  "extensionPdfHighlightHint": {
+    "message": "टेक्स्ट चुनें और हाइलाइट करने के लिए राइट-क्लिक करें",
+    "description": "PDF highlight panel instruction."
+  },
   "extensionLastCheckAuthenticatedStatusFailed": {
     "message": "अंतिम जाँच: प्रमाणित, लेकिन स्थिति विफल रही।",
     "description": "Connector diagnostic."
@@ -1522,5 +1538,69 @@
   "desktopDeviceIdentityRestart": {
     "message": "डिवाइस पहचान अनुपलब्ध. Browser Recall को पुनः आरंभ करने का प्रयास करें।",
     "description": "Startup failure when desktop device identity is unavailable."
+  },
+  "extensionCouldNotLoadNotes": {
+    "message": "नोट लोड नहीं किए जा सके।",
+    "description": "नोट लोड न होने पर त्रुटि।"
+  },
+  "extensionCouldNotLoadHighlights": {
+    "message": "हाइलाइट लोड नहीं किए जा सके।",
+    "description": "हाइलाइट लोड न होने पर त्रुटि।"
+  },
+  "extensionCouldNotLoadLists": {
+    "message": "सूचियाँ लोड नहीं की जा सकीं।",
+    "description": "सूचियाँ लोड न होने पर त्रुटि।"
+  },
+  "extensionCouldNotLoadShortcuts": {
+    "message": "शॉर्टकट लोड नहीं किए जा सके: $1",
+    "description": "शॉर्टकट लोड न होने पर त्रुटि।"
+  },
+  "extensionPopupDataTimedOut": {
+    "message": "पॉपअप डेटा लोड होने में समय समाप्त हो गया। फिर से कोशिश करें।",
+    "description": "पॉपअप डेटा लोड होने की समय-सीमा त्रुटि।"
+  },
+  "desktopAddColumns": {
+    "message": "कॉलम जोड़ें",
+    "description": "कॉलम जोड़ने के बटन का शीर्षक।"
+  },
+  "desktopClearSearch": {
+    "message": "खोज साफ़ करें",
+    "description": "खोज साफ़ करने का लेबल।"
+  },
+  "desktopExpand": {
+    "message": "विस्तृत करें",
+    "description": "सूची विस्तृत करने का शीर्षक।"
+  },
+  "desktopFailedToLoadPageDetails": {
+    "message": "पेज का विवरण लोड नहीं किया जा सका",
+    "description": "Page detail load failure."
+  },
+  "desktopAutoTag": {
+    "message": "स्वचालित",
+    "description": "Automatically pinned result tag."
+  },
+  "desktopLikedTag": {
+    "message": "पसंद किया गया",
+    "description": "Liked result tag."
+  },
+  "desktopNoteTag": {
+    "message": "नोट",
+    "description": "Result tag indicating a note."
+  },
+  "desktopSnapshotTag": {
+    "message": "स्नैपशॉट",
+    "description": "Result tag indicating a snapshot."
+  },
+  "desktopMatchedInNoteTag": {
+    "message": "नोट में मिलान",
+    "description": "Search result tag for a note match."
+  },
+  "desktopMatchedInSnapshotTag": {
+    "message": "स्नैपशॉट में मिलान",
+    "description": "Search result tag for a snapshot match."
+  },
+  "desktopListNamePlaceholder": {
+    "message": "सूची का नाम...",
+    "description": "सूची नाम इनपुट का प्लेसहोल्डर।"
   }
 }

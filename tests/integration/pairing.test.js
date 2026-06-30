@@ -3,77 +3,24 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
-import { spawnSync, spawn } from 'node:child_process';
 import WebSocket from 'ws';
+import {
+  collectDaemonMessages as collectMessages,
+  ensureTestDaemonBuilt,
+  launchTestDaemon,
+  nextDaemonMessage as nextMessage,
+  stopTestDaemon,
+  waitForDaemonListening as waitForListening,
+} from './daemon-test-harness.js';
 
-const ROOT = process.cwd();
-const BINARY_PATH = path.join(ROOT, 'target', 'debug', 'browser-recall-daemon');
 const ORIGIN = 'chrome-extension://abcdefghijklmnop';
 const PORT_CANDIDATES = [28571, 28572, 28573];
 
-function waitForListening(child) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error('daemon did not start')),
-      15_000,
-    );
-    child.stdout.on('data', (chunk) => {
-      const text = chunk.toString();
-      const match = text.match(/listening on (\d+)/);
-      if (match) {
-        clearTimeout(timer);
-        resolve(Number(match[1]));
-      }
-    });
-    child.once('exit', (code) => {
-      clearTimeout(timer);
-      reject(new Error(`daemon exited early with code ${code}`));
-    });
-  });
-}
-
-function nextMessage(socket) {
-  return new Promise((resolve, reject) => {
-    socket.once('message', (raw) => resolve(JSON.parse(raw.toString())));
-    socket.once('error', reject);
-  });
-}
-
-function collectMessages(socket, count) {
-  return new Promise((resolve, reject) => {
-    const messages = [];
-    const onMessage = (raw) => {
-      messages.push(JSON.parse(raw.toString()));
-      if (messages.length === count) {
-        socket.off('message', onMessage);
-        socket.off('error', onError);
-        resolve(messages);
-      }
-    };
-    const onError = (error) => {
-      socket.off('message', onMessage);
-      socket.off('error', onError);
-      reject(error);
-    };
-    socket.on('message', onMessage);
-    socket.on('error', onError);
-  });
-}
-
 function launchDaemon(configDir, approveMode = 'allow') {
-  const child = spawn(
-    BINARY_PATH,
-    ['--config-dir', configDir, '--approve-mode', approveMode],
-    {
-      cwd: ROOT,
-      env: {
-        ...process.env,
-        BROWSER_RECALL_PORTS: PORT_CANDIDATES.join(','),
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  );
-  return child;
+  return launchTestDaemon(configDir, {
+    ports: PORT_CANDIDATES,
+    approveMode,
+  });
 }
 
 function tryListen(port) {
@@ -103,6 +50,7 @@ async function pairOnce(port) {
     socket.once('open', resolve);
     socket.once('error', reject);
   });
+  const pairingMessages = collectMessages(socket, 2);
   socket.send(
     JSON.stringify({
       type: 'pair_request',
@@ -111,7 +59,7 @@ async function pairOnce(port) {
       extensionId: 'abcdefghijklmnop',
     }),
   );
-  const [, approved] = await collectMessages(socket, 2);
+  const [, approved] = await pairingMessages;
   return { socket, approved };
 }
 
@@ -120,28 +68,12 @@ describe.sequential('phase 1 daemon pairing integration', () => {
   let childProcesses = [];
   let blockerServers = [];
 
-  beforeAll(() => {
-    const build = spawnSync(
-      'cargo',
-      [
-        'build',
-        '-p',
-        'browser-recall-daemon',
-        '--bin',
-        'browser-recall-daemon',
-      ],
-      {
-        cwd: ROOT,
-        stdio: 'inherit',
-      },
-    );
-    expect(build.status).toBe(0);
-  });
+  beforeAll(() => ensureTestDaemonBuilt(), 300_000);
 
-  afterEach(() => {
-    for (const child of childProcesses.splice(0)) {
-      child.kill('SIGINT');
-    }
+  afterEach(async () => {
+    await Promise.all(
+      childProcesses.splice(0).map((child) => stopTestDaemon(child)),
+    );
     for (const server of blockerServers.splice(0)) {
       server.close();
     }
@@ -183,6 +115,7 @@ describe.sequential('phase 1 daemon pairing integration', () => {
       socket.once('open', resolve);
       socket.once('error', reject);
     });
+    const pairingMessages = collectMessages(socket, 2);
     socket.send(
       JSON.stringify({
         type: 'pair_request',
@@ -191,7 +124,7 @@ describe.sequential('phase 1 daemon pairing integration', () => {
         extensionId: 'abcdefghijklmnop',
       }),
     );
-    const messages = await collectMessages(socket, 2);
+    const messages = await pairingMessages;
     expect(messages.map((message) => message.type)).toEqual([
       'pair_pending',
       'pair_denied',
@@ -209,7 +142,7 @@ describe.sequential('phase 1 daemon pairing integration', () => {
     const { socket, approved } = await pairOnce(port);
     const token = approved.token;
     socket.close();
-    child.kill('SIGINT');
+    await stopTestDaemon(child);
     childProcesses.pop();
 
     const configPath = path.join(dir, 'config.json');

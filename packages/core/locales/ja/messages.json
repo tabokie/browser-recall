@@ -863,6 +863,22 @@
     "message": "ハイライトに失敗しました",
     "description": "Highlight failure."
   },
+  "extensionHighlightSelected": {
+    "message": "選択したテキストをハイライト",
+    "description": "Selection context menu label."
+  },
+  "extensionResumeTracing": {
+    "message": "トレースを再開する",
+    "description": "Extension popup recording resume title."
+  },
+  "extensionUpdatingTracing": {
+    "message": "トレースを更新中",
+    "description": "Extension popup recording update title."
+  },
+  "extensionPdfHighlightHint": {
+    "message": "テキストを選択し、右クリックしてハイライト",
+    "description": "PDF highlight panel instruction."
+  },
   "extensionLastCheckAuthenticatedStatusFailed": {
     "message": "最終チェック: 認証されましたが、ステータスは失敗しました。",
     "description": "Connector diagnostic."
@@ -1522,5 +1538,69 @@
   "desktopDeviceIdentityRestart": {
     "message": "デバイス ID が利用できません。 Browser Recall を再起動してみてください。",
     "description": "Startup failure when desktop device identity is unavailable."
+  },
+  "extensionCouldNotLoadNotes": {
+    "message": "ノートを読み込めませんでした。",
+    "description": "ノートを読み込めない場合のエラー。"
+  },
+  "extensionCouldNotLoadHighlights": {
+    "message": "ハイライトを読み込めませんでした。",
+    "description": "ハイライトを読み込めない場合のエラー。"
+  },
+  "extensionCouldNotLoadLists": {
+    "message": "リストを読み込めませんでした。",
+    "description": "リストを読み込めない場合のエラー。"
+  },
+  "extensionCouldNotLoadShortcuts": {
+    "message": "ショートカットを読み込めませんでした: $1",
+    "description": "ショートカットを読み込めない場合のエラー。"
+  },
+  "extensionPopupDataTimedOut": {
+    "message": "ポップアップデータの読み込みがタイムアウトしました。もう一度お試しください。",
+    "description": "ポップアップデータのタイムアウトエラー。"
+  },
+  "desktopAddColumns": {
+    "message": "列を追加",
+    "description": "列を追加するボタンのタイトル。"
+  },
+  "desktopClearSearch": {
+    "message": "検索をクリア",
+    "description": "検索をクリアするボタンのラベル。"
+  },
+  "desktopExpand": {
+    "message": "展開",
+    "description": "リストを展開するタイトル。"
+  },
+  "desktopFailedToLoadPageDetails": {
+    "message": "ページの詳細を読み込めませんでした",
+    "description": "Page detail load failure."
+  },
+  "desktopAutoTag": {
+    "message": "自動",
+    "description": "Automatically pinned result tag."
+  },
+  "desktopLikedTag": {
+    "message": "いいね",
+    "description": "Liked result tag."
+  },
+  "desktopNoteTag": {
+    "message": "メモ",
+    "description": "Result tag indicating a note."
+  },
+  "desktopSnapshotTag": {
+    "message": "スナップショット",
+    "description": "Result tag indicating a snapshot."
+  },
+  "desktopMatchedInNoteTag": {
+    "message": "メモ内で一致",
+    "description": "Search result tag for a note match."
+  },
+  "desktopMatchedInSnapshotTag": {
+    "message": "スナップショット内で一致",
+    "description": "Search result tag for a snapshot match."
+  },
+  "desktopListNamePlaceholder": {
+    "message": "リスト名...",
+    "description": "リスト名入力のプレースホルダー。"
   }
 }

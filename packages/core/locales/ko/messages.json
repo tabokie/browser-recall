@@ -863,6 +863,22 @@
     "message": "하이라이트 실패",
     "description": "Highlight failure."
   },
+  "extensionHighlightSelected": {
+    "message": "선택 항목 강조 표시",
+    "description": "Selection context menu label."
+  },
+  "extensionResumeTracing": {
+    "message": "추적 재개",
+    "description": "Extension popup recording resume title."
+  },
+  "extensionUpdatingTracing": {
+    "message": "추적 업데이트 중",
+    "description": "Extension popup recording update title."
+  },
+  "extensionPdfHighlightHint": {
+    "message": "텍스트를 선택하고 마우스 오른쪽 버튼으로 클릭하여 강조 표시",
+    "description": "PDF highlight panel instruction."
+  },
   "extensionLastCheckAuthenticatedStatusFailed": {
     "message": "마지막 확인: 인증되었지만 상태가 실패했습니다.",
     "description": "Connector diagnostic."
@@ -1522,5 +1538,66 @@
   "desktopDeviceIdentityRestart": {
     "message": "장치 ID를 사용할 수 없습니다. Browser Recall을 다시 시작해 보세요.",
     "description": "Startup failure when desktop device identity is unavailable."
+  },
+  "extensionCouldNotLoadNotes": {
+    "message": "노트를 불러올 수 없습니다.",
+    "description": "노트를 불러오지 못한 경우의 오류."
+  },
+  "extensionCouldNotLoadHighlights": {
+    "message": "강조 표시를 불러올 수 없습니다.",
+    "description": "강조 표시를 불러오지 못한 경우의 오류."
+  },
+  "extensionCouldNotLoadLists": {
+    "message": "목록을 불러올 수 없습니다.",
+    "description": "목록을 불러오지 못한 경우의 오류."
+  },
+  "extensionCouldNotLoadShortcuts": {
+    "message": "단축키를 불러올 수 없습니다: $1",
+    "description": "단축키를 불러오지 못한 경우의 오류."
+  },
+  "extensionPopupDataTimedOut": {
+    "message": "팝업 데이터를 불러오는 시간이 초과되었습니다. 다시 시도하세요.",
+    "description": "팝업 데이터 시간 초과 오류."
+  },
+  "desktopAddColumns": {
+    "message": "열 추가",
+    "description": "열 추가 버튼 제목."
+  },
+  "desktopClearSearch": {
+    "message": "검색 지우기",
+    "description": "검색 지우기 버튼 레이블."
+  },
+  "desktopExpand": { "message": "펼치기", "description": "목록 펼치기 제목." },
+  "desktopFailedToLoadPageDetails": {
+    "message": "페이지 세부 정보를 불러오지 못했습니다",
+    "description": "Page detail load failure."
+  },
+  "desktopAutoTag": {
+    "message": "자동",
+    "description": "Automatically pinned result tag."
+  },
+  "desktopLikedTag": {
+    "message": "좋아요",
+    "description": "Liked result tag."
+  },
+  "desktopNoteTag": {
+    "message": "메모",
+    "description": "Result tag indicating a note."
+  },
+  "desktopSnapshotTag": {
+    "message": "스냅샷",
+    "description": "Result tag indicating a snapshot."
+  },
+  "desktopMatchedInNoteTag": {
+    "message": "메모에서 일치",
+    "description": "Search result tag for a note match."
+  },
+  "desktopMatchedInSnapshotTag": {
+    "message": "스냅샷에서 일치",
+    "description": "Search result tag for a snapshot match."
+  },
+  "desktopListNamePlaceholder": {
+    "message": "목록 이름...",
+    "description": "목록 이름 입력 자리표시자."
   }
 }

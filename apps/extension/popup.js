@@ -917,7 +917,7 @@ function renderPageNoteWrap(globalNote) {
   } else {
     wrap.innerHTML = `<div class="page-note-display">
       <span class="note-body">${escapeHtml(noteText)}</span>
-      <button class="note-action-btn edit" title="Edit">${ICON_EDIT}</button>
+      <button class="note-action-btn edit" title="${escapeHtml(tr('extensionEdit', 'Edit', undefined))}">${ICON_EDIT}</button>
     </div>`;
     wrap
       .querySelector('.note-action-btn.edit')
@@ -930,7 +930,7 @@ function renderPageNoteWrap(globalNote) {
 
 function openPageNoteEditor(wrap, text, slug) {
   document.getElementById('notesSection')?.classList.remove('is-empty');
-  wrap.innerHTML = `<textarea class="page-note-edit-textarea" placeholder="Add a page note...">${escapeHtml(text)}</textarea>`;
+  wrap.innerHTML = `<textarea class="page-note-edit-textarea" placeholder="${escapeHtml(tr('extensionAddPageNoteEsc', 'Add a page note... Esc to save.', undefined))}">${escapeHtml(text)}</textarea>`;
   const ta = wrap.querySelector('textarea');
   ta.dataset.noteSlug = slug;
   autoResizeTextarea(ta);
@@ -1396,7 +1396,7 @@ async function renderListChips(listOverride = null) {
       })
       .join('');
 
-    html += `<span class="list-add-btn" id="listAddBtn" title="Add to list">+</span>`;
+    html += `<span class="list-add-btn" id="listAddBtn" title="${escapeHtml(tr('extensionAddToList', 'Add to list', undefined))}">+</span>`;
 
     container.innerHTML = html;
   }
@@ -1550,7 +1550,11 @@ function configureListPickerInput(input) {
   input.setAttribute('aria-controls', 'listPickerList');
   input.setAttribute('aria-expanded', 'true');
   input.setAttribute('aria-autocomplete', 'list');
-  input.placeholder = 'Search or create...';
+  input.placeholder = tr(
+    'extensionSearchOrCreate',
+    'Search or create...',
+    undefined,
+  );
   input.autocomplete = 'off';
   input.autocapitalize = 'off';
   input.spellcheck = false;
@@ -2159,11 +2163,11 @@ function applyRecordingBarState() {
   button.setAttribute('aria-disabled', pending ? 'true' : 'false');
   button.setAttribute('aria-pressed', paused ? 'true' : 'false');
   button.title = pending
-    ? 'Updating tracing'
+    ? tr('extensionUpdatingTracing', 'Updating tracing', undefined)
     : paused
-      ? 'Resume tracing'
-      : 'Pause tracing';
-  label.textContent = 'BROWSER RECALL';
+      ? tr('extensionResumeTracing', 'Resume tracing', undefined)
+      : tr('extensionPauseTracing', 'Pause tracing', undefined);
+  label.textContent = tr('extensionName', 'Browser Recall', undefined);
 }
 
 async function renderRecordingBar() {
@@ -2437,7 +2441,12 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
       const connector = await refreshDesktopConnectorState();
       if (connector?.state === 'connected' && connector?.deviceId) {
         showDesktopDataUnavailable(
-          summary?.error || 'Desktop page summary failed.',
+          summary?.error ||
+            tr(
+              'extensionDesktopPageDataUnavailable',
+              'Desktop page data unavailable.',
+              undefined,
+            ),
           {
             reason: 'popup-page-summary-failed',
             summary,
@@ -2457,7 +2466,12 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
     const connector = await refreshDesktopConnectorState();
     if (connector?.state === 'connected' && connector?.deviceId) {
       showDesktopDataUnavailable(
-        error.message || 'Desktop page summary failed.',
+        error.message ||
+          tr(
+            'extensionDesktopPageDataUnavailable',
+            'Desktop page data unavailable.',
+            undefined,
+          ),
         {
           reason: 'popup-page-summary-error',
           error: error.message || String(error),

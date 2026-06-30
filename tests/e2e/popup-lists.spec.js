@@ -130,10 +130,37 @@ test.describe('Popup list chip behavior', () => {
       url,
       title: 'Localized Page Note',
       locale: 'zh-CN',
-      messages: { extensionAddPageNote: '+ 页面笔记' },
+      messages: {
+        extensionAddPageNote: '+ 页面笔记',
+        extensionAddPageNoteEsc: '添加页面笔记...按 Esc 保存。',
+        extensionAddToList: '添加到列表',
+        extensionSearchOrCreate: '搜索或创建...',
+        extensionPauseTracing: '暂停跟踪',
+      },
     });
 
     await expect(popup.locator('#pageNoteAddBtn')).toHaveText('+ 页面笔记');
+    await expect(popup.locator('#recordingToggle')).toHaveAttribute(
+      'title',
+      '暂停跟踪',
+    );
+    await expect(popup.locator('#listAddBtn')).toHaveAttribute(
+      'title',
+      '添加到列表',
+    );
+
+    await popup.locator('#pageNoteAddBtn').click();
+    await expect(popup.locator('.page-note-edit-textarea')).toHaveAttribute(
+      'placeholder',
+      '添加页面笔记...按 Esc 保存。',
+    );
+    await popup.locator('.page-note-edit-textarea').blur();
+
+    await popup.locator('#listAddBtn').click();
+    await expect(popup.locator('#listPickerInput')).toHaveAttribute(
+      'placeholder',
+      '搜索或创建...',
+    );
 
     await popup.close();
     await page.close();

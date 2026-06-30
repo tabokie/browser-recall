@@ -237,6 +237,13 @@ test('desktop locale choices persist across real daemon checkpoints and reloads'
       await page.goto(desktopUrl);
       await page.waitForFunction(() => document.body.dataset.ready === 'true');
 
+      await page.locator('#createListBtn').click();
+      await expect(page.locator('.inline-list-create')).toHaveAttribute(
+        'placeholder',
+        localeMessage('zh-CN', 'desktopListNamePlaceholder'),
+      );
+      await page.locator('.inline-list-create').press('Escape');
+
       await page.locator('#settingsBtn').click();
       await expect(page.locator('#settingsTitle')).toHaveText('设置');
       await expect(page.locator('#localeSelect')).toHaveValue('system');

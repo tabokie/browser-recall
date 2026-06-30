@@ -863,6 +863,22 @@
     "message": "Sorotan gagal",
     "description": "Highlight failure."
   },
+  "extensionHighlightSelected": {
+    "message": "Sorot pilihan",
+    "description": "Selection context menu label."
+  },
+  "extensionResumeTracing": {
+    "message": "Lanjutkan pelacakan",
+    "description": "Extension popup recording resume title."
+  },
+  "extensionUpdatingTracing": {
+    "message": "Memperbarui pelacakan",
+    "description": "Extension popup recording update title."
+  },
+  "extensionPdfHighlightHint": {
+    "message": "Pilih teks dan klik kanan untuk menyorot",
+    "description": "PDF highlight panel instruction."
+  },
   "extensionLastCheckAuthenticatedStatusFailed": {
     "message": "Pemeriksaan terakhir: diautentikasi, tetapi status gagal.",
     "description": "Connector diagnostic."
@@ -1522,5 +1538,69 @@
   "desktopDeviceIdentityRestart": {
     "message": "Identitas perangkat tidak tersedia. Coba mulai ulang Browser Recall.",
     "description": "Startup failure when desktop device identity is unavailable."
+  },
+  "extensionCouldNotLoadNotes": {
+    "message": "Catatan tidak dapat dimuat.",
+    "description": "Kesalahan saat memuat catatan."
+  },
+  "extensionCouldNotLoadHighlights": {
+    "message": "Sorotan tidak dapat dimuat.",
+    "description": "Kesalahan saat memuat sorotan."
+  },
+  "extensionCouldNotLoadLists": {
+    "message": "Daftar tidak dapat dimuat.",
+    "description": "Kesalahan saat memuat daftar."
+  },
+  "extensionCouldNotLoadShortcuts": {
+    "message": "Pintasan tidak dapat dimuat: $1",
+    "description": "Kesalahan saat memuat pintasan."
+  },
+  "extensionPopupDataTimedOut": {
+    "message": "Waktu pemuatan data popup habis. Coba lagi.",
+    "description": "Waktu pemuatan data popup habis."
+  },
+  "desktopAddColumns": {
+    "message": "Tambahkan kolom",
+    "description": "Judul tombol tambah kolom."
+  },
+  "desktopClearSearch": {
+    "message": "Hapus pencarian",
+    "description": "Label tombol hapus pencarian."
+  },
+  "desktopExpand": {
+    "message": "Perluas",
+    "description": "Judul perluas daftar."
+  },
+  "desktopFailedToLoadPageDetails": {
+    "message": "Gagal memuat detail halaman",
+    "description": "Page detail load failure."
+  },
+  "desktopAutoTag": {
+    "message": "otomatis",
+    "description": "Automatically pinned result tag."
+  },
+  "desktopLikedTag": {
+    "message": "disukai",
+    "description": "Liked result tag."
+  },
+  "desktopNoteTag": {
+    "message": "catatan",
+    "description": "Result tag indicating a note."
+  },
+  "desktopSnapshotTag": {
+    "message": "snapshot",
+    "description": "Result tag indicating a snapshot."
+  },
+  "desktopMatchedInNoteTag": {
+    "message": "cocok dalam catatan",
+    "description": "Search result tag for a note match."
+  },
+  "desktopMatchedInSnapshotTag": {
+    "message": "cocok dalam snapshot",
+    "description": "Search result tag for a snapshot match."
+  },
+  "desktopListNamePlaceholder": {
+    "message": "Nama daftar...",
+    "description": "Placeholder nama daftar."
   }
 }

@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - [Rust](https://rustup.rs/) (latest stable)
-- Node.js 18+ (for npm scripts, test runners)
+- Node.js 24+ (for npm scripts, test runners)
 
 ```bash
 # Install Rust
@@ -187,9 +187,9 @@ cargo fmt -- --check     # check Rust formatting (CI mode)
 ## Lint & Analysis
 
 ```bash
-npx knip --include files,exports,duplicates   # unused files/exports/deps
-npx jscpd apps/extension/ --min-lines 5 --min-tokens 50  # duplicated code blocks
-cargo clippy --workspace --all-targets -- -D warnings        # Rust lints
+npm run lint:unused      # unused files/exports/deps
+npm run lint:duplicates  # duplicated code blocks
+cargo clippy --workspace --all-targets -- -D warnings  # Rust lints
 ```
 
 ## Replay Verification

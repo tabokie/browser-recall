@@ -14,6 +14,8 @@ import {
   defaultArtifactDirs,
   stageExtensionAssets,
   stageFirefoxExtensionAssets,
+  validateLocalizationReferences,
+  validateLocalizedUiSource,
   validateLocaleMessage,
 } from '../../scripts/stage-app-assets.mjs';
 import { DAEMON_PORTS } from '../../scripts/lib/desktop-test-runtime.mjs';
@@ -29,6 +31,57 @@ afterEach(() => {
 });
 
 describe('extension staged assets', () => {
+  it('rejects source localization references missing from the catalog', () => {
+    expect(() =>
+      validateLocalizationReferences(
+        new Map([['en', { extensionKnown: { message: 'Known' } }]]),
+        [{ path: 'popup.js', source: "tr('extensionMissing', 'Missing')" }],
+      ),
+    ).toThrow('popup.js references missing localization key extensionMissing');
+  });
+
+  it('rejects hardcoded user-facing attributes in extension source', () => {
+    expect(() =>
+      validateLocalizedUiSource(
+        'popup.js',
+        "button.title = 'Hardcoded title'; input.placeholder = 'Hardcoded placeholder';",
+      ),
+    ).toThrow('popup.js has hardcoded localized UI text');
+  });
+
+  it('rejects interpolated hardcoded user-facing attributes', () => {
+    expect(() =>
+      validateLocalizedUiSource('popup.js', 'button.title = `Delete ${name}`;'),
+    ).toThrow('popup.js has hardcoded localized UI text');
+  });
+
+  it('rejects hardcoded user-facing text rendered through innerHTML', () => {
+    expect(() =>
+      validateLocalizedUiSource(
+        'popup.js',
+        "panel.innerHTML = '<p>Page details unavailable</p>';",
+      ),
+    ).toThrow('popup.js has hardcoded localized UI text');
+  });
+
+  it('rejects hardcoded static text in an interpolated innerHTML template', () => {
+    expect(() =>
+      validateLocalizedUiSource(
+        'popup.js',
+        'panel.innerHTML = `<p>Delete ${name}</p>`;',
+      ),
+    ).toThrow('popup.js has hardcoded localized UI text');
+  });
+
+  it('rejects hardcoded HTML text nodes', () => {
+    expect(() =>
+      validateLocalizedUiSource(
+        'popup.html',
+        '<main><p>Hardcoded panel</p></main>',
+      ),
+    ).toThrow('popup.html has hardcoded localized UI text');
+  });
+
   it('rejects localized HTML whose tags are misnested', () => {
     expect(() =>
       validateLocaleMessage(
@@ -109,35 +162,6 @@ describe('extension staged assets', () => {
     expect(coreMessages.desktopSync).toBeUndefined();
     expect(zhMessages.extensionCaptureFrame.message).toBe('捕获画面');
     expect(zhMessages.desktopSync).toBeUndefined();
-  });
-
-  it('keeps previously missed UI strings on localization keys', () => {
-    const desktopHtml = readFileSync(
-      join(process.cwd(), 'apps/desktop/ui/index.html'),
-      'utf8',
-    );
-    const desktopSource = readFileSync(
-      join(process.cwd(), 'apps/desktop/ui/index.js'),
-      'utf8',
-    );
-    const popupHtml = readFileSync(
-      join(process.cwd(), 'apps/extension/popup.html'),
-      'utf8',
-    );
-    const popupSource = readFileSync(
-      join(process.cwd(), 'apps/extension/popup.js'),
-      'utf8',
-    );
-
-    expect(desktopHtml).toContain('data-i18n="desktopOnboardingHistoryTitle"');
-    expect(desktopHtml).toContain('data-i18n-html="desktopManualSetupHtml"');
-    expect(desktopSource).toContain('populateLocaleSelect(select)');
-    expect(desktopSource).toContain("tr('desktopCannotDeleteHistory'");
-    expect(desktopSource).toContain("tr('desktopCanOnlyPasteIntoList'");
-    expect(desktopSource).toContain("tr('desktopNoResults'");
-    expect(desktopSource).toContain('desktopColumnRelevance');
-    expect(popupHtml).toContain('data-i18n="extensionCaptureFrame"');
-    expect(popupSource).toContain("tr('extensionFirst'");
   });
 
   it('keeps shared CSS imports valid in the staged extension bundle', () => {

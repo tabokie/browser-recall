@@ -863,6 +863,22 @@
     "message": "Выделить не удалось",
     "description": "Highlight failure."
   },
+  "extensionHighlightSelected": {
+    "message": "Подсветить выделенное",
+    "description": "Selection context menu label."
+  },
+  "extensionResumeTracing": {
+    "message": "Возобновить отслеживание",
+    "description": "Extension popup recording resume title."
+  },
+  "extensionUpdatingTracing": {
+    "message": "Обновление отслеживания",
+    "description": "Extension popup recording update title."
+  },
+  "extensionPdfHighlightHint": {
+    "message": "Выделите текст и щёлкните правой кнопкой мыши, чтобы подсветить",
+    "description": "PDF highlight panel instruction."
+  },
   "extensionLastCheckAuthenticatedStatusFailed": {
     "message": "Последняя проверка: аутентифицирован, но статус не удался.",
     "description": "Connector diagnostic."
@@ -1522,5 +1538,69 @@
   "desktopDeviceIdentityRestart": {
     "message": "Идентификация устройства недоступна. Попробуйте перезапустить Browser Recall.",
     "description": "Startup failure when desktop device identity is unavailable."
+  },
+  "extensionCouldNotLoadNotes": {
+    "message": "Не удалось загрузить заметки.",
+    "description": "Ошибка загрузки заметок."
+  },
+  "extensionCouldNotLoadHighlights": {
+    "message": "Не удалось загрузить выделения.",
+    "description": "Ошибка загрузки выделений."
+  },
+  "extensionCouldNotLoadLists": {
+    "message": "Не удалось загрузить списки.",
+    "description": "Ошибка загрузки списков."
+  },
+  "extensionCouldNotLoadShortcuts": {
+    "message": "Не удалось загрузить сочетания клавиш: $1",
+    "description": "Ошибка загрузки сочетаний клавиш."
+  },
+  "extensionPopupDataTimedOut": {
+    "message": "Время ожидания загрузки данных всплывающего окна истекло. Повторите попытку.",
+    "description": "Истекло время ожидания данных всплывающего окна."
+  },
+  "desktopAddColumns": {
+    "message": "Добавить столбцы",
+    "description": "Подпись кнопки добавления столбцов."
+  },
+  "desktopClearSearch": {
+    "message": "Очистить поиск",
+    "description": "Подпись кнопки очистки поиска."
+  },
+  "desktopExpand": {
+    "message": "Развернуть",
+    "description": "Заголовок разворачивания списка."
+  },
+  "desktopFailedToLoadPageDetails": {
+    "message": "Не удалось загрузить сведения о странице",
+    "description": "Page detail load failure."
+  },
+  "desktopAutoTag": {
+    "message": "автоматически",
+    "description": "Automatically pinned result tag."
+  },
+  "desktopLikedTag": {
+    "message": "понравилось",
+    "description": "Liked result tag."
+  },
+  "desktopNoteTag": {
+    "message": "заметка",
+    "description": "Result tag indicating a note."
+  },
+  "desktopSnapshotTag": {
+    "message": "снимок",
+    "description": "Result tag indicating a snapshot."
+  },
+  "desktopMatchedInNoteTag": {
+    "message": "совпадение в заметке",
+    "description": "Search result tag for a note match."
+  },
+  "desktopMatchedInSnapshotTag": {
+    "message": "совпадение в снимке",
+    "description": "Search result tag for a snapshot match."
+  },
+  "desktopListNamePlaceholder": {
+    "message": "Название списка...",
+    "description": "Заполнитель поля названия списка."
   }
 }

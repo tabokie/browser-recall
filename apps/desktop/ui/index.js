@@ -2370,7 +2370,7 @@ function columnHeaderHtml(context, opts = {}) {
 
   const availableExtras = getAvailableExtras(context);
   if (availableExtras.length > 0) {
-    html += `<button class="col-add-btn" data-context="${context}" title="Add columns">+</button>`;
+    html += `<button class="col-add-btn" data-context="${context}" title="${escapeHtml(tr('desktopAddColumns', 'Add columns'))}">+</button>`;
   }
 
   if (hasDelete) html += `<div class="col-action-spacer"></div>`;
@@ -4571,7 +4571,7 @@ function resultRowHtml(title, url, opts = {}) {
         : null,
       timestamps,
     });
-  const attCtrlHtml = `<div class="att-ctrl${attLvl ? ' ' + attLvl : ''}" data-url="${safeUrl}" data-title="${safeTitle}"><span class="att-ctrl-dot"></span><button class="att-ctrl-btn" title="View details"><span class="att-ctrl-icon" aria-hidden="true">⋯</span></button></div>`;
+  const attCtrlHtml = `<div class="att-ctrl${attLvl ? ' ' + attLvl : ''}" data-url="${safeUrl}" data-title="${safeTitle}"><span class="att-ctrl-dot"></span><button class="att-ctrl-btn" title="${escapeHtml(tr('desktopViewDetails', 'View details'))}"><span class="att-ctrl-icon" aria-hidden="true">⋯</span></button></div>`;
   const listTagsHtml = belongedListNames
     .map((n) => `<span class="card-tag card-tag-list">${escapeHtml(n)}</span>`)
     .join('');
@@ -4588,10 +4588,10 @@ function resultRowHtml(title, url, opts = {}) {
     matchNoteHit ||
     matchSnapHit;
   const extrasHtml = hasExtras
-    ? `<div class="card-extras">${isAuto ? '<span class="card-tag card-tag-auto">auto</span>' : ''}${isLiked ? '<span class="card-tag card-tag-liked">liked</span>' : ''}${hasNotes ? '<span class="card-tag card-tag-note">note</span>' : ''}${hasSnaps ? '<span class="card-tag card-tag-snap">snapshot</span>' : ''}${matchNoteHit ? '<span class="card-tag card-tag-match-note">matched in note</span>' : ''}${matchSnapHit ? '<span class="card-tag card-tag-match-snap">matched in snapshot</span>' : ''}${listTagsHtml}</div>`
+    ? `<div class="card-extras">${isAuto ? `<span class="card-tag card-tag-auto">${escapeHtml(tr('desktopAutoTag', 'auto'))}</span>` : ''}${isLiked ? `<span class="card-tag card-tag-liked">${escapeHtml(tr('desktopLikedTag', 'liked'))}</span>` : ''}${hasNotes ? `<span class="card-tag card-tag-note">${escapeHtml(tr('desktopNoteTag', 'note'))}</span>` : ''}${hasSnaps ? `<span class="card-tag card-tag-snap">${escapeHtml(tr('desktopSnapshotTag', 'snapshot'))}</span>` : ''}${matchNoteHit ? `<span class="card-tag card-tag-match-note">${escapeHtml(tr('desktopMatchedInNoteTag', 'matched in note'))}</span>` : ''}${matchSnapHit ? `<span class="card-tag card-tag-match-snap">${escapeHtml(tr('desktopMatchedInSnapshotTag', 'matched in snapshot'))}</span>` : ''}${listTagsHtml}</div>`
     : '';
   const cardActionsHtml = deletable
-    ? `<div class="card-actions"><button class="result-delete" data-delete-url="${safeUrl}" data-delete-title="${safeTitle}" title="Delete">${DELETE_SVG}</button></div>`
+    ? `<div class="card-actions"><button class="result-delete" data-delete-url="${safeUrl}" data-delete-title="${safeTitle}" title="${escapeHtml(tr('commonDelete', 'Delete'))}">${DELETE_SVG}</button></div>`
     : '';
 
   return `<div class="result-item${cssClass ? ' ' + cssClass : ''}" draggable="true">
@@ -4747,7 +4747,7 @@ function openPageDetailCard(
   card.innerHTML = `
     <div class="page-detail-header">
       <div class="page-detail-title">${escapeHtml(title || url)}</div>
-      <button class="page-detail-close" title="Close">×</button>
+      <button class="page-detail-close" title="${escapeHtml(tr('commonClose', 'Close'))}">×</button>
     </div>
     <div class="page-detail-body scroll-boundary-contained"><div class="page-detail-loading"><span class="spinner"></span></div></div>
   `;
@@ -4764,8 +4764,7 @@ function openPageDetailCard(
 
   if (!url || url === '<unknown>') {
     const body = card.querySelector('.page-detail-body');
-    body.innerHTML =
-      '<div style="padding:16px;color:var(--text-muted)">Page details unavailable</div>';
+    body.innerHTML = `<div style="padding:16px;color:var(--text-muted)">${escapeHtml(tr('desktopPageDetailsUnavailable', 'Page details unavailable'))}</div>`;
   } else {
     loadExtraDetail(url)
       .then((extra) => {
@@ -4783,8 +4782,7 @@ function openPageDetailCard(
       .catch(() => {
         const body = card.querySelector('.page-detail-body');
         if (body)
-          body.innerHTML =
-            '<div style="padding:16px;color:var(--text-muted)">Failed to load page details</div>';
+          body.innerHTML = `<div style="padding:16px;color:var(--text-muted)">${escapeHtml(tr('desktopFailedToLoadPageDetails', 'Failed to load page details'))}</div>`;
       });
   }
 
@@ -5190,15 +5188,17 @@ function createSidebarItemDOM(node, depth) {
 
   const chevronSvg =
     '<svg viewBox="0 0 8 8"><path d="M2 1l4 3-4 3z" fill="currentColor"/></svg>';
+  const collapseTitle = tr('desktopCollapse', 'Collapse');
+  const expandTitle = tr('desktopExpand', 'Expand');
   item.innerHTML = `
     ${
       hasChildren
-        ? `<button class="fold-toggle${expanded ? ' expanded' : ''}" title="${expanded ? 'Collapse' : 'Expand'}">${chevronSvg}</button>`
+        ? `<button class="fold-toggle${expanded ? ' expanded' : ''}" title="${escapeHtml(expanded ? collapseTitle : expandTitle)}">${chevronSvg}</button>`
         : '<span class="fold-spacer"></span>'
     }
     <span class="label">${escapeHtml(listDisplayName(node))}</span>
     <span class="pin-count"></span>
-    <button class="remove-list" title="Remove list">&times;</button>
+    <button class="remove-list" title="${escapeHtml(tr('commonRemove', 'Remove'))}">&times;</button>
   `;
 
   if (hasChildren) {
@@ -5213,7 +5213,7 @@ function createSidebarItemDOM(node, depth) {
       }
       const btn = item.querySelector('.fold-toggle');
       btn.classList.toggle('expanded', newExpanded);
-      btn.title = newExpanded ? 'Collapse' : 'Expand';
+      btn.title = newExpanded ? collapseTitle : expandTitle;
     });
   }
 
@@ -5521,7 +5521,7 @@ document.getElementById('createListBtn').addEventListener('click', () => {
   const listEl = document.getElementById('listsList');
   const input = document.createElement('input');
   input.className = 'inline-list-create';
-  input.placeholder = 'List name...';
+  input.placeholder = tr('desktopListNamePlaceholder', 'List name...');
   listEl.prepend(input);
   input.focus();
 
@@ -6875,7 +6875,11 @@ document
 
     const details = document.createElement('details');
     const summary = document.createElement('summary');
-    summary.textContent = `${failures.length} item${failures.length !== 1 ? 's' : ''} skipped`;
+    summary.textContent = tr(
+      'desktopItemsSkipped',
+      `${failures.length} item${failures.length !== 1 ? 's' : ''} skipped`,
+      [failures.length],
+    );
     details.appendChild(summary);
     const list = document.createElement('ul');
     list.style.cssText = 'margin:4px 0;padding-left:20px;';
@@ -7388,7 +7392,7 @@ function renderSearchDraftControlHtml() {
   return `
     <div class="search-draft-control">
       <input type="search" class="search-draft-input" id="searchDraftInput" placeholder="${SEARCH_INPUT_PLACEHOLDER}" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="none">
-      <button class="search-draft-clear" id="searchDraftClearBtn" type="button" title="Clear search" aria-label="Clear search">${clearSvg}</button>
+      <button class="search-draft-clear" id="searchDraftClearBtn" type="button" title="${escapeHtml(tr('desktopClearSearch', 'Clear search'))}" aria-label="${escapeHtml(tr('desktopClearSearch', 'Clear search'))}">${clearSvg}</button>
     </div>
   `;
 }
@@ -7418,7 +7422,7 @@ async function renderSearchPanel({ deferFilterPanel = false } = {}) {
   let html = '<div class="search-filters-panel" id="searchFiltersPanel">';
   html += '<div class="search-draft">';
   html += renderSearchDraftControlHtml();
-  html += `<button class="filter-toggle-btn${filterVisible ? ' active' : ''}${!isDefaultFilterState(filterState) ? ' has-filters' : ''}" id="filterToggleBtn" title="Filters">${filterSvg}</button>`;
+  html += `<button class="filter-toggle-btn${filterVisible ? ' active' : ''}${!isDefaultFilterState(filterState) ? ' has-filters' : ''}" id="filterToggleBtn" title="${escapeHtml(tr('desktopFilters', 'Filters'))}">${filterSvg}</button>`;
   html += '</div>';
 
   const shouldDeferFilterPanel = deferFilterPanel && !filterVisible;

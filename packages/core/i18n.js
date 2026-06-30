@@ -175,7 +175,7 @@ export async function initializeExtensionI18n(api = globalThis.chrome) {
   return activeI18n;
 }
 
-export function setDocumentLocale(locale) {
+function setDocumentLocale(locale) {
   const normalized = normalizeLocale(locale);
   document.documentElement.lang = normalized;
   document.documentElement.dir = /^(ar|fa|he|ur)(-|$)/i.test(normalized)
@@ -184,10 +184,6 @@ export function setDocumentLocale(locale) {
 }
 
 export function tr(key, fallback = '', substitutions) {
-  return activeI18n.translate(key, fallback, substitutions);
-}
-
-export function t(key, substitutions, fallback = '') {
   return activeI18n.translate(key, fallback, substitutions);
 }
 

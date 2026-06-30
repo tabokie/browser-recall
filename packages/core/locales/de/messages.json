@@ -863,6 +863,22 @@
     "message": "Hervorhebung fehlgeschlagen",
     "description": "Highlight failure."
   },
+  "extensionHighlightSelected": {
+    "message": "Auswahl hervorheben",
+    "description": "Selection context menu label."
+  },
+  "extensionResumeTracing": {
+    "message": "Verfolgung fortsetzen",
+    "description": "Extension popup recording resume title."
+  },
+  "extensionUpdatingTracing": {
+    "message": "Verfolgung wird aktualisiert",
+    "description": "Extension popup recording update title."
+  },
+  "extensionPdfHighlightHint": {
+    "message": "Text auswählen und mit der rechten Maustaste hervorheben",
+    "description": "PDF highlight panel instruction."
+  },
   "extensionLastCheckAuthenticatedStatusFailed": {
     "message": "Letzte Prüfung: authentifiziert, aber Status fehlgeschlagen.",
     "description": "Connector diagnostic."
@@ -1522,5 +1538,69 @@
   "desktopDeviceIdentityRestart": {
     "message": "Geräteidentität nicht verfügbar. Versuchen Sie, Browser Recall neu zu starten.",
     "description": "Startup failure when desktop device identity is unavailable."
+  },
+  "extensionCouldNotLoadNotes": {
+    "message": "Notizen konnten nicht geladen werden.",
+    "description": "Fehler beim Laden von Notizen."
+  },
+  "extensionCouldNotLoadHighlights": {
+    "message": "Hervorhebungen konnten nicht geladen werden.",
+    "description": "Fehler beim Laden von Hervorhebungen."
+  },
+  "extensionCouldNotLoadLists": {
+    "message": "Listen konnten nicht geladen werden.",
+    "description": "Fehler beim Laden von Listen."
+  },
+  "extensionCouldNotLoadShortcuts": {
+    "message": "Tastenkürzel konnten nicht geladen werden: $1",
+    "description": "Fehler beim Laden von Tastenkürzeln."
+  },
+  "extensionPopupDataTimedOut": {
+    "message": "Zeitüberschreitung beim Laden der Pop-up-Daten. Versuchen Sie es erneut.",
+    "description": "Zeitüberschreitung beim Laden der Pop-up-Daten."
+  },
+  "desktopAddColumns": {
+    "message": "Spalten hinzufügen",
+    "description": "Titel der Schaltfläche zum Hinzufügen von Spalten."
+  },
+  "desktopClearSearch": {
+    "message": "Suche löschen",
+    "description": "Beschriftung zum Löschen der Suche."
+  },
+  "desktopExpand": {
+    "message": "Erweitern",
+    "description": "Titel zum Erweitern einer Liste."
+  },
+  "desktopFailedToLoadPageDetails": {
+    "message": "Seitendetails konnten nicht geladen werden",
+    "description": "Page detail load failure."
+  },
+  "desktopAutoTag": {
+    "message": "automatisch",
+    "description": "Automatically pinned result tag."
+  },
+  "desktopLikedTag": {
+    "message": "gefällt mir",
+    "description": "Liked result tag."
+  },
+  "desktopNoteTag": {
+    "message": "Notiz",
+    "description": "Result tag indicating a note."
+  },
+  "desktopSnapshotTag": {
+    "message": "Schnappschuss",
+    "description": "Result tag indicating a snapshot."
+  },
+  "desktopMatchedInNoteTag": {
+    "message": "Übereinstimmung in Notiz",
+    "description": "Search result tag for a note match."
+  },
+  "desktopMatchedInSnapshotTag": {
+    "message": "Übereinstimmung in Schnappschuss",
+    "description": "Search result tag for a snapshot match."
+  },
+  "desktopListNamePlaceholder": {
+    "message": "Listenname...",
+    "description": "Platzhalter für den Listennamen."
   }
 }

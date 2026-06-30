@@ -136,6 +136,7 @@ function createFirefoxWebExtensionApi({
   sendMessage,
   onOpenOptionsPage,
   onSendMessage,
+  i18n = createEnglishI18n(),
 } = {}) {
   const storageChanged = createEvent();
   const runtimeMessage = createEvent();
@@ -155,6 +156,7 @@ function createFirefoxWebExtensionApi({
     global: { text: '', color: '#000000', title: '', icon: null },
     tabs: new Map(),
   };
+  const contextMenuItems = new Map();
 
   function assertFirefoxArgs(methodName, args, expectedLength) {
     if (args.length !== expectedLength) {
@@ -201,7 +203,7 @@ function createFirefoxWebExtensionApi({
 
   const browserApi = {
     badgeState,
-    i18n: createEnglishI18n(),
+    i18n,
     action: {
       async setBadgeBackgroundColor(details) {
         assertFirefoxArgs('setBadgeBackgroundColor', arguments, 1);
@@ -243,7 +245,19 @@ function createFirefoxWebExtensionApi({
     },
     contextMenus: {
       onClicked: createEvent(),
-      async create() {},
+      async create(item) {
+        contextMenuItems.set(item.id, { ...item });
+        return item.id;
+      },
+      async update(id, patch) {
+        if (!contextMenuItems.has(id)) {
+          throw new Error(`Unknown context menu: ${id}`);
+        }
+        contextMenuItems.set(id, {
+          ...contextMenuItems.get(id),
+          ...patch,
+        });
+      },
     },
     runtime: {
       onInstalled: runtimeInstalled,
@@ -312,6 +326,7 @@ function createFirefoxWebExtensionApi({
     },
     storage,
     badgeState,
+    contextMenuItems,
   };
 }
 
@@ -326,6 +341,7 @@ function createOrionCallbackWebExtensionApi({
     global: { text: '', color: null, icon: null, title: '' },
     tabs: new Map(),
   };
+  const contextMenuItems = new Map();
   const storageData = {
     connectorState: 'connected',
     connectorDeviceId: 'orion-device',
@@ -376,8 +392,50 @@ function createOrionCallbackWebExtensionApi({
       return callbackLater(undefined, callback);
     },
   };
+  const runtime = {
+    ...(runtimeId ? { id: runtimeId } : {}),
+    lastError: null,
+    onInstalled: createEvent(),
+    onMessage: runtimeMessage,
+    onStartup: createEvent(),
+    getBrowserInfo(callback) {
+      return callbackLater({ name: 'Orion' }, callback);
+    },
+    getManifest() {
+      return {
+        manifest_version: 3,
+        name: 'browser-recall',
+        browser_specific_settings: {
+          gecko: { id: 'browser-recall@example.invalid' },
+        },
+      };
+    },
+    reload() {},
+    sendMessage(message, callback) {
+      const handler = responses[message?.action];
+      const value = handler
+        ? typeof handler === 'function'
+          ? handler(message)
+          : handler
+        : { success: true };
+      if (value?.__delayMs) {
+        setTimeout(() => callback?.(value.response), value.__delayMs);
+        return undefined;
+      }
+      return callbackLater(value, callback);
+    },
+  };
+  const callbackWithLastError = (error, callback) => {
+    queueMicrotask(() => {
+      runtime.lastError = error ? { message: error.message } : null;
+      callback?.();
+      runtime.lastError = null;
+    });
+  };
+
   return {
     badgeState,
+    contextMenuItems,
     i18n: createEnglishI18n(),
     action,
     alarms: {
@@ -397,42 +455,28 @@ function createOrionCallbackWebExtensionApi({
     },
     contextMenus: {
       onClicked: createEvent(),
-      create(_, callback) {
-        return callbackLater(undefined, callback);
+      create(item, callback) {
+        contextMenuItems.set(item.id, { ...item });
+        callbackWithLastError(null, callback);
+        return item.id;
       },
-    },
-    runtime: {
-      ...(runtimeId ? { id: runtimeId } : {}),
-      onInstalled: createEvent(),
-      onMessage: runtimeMessage,
-      onStartup: createEvent(),
-      getBrowserInfo(callback) {
-        return callbackLater({ name: 'Orion' }, callback);
-      },
-      getManifest() {
-        return {
-          manifest_version: 3,
-          name: 'browser-recall',
-          browser_specific_settings: {
-            gecko: { id: 'browser-recall@example.invalid' },
-          },
-        };
-      },
-      reload() {},
-      sendMessage(message, callback) {
-        const handler = responses[message?.action];
-        const value = handler
-          ? typeof handler === 'function'
-            ? handler(message)
-            : handler
-          : { success: true };
-        if (value?.__delayMs) {
-          setTimeout(() => callback?.(value.response), value.__delayMs);
+      update(id, patch, callback) {
+        if (!contextMenuItems.has(id)) {
+          callbackWithLastError(
+            new Error(`Unknown context menu: ${id}`),
+            callback,
+          );
           return undefined;
         }
-        return callbackLater(value, callback);
+        contextMenuItems.set(id, {
+          ...contextMenuItems.get(id),
+          ...patch,
+        });
+        callbackWithLastError(null, callback);
+        return undefined;
       },
     },
+    runtime,
     storage: {
       onChanged: storageChanged,
       local: {
@@ -784,7 +828,15 @@ test.describe('Firefox extension smoke', () => {
   test('staged background opens options only on fresh install', async () => {
     await withStagedFirefoxExtension(async (outDir) => {
       let optionsOpenCount = 0;
+      let highlightTitle = 'Highlight Selected';
       const api = createFirefoxWebExtensionApi({
+        i18n: {
+          ...createEnglishI18n(),
+          getMessage(key, substitutions) {
+            if (key === 'extensionHighlightSelected') return highlightTitle;
+            return createEnglishI18n().getMessage(key, substitutions);
+          },
+        },
         onOpenOptionsPage() {
           optionsOpenCount += 1;
         },
@@ -814,11 +866,63 @@ test.describe('Firefox extension smoke', () => {
 
           await api.events.runtimeInstalled.dispatch({ reason: 'update' });
           expect(optionsOpenCount).toBe(0);
+          expect(api.contextMenuItems.get('portal-highlight')?.title).toBe(
+            'Highlight Selected',
+          );
+
+          highlightTitle = '選択したテキストをハイライト';
+          await api.events.runtimeStartup.dispatch();
+          expect(api.contextMenuItems.get('portal-highlight')?.title).toBe(
+            '選択したテキストをハイライト',
+          );
 
           await api.events.runtimeInstalled.dispatch({ reason: 'install' });
           await waitFor(
             () => optionsOpenCount === 1,
             'options page opened after install',
+          );
+        },
+      );
+
+      for (const timer of timers) clearTimeout(timer);
+    });
+  });
+
+  test('staged background creates its context menu through callback-only APIs', async () => {
+    await withStagedFirefoxExtension(async (outDir) => {
+      const api = createOrionCallbackWebExtensionApi({
+        tab: {
+          id: 31,
+          url: 'https://example.test/callback-context-menu',
+          title: 'Callback Context Menu',
+        },
+        responses: {},
+      });
+      const timers = new Set();
+      const nativeSetTimeout = globalThis.setTimeout;
+      const unrefSetTimeout = (callback, ms, ...args) => {
+        const timer = nativeSetTimeout(callback, ms, ...args);
+        timer.unref?.();
+        timers.add(timer);
+        return timer;
+      };
+
+      await withPatchedGlobals(
+        {
+          browser: api,
+          chrome: {},
+          navigator: navigatorWithUserAgent(
+            globalThis.navigator,
+            NON_FIREFOX_USER_AGENT,
+          ),
+          WebSocket: FailingWebSocket,
+          setTimeout: unrefSetTimeout,
+        },
+        async () => {
+          await import(pathToFileURL(path.join(outDir, 'background.js')).href);
+          await api.runtime.onInstalled.dispatch({ reason: 'update' });
+          expect(api.contextMenuItems.get('portal-highlight')?.title).toBe(
+            'Highlight Selected',
           );
         },
       );

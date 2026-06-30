@@ -19,7 +19,7 @@ Browser Recall is a desktop-first browsing memory app: a Tauri desktop app and d
 ### Prerequisites
 
 - [Rust](https://rustup.rs/) (latest stable)
-- Node.js 18+
+- Node.js 24+
 
 ### Build & Load
 

@@ -863,6 +863,22 @@
     "message": "Échec de la surbrillance",
     "description": "Highlight failure."
   },
+  "extensionHighlightSelected": {
+    "message": "Surligner la sélection",
+    "description": "Selection context menu label."
+  },
+  "extensionResumeTracing": {
+    "message": "Reprendre le suivi",
+    "description": "Extension popup recording resume title."
+  },
+  "extensionUpdatingTracing": {
+    "message": "Mise à jour du suivi",
+    "description": "Extension popup recording update title."
+  },
+  "extensionPdfHighlightHint": {
+    "message": "Sélectionnez du texte et faites un clic droit pour le surligner",
+    "description": "PDF highlight panel instruction."
+  },
   "extensionLastCheckAuthenticatedStatusFailed": {
     "message": "Dernière vérification : authentifié, mais le statut a échoué.",
     "description": "Connector diagnostic."
@@ -1522,5 +1538,66 @@
   "desktopDeviceIdentityRestart": {
     "message": "Identité de l'appareil indisponible. Essayez de redémarrer Browser Recall.",
     "description": "Startup failure when desktop device identity is unavailable."
+  },
+  "extensionCouldNotLoadNotes": {
+    "message": "Impossible de charger les notes.",
+    "description": "Erreur de chargement des notes."
+  },
+  "extensionCouldNotLoadHighlights": {
+    "message": "Impossible de charger les surlignages.",
+    "description": "Erreur de chargement des surlignages."
+  },
+  "extensionCouldNotLoadLists": {
+    "message": "Impossible de charger les listes.",
+    "description": "Erreur de chargement des listes."
+  },
+  "extensionCouldNotLoadShortcuts": {
+    "message": "Impossible de charger les raccourcis : $1",
+    "description": "Erreur de chargement des raccourcis."
+  },
+  "extensionPopupDataTimedOut": {
+    "message": "Le chargement des données de la fenêtre contextuelle a expiré. Réessayez.",
+    "description": "Expiration du chargement de la fenêtre contextuelle."
+  },
+  "desktopAddColumns": {
+    "message": "Ajouter des colonnes",
+    "description": "Titre du bouton d’ajout de colonnes."
+  },
+  "desktopClearSearch": {
+    "message": "Effacer la recherche",
+    "description": "Libellé pour effacer la recherche."
+  },
+  "desktopExpand": {
+    "message": "Développer",
+    "description": "Titre pour développer une liste."
+  },
+  "desktopFailedToLoadPageDetails": {
+    "message": "Impossible de charger les détails de la page",
+    "description": "Page detail load failure."
+  },
+  "desktopAutoTag": {
+    "message": "automatique",
+    "description": "Automatically pinned result tag."
+  },
+  "desktopLikedTag": { "message": "aimé", "description": "Liked result tag." },
+  "desktopNoteTag": {
+    "message": "note",
+    "description": "Result tag indicating a note."
+  },
+  "desktopSnapshotTag": {
+    "message": "instantané",
+    "description": "Result tag indicating a snapshot."
+  },
+  "desktopMatchedInNoteTag": {
+    "message": "correspondance dans la note",
+    "description": "Search result tag for a note match."
+  },
+  "desktopMatchedInSnapshotTag": {
+    "message": "correspondance dans l'instantané",
+    "description": "Search result tag for a snapshot match."
+  },
+  "desktopListNamePlaceholder": {
+    "message": "Nom de la liste...",
+    "description": "Espace réservé du nom de liste."
   }
 }

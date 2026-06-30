@@ -8,77 +8,21 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import WebSocket from 'ws';
 import { generateSlugFromUrl } from '../../packages/core/page-identity.js';
+import {
+  collectDaemonMessages as collectMessages,
+  ensureTestDaemonBuilt,
+  launchTestDaemon,
+  nextDaemonMessage as nextMessage,
+  stopTestDaemon as stopDaemon,
+  waitForDaemonListening as waitForListening,
+} from './daemon-test-harness.js';
 
-const ROOT = process.cwd();
-const BINARY_PATH = path.join(ROOT, 'target', 'debug', 'browser-recall-daemon');
 const ORIGIN = 'chrome-extension://abcdefghijklmnop';
 const PORT_CANDIDATES = [28671, 28672, 28673];
-
-function waitForListening(child) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error('daemon did not start')),
-      15_000,
-    );
-    child.stdout.on('data', (chunk) => {
-      const text = chunk.toString();
-      const match = text.match(/listening on (\d+)/);
-      if (match) {
-        clearTimeout(timer);
-        resolve(Number(match[1]));
-      }
-    });
-    child.once('exit', (code) => {
-      clearTimeout(timer);
-      reject(new Error(`daemon exited early with code ${code}`));
-    });
-  });
-}
-
-function nextMessage(socket) {
-  return new Promise((resolve, reject) => {
-    const onMessage = (raw) => {
-      const message = JSON.parse(raw.toString());
-      if (message.type === 'change') return;
-      socket.off('message', onMessage);
-      socket.off('error', onError);
-      resolve(message);
-    };
-    const onError = (error) => {
-      socket.off('message', onMessage);
-      socket.off('error', onError);
-      reject(error);
-    };
-    socket.on('message', onMessage);
-    socket.on('error', onError);
-  });
-}
-
-function collectMessages(socket, count) {
-  return new Promise((resolve, reject) => {
-    const messages = [];
-    const onMessage = (raw) => {
-      messages.push(JSON.parse(raw.toString()));
-      if (messages.length === count) {
-        socket.off('message', onMessage);
-        socket.off('error', onError);
-        resolve(messages);
-      }
-    };
-    const onError = (error) => {
-      socket.off('message', onMessage);
-      socket.off('error', onError);
-      reject(error);
-    };
-    socket.on('message', onMessage);
-    socket.on('error', onError);
-  });
-}
 
 function shardFor(value) {
   return createHash('sha256')
@@ -167,29 +111,9 @@ async function waitForFirstLog(root) {
 }
 
 function launchDaemon(configDir, approveMode = 'allow') {
-  return spawn(
-    BINARY_PATH,
-    ['--config-dir', configDir, '--approve-mode', approveMode],
-    {
-      cwd: ROOT,
-      env: {
-        ...process.env,
-        BROWSER_RECALL_PORTS: PORT_CANDIDATES.join(','),
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  );
-}
-
-async function stopDaemon(child) {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  await new Promise((resolve) => {
-    const timer = setTimeout(resolve, 2_000);
-    child.once('exit', () => {
-      clearTimeout(timer);
-      resolve();
-    });
-    child.kill('SIGINT');
+  return launchTestDaemon(configDir, {
+    ports: PORT_CANDIDATES,
+    approveMode,
   });
 }
 
@@ -201,6 +125,7 @@ async function pairSocket(port) {
     socket.once('open', resolve);
     socket.once('error', reject);
   });
+  const pairingMessages = collectMessages(socket, 2);
   socket.send(
     JSON.stringify({
       type: 'pair_request',
@@ -209,7 +134,7 @@ async function pairSocket(port) {
       extensionId: 'abcdefghijklmnop',
     }),
   );
-  const [, approved] = await collectMessages(socket, 2);
+  const [, approved] = await pairingMessages;
   expect(approved.type).toBe('pair_approved');
   return socket;
 }
@@ -218,23 +143,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
   let tempDirs = [];
   let childProcesses = [];
 
-  beforeAll(() => {
-    const build = spawnSync(
-      'cargo',
-      [
-        'build',
-        '-p',
-        'browser-recall-daemon',
-        '--bin',
-        'browser-recall-daemon',
-      ],
-      {
-        cwd: ROOT,
-        stdio: 'inherit',
-      },
-    );
-    expect(build.status).toBe(0);
-  });
+  beforeAll(() => ensureTestDaemonBuilt(), 300_000);
 
   afterEach(async () => {
     await Promise.all(
@@ -393,6 +302,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     );
     expect((await nextMessage(socket)).type).toBe('ack');
 
+    const historyMessages = collectMessages(socket, 2);
     socket.send(
       JSON.stringify({
         type: 'search_history_stream',
@@ -400,7 +310,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
         query: 'banana',
       }),
     );
-    const historyChunk = await nextMessage(socket);
+    const [historyChunk, historyDone] = await historyMessages;
     expect(historyChunk).toMatchObject({
       type: 'history_search_chunk',
       searchId: 'integration-history-search',
@@ -411,7 +321,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
         },
       ],
     });
-    await expect(nextMessage(socket)).resolves.toMatchObject({
+    expect(historyDone).toMatchObject({
       type: 'history_search_done',
       searchId: 'integration-history-search',
       success: true,

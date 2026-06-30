@@ -75,5 +75,9 @@ customizeShortcuts.addEventListener('click', () => {
 });
 
 renderShortcuts().catch((error) => {
-  shortcutsList.textContent = `Could not load shortcuts: ${error.message}`;
+  shortcutsList.textContent = tr(
+    'extensionCouldNotLoadShortcuts',
+    'Could not load shortcuts: $1',
+    error.message,
+  );
 });

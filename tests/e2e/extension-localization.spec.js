@@ -224,6 +224,16 @@ test('packaged extension renders a real Japanese popup workflow', async ({
     await expect(popup.locator('#pageNoteAddBtn')).toHaveText(
       catalog.extensionAddPageNote.message,
     );
+
+    localServer.addPage('/localized-extension.pdf', {
+      title: 'Localized PDF Extension',
+      body: '<main>Localized PDF highlight workflow</main>',
+    });
+    const pdfPage = await context.newPage();
+    await pdfPage.goto(localServer.url('/localized-extension.pdf'));
+    await expect(pdfPage.locator('#portal-highlights-panel .hint')).toHaveText(
+      'テキストを選択し、右クリックしてハイライト',
+    );
   } finally {
     await browser?.close().catch(() => {});
     await stopBrowserProcess(browserProcess);

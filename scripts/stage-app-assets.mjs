@@ -34,6 +34,10 @@ const extensionProductionExcludes = new Set([
   'background-test-actions.js',
   'background-test-control.js',
 ]);
+const localizationSourceExcludes = new Set([
+  ...extensionProductionExcludes,
+  'test-helper.html',
+]);
 
 const targets = {
   extension: {
@@ -204,6 +208,274 @@ export function validateLocaleMessage(
   }
 }
 
+function collectLocalizationSources(dir, relativeRoot = repoRoot) {
+  const sources = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (
+      entry.isDirectory() &&
+      ['_locales', 'lib', 'savepage'].includes(entry.name)
+    ) {
+      continue;
+    }
+    const filePath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      sources.push(...collectLocalizationSources(filePath, relativeRoot));
+      continue;
+    }
+    if (!/\.(?:html|js|json)$/.test(entry.name)) continue;
+    if (localizationSourceExcludes.has(entry.name)) continue;
+    sources.push({
+      path: path.relative(relativeRoot, filePath),
+      source: fs.readFileSync(filePath, 'utf8'),
+    });
+  }
+  return sources;
+}
+
+function referencedLocalizationKeys(source) {
+  const keys = new Set();
+  const patterns = [
+    /\btr\(\s*['"]([^'"]+)['"]/g,
+    /\b(?:chrome\.)?i18n\.getMessage\(\s*['"]([^'"]+)['"]/g,
+    /data-i18n(?:-html|-placeholder|-title|-aria-label)?\s*=\s*['"]([^'"]+)['"]/g,
+    /__MSG_([A-Za-z][\w.-]*)__\b/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) keys.add(match[1]);
+  }
+  return keys;
+}
+
+function stripHtmlMarkup(value) {
+  return value
+    .replace(/<(?:style|script)\b[^>]*>[\s\S]*?<\/(?:style|script)>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&(?:#\d+|#x[\da-f]+|[a-z][\w-]*);/gi, ' ');
+}
+
+function skipQuotedJsLiteral(source, start, quote) {
+  for (let index = start + 1; index < source.length; index += 1) {
+    if (source[index] === '\\') {
+      index += 1;
+      continue;
+    }
+    if (source[index] === quote) return index + 1;
+  }
+  return source.length;
+}
+
+function scanTemplateLiteral(source, start) {
+  const staticParts = [];
+  let partStart = start + 1;
+  for (let index = partStart; index < source.length; index += 1) {
+    if (source[index] === '\\') {
+      index += 1;
+      continue;
+    }
+    if (source[index] === '`') {
+      staticParts.push(source.slice(partStart, index));
+      return { end: index + 1, staticText: staticParts.join(' ') };
+    }
+    if (source[index] === '$' && source[index + 1] === '{') {
+      staticParts.push(source.slice(partStart, index));
+      index = skipJsExpression(source, index + 2) - 1;
+      partStart = index + 1;
+    }
+  }
+  return { end: source.length, staticText: staticParts.join(' ') };
+}
+
+function skipJsExpression(source, start) {
+  let depth = 1;
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "'" || char === '"') {
+      index = skipQuotedJsLiteral(source, index, char) - 1;
+      continue;
+    }
+    if (char === '`') {
+      index = scanTemplateLiteral(source, index).end - 1;
+      continue;
+    }
+    if (char === '/' && source[index + 1] === '/') {
+      const newline = source.indexOf('\n', index + 2);
+      index = newline === -1 ? source.length : newline;
+      continue;
+    }
+    if (char === '/' && source[index + 1] === '*') {
+      const commentEnd = source.indexOf('*/', index + 2);
+      index = commentEnd === -1 ? source.length : commentEnd + 1;
+      continue;
+    }
+    if (char === '{') depth += 1;
+    if (char !== '}') continue;
+    depth -= 1;
+    if (depth === 0) return index + 1;
+  }
+  return source.length;
+}
+
+export function validateLocalizedUiSource(filePath, source) {
+  // Cover HTML text nodes, UI attributes, and static innerHTML segments.
+  // Mark intentional non-translated product or provider names with translate="no".
+  const literalPatterns = [
+    String.raw`"((?:\\.|[^"\\])*)"`,
+    String.raw`'((?:\\.|[^'\\])*)'`,
+    String.raw`\`((?:\\.|[^\`\\])*)\``,
+  ];
+  const assignmentGroups = [
+    {
+      prefix: String.raw`\.(?:title|placeholder|textContent|innerText)\s*=\s*`,
+      html: false,
+    },
+    {
+      prefix: String.raw`\.innerHTML\s*=\s*`,
+      html: true,
+      literals: literalPatterns.slice(0, 2),
+    },
+    {
+      prefix: String.raw`\.setAttribute\(\s*['"](?:title|placeholder|aria-label)['"]\s*,\s*`,
+      html: false,
+    },
+  ];
+  if (filePath.endsWith('.js')) {
+    assignmentGroups.push({
+      prefix: String.raw`(?:title|placeholder|aria-label)\s*=\s*`,
+      html: false,
+    });
+  }
+  const assignments = assignmentGroups.flatMap(
+    ({ prefix, html, literals = literalPatterns }) =>
+      literals.map((literal) => ({
+        pattern: new RegExp(`${prefix}${literal}`, 'gs'),
+        html,
+      })),
+  );
+  for (const { pattern, html } of assignments) {
+    for (const match of source.matchAll(pattern)) {
+      const literalText = match[1];
+      let visibleText = literalText
+        .replace(/\$\{[\s\S]*?\}/g, ' ')
+        .replace(/\\u[\da-f]{4}|\\x[\da-f]{2}/gi, '');
+      if (html) {
+        visibleText = stripHtmlMarkup(visibleText);
+      }
+      if (
+        /\p{L}/u.test(visibleText) &&
+        !visibleText.trimStart().startsWith('//')
+      ) {
+        throw new Error(
+          `${filePath} has hardcoded localized UI text: ${literalText}`,
+        );
+      }
+    }
+  }
+  if (filePath.endsWith('.js')) {
+    for (const match of source.matchAll(/\.innerHTML\s*=\s*`/g)) {
+      const start = match.index + match[0].length - 1;
+      const { staticText } = scanTemplateLiteral(source, start);
+      const visibleText = stripHtmlMarkup(staticText).replace(
+        /\\u[\da-f]{4}|\\x[\da-f]{2}/gi,
+        '',
+      );
+      if (/\p{L}/u.test(visibleText)) {
+        throw new Error(
+          `${filePath} has hardcoded localized UI text: ${visibleText.trim()}`,
+        );
+      }
+    }
+  }
+  if (!filePath.endsWith('.html')) return;
+  for (const tagMatch of source.matchAll(/<[^>]+>/gs)) {
+    const tag = tagMatch[0];
+    for (const attribute of ['title', 'placeholder', 'aria-label']) {
+      const value = tag.match(
+        new RegExp(`\\s${attribute}=(['"])([^'"]+)\\1`),
+      )?.[2];
+      if (!value || !/\p{L}/u.test(value)) continue;
+      if (tag.includes(`data-i18n-${attribute}=`)) continue;
+      if (
+        tag.includes('data-scheme=') ||
+        /^(?:https?:\/\/|github_pat_)/.test(value)
+      ) {
+        continue;
+      }
+      throw new Error(`${filePath} has hardcoded localized UI text: ${value}`);
+    }
+  }
+
+  const voidTags = new Set([
+    'area',
+    'base',
+    'br',
+    'col',
+    'embed',
+    'hr',
+    'img',
+    'input',
+    'link',
+    'meta',
+    'param',
+    'source',
+    'track',
+    'wbr',
+  ]);
+  const stack = [];
+  for (const tokenMatch of source.matchAll(
+    /<!--[\s\S]*?-->|<![^>]*>|<[^>]+>|[^<]+/g,
+  )) {
+    const token = tokenMatch[0];
+    if (token.startsWith('<!--') || token.startsWith('<!')) continue;
+    if (token.startsWith('</')) {
+      stack.pop();
+      continue;
+    }
+    if (token.startsWith('<')) {
+      const tagName = token.match(/^<\s*([\w-]+)/)?.[1]?.toLowerCase();
+      if (!tagName || voidTags.has(tagName) || /\/\s*>$/.test(token)) continue;
+      stack.push({
+        excluded: ['script', 'style'].includes(tagName),
+        localized: /\sdata-i18n(?:-html)?\s*=/.test(token),
+        untranslated: /\stranslate\s*=\s*['"]no['"]/.test(token),
+      });
+      continue;
+    }
+    if (stack.some(({ excluded }) => excluded)) continue;
+    if (stack.some(({ localized }) => localized)) continue;
+    if (stack.some(({ untranslated }) => untranslated)) continue;
+    const visibleText = token
+      .replace(/__MSG_[A-Za-z][\w.-]*__/g, '')
+      .replace(/&(?:#\d+|#x[\da-f]+|[a-z][\w-]*);/gi, ' ');
+    if (/\p{L}/u.test(visibleText)) {
+      throw new Error(
+        `${filePath} has hardcoded localized UI text: ${visibleText.trim()}`,
+      );
+    }
+  }
+}
+
+export function validateLocalizationReferences(
+  catalogs,
+  sources = [
+    ...collectLocalizationSources(extensionSourceDir),
+    ...collectLocalizationSources(desktopUiSourceDir),
+  ],
+) {
+  const defaultCatalog =
+    catalogs.get(DEFAULT_LOCALE) || catalogs.get('en') || new Map();
+  for (const { path: filePath, source } of sources) {
+    for (const key of referencedLocalizationKeys(source)) {
+      if (!defaultCatalog[key]?.message) {
+        throw new Error(
+          `${filePath} references missing localization key ${key}`,
+        );
+      }
+    }
+    validateLocalizedUiSource(filePath, source);
+  }
+}
+
 export function validateLocaleCatalogs() {
   const registeredCodes = SUPPORTED_LOCALES.map((locale) => locale.code);
   if (new Set(registeredCodes).size !== registeredCodes.length) {
@@ -257,6 +529,7 @@ export function validateLocaleCatalogs() {
       );
     }
   }
+  validateLocalizationReferences(catalogs);
   return catalogs;
 }
 

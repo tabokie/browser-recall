@@ -863,6 +863,22 @@
     "message": "Evidenziazione non riuscita",
     "description": "Highlight failure."
   },
+  "extensionHighlightSelected": {
+    "message": "Evidenzia selezione",
+    "description": "Selection context menu label."
+  },
+  "extensionResumeTracing": {
+    "message": "Riprendi il tracciamento",
+    "description": "Extension popup recording resume title."
+  },
+  "extensionUpdatingTracing": {
+    "message": "Aggiornamento del tracciamento",
+    "description": "Extension popup recording update title."
+  },
+  "extensionPdfHighlightHint": {
+    "message": "Seleziona il testo e fai clic con il pulsante destro per evidenziarlo",
+    "description": "PDF highlight panel instruction."
+  },
   "extensionLastCheckAuthenticatedStatusFailed": {
     "message": "Ultimo controllo: autenticato, ma lo stato non è riuscito.",
     "description": "Connector diagnostic."
@@ -1522,5 +1538,69 @@
   "desktopDeviceIdentityRestart": {
     "message": "Identità del dispositivo non disponibile. Prova a riavviare Browser Recall.",
     "description": "Startup failure when desktop device identity is unavailable."
+  },
+  "extensionCouldNotLoadNotes": {
+    "message": "Impossibile caricare le note.",
+    "description": "Errore durante il caricamento delle note."
+  },
+  "extensionCouldNotLoadHighlights": {
+    "message": "Impossibile caricare le evidenziazioni.",
+    "description": "Errore durante il caricamento delle evidenziazioni."
+  },
+  "extensionCouldNotLoadLists": {
+    "message": "Impossibile caricare gli elenchi.",
+    "description": "Errore durante il caricamento degli elenchi."
+  },
+  "extensionCouldNotLoadShortcuts": {
+    "message": "Impossibile caricare le scorciatoie: $1",
+    "description": "Errore durante il caricamento delle scorciatoie."
+  },
+  "extensionPopupDataTimedOut": {
+    "message": "Tempo scaduto durante il caricamento dei dati del popup. Riprova.",
+    "description": "Tempo scaduto durante il caricamento del popup."
+  },
+  "desktopAddColumns": {
+    "message": "Aggiungi colonne",
+    "description": "Titolo del pulsante per aggiungere colonne."
+  },
+  "desktopClearSearch": {
+    "message": "Cancella ricerca",
+    "description": "Etichetta per cancellare la ricerca."
+  },
+  "desktopExpand": {
+    "message": "Espandi",
+    "description": "Titolo per espandere un elenco."
+  },
+  "desktopFailedToLoadPageDetails": {
+    "message": "Impossibile caricare i dettagli della pagina",
+    "description": "Page detail load failure."
+  },
+  "desktopAutoTag": {
+    "message": "automatico",
+    "description": "Automatically pinned result tag."
+  },
+  "desktopLikedTag": {
+    "message": "mi piace",
+    "description": "Liked result tag."
+  },
+  "desktopNoteTag": {
+    "message": "nota",
+    "description": "Result tag indicating a note."
+  },
+  "desktopSnapshotTag": {
+    "message": "istantanea",
+    "description": "Result tag indicating a snapshot."
+  },
+  "desktopMatchedInNoteTag": {
+    "message": "corrispondenza nella nota",
+    "description": "Search result tag for a note match."
+  },
+  "desktopMatchedInSnapshotTag": {
+    "message": "corrispondenza nell'istantanea",
+    "description": "Search result tag for a snapshot match."
+  },
+  "desktopListNamePlaceholder": {
+    "message": "Nome elenco...",
+    "description": "Segnaposto del nome elenco."
   }
 }

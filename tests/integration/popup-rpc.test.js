@@ -2,89 +2,25 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
 import WebSocket from 'ws';
 import { generateSlugFromUrl } from '../../packages/core/page-identity.js';
+import {
+  collectDaemonMessages as collectMessages,
+  ensureTestDaemonBuilt,
+  launchTestDaemon,
+  nextDaemonMessage as nextMessage,
+  stopTestDaemon,
+  waitForDaemonListening as waitForListening,
+} from './daemon-test-harness.js';
 
-const ROOT = process.cwd();
-const BINARY_PATH = path.join(ROOT, 'target', 'debug', 'browser-recall-daemon');
 const ORIGIN = 'chrome-extension://abcdefghijklmnop';
 const PORT_CANDIDATES = [28771, 28772, 28773];
 
-function waitForListening(child) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error('daemon did not start')),
-      15_000,
-    );
-    child.stdout.on('data', (chunk) => {
-      const text = chunk.toString();
-      const match = text.match(/listening on (\d+)/);
-      if (match) {
-        clearTimeout(timer);
-        resolve(Number(match[1]));
-      }
-    });
-    child.once('exit', (code) => {
-      clearTimeout(timer);
-      reject(new Error(`daemon exited early with code ${code}`));
-    });
-  });
-}
-
-function nextMessage(socket) {
-  return new Promise((resolve, reject) => {
-    const onMessage = (raw) => {
-      const message = JSON.parse(raw.toString());
-      if (message.type === 'change') return;
-      socket.off('message', onMessage);
-      socket.off('error', onError);
-      resolve(message);
-    };
-    const onError = (error) => {
-      socket.off('message', onMessage);
-      socket.off('error', onError);
-      reject(error);
-    };
-    socket.on('message', onMessage);
-    socket.on('error', onError);
-  });
-}
-
-function collectMessages(socket, count) {
-  return new Promise((resolve, reject) => {
-    const messages = [];
-    const onMessage = (raw) => {
-      messages.push(JSON.parse(raw.toString()));
-      if (messages.length === count) {
-        socket.off('message', onMessage);
-        socket.off('error', onError);
-        resolve(messages);
-      }
-    };
-    const onError = (error) => {
-      socket.off('message', onMessage);
-      socket.off('error', onError);
-      reject(error);
-    };
-    socket.on('message', onMessage);
-    socket.on('error', onError);
-  });
-}
-
 function launchDaemon(configDir) {
-  return spawn(
-    BINARY_PATH,
-    ['--config-dir', configDir, '--approve-mode', 'allow'],
-    {
-      cwd: ROOT,
-      env: {
-        ...process.env,
-        BROWSER_RECALL_PORTS: PORT_CANDIDATES.join(','),
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  );
+  return launchTestDaemon(configDir, {
+    ports: PORT_CANDIDATES,
+    approveMode: 'allow',
+  });
 }
 
 async function pairSocket(port) {
@@ -95,6 +31,7 @@ async function pairSocket(port) {
     socket.once('open', resolve);
     socket.once('error', reject);
   });
+  const pairingMessages = collectMessages(socket, 2);
   socket.send(
     JSON.stringify({
       type: 'pair_request',
@@ -103,7 +40,7 @@ async function pairSocket(port) {
       extensionId: 'abcdefghijklmnop',
     }),
   );
-  const [, approved] = await collectMessages(socket, 2);
+  const [, approved] = await pairingMessages;
   expect(approved.type).toBe('pair_approved');
   return { socket, deviceId: approved.deviceId };
 }
@@ -112,28 +49,12 @@ describe.sequential('popup rpc integration', () => {
   let tempDirs = [];
   let childProcesses = [];
 
-  beforeAll(() => {
-    const build = spawnSync(
-      'cargo',
-      [
-        'build',
-        '-p',
-        'browser-recall-daemon',
-        '--bin',
-        'browser-recall-daemon',
-      ],
-      {
-        cwd: ROOT,
-        stdio: 'inherit',
-      },
-    );
-    expect(build.status).toBe(0);
-  });
+  beforeAll(() => ensureTestDaemonBuilt(), 300_000);
 
-  afterEach(() => {
-    for (const child of childProcesses.splice(0)) {
-      child.kill('SIGINT');
-    }
+  afterEach(async () => {
+    await Promise.all(
+      childProcesses.splice(0).map((child) => stopTestDaemon(child)),
+    );
     for (const dir of tempDirs.splice(0)) {
       rmSync(dir, { recursive: true, force: true });
     }
