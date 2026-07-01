@@ -89,7 +89,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 - Desktop UI localization uses the registry in `packages/core/i18n.js`; system locale comes from the Tauri shell, while `localeOverride` persists in daemon settings. The settings selector is generated from the registry rather than maintained separately in HTML.
 - `apps/desktop/ui/desktop-bridge.js` owns direct Tauri command dispatch for desktop product actions.
 - `apps/desktop/ui/extension-api-shim.js` keeps only the remaining `chrome.*` compatibility surfaces needed by the ported UI.
-- `apps/desktop/src-tauri/src/main.rs` forwards command results, change events, and storage updates into the webview.
+- `apps/desktop/src-tauri/src/main.rs` forwards command results, change events, and storage updates into the webview. Its window lifecycle keeps the webview warm while closed and restores visibility/focus when the tray, Dock, or a deep link reopens it.
 
 ### Connector Popup
 
@@ -149,10 +149,11 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `tests/e2e/seeded-combination-workflows.spec.js` | Seeded randomized extension workflow combining visits, notes, list pins, and popup reads |
 | `tests/e2e/desktop-locale-setting.spec.js` | Registry-complete desktop locale workflow through the real connector, daemon, settings checkpoints, UI reloads, invalid-override reporting, and RTL verification |
 | `tests/e2e/extension-localization.spec.js` | Browser-native WebExtension catalog selection using the packaged extension and the browser-reported UI locale |
+| `tests/smoke/macos-desktop-window-lifecycle.mjs` | Isolated signed-app smoke test for repeated native close/tray reopen, focus, and frame preservation |
 | `scripts/test-coverage-monitor.mjs` | Test-suite LoC mix and JS/Rust uncovered production line reporting |
 | `crates/daemon/tests/commands.rs` | Desktop command-surface coverage |
 | `crates/daemon/tests/sync_controller.rs` | Daemon sync-controller coverage |
 
 ## Remaining Intentional Gap
 
-The full desktop smoke / GUI parity suite is still intentionally absent. Everything else in this map refers to code that is present and part of the active product path.
+A full desktop GUI parity suite is still intentionally absent. The focused macOS lifecycle smoke test covers the native close/tray-reopen boundary; desktop visual behavior remains covered separately in Chromium.

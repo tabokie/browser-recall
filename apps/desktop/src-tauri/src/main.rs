@@ -38,6 +38,8 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
+#[cfg(target_os = "macos")]
+use std::time::Duration;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{
@@ -78,6 +80,7 @@ struct DesktopState {
     active_history_search: Mutex<Option<ActiveHistorySearch>>,
     logging: logging::LoggingHandle,
     quit_requested: Mutex<bool>,
+    main_window_focus_pending: AtomicBool,
 }
 
 struct ActiveHistorySearch {
@@ -265,12 +268,19 @@ fn set_dock_visible(app: &AppHandle, visible: bool) {
     }
 }
 
+fn log_window_error(result: tauri::Result<()>, action: &str) {
+    if let Err(error) = result {
+        warn!(%error, action, "failed to update main window");
+    }
+}
+
 fn show_main_window(app: &AppHandle) {
+    set_main_window_focus_pending(app, true);
     set_dock_visible(app, true);
-    let window = match app.get_webview_window("main") {
-        Some(window) => window,
+    let (window, created) = match app.get_webview_window("main") {
+        Some(window) => (window, false),
         None => match create_main_window(app) {
-            Ok(window) => window,
+            Ok(window) => (window, true),
             Err(error) => {
                 warn!(%error, "failed to create main window");
                 return;
@@ -278,17 +288,53 @@ fn show_main_window(app: &AppHandle) {
         },
     };
 
-    restore_normal_webview_window_frame(&window);
-    let _ = window.show();
-    let _ = window.set_focus();
+    if created {
+        restore_normal_webview_window_frame(&window);
+    }
+    log_window_error(window.unminimize(), "unminimize");
+    log_window_error(window.show(), "show");
+    log_window_error(window.set_focus(), "focus");
+    retry_main_window_focus(app.clone());
     apply_shell_state(app);
 }
 
-fn close_main_window(app: &AppHandle) {
-    set_dock_visible(app, false);
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.destroy();
+#[cfg(target_os = "macos")]
+fn retry_main_window_focus(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let should_retry = app.try_state::<DesktopState>().is_some_and(|state| {
+            state
+                .main_window_focus_pending
+                .swap(false, Ordering::Relaxed)
+        });
+        if !should_retry {
+            return;
+        }
+        if let Some(window) = app.get_webview_window("main") {
+            if window.is_visible().unwrap_or(false) && !window.is_focused().unwrap_or(false) {
+                log_window_error(window.set_focus(), "focus retry");
+            }
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn retry_main_window_focus(_app: AppHandle) {}
+
+fn set_main_window_focus_pending(app: &AppHandle, pending: bool) {
+    if let Some(state) = app.try_state::<DesktopState>() {
+        state
+            .main_window_focus_pending
+            .store(pending, Ordering::Relaxed);
     }
+}
+
+fn close_main_window(app: &AppHandle) {
+    set_main_window_focus_pending(app, false);
+    if let Some(window) = app.get_webview_window("main") {
+        log_window_error(window.hide(), "hide");
+    }
+    set_dock_visible(app, false);
 }
 
 fn restore_normal_webview_window_frame(window: &WebviewWindow) {
@@ -1684,6 +1730,10 @@ fn parse_deep_link_route(url: &str) -> Option<String> {
 }
 
 fn configure_deep_links(app: &AppHandle) {
+    if std::env::var_os("BROWSER_RECALL_SKIP_DEEP_LINK_REGISTRATION").is_some() {
+        info!("skipping deep-link registration for isolated runtime test");
+        return;
+    }
     if let Err(error) = app.deep_link().register("browser-recall") {
         warn!(%error, "failed to register deep-link scheme");
     }
@@ -1790,6 +1840,7 @@ fn main() {
                 active_history_search: Mutex::new(None),
                 logging,
                 quit_requested: Mutex::new(false),
+                main_window_focus_pending: AtomicBool::new(false),
             });
             apply_shell_state(app.handle());
             if let Some((snapshot_rx, change_rx)) = watcher_bundle {
@@ -1812,12 +1863,15 @@ fn main() {
             show_main_window(app.handle());
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
-                let app = window.app_handle().clone();
-                close_main_window(&app);
+                close_main_window(window.app_handle());
             }
+            WindowEvent::Focused(true) if window.label() == "main" => {
+                set_main_window_focus_pending(window.app_handle(), false);
+            }
+            _ => {}
         })
         .build(tauri::generate_context!())
         .expect("error while building Browser Recall desktop shell")

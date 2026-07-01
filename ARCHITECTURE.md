@@ -117,6 +117,8 @@ Desktop product actions should use `desktop-bridge.js` directly. The `chrome.*` 
 
 The Tauri layer is intentionally thin; storage/search/replay behavior lives in `crates/daemon/`.
 
+Closing the desktop window hides it instead of destroying its webview. Tray clicks, Dock reopen events, and deep links reuse that warm webview, preserve its frame, then unminimize, show, and focus it. macOS performs one delayed focus retry to handle native activation timing.
+
 ### Daemon Commands
 
 `crates/daemon/src/commands.rs` backs the desktop command surface, including:

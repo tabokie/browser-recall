@@ -1,0 +1,9 @@
+- The desktop app slow open issue was not fixed in eaea4af4, when I open the window by clicking on tray icon, the app window shows blank for a period before rendering content. And now I noticed sometimes when opening the app window, the window is hidden even though dock icon appears, I have to manually click on the dock icon to open the window.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them
+- I see you added 200 lines of code. Is there a simpler way to accomplish the same result?
+- Simplify
+- Please review my uncommitted changes
+- Fix them
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.5 Codex
+- Extend the test, add the lesson as a code comment somewhere
