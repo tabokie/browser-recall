@@ -157,7 +157,7 @@ test.describe('Popup list chip behavior', () => {
     await popup.locator('.page-note-edit-textarea').blur();
 
     await popup.locator('#listAddBtn').click();
-    await expect(popup.locator('#listPickerInput')).toHaveAttribute(
+    await expect(popup.locator('#listSearchInput')).toHaveAttribute(
       'placeholder',
       '搜索或创建...',
     );
@@ -604,7 +604,7 @@ test.describe('Popup list chip behavior', () => {
     ).toBeVisible();
 
     await popup.locator('#listAddBtn').click();
-    await expect(popup.locator('#listPicker')).toBeVisible();
+    await expect(popup.locator('#listPickerHost.list-picker')).toBeVisible();
     await expect
       .poll(() =>
         popup.evaluate(() =>
@@ -614,7 +614,9 @@ test.describe('Popup list chip behavior', () => {
       .toBe(false);
 
     await popup
-      .locator('#listPicker .list-picker-row', { hasText: 'Picker List' })
+      .locator('#listPickerHost.list-picker .list-picker-row', {
+        hasText: 'Picker List',
+      })
       .click();
     await expect
       .poll(() => popup.evaluate(() => globalThis.__listToggleEventsForTest))
@@ -624,14 +626,14 @@ test.describe('Popup list chip behavior', () => {
       .poll(() =>
         popup.evaluate(
           () =>
-            getComputedStyle(document.getElementById('listPickerInput'))
+            getComputedStyle(document.getElementById('listSearchInput'))
               .opacity,
         ),
       )
       .toBe('1');
     await popup.evaluate(() => globalThis.__releaseListToggleForTest());
     await expect(
-      popup.locator('#listPicker .list-picker-row.selected', {
+      popup.locator('#listPickerHost.list-picker .list-picker-row.selected', {
         hasText: 'Picker List',
       }),
     ).toBeVisible();
@@ -1275,7 +1277,7 @@ test.describe('Popup list chip behavior', () => {
 
     await expect(popup.locator('#listAddBtn')).toBeVisible();
     await popup.evaluate(() => document.getElementById('listAddBtn').click());
-    await expect(popup.locator('#listPicker')).toBeVisible();
+    await expect(popup.locator('#listPickerHost.list-picker')).toBeVisible();
     await expect(popup.locator('#listPickerList')).toContainText(
       'Floating List 18',
     );
@@ -1291,10 +1293,10 @@ test.describe('Popup list chip behavior', () => {
         return color;
       };
       const pickerStyle = getComputedStyle(
-        document.getElementById('listPicker'),
+        document.querySelector('#listPickerHost.list-picker'),
       );
       const inputStyle = getComputedStyle(
-        document.getElementById('listPickerInput'),
+        document.getElementById('listSearchInput'),
       );
       return {
         bodyHeight: document.body.getBoundingClientRect().height,
@@ -1317,11 +1319,11 @@ test.describe('Popup list chip behavior', () => {
           rightWidth: inputStyle.borderRightWidth,
         },
         inputBox: document
-          .getElementById('listPickerInput')
+          .getElementById('listSearchInput')
           .getBoundingClientRect()
           .toJSON(),
         pickerBox: document
-          .getElementById('listPicker')
+          .querySelector('#listPickerHost.list-picker')
           .getBoundingClientRect()
           .toJSON(),
         wrapBox: document
@@ -1505,7 +1507,7 @@ test.describe('Popup list chip behavior', () => {
       afterGutterWheelThumbTop - afterGutterWheelScrollbarTop,
     ).toBeGreaterThan(beforeGutterWheelThumbTop - afterGutterWheelScrollbarTop);
 
-    await popup.locator('#listPickerInput').fill('Floating List 18');
+    await popup.locator('#listSearchInput').fill('Floating List 18');
     await expect(popup.locator('#listPickerList .list-picker-row')).toHaveCount(
       1,
     );
@@ -1533,7 +1535,7 @@ test.describe('Popup list chip behavior', () => {
     expect(filtered.scrollbarWidth).toBe(0);
     expect(filtered.thumbWidth).toBe(0);
 
-    await popup.locator('#listPickerInput').fill('Create Only');
+    await popup.locator('#listSearchInput').fill('Create Only');
     await expect(popup.locator('#listPickerList .list-picker-row')).toHaveCount(
       0,
     );
@@ -1541,10 +1543,10 @@ test.describe('Popup list chip behavior', () => {
       await getExtensionMessage(popup, 'extensionCreateList', ['Create Only']),
     );
     const createOnly = await popup.evaluate(() => {
-      const picker = document.getElementById('listPicker');
+      const picker = document.querySelector('#listPickerHost.list-picker');
       const list = document.getElementById('listPickerList');
       const create = document.getElementById('listPickerCreate');
-      const input = document.getElementById('listPickerInput');
+      const input = document.getElementById('listSearchInput');
       const pickerBox = picker.getBoundingClientRect();
       const listBox = list.getBoundingClientRect();
       const createBox = create.getBoundingClientRect();
@@ -1568,7 +1570,7 @@ test.describe('Popup list chip behavior', () => {
     expect(createOnly.listScrollHeight).toBe(createOnly.listClientHeight);
     expect(createOnly.bottomHitOptionId).toBe('listPickerCreate');
 
-    await popup.locator('#listPickerInput').fill('Floating List 18');
+    await popup.locator('#listSearchInput').fill('Floating List 18');
     await expect(popup.locator('#listPickerList .list-picker-row')).toHaveCount(
       1,
     );
@@ -1648,7 +1650,7 @@ test.describe('Popup list chip behavior', () => {
     });
 
     await popup.keyboard.type('re');
-    const input = popup.locator('#listPickerInput');
+    const input = popup.locator('#listSearchInput');
     await expect(input).toBeVisible();
     await expect(input).toHaveValue('re');
     await expect(popup.locator('#listPickerList')).toContainText('Reading');
@@ -1660,7 +1662,7 @@ test.describe('Popup list chip behavior', () => {
     await titleInput.fill('');
     await popup.keyboard.type('abc');
     await expect(titleInput).toHaveValue('abc');
-    await expect(popup.locator('#listPicker')).toHaveCount(0);
+    await expect(popup.locator('#listPickerHost.list-picker')).toHaveCount(0);
 
     await popup.close();
     await page.close();
@@ -1733,7 +1735,7 @@ test.describe('Popup list chip behavior', () => {
     await popup.evaluate(() => document.activeElement?.blur());
     await popup.keyboard.type('r');
 
-    const input = popup.locator('#listPickerInput');
+    const input = popup.locator('#listSearchInput');
     await expect(input).toBeVisible();
     await expect(input).toHaveValue('r');
     await expect(popup.locator('#listPickerList')).toContainText('Reading');
@@ -1813,15 +1815,15 @@ test.describe('Popup list chip behavior', () => {
     });
 
     await popup.keyboard.type('r');
-    await expect(popup.locator('#listPicker')).toBeVisible();
+    await expect(popup.locator('#listPickerHost.list-picker')).toBeVisible();
     await popup.keyboard.press('Escape');
-    await expect(popup.locator('#listPicker')).toHaveCount(0);
+    await expect(popup.locator('#listPickerHost.list-picker')).toHaveCount(0);
     await popup.evaluate(() => window.__releasePopupListsForTest());
     await popup.waitForTimeout(100);
 
     expect(pageErrors).toEqual([]);
     await expect(popup.locator('#errorBubble')).toHaveCount(0);
-    await expect(popup.locator('#listSearchCaptureInput')).toBeFocused();
+    await expect(popup.locator('#listSearchInput')).toBeFocused();
 
     await popup.close();
     await page.close();
@@ -1976,7 +1978,7 @@ test.describe('Popup list chip behavior', () => {
       title: 'Popup CJK IME List Search',
     });
 
-    const capture = popup.locator('#listSearchCaptureInput');
+    const capture = popup.locator('#listSearchInput');
     await expect(capture).toBeFocused();
     await capture.evaluate((el) => {
       el.dataset.compositionTarget = 'list-search';
@@ -1986,8 +1988,8 @@ test.describe('Popup list chip behavior', () => {
         new CompositionEvent('compositionstart', { bubbles: true }),
       );
     });
-    await expect(popup.locator('#listPicker')).toBeVisible();
-    const input = popup.locator('#listPickerInput');
+    await expect(popup.locator('#listPickerHost.list-picker')).toBeVisible();
+    const input = popup.locator('#listSearchInput');
     await expect(input).toHaveAttribute(
       'data-composition-target',
       'list-search',
@@ -2000,7 +2002,7 @@ test.describe('Popup list chip behavior', () => {
         })),
       )
       .toEqual({
-        id: 'listPicker',
+        id: 'listPickerHost',
         className: 'list-picker',
       });
     await expect(input).toBeFocused();
@@ -2098,60 +2100,182 @@ test.describe('Popup list chip behavior', () => {
     const page = await extContext.newPage();
     await page.goto(url);
     await page.waitForLoadState('domcontentloaded');
-    const popup = await openPopupForUrl(extContext, extensionId, {
-      url,
-      title: 'Popup CJK IME Pinyin Preedit',
+    const popup = await extContext.newPage();
+    await popup.addInitScript(
+      ({ url, title }) => {
+        let releaseActiveTabQuery;
+        const activeTabQueryGate = new Promise((resolve) => {
+          releaseActiveTabQuery = resolve;
+        });
+        window.__releaseActiveTabQueryForImeTest = releaseActiveTabQuery;
+        window.__activeTabQueryBlockedForImeTest = false;
+        const patchTabsQuery = () => {
+          if (!globalThis.chrome?.tabs?.query) {
+            setTimeout(patchTabsQuery, 0);
+            return;
+          }
+          const originalQuery = chrome.tabs.query.bind(chrome.tabs);
+          chrome.tabs.query = async (queryInfo) => {
+            if (queryInfo?.active && queryInfo?.currentWindow) {
+              window.__activeTabQueryBlockedForImeTest = true;
+              await activeTabQueryGate;
+              return [{ id: 10001, url, title }];
+            }
+            return originalQuery(queryInfo);
+          };
+        };
+        patchTabsQuery();
+      },
+      { url, title: 'Popup CJK IME Pinyin Preedit' },
+    );
+    await popup.goto(`chrome-extension://${extensionId}/popup.html`, {
+      waitUntil: 'domcontentloaded',
     });
 
-    await popup.evaluate(() => {
-      const original = HTMLInputElement.prototype.setSelectionRange;
-      window.__imeSelectionTouchedForTest = false;
-      HTMLInputElement.prototype.setSelectionRange = function (...args) {
-        if (this.__browserRecallImeComposingForTest) {
-          window.__imeSelectionTouchedForTest = true;
-        }
-        return original.apply(this, args);
-      };
-    });
-
-    const capture = popup.locator('#listSearchCaptureInput');
-    await expect(capture).toBeFocused();
+    await expect
+      .poll(() =>
+        popup.evaluate(() => window.__activeTabQueryBlockedForImeTest),
+      )
+      .toBe(true);
+    const capture = popup.locator('#listSearchInput');
+    expect(await capture.evaluate((el) => document.activeElement === el)).toBe(
+      true,
+    );
     await capture.evaluate((el) => {
-      el.__browserRecallImeComposingForTest = true;
-      el.dispatchEvent(
-        new CompositionEvent('compositionstart', { bubbles: true }),
-      );
+      el.parentElement.dataset.originalListSearchParent = 'true';
     });
+    const cdp = await extContext.newCDPSession(popup);
+    await cdp.send('Input.imeSetComposition', {
+      text: 'y',
+      selectionStart: 1,
+      selectionEnd: 1,
+      replacementStart: 0,
+      replacementEnd: 0,
+    });
+    await expect(popup.locator('#listPickerHost.list-picker')).toHaveCount(0);
+    await popup.evaluate(() => window.__releaseActiveTabQueryForImeTest());
 
-    const input = popup.locator('#listPickerInput');
+    const input = popup.locator('#listSearchInput');
     await expect(input).toBeFocused();
-    await input.evaluate((el) => {
-      el.value = 'y';
-      el.dispatchEvent(
-        new InputEvent('input', {
-          inputType: 'insertCompositionText',
-          data: 'y',
-          bubbles: true,
-        }),
-      );
-    });
     await expect(input).toHaveValue('y');
-
-    await input.evaluate((el) => {
-      const nextPreedit = window.__imeSelectionTouchedForTest ? 'u' : 'yu';
-      el.value = nextPreedit;
-      el.dispatchEvent(
-        new InputEvent('input', {
-          inputType: 'insertCompositionText',
-          data: nextPreedit,
-          bubbles: true,
-        }),
-      );
+    await expect(input.locator('..')).toHaveAttribute(
+      'data-original-list-search-parent',
+      'true',
+    );
+    await cdp.send('Input.imeSetComposition', {
+      text: 'yu',
+      selectionStart: 2,
+      selectionEnd: 2,
+      replacementStart: 0,
+      replacementEnd: 1,
     });
 
     await expect(input).toHaveValue('yu');
 
     await popup.close();
+    await page.close();
+  });
+
+  test('toolbar action popup focuses and preserves its stable IME input', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    const now = Date.now();
+    localServer.addPage('/toolbar-popup-ime', {
+      title: 'Toolbar Popup IME',
+      body: '<main>Toolbar popup IME page</main>',
+    });
+    const url = localServer.url('/toolbar-popup-ime');
+    const slug = getSlugForUrl(url);
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: 'views/manifest/list-order.json',
+        data: { timestamp: now, tree: [] },
+      },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url,
+          title: 'Toolbar Popup IME',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.bringToFront();
+    const helper = await openHelperPage(extContext, extensionId);
+    await helper.evaluate(async (pageUrl) => {
+      const [tab] = await chrome.tabs.query({ url: pageUrl });
+      const prepared = await chrome.runtime.sendMessage({
+        action: 'preparePopupBootstrapForTest',
+        tabId: tab.id,
+      });
+      if (!prepared?.success) {
+        throw new Error(
+          `Popup preparation failed: ${JSON.stringify(prepared)}`,
+        );
+      }
+      await chrome.action.setPopup({
+        tabId: tab.id,
+        popup: prepared.popupPath,
+      });
+    }, url);
+    await page.bringToFront();
+    await helper.evaluate(() => chrome.action.openPopup());
+    await expect
+      .poll(() =>
+        helper.evaluate(
+          () => chrome.extension.getViews({ type: 'popup' }).length,
+        ),
+      )
+      .toBe(1);
+    const popupState = await helper.evaluate(() => {
+      const popup = chrome.extension.getViews({ type: 'popup' })[0];
+      const input = popup.document.getElementById('listSearchInput');
+      const originalParent = input.parentElement;
+      input.dispatchEvent(
+        new popup.CompositionEvent('compositionstart', { bubbles: true }),
+      );
+      input.value = 'y';
+      input.dispatchEvent(
+        new popup.InputEvent('input', {
+          inputType: 'insertCompositionText',
+          data: 'y',
+          bubbles: true,
+        }),
+      );
+      input.value = 'yu';
+      input.dispatchEvent(
+        new popup.InputEvent('input', {
+          inputType: 'insertCompositionText',
+          data: 'yu',
+          bubbles: true,
+        }),
+      );
+      return {
+        focused: popup.document.activeElement === input,
+        parentStable: input.parentElement === originalParent,
+        value: input.value,
+      };
+    });
+    expect(popupState).toEqual({
+      focused: true,
+      parentStable: true,
+      value: 'yu',
+    });
+    await helper.evaluate(() =>
+      chrome.extension.getViews({ type: 'popup' })[0].close(),
+    );
+    await helper.close();
     await page.close();
   });
 
@@ -2635,7 +2759,7 @@ test.describe('Popup list chip behavior', () => {
     });
 
     await popup.locator('#listAddBtn').click();
-    await popup.locator('#listPickerInput').fill('Brand New');
+    await popup.locator('#listSearchInput').fill('Brand New');
     await popup.keyboard.press('Enter');
 
     await expect
@@ -2713,7 +2837,7 @@ test.describe('Popup list chip behavior', () => {
     });
 
     await popup.locator('#listAddBtn').click();
-    const input = popup.locator('#listPickerInput');
+    const input = popup.locator('#listSearchInput');
     await input.fill('阅读');
     await input.evaluate((el) => {
       const event = new KeyboardEvent('keydown', {
@@ -2727,7 +2851,7 @@ test.describe('Popup list chip behavior', () => {
       el.dispatchEvent(event);
     });
 
-    await expect(popup.locator('#listPicker')).toBeVisible();
+    await expect(popup.locator('#listPickerHost.list-picker')).toBeVisible();
     await expect(popup.locator('#listPickerCreate')).toHaveText(
       await getExtensionMessage(popup, 'extensionCreateList', ['阅读']),
     );
@@ -2792,17 +2916,17 @@ test.describe('Popup list chip behavior', () => {
 
     for (let i = 0; i < 3; i += 1) {
       await popup.locator('#listAddBtn').click();
-      await expect(popup.locator('#listPicker')).toBeVisible();
-      await popup.locator('#listPickerInput').focus();
+      await expect(popup.locator('#listPickerHost.list-picker')).toBeVisible();
+      await popup.locator('#listSearchInput').focus();
       await popup.keyboard.press('Escape');
-      await expect(popup.locator('#listPicker')).toHaveCount(0);
+      await expect(popup.locator('#listPickerHost.list-picker')).toHaveCount(0);
     }
 
     await popup.locator('#listAddBtn').click();
-    await popup.locator('#listPickerInput').fill('Solo Create');
+    await popup.locator('#listSearchInput').fill('Solo Create');
     await popup.keyboard.press('Enter');
 
-    await expect(popup.locator('#listPicker')).toHaveCount(0);
+    await expect(popup.locator('#listPickerHost.list-picker')).toHaveCount(0);
     expect(
       await popup.evaluate(() => window.__saveListMetaRequests.length),
     ).toBe(1);
@@ -2886,7 +3010,7 @@ test.describe('Popup list chip behavior', () => {
     });
 
     await popup.locator('#listAddBtn').click();
-    const input = popup.locator('#listPickerInput');
+    const input = popup.locator('#listSearchInput');
     await input.fill('Keyboard');
     const createKeyboardLabel = await getExtensionMessage(
       popup,
@@ -2929,7 +3053,7 @@ test.describe('Popup list chip behavior', () => {
     await expect.poll(activeText).toBe('Keyboard Alpha');
 
     await popup.keyboard.press('Enter');
-    await expect(popup.locator('#listPicker')).toBeVisible();
+    await expect(popup.locator('#listPickerHost.list-picker')).toBeVisible();
     await expect(popup.locator('.list-chip.selected')).toContainText(
       'Keyboard Alpha',
     );
@@ -2946,7 +3070,7 @@ test.describe('Popup list chip behavior', () => {
     await expect(input).toHaveAttribute('aria-disabled', 'false');
     await input.press('Enter');
 
-    await expect(popup.locator('#listPicker')).toHaveCount(0);
+    await expect(popup.locator('#listPickerHost.list-picker')).toHaveCount(0);
     await expect(
       popup.getByRole('button', { name: 'Keyboard', exact: true }),
     ).toHaveClass(/selected/);

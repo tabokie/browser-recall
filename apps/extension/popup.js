@@ -197,7 +197,7 @@ function setPopupInteractionDisabled(disabled) {
         '.page-note-edit-textarea',
         '.highlight-note-edit-textarea',
         '.page-title-input',
-        '#listPickerInput',
+        '#listSearchInput',
       ].join(','),
     )
     .forEach((element) => {
@@ -1269,7 +1269,7 @@ function syncListCountFromSummary() {
 
 function syncListPickerOptionToggle(listId, pinned) {
   const option = document.querySelector(
-    `#listPicker .list-picker-option[data-list-id="${escapeCssSelector(listId)}"]`,
+    `#listPickerHost.list-picker .list-picker-option[data-list-id="${escapeCssSelector(listId)}"]`,
   );
   if (!option) return false;
   option.classList.toggle('selected', pinned);
@@ -1292,7 +1292,7 @@ function handleListChipsClick(event) {
   if (target.id === 'listAddBtn') {
     event.stopPropagation();
     void runPopupUiMutation('open-list-picker', async () => {
-      if (document.getElementById('listPicker')) {
+      if (listPickerElement()) {
         closeListPicker();
         return;
       }
@@ -1446,7 +1446,7 @@ function borderBlockSize(element) {
 
 function positionListPickerOverlay(wrap, picker, options = {}) {
   if (!wrap || !picker) return;
-  const input = picker.querySelector('#listPickerInput');
+  const input = picker.querySelector('#listSearchInput');
   if (!wrap.isConnected || !picker.isConnected || !input) return;
   const gap = 5;
   const listMaxHeight = 160;
@@ -1509,27 +1509,29 @@ function positionListPickerOverlay(wrap, picker, options = {}) {
 }
 
 function closeListPicker() {
-  const existing = document.getElementById('listPicker');
-  const pickerInput = document.getElementById('listPickerInput');
-  const wrap = document.querySelector('.list-chips-wrap');
-  if (pickerInput && wrap) {
+  const existing = listPickerElement();
+  const pickerInput = listPickerInput();
+  if (pickerInput) {
     pickerInput.__browserRecallPickerAbort?.abort();
     pickerInput.__browserRecallPickerAbort = null;
     configureListSearchCaptureInput(pickerInput);
-    wrap.appendChild(pickerInput);
   }
-  if (existing) existing.remove();
+  if (existing) {
+    existing.className = 'list-picker-host';
+    existing.removeAttribute('style');
+    document.getElementById('listPickerOptions').innerHTML = '';
+  }
   document.removeEventListener('click', pickerOutsideClickHandler);
   ensureListSearchCapture();
   focusListSearchCapture();
 }
 
 function pickerOutsideClickHandler(e) {
-  const picker = document.getElementById('listPicker');
+  const picker = listPickerElement();
   if (
     picker &&
     !picker.contains(e.target) &&
-    e.target.id !== 'listPickerInput' &&
+    e.target !== listSearchInput() &&
     e.target.id !== 'listAddBtn'
   ) {
     closeListPicker();
@@ -1542,7 +1544,6 @@ function configureListPickerInput(input) {
     input.ownerDocument?.defaultView?.AbortController ||
     globalThis.AbortController;
   input.__browserRecallPickerAbort = new AbortControllerCtor();
-  input.id = 'listPickerInput';
   input.className = 'list-picker-input';
   input.type = 'text';
   input.tabIndex = 0;
@@ -1574,36 +1575,22 @@ function setListSearchInputCursorToEnd(input) {
 function openListPicker(lists, allPins, options = {}) {
   const { initialQuery = '', loading = false, inputElement = null } = options;
   // Close if already open
-  if (document.getElementById('listPicker')) {
+  if (listPickerElement()) {
     closeListPicker();
     return null;
   }
 
   const wrap = document.querySelector('.list-chips-wrap');
   if (!wrap) return null;
-  const input =
-    inputElement || listSearchCaptureInput() || createListSearchCaptureInput();
+  const input = inputElement || listSearchCaptureInput();
+  if (!input) throw new Error('List search input is missing');
   const shouldRestoreFocus = document.activeElement !== input;
-  if (input.parentElement !== wrap) {
-    wrap.appendChild(input);
+  const picker = document.getElementById('listPickerHost');
+  if (!picker || !picker.contains(input)) {
+    throw new Error('List picker host is missing its search input');
   }
   configureListPickerInput(input);
-
-  const picker = document.createElement('div');
   picker.className = 'list-picker';
-  picker.id = 'listPicker';
-  picker.innerHTML = `
-    <div class="list-picker-list-row">
-      <div class="list-picker-list" id="listPickerList" role="listbox">
-        <div class="list-picker-options" id="listPickerOptions"></div>
-      </div>
-      <div class="list-picker-scrollbar" id="listPickerScrollbar" aria-hidden="true">
-        <div class="list-picker-scroll-thumb" id="listPickerScrollThumb"></div>
-      </div>
-    </div>
-  `;
-  picker.insertBefore(input, picker.firstChild);
-  wrap.appendChild(picker);
   positionListPickerOverlay(wrap, picker);
 
   const listEl = document.getElementById('listPickerList');
@@ -1619,10 +1606,10 @@ function openListPicker(lists, allPins, options = {}) {
 
   function isCurrentPicker() {
     return (
-      document.getElementById('listPicker') === picker &&
+      listPickerElement() === picker &&
       picker.isConnected &&
       picker.contains(input) &&
-      input.id === 'listPickerInput'
+      input.classList.contains('list-picker-input')
     );
   }
 
@@ -1840,8 +1827,7 @@ function openListPicker(lists, allPins, options = {}) {
 
   renderPickerRows();
   if (inputElement) {
-    input.focus({ preventScroll: true });
-    setListSearchInputCursorToEnd(input);
+    if (document.activeElement !== input) input.focus({ preventScroll: true });
   } else if (shouldRestoreFocus) {
     // Use setTimeout to avoid the click event that opened the picker from immediately focusing away.
     setTimeout(() => {
@@ -1894,10 +1880,7 @@ function openListPicker(lists, allPins, options = {}) {
         await runMutation('activate-list-picker-option', async () => {
           await activatePickerOption(activeOption);
         });
-        if (
-          document.getElementById('listPicker') &&
-          document.body.contains(input)
-        ) {
+        if (listPickerElement() && document.body.contains(input)) {
           input.focus({ preventScroll: true });
         }
         return;
@@ -1942,7 +1925,7 @@ function openListPicker(lists, allPins, options = {}) {
   document.addEventListener(
     'keydown',
     (e) => {
-      if (e.target === input || !document.getElementById('listPicker')) return;
+      if (e.target === input || !listPickerElement()) return;
       if (!['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(e.key)) return;
       if (isEditableEventTarget(e.target)) return;
       if (
@@ -1983,26 +1966,44 @@ function shouldFocusListSearchCapture() {
   if (isPopupUiMutating()) return false;
   if (popupShellState.surface !== 'dashboard') return false;
   if (!doc.getElementById('dashboardContent')) return false;
-  if (doc.getElementById('listPicker')) return false;
+  if (listPickerElement()) return false;
   if (!currentPage.url) return false;
-  if (isEditableEventTarget(doc.activeElement)) return false;
+  const input = listSearchCaptureInput();
+  if (isEditableEventTarget(doc.activeElement) && doc.activeElement !== input)
+    return false;
   return true;
 }
 
 function listSearchCaptureInput() {
-  return document.getElementById('listSearchCaptureInput');
+  const input = listSearchInput();
+  return input?.classList.contains('list-search-capture') ? input : null;
+}
+
+function listSearchInput() {
+  return document.getElementById('listSearchInput');
+}
+
+function listPickerInput() {
+  const input = listSearchInput();
+  return input?.classList.contains('list-picker-input') ? input : null;
+}
+
+function listPickerElement() {
+  const picker = document.getElementById('listPickerHost');
+  return picker?.classList.contains('list-picker') ? picker : null;
 }
 
 function focusListSearchCapture() {
   if (!shouldFocusListSearchCapture()) return;
-  const input = listSearchCaptureInput();
+  const input = listSearchInput();
   if (!input) return;
-  input.value = '';
-  input.focus({ preventScroll: true });
+  if (document.activeElement !== input) input.focus({ preventScroll: true });
+  if (input.value || isListSearchInputComposing(input)) {
+    void openListPickerFromTyping(input.value, input);
+  }
 }
 
 function configureListSearchCaptureInput(input) {
-  input.id = 'listSearchCaptureInput';
   input.className = 'list-search-capture';
   input.type = 'text';
   input.tabIndex = -1;
@@ -2021,22 +2022,20 @@ function configureListSearchCaptureInput(input) {
   return input;
 }
 
-function createListSearchCaptureInput() {
-  return configureListSearchCaptureInput(document.createElement('input'));
-}
-
 function bindListSearchCapture() {
   const input = listSearchCaptureInput();
   if (!input || boundListSearchCaptureInputs.has(input)) return;
   boundListSearchCaptureInputs.add(input);
   input.addEventListener('input', (event) => {
-    if (input.id !== 'listSearchCaptureInput') return;
+    if (!input.classList.contains('list-search-capture')) return;
     if (!input.value) return;
+    if (!currentPage.url || popupShellState.surface !== 'dashboard') return;
     void openListPickerFromTyping(input.value, input);
   });
   input.addEventListener('compositionstart', () => {
     input.__browserRecallListSearchComposing = true;
-    if (input.id !== 'listSearchCaptureInput') return;
+    if (!input.classList.contains('list-search-capture')) return;
+    if (!currentPage.url || popupShellState.surface !== 'dashboard') return;
     void openListPickerFromTyping(input.value, input);
   });
   input.addEventListener('compositionend', () => {
@@ -2045,13 +2044,8 @@ function bindListSearchCapture() {
 }
 
 function ensureListSearchCapture() {
-  const wrap = document.querySelector('.list-chips-wrap');
-  if (!wrap) return null;
-  let input = listSearchCaptureInput();
-  if (!input) {
-    input = createListSearchCaptureInput();
-    wrap.appendChild(input);
-  }
+  const input = listSearchInput();
+  if (!input) throw new Error('List search input is missing');
   bindListSearchCapture();
   return input;
 }
@@ -2061,7 +2055,7 @@ async function openListPickerFromTyping(
   inputElement = null,
 ) {
   if (isPopupUiMutating()) return;
-  const existingInput = document.getElementById('listPickerInput');
+  const existingInput = listPickerInput();
   if (existingInput) {
     if (initialQuery) {
       existingInput.value = initialQuery;
@@ -2970,6 +2964,8 @@ async function initPopup() {
     throw error;
   }
 }
+ensureListSearchCapture();
+listSearchInput().focus({ preventScroll: true });
 initPopup().catch((err) => showFatalError(err.message));
 
 chrome.storage.onChanged.addListener((changes, areaName) => {

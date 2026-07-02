@@ -2083,8 +2083,8 @@ describe('popup desktop state rendering', () => {
       'Reading',
     );
     document.getElementById('listAddBtn').click();
-    await waitFor(() => document.getElementById('listPickerInput'));
-    const input = document.getElementById('listPickerInput');
+    await waitFor(() => document.getElementById('listSearchInput'));
+    const input = document.getElementById('listSearchInput');
     input.value = 'Reading';
     input.dispatchEvent(new window.Event('input', { bubbles: true }));
     await waitFor(() => document.querySelector('.list-picker-row'));
@@ -2247,8 +2247,8 @@ describe('popup desktop state rendering', () => {
 
     await waitFor(() => document.getElementById('listAddBtn'));
     document.getElementById('listAddBtn').click();
-    await waitFor(() => document.getElementById('listPickerInput'));
-    const input = document.getElementById('listPickerInput');
+    await waitFor(() => document.getElementById('listSearchInput'));
+    const input = document.getElementById('listSearchInput');
     input.value = 'Reading';
     input.dispatchEvent(new window.Event('input', { bubbles: true }));
     await waitFor(() => document.querySelector('.list-picker-row'));

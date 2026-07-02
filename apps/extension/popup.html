@@ -793,6 +793,14 @@
         pointer-events: none;
       }
 
+      .list-picker-host {
+        display: contents;
+      }
+
+      .list-picker-host .list-picker-list-row {
+        display: none;
+      }
+
       .list-picker {
         --list-picker-scroll-gutter-width: 24px;
         position: fixed;
@@ -1377,6 +1385,34 @@
           >
             CAPTURE FRAME
           </button>
+        </div>
+      </div>
+      <!-- Native IME composition belongs to this node; keep it mounted and unreparented for the popup lifetime. -->
+      <div class="list-picker-host" id="listPickerHost">
+        <input
+          class="list-search-capture"
+          id="listSearchInput"
+          type="text"
+          tabindex="-1"
+          aria-hidden="true"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+        />
+        <div class="list-picker-list-row">
+          <div class="list-picker-list" id="listPickerList" role="listbox">
+            <div class="list-picker-options" id="listPickerOptions"></div>
+          </div>
+          <div
+            class="list-picker-scrollbar"
+            id="listPickerScrollbar"
+            aria-hidden="true"
+          >
+            <div
+              class="list-picker-scroll-thumb"
+              id="listPickerScrollThumb"
+            ></div>
+          </div>
         </div>
       </div>
     </div>

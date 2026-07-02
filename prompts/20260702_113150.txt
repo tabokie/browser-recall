@@ -1,0 +1,7 @@
+- In 00308d30, I asked you to fix a bug about popup dropping character when using CJK IME (prompt file is at ./prompts/20260626_140651.txt). I noticed this bug reappears in the latest version. Let's investigate the original fix, why it resurfaces, and why the tests didn't find the regression.
+- Go ahead fix it thoroughly, preferably in a simple way
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them all
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.5 Codex
+- go
+- Save as a code comment somewhere
