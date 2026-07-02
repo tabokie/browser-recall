@@ -1,0 +1,15 @@
+- GitHub CI is still failing. Rust test and clippy fails, visual regression hangs forever during `npx playwright install chromium` even though the progress shows 100%.
+
+Rust test log:
+
+error: proc macro panicked
+    --> apps/desktop/src-tauri/src/main.rs:1822:16
+     |
+1822 |         .build(tauri::generate_context!())
+     |                ^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: message: The `frontendDist` configuration is set to `"../../../dist/desktop/ui"` but this path doesn't exist
+- Make sure the CI passes when making a commit, (1) Make local testing mirrors GitHub CI, (2) Modify finish skill to run CI suite if present.
+- Note that the finish skill is shared by many projects with different commands to run tests, so you must phrase the step in a command-agnostic way.
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.5 Codex
+- Remove the Git hook, and drop the lesson.

@@ -13,6 +13,13 @@
     "packages/*"
   ],
   "scripts": {
+    "ci": "npm run ci:test && npm run ci:test-rust && npm run ci:install-playwright && npm run ci:test-desktop-visual && npm run ci:lint-js && npm run ci:lint-rust",
+    "ci:test": "npm test",
+    "ci:test-rust": "npm run build:desktop-ui && cargo test --workspace",
+    "ci:install-playwright": "playwright install --no-shell chromium",
+    "ci:test-desktop-visual": "npm run test:visual",
+    "ci:lint-js": "npm run fmt:check && npm run lint:unused && npm run lint:duplicates",
+    "ci:lint-rust": "npm run build:desktop-ui && cargo fmt -- --check && cargo clippy --workspace --all-targets -- -D warnings",
     "build": "npm run build:extension && npm run build --workspace @browser-recall/desktop",
     "build:extension": "node scripts/stage-app-assets.mjs extension",
     "build:desktop-ui": "node scripts/stage-app-assets.mjs desktop-ui",

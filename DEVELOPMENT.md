@@ -87,6 +87,18 @@ The extension options page is only a stub. The main UI runs in the desktop app w
 
 ## Testing
 
+### Full Local CI
+
+Run the complete GitHub CI test and lint suite locally with:
+
+```bash
+npm run ci
+```
+
+GitHub CI delegates to the same `ci:*` package scripts, so local and hosted
+verification cannot drift into different command sets. Run the complete suite
+before committing.
+
 ### Unit Tests (Vitest)
 
 ~600 tests covering pure logic: search helpers, rule engine, utilities, sync, caching.
@@ -127,7 +139,7 @@ pkill -9 -f 'Google Chrome'
 Playwright needs a Chromium binary. Install it if you haven't:
 
 ```bash
-npx playwright install chromium
+npm run ci:install-playwright
 ```
 
 ### Coverage Monitor

@@ -233,6 +233,10 @@ The connector websocket protocol is represented by the Rust message enums in `cr
 
 ## Testing Model
 
+GitHub jobs and local verification share the `ci:*` package-script entrypoints.
+The composed `npm run ci` command runs every hosted test and lint group before
+a change is committed.
+
 Current automated coverage is split across three layers:
 
 - `tests/unit/` for shared JS helpers and connector-side utility logic

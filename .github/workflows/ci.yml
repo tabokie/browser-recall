@@ -24,7 +24,7 @@ jobs:
 
       - run: npm ci
 
-      - run: npm test
+      - run: npm run ci:test
 
   test-rust:
     name: Rust Tests
@@ -50,7 +50,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - run: cargo test --workspace
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - run: npm run ci:test-rust
 
   test-desktop-visual:
     name: Desktop Visual Regression
@@ -65,9 +69,11 @@ jobs:
 
       - run: npm ci
 
-      - run: npx playwright install chromium
+      - name: Install Playwright Chromium
+        timeout-minutes: 10
+        run: npm run ci:install-playwright
 
-      - run: npm run test:visual
+      - run: npm run ci:test-desktop-visual
 
   lint-js:
     name: Lint & Format (JS)
@@ -82,14 +88,7 @@ jobs:
 
       - run: npm ci
 
-      - name: Check formatting (Prettier)
-        run: npm run fmt:check
-
-      - name: Check unused files/exports (knip)
-        run: npm run lint:unused
-
-      - name: Check duplicated code (jscpd)
-        run: npm run lint:duplicates
+      - run: npm run ci:lint-js
 
   lint-rust:
     name: Lint & Format (Rust)
@@ -117,8 +116,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Check formatting (rustfmt)
-        run: cargo fmt -- --check
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
 
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: npm run ci:lint-rust
