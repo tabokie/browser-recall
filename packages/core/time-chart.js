@@ -227,13 +227,11 @@ export function applyDateFilter(chartEl, resultsContainer) {
   // For virtual-scrolled containers, filter at the data level
   const vs = resultsContainer._virtualScroller;
   if (vs) {
-    if (!hasFilter) {
-      vs.applyFilter(null);
-    } else {
-      vs.applyFilter((item) => {
-        return collectVisitDateKeys(item).some((date) => activeDates.has(date));
-      });
-    }
+    const filter = hasFilter
+      ? (item) =>
+          collectVisitDateKeys(item).some((date) => activeDates.has(date))
+      : null;
+    vs.applyFilter(filter);
     return;
   }
 
@@ -251,6 +249,19 @@ export function applyDateFilter(chartEl, resultsContainer) {
   });
 }
 
+async function commitDateSelection(chartEl, resultsContainer, activeDates) {
+  chartEl._activeDates = activeDates;
+  const selectionToken = Symbol('chart-date-selection');
+  chartEl._dateSelectionToken = selectionToken;
+
+  if (chartEl._onDateSelect) {
+    await chartEl._onDateSelect(new Set(activeDates));
+  }
+  if (chartEl._dateSelectionToken !== selectionToken) return;
+  applyDateFilter(chartEl, resultsContainer);
+  syncChartHighlights();
+}
+
 export function bindChartBarClick(chartEl, resultsContainer) {
   const barsEl = chartEl.querySelector('.chart-bars');
   if (!barsEl || barsEl._chartClickBound) return;
@@ -262,17 +273,8 @@ export function bindChartBarClick(chartEl, resultsContainer) {
     if (!group) return;
     group.classList.toggle('active');
     const activeDates = collectActiveDates(chartEl);
-    chartEl._activeDates = activeDates;
-    const selectionToken = Symbol('chart-date-selection');
-    chartEl._dateSelectionToken = selectionToken;
-
     // Notify about selected dates for demand loading before applying the data-level filter.
-    if (chartEl._onDateSelect) {
-      await chartEl._onDateSelect(new Set(activeDates));
-    }
-    if (chartEl._dateSelectionToken !== selectionToken) return;
-    applyDateFilter(chartEl, resultsContainer);
-    syncChartHighlights();
+    await commitDateSelection(chartEl, resultsContainer, activeDates);
   });
   // Click anywhere in chart that isn't a bar clears all active selections
   if (!chartEl._chartBgClickBound) {
@@ -282,15 +284,7 @@ export function bindChartBarClick(chartEl, resultsContainer) {
       chartEl
         .querySelectorAll('.chart-bar-group.active')
         .forEach((g) => g.classList.remove('active'));
-      chartEl._activeDates = new Set();
-      const selectionToken = Symbol('chart-date-selection');
-      chartEl._dateSelectionToken = selectionToken;
-      if (chartEl._onDateSelect) {
-        await chartEl._onDateSelect(new Set());
-      }
-      if (chartEl._dateSelectionToken !== selectionToken) return;
-      applyDateFilter(chartEl, resultsContainer);
-      syncChartHighlights();
+      await commitDateSelection(chartEl, resultsContainer, new Set());
     });
   }
 }

@@ -96,19 +96,7 @@ export class VirtualScroller {
     this.data = items;
     this.renderRow = renderRowFn;
     this._filterFn = null;
-    this.renderedRange = { start: -1, end: -1 };
-    this._expandedIdx = -1;
-    this._expandedExtraH = 0;
-    this._selectAllActive = false;
-    this._loadMorePending = false;
-    this._appendRenderPending = false;
-    this._scrollRenderPending = false;
-    this._pendingBottomAnchor = null;
-    this._topLockFrames = 0;
-    this.rowHeight = this.baseRowHeight;
-    this._resetHeightAccounting({ clearMeasured: true });
-    this._estimateCalibrated = false;
-    this._savedNodes.clear();
+    this._resetViewportState({ clearSelection: true, clearSavedNodes: true });
     this._render(true);
   }
 
@@ -122,17 +110,7 @@ export class VirtualScroller {
     this.data = items;
     if (renderRowFn) this.renderRow = renderRowFn;
     this._filterFn = null;
-    this.renderedRange = { start: -1, end: -1 };
-    this._expandedIdx = -1;
-    this._expandedExtraH = 0;
-    this._loadMorePending = false;
-    this._appendRenderPending = false;
-    this._scrollRenderPending = false;
-    this._pendingBottomAnchor = null;
-    this._topLockFrames = 0;
-    this.rowHeight = this.baseRowHeight;
-    this._resetHeightAccounting({ clearMeasured: true });
-    this._estimateCalibrated = false;
+    this._resetViewportState();
     // _savedNodes NOT cleared — _render(true) will restore matching nodes
     this._render(true);
     this._restoreScrollAnchor(anchor);
@@ -163,10 +141,17 @@ export class VirtualScroller {
   applyFilter(filterFn) {
     this._filterFn = filterFn;
     this.data = filterFn ? this._fullData.filter(filterFn) : this._fullData;
+    this._resetViewportState({ clearSelection: true, clearSavedNodes: true });
+    this._render(true);
+  }
+
+  _resetViewportState({
+    clearSelection = false,
+    clearSavedNodes = false,
+  } = {}) {
     this.renderedRange = { start: -1, end: -1 };
-    this._expandedIdx = -1;
-    this._expandedExtraH = 0;
-    this._selectAllActive = false;
+    this._clearExpandedState();
+    if (clearSelection) this._selectAllActive = false;
     this._loadMorePending = false;
     this._appendRenderPending = false;
     this._scrollRenderPending = false;
@@ -175,8 +160,12 @@ export class VirtualScroller {
     this.rowHeight = this.baseRowHeight;
     this._resetHeightAccounting({ clearMeasured: true });
     this._estimateCalibrated = false;
-    this._savedNodes.clear();
-    this._render(true);
+    if (clearSavedNodes) this._savedNodes.clear();
+  }
+
+  _clearExpandedState() {
+    this._expandedIdx = -1;
+    this._expandedExtraH = 0;
   }
 
   // Re-render currently visible rows (e.g. after in-place data mutation like enrichment).
@@ -228,8 +217,7 @@ export class VirtualScroller {
       const row = item.querySelector('.result-row');
       if (row && urlSet.has(row.dataset.url)) item.remove();
     }
-    this._expandedIdx = -1;
-    this._expandedExtraH = 0;
+    this._clearExpandedState();
     // Trigger non-forced rebuild which saves remaining selected nodes before re-rendering
     this.renderedRange = { start: -1, end: -1 };
     this._render(false);
@@ -238,23 +226,17 @@ export class VirtualScroller {
   onExpandToggle() {
     // After expand/collapse, measure actual height difference
     const openDetail = this.containerEl.querySelector('.result-detail.open');
-    if (openDetail) {
-      const item = openDetail.closest('.result-item');
-      if (item) {
-        const row = item.querySelector('.result-row');
-        if (row) {
-          const url = row.dataset.url;
-          const idx = this._indexByKey.get(url) ?? -1;
-          const collapsedHeight = this._heightByKey.get(url) ?? this.rowHeight;
-          const expandedHeight =
-            this._measureItemHeight(item) || item.offsetHeight || 0;
-          this._expandedIdx = idx;
-          this._expandedExtraH = Math.max(0, expandedHeight - collapsedHeight);
-        }
-      }
+    const item = openDetail?.closest('.result-item');
+    const row = item?.querySelector('.result-row');
+    if (item && row) {
+      const url = row.dataset.url;
+      const collapsedHeight = this._heightByKey.get(url) ?? this.rowHeight;
+      const expandedHeight =
+        this._measureItemHeight(item) || item.offsetHeight || 0;
+      this._expandedIdx = this._indexByKey.get(url) ?? -1;
+      this._expandedExtraH = Math.max(0, expandedHeight - collapsedHeight);
     } else {
-      this._expandedIdx = -1;
-      this._expandedExtraH = 0;
+      this._clearExpandedState();
     }
     this._calibrateRowHeight();
     // Only adjust padding-bottom to account for the height change —
@@ -624,6 +606,11 @@ export class VirtualScroller {
 
   // Save a DOM node if it has meaningful state (selected or expanded); otherwise discard it.
   _saveOrDiscard(item) {
+    this._rememberStatefulNode(item);
+    item.remove();
+  }
+
+  _rememberStatefulNode(item) {
     const row = item.querySelector('.result-row');
     if (
       row &&
@@ -632,7 +619,6 @@ export class VirtualScroller {
     ) {
       this._savedNodes.set(row.dataset.url, item);
     }
-    item.remove();
   }
 
   // Insert a row at data index i. Reuses a saved node if one exists for that URL,
@@ -689,14 +675,7 @@ export class VirtualScroller {
       // On non-forced jumps, save selected nodes before destroying.
       if (!force) {
         for (const item of this.containerEl.querySelectorAll('.result-item')) {
-          const row = item.querySelector('.result-row');
-          if (
-            row &&
-            (row.classList.contains('selected') ||
-              item.querySelector('.result-detail.open'))
-          ) {
-            this._savedNodes.set(row.dataset.url, item);
-          }
+          this._rememberStatefulNode(item);
         }
       }
 
@@ -772,8 +751,7 @@ export class VirtualScroller {
       this._expandedIdx >= 0 &&
       (this._expandedIdx < start || this._expandedIdx >= end)
     ) {
-      this._expandedIdx = -1;
-      this._expandedExtraH = 0;
+      this._clearExpandedState();
     }
 
     this.renderedRange = { start, end };

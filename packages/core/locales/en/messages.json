@@ -1083,6 +1083,20 @@
     "message": "Snapshot captured",
     "description": "Snapshot capture success notification."
   },
+  "extensionSnapshotCapturedWithOneWarning": {
+    "message": "Snapshot captured, but 1 resource was unavailable.",
+    "description": "Snapshot capture partial-success warning for one unavailable resource."
+  },
+  "extensionSnapshotCapturedWithWarnings": {
+    "message": "Snapshot captured, but $COUNT$ resources were unavailable.",
+    "description": "Snapshot capture partial-success warning for multiple unavailable resources.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
+  },
   "extensionSomethingWentWrong": {
     "message": "Something went wrong",
     "description": "Generic extension error."

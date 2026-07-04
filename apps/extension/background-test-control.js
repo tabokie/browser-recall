@@ -1,4 +1,7 @@
 import {
+  requestDesktopEntity,
+  requestDesktopHistoryBatch,
+  requestDesktopHistoryFiles,
   requestDesktopSetDeviceId,
   requestDesktopTestReset,
   requestDesktopTestSeed,
@@ -93,6 +96,41 @@ async function handleGetDesktopQueueForTest() {
   };
 }
 
+async function handleReadDesktopValueForTest(request) {
+  let value;
+  if (request.key.startsWith('log:')) {
+    const date = request.key.slice('log:'.length);
+    const listing = await requestDesktopHistoryFiles(false);
+    if (!listing?.success) {
+      throw new Error(listing?.error || 'Desktop history file list failed');
+    }
+    const files = (listing.files || []).filter(
+      (file) => file.replace('.jsonl', '') === date,
+    );
+    if (files.length === 0) {
+      value = [];
+    } else {
+      const batch = await requestDesktopHistoryBatch(files);
+      if (!batch?.success) {
+        throw new Error(batch?.error || 'Desktop history batch failed');
+      }
+      value = [...(batch.entries || [])].sort(
+        (left, right) => (left.timestamp || 0) - (right.timestamp || 0),
+      );
+    }
+  } else {
+    const response = await requestDesktopEntity(request.key);
+    if (!response?.success) {
+      throw new Error(
+        response?.error || `Desktop read failed for ${request.key}`,
+      );
+    }
+    value = response.entity ?? null;
+  }
+  if (!request.includeDeleted && value?.deleted) value = null;
+  return { success: true, value };
+}
+
 async function handleGetActionIconForTest(request) {
   const state = globalThis.browserRecallActionIconStateForTest;
   if (!state) return { success: false, error: 'Action icon state unavailable' };
@@ -138,6 +176,25 @@ async function handleTriggerCommandForTest(request) {
   return { success: true };
 }
 
+const testMessageHandlers = new Map([
+  ['resetForTest', handleResetForTest],
+  ['flushDesktopQueueForTest', handleFlushDesktopQueueForTest],
+  ['seedTestData', handleSeedTestData],
+  ['getDesktopQueueForTest', handleGetDesktopQueueForTest],
+  ['getActionIconForTest', handleGetActionIconForTest],
+  ['preparePopupBootstrapForTest', handlePreparePopupBootstrapForTest],
+  ['failNextTabMessageForTest', handleFailNextTabMessageForTest],
+  ['triggerCommandForTest', handleTriggerCommandForTest],
+  ['readDesktopValue', handleReadDesktopValueForTest],
+  [
+    'restartConnectorRuntimeForTest',
+    async () => {
+      await restartConnectorRuntimeForTest();
+      return { success: true };
+    },
+  ],
+]);
+
 chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
   if (request.type && !request.action) return false;
   if (!BACKGROUND_TEST_ACTIONS.includes(request.action)) {
@@ -156,36 +213,8 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
 
   (async () => {
     try {
-      switch (request.action) {
-        case 'resetForTest':
-          sendResponse(await handleResetForTest());
-          break;
-        case 'flushDesktopQueueForTest':
-          sendResponse(await handleFlushDesktopQueueForTest(request));
-          break;
-        case 'seedTestData':
-          sendResponse(await handleSeedTestData(request));
-          break;
-        case 'getDesktopQueueForTest':
-          sendResponse(await handleGetDesktopQueueForTest());
-          break;
-        case 'getActionIconForTest':
-          sendResponse(await handleGetActionIconForTest(request));
-          break;
-        case 'preparePopupBootstrapForTest':
-          sendResponse(await handlePreparePopupBootstrapForTest(request));
-          break;
-        case 'failNextTabMessageForTest':
-          sendResponse(await handleFailNextTabMessageForTest(request));
-          break;
-        case 'triggerCommandForTest':
-          sendResponse(await handleTriggerCommandForTest(request));
-          break;
-        case 'restartConnectorRuntimeForTest':
-          await restartConnectorRuntimeForTest();
-          sendResponse({ success: true });
-          break;
-      }
+      const handler = testMessageHandlers.get(request.action);
+      sendResponse(await handler(request, sender));
     } catch (error) {
       sendResponse({ success: false, error: error.message });
     }

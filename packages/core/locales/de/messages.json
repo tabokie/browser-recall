@@ -1055,6 +1055,15 @@
     "message": "Schnappschuss aufgenommen",
     "description": "Snapshot capture success notification."
   },
+  "extensionSnapshotCapturedWithOneWarning": {
+    "message": "Schnappschuss gespeichert, aber 1 Ressource war nicht verfügbar.",
+    "description": "Snapshot capture partial-success warning for one unavailable resource."
+  },
+  "extensionSnapshotCapturedWithWarnings": {
+    "message": "Schnappschuss gespeichert, aber $COUNT$ Ressourcen waren nicht verfügbar.",
+    "description": "Snapshot capture partial-success warning for multiple unavailable resources.",
+    "placeholders": { "count": { "content": "$1", "example": "2" } }
+  },
   "extensionSomethingWentWrong": {
     "message": "Etwas ist schief gelaufen",
     "description": "Generic extension error."

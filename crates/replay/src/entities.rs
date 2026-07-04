@@ -277,72 +277,42 @@ impl Entity {
     pub fn as_page(&self) -> Option<&PageEntity> {
         match self {
             Self::Page(page) => Some(page),
-            Self::Note(_)
-            | Self::List(_)
-            | Self::Settings(_)
-            | Self::NameToId(_)
-            | Self::ListOrder(_)
-            | Self::Orphaned(_) => None,
+            _ => None,
         }
     }
 
     pub fn into_page(self) -> Option<PageEntity> {
         match self {
             Self::Page(page) => Some(page),
-            Self::Note(_)
-            | Self::List(_)
-            | Self::Settings(_)
-            | Self::NameToId(_)
-            | Self::ListOrder(_)
-            | Self::Orphaned(_) => None,
+            _ => None,
         }
     }
 
     pub fn as_note(&self) -> Option<&NoteEntity> {
         match self {
             Self::Note(note) => Some(note),
-            Self::Page(_)
-            | Self::List(_)
-            | Self::Settings(_)
-            | Self::NameToId(_)
-            | Self::ListOrder(_)
-            | Self::Orphaned(_) => None,
+            _ => None,
         }
     }
 
     pub fn into_note(self) -> Option<NoteEntity> {
         match self {
             Self::Note(note) => Some(note),
-            Self::Page(_)
-            | Self::List(_)
-            | Self::Settings(_)
-            | Self::NameToId(_)
-            | Self::ListOrder(_)
-            | Self::Orphaned(_) => None,
+            _ => None,
         }
     }
 
     pub fn as_list(&self) -> Option<&ListEntity> {
         match self {
             Self::List(list) => Some(list),
-            Self::Page(_)
-            | Self::Note(_)
-            | Self::Settings(_)
-            | Self::NameToId(_)
-            | Self::ListOrder(_)
-            | Self::Orphaned(_) => None,
+            _ => None,
         }
     }
 
     pub fn into_list(self) -> Option<ListEntity> {
         match self {
             Self::List(list) => Some(list),
-            Self::Page(_)
-            | Self::Note(_)
-            | Self::Settings(_)
-            | Self::NameToId(_)
-            | Self::ListOrder(_)
-            | Self::Orphaned(_) => None,
+            _ => None,
         }
     }
 

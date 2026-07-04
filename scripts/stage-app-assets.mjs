@@ -10,6 +10,7 @@ import {
   toWebExtensionLocale,
 } from '../packages/core/i18n.js';
 import { createPageIdentityGlobalScript } from '../packages/core/page-identity.js';
+import { createHighlightLifecycleGlobalScript } from '../packages/core/highlight-lifecycle.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
@@ -23,6 +24,7 @@ const chromeExtensionOutDir = path.join(extensionDistDir, 'chrome');
 const firefoxExtensionOutDir = path.join(extensionDistDir, 'firefox');
 const desktopUiOutDir = path.join(repoRoot, 'dist/desktop/ui');
 const pageIdentityContentScript = 'browser-recall-page-identity.js';
+const highlightLifecycleContentScript = 'browser-recall-highlight-lifecycle.js';
 
 export const defaultArtifactDirs = Object.freeze({
   chromeExtension: chromeExtensionOutDir,
@@ -92,6 +94,13 @@ function writeExtensionPageIdentityGlobal(outDir) {
   fs.writeFileSync(
     path.join(outDir, pageIdentityContentScript),
     createPageIdentityGlobalScript(),
+  );
+}
+
+function writeExtensionHighlightLifecycleGlobal(outDir) {
+  fs.writeFileSync(
+    path.join(outDir, highlightLifecycleContentScript),
+    createHighlightLifecycleGlobalScript(),
   );
 }
 
@@ -574,10 +583,24 @@ function ensurePageIdentityContentScript(manifest) {
   contentScript.js.splice(insertIndex, 0, pageIdentityContentScript);
 }
 
+function ensureHighlightLifecycleContentScript(manifest) {
+  const contentScript = manifest.content_scripts?.find((entry) =>
+    entry.js?.includes('content.js'),
+  );
+  if (!contentScript) return;
+  if (contentScript.js.includes(highlightLifecycleContentScript)) return;
+  const contentIndex = contentScript.js.indexOf('content.js');
+  if (contentIndex < 0) {
+    throw new Error('Cannot stage highlight lifecycle without content.js');
+  }
+  contentScript.js.splice(contentIndex, 0, highlightLifecycleContentScript);
+}
+
 function writeExtensionManifest(outDir, browser = 'chrome') {
   const manifestPath = path.join(outDir, 'manifest.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   ensurePageIdentityContentScript(manifest);
+  ensureHighlightLifecycleContentScript(manifest);
   manifest.default_locale = toWebExtensionLocale(DEFAULT_LOCALE);
 
   if (browser === 'firefox') {
@@ -624,6 +647,7 @@ export function stageExtensionAssets(outDir = targets.extension.defaultOutDir) {
   const staged = stageTarget('extension', outDir);
   writeExtensionLocales(staged);
   writeExtensionPageIdentityGlobal(staged);
+  writeExtensionHighlightLifecycleGlobal(staged);
   writeExtensionManifest(staged, 'chrome');
   return staged;
 }
@@ -632,6 +656,7 @@ export function stageFirefoxExtensionAssets(outDir = firefoxExtensionOutDir) {
   const staged = stageTarget('extension', outDir);
   writeExtensionLocales(staged);
   writeExtensionPageIdentityGlobal(staged);
+  writeExtensionHighlightLifecycleGlobal(staged);
   writeExtensionManifest(staged, 'firefox');
   return staged;
 }

@@ -196,10 +196,9 @@ describe('savepage bridge uses capture-scoped Desktop settings', () => {
     expect(bridgeSource).not.toContain(
       'chrome.storage.session.get("manifest:settings"',
     );
-    expect(bridgeSource).toContain(
-      'savepageSettings.set(tabId, settings || {})',
-    );
-    expect(bridgeSource).toContain('savepageSettings.delete(tabId)');
+    expect(bridgeSource).toContain('settings: settings || {}');
+    expect(bridgeSource).toContain('captureSessions.set(tabId, session)');
+    expect(bridgeSource).toContain('captureSessions.delete(tabId)');
   });
 
   it('passes Desktop-backed settings into captureSavePage', () => {
@@ -207,9 +206,7 @@ describe('savepage bridge uses capture-scoped Desktop settings', () => {
       /async function captureAndLog[\s\S]*?^}/m,
     );
     expect(captureAndLogMatch).not.toBeNull();
-    expect(captureAndLogMatch[0]).toContain(
-      "await readDesktopValue('manifest:settings')",
-    );
+    expect(captureAndLogMatch[0]).toContain('await requestDesktopSettings()');
     expect(captureAndLogMatch[0]).toContain('captureSavePage(tabId, settings)');
   });
 });

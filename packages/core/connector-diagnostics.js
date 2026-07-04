@@ -29,18 +29,7 @@ export function formatConnectorDiagnostic(diagnostic) {
       const seconds = diagnostic.elapsedMs
         ? `${Math.round(diagnostic.elapsedMs / 1000)}s`
         : tr('extensionRetryWindow', 'the retry window', undefined);
-      const summary = formatPortFailures(diagnostic.failures);
-      const reason = summary
-        ? tr('extensionLastPortFailures', ` Last port failures: ${summary}.`, [
-            summary,
-          ])
-        : diagnostic.lastDiagnostic
-          ? tr(
-              'extensionLastDiagnostic',
-              ` Last diagnostic: ${diagnostic.lastDiagnostic}.`,
-              [diagnostic.lastDiagnostic],
-            )
-          : '';
+      const reason = formatReconnectFailureReason(diagnostic);
       return `${tr('extensionLastCheckReconnectFailed', `Last check: desktop connection did not succeed in ${seconds}.`, [seconds])}${reason}`;
     }
     case 'manual_status_failed':
@@ -107,10 +96,42 @@ export function formatConnectorDiagnostic(diagnostic) {
   }
 }
 
+function formatReconnectFailureReason(diagnostic) {
+  const summary = formatPortFailures(diagnostic.failures);
+  if (summary) {
+    return tr('extensionLastPortFailures', ` Last port failures: ${summary}.`, [
+      summary,
+    ]);
+  }
+  if (diagnostic.lastDiagnostic) {
+    return tr(
+      'extensionLastDiagnostic',
+      ` Last diagnostic: ${diagnostic.lastDiagnostic}.`,
+      [diagnostic.lastDiagnostic],
+    );
+  }
+  return '';
+}
+
 function appendConnectorDiagnostic(meta, connector) {
   if (!connector?.lastDiagnostic) return meta;
   const detail = formatConnectorDiagnostic(connector.lastDiagnostic);
   return detail ? `${meta} ${detail}` : meta;
+}
+
+function formatOfflineMeta(connector) {
+  const message = connector.hasToken
+    ? tr(
+        'extensionDesktopApprovedConnectionFailed',
+        'Desktop approved, but connection failed.',
+        undefined,
+      )
+    : tr(
+        'extensionStartDesktopCapture',
+        'Start Browser Recall Desktop to resume live capture.',
+        undefined,
+      );
+  return appendConnectorDiagnostic(message, connector);
 }
 
 const STATE_FORMATS = {
@@ -196,21 +217,7 @@ const STATE_FORMATS = {
   },
   connecting: {
     status: () => tr('extensionDesktopOffline', 'Desktop Offline', undefined),
-    meta: (connector) =>
-      appendConnectorDiagnostic(
-        connector.hasToken
-          ? tr(
-              'extensionDesktopApprovedConnectionFailed',
-              'Desktop approved, but connection failed.',
-              undefined,
-            )
-          : tr(
-              'extensionStartDesktopCapture',
-              'Start Browser Recall Desktop to resume live capture.',
-              undefined,
-            ),
-        connector,
-      ),
+    meta: formatOfflineMeta,
     tone: '',
   },
 };
@@ -220,8 +227,7 @@ export function formatDesktopConnectorState(connector = {}) {
   const format = STATE_FORMATS[state];
   if (format) {
     return {
-      status:
-        typeof format.status === 'function' ? format.status() : format.status,
+      status: format.status(),
       meta: format.meta(connector),
       tone: format.tone,
     };
@@ -239,23 +245,7 @@ export function formatDesktopConnectorState(connector = {}) {
   }
   return {
     status: tr('extensionDesktopOffline', 'Desktop Offline', undefined),
-    meta: connector.hasToken
-      ? appendConnectorDiagnostic(
-          tr(
-            'extensionDesktopApprovedConnectionFailed',
-            'Desktop approved, but connection failed.',
-            undefined,
-          ),
-          connector,
-        )
-      : appendConnectorDiagnostic(
-          tr(
-            'extensionStartDesktopCapture',
-            'Start Browser Recall Desktop to resume live capture.',
-            undefined,
-          ),
-          connector,
-        ),
+    meta: formatOfflineMeta(connector),
     tone: 'error',
   };
 }

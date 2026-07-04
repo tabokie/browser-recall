@@ -1,8 +1,5 @@
 import { logDebug } from './logger.js';
-import {
-  highlightSavedExcerptPartsInPage,
-  wrapRangeWithMark as wrapSharedRangeWithMark,
-} from './highlight-helpers.js';
+import { createHighlightLifecycle } from '../../packages/core/highlight-lifecycle.js';
 import {
   applyPaperErrorPopoutStyle,
   paperErrorPopoutCss,
@@ -104,18 +101,13 @@ frame.addEventListener('load', async () => {
     if (!resp?.success || !resp?.notes) return;
 
     const doc = frame.contentDocument;
-    for (const note of resp.notes) {
-      if (note.excerpt === null) continue;
-      const marks = highlightSavedExcerptPartsInPage(
-        doc.body,
-        note.excerpt,
-        note.cssPath,
-      );
-      for (const mark of marks) {
-        if (note.slug) mark.dataset.noteSlug = note.slug;
-        attachMarkClickHandler(doc, mark);
-      }
-    }
+    let highlightLifecycle;
+    highlightLifecycle = createHighlightLifecycle({
+      document: doc,
+      formatExcerpt: extensionSurface.formatHighlightExcerpt,
+      onMark: (mark) => attachMarkClickHandler(doc, mark, highlightLifecycle),
+    });
+    highlightLifecycle.applySaved(resp.notes);
 
     doc.addEventListener('mouseup', () => {
       const selection = doc.getSelection();
@@ -145,10 +137,18 @@ frame.addEventListener('load', async () => {
         .then((response) => {
           if (!response?.success) return;
           const noteSlug = response.noteSlug;
-          const mark = wrapRangeWithMark(doc, range, selectedText, noteSlug);
+          const mark = highlightLifecycle.createMark(range, selectedText, {
+            noteSlug,
+          });
           if (mark) {
-            attachMarkClickHandler(doc, mark);
-            showHighlightEditOverlay(doc, mark, selectedText, noteSlug, '');
+            showHighlightEditOverlay(
+              doc,
+              mark,
+              selectedText,
+              noteSlug,
+              '',
+              highlightLifecycle,
+            );
           }
           selection.removeAllRanges();
         })
@@ -162,38 +162,7 @@ frame.addEventListener('load', async () => {
   }
 });
 
-function wrapRangeWithMark(doc, range, text, noteSlug) {
-  const mark = wrapSharedRangeWithMark(range, text);
-  if (!mark) return null;
-  if (noteSlug) mark.dataset.noteSlug = noteSlug;
-  return mark;
-}
-
-function unwrapHighlightMark(mark) {
-  const parent = mark.parentNode;
-  if (!parent) return;
-  while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
-  parent.removeChild(mark);
-  parent.normalize();
-}
-
-function removeHighlightMarksByNoteSlug(doc, noteSlug) {
-  const escaped = cssEscape(doc, noteSlug);
-  doc
-    .querySelectorAll(`mark.portal-highlight[data-note-slug="${escaped}"]`)
-    .forEach((mark) => unwrapHighlightMark(mark));
-}
-
-function cssEscape(doc, value) {
-  if (doc.defaultView.CSS && typeof doc.defaultView.CSS.escape === 'function') {
-    return doc.defaultView.CSS.escape(value);
-  }
-  return String(value).replace(/[^a-zA-Z0-9_-]/g, (character) => {
-    return `\\${character.codePointAt(0).toString(16)} `;
-  });
-}
-
-function attachMarkClickHandler(doc, mark) {
+function attachMarkClickHandler(doc, mark, highlightLifecycle) {
   mark.addEventListener('click', (event) => {
     event.stopPropagation();
     doc.getElementById('portal-highlight-overlay')?.remove();
@@ -214,11 +183,19 @@ function attachMarkClickHandler(doc, mark) {
           displayText,
           noteSlug,
           match?.note || '',
+          highlightLifecycle,
         );
       })
       .catch((error) => {
         if (showSnapshotRuntimeError(error)) return;
-        showHighlightEditOverlay(doc, mark, text, noteSlug, '');
+        showHighlightEditOverlay(
+          doc,
+          mark,
+          text,
+          noteSlug,
+          '',
+          highlightLifecycle,
+        );
       });
   });
 }
@@ -265,7 +242,14 @@ const OVERLAY_STYLE = `
   textarea:focus { outline: none; border-color: var(--br-accent-primary); box-shadow: 0 0 0 3px var(--br-accent-soft); }
 `;
 
-function showHighlightEditOverlay(doc, mark, text, noteSlug, existingNote) {
+function showHighlightEditOverlay(
+  doc,
+  mark,
+  text,
+  noteSlug,
+  existingNote,
+  highlightLifecycle,
+) {
   doc.getElementById('portal-highlight-overlay')?.remove();
 
   const rect = mark.getBoundingClientRect();
@@ -293,6 +277,11 @@ function showHighlightEditOverlay(doc, mark, text, noteSlug, existingNote) {
     if (note !== existingNote && noteSlug) {
       chrome.runtime
         .sendMessage({ action: 'updateNote', noteSlug, note })
+        .then((response) => {
+          if (response?.noteSlug) {
+            highlightLifecycle.replaceNote(noteSlug, response.noteSlug);
+          }
+        })
         .catch((error) => {
           showSnapshotRuntimeError(error);
         });
@@ -302,8 +291,7 @@ function showHighlightEditOverlay(doc, mark, text, noteSlug, existingNote) {
 
   deleteBtn.addEventListener('click', (event) => {
     event.stopPropagation();
-    if (noteSlug) removeHighlightMarksByNoteSlug(doc, noteSlug);
-    else unwrapHighlightMark(mark);
+    highlightLifecycle.remove(noteSlug ? { noteSlug } : { mark });
     if (noteSlug)
       chrome.runtime
         .sendMessage({ action: 'deleteNote', noteSlug })

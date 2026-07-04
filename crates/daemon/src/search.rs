@@ -1,4 +1,6 @@
-use browser_recall::{search_batch, search_notes, search_records, search_snapshots, SearchRecord};
+use browser_recall::{
+    search_batch, search_notes, search_records, search_snapshots, SearchRecord, SearchResult,
+};
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -18,6 +20,17 @@ pub struct HistorySearchHit {
     pub title: String,
     pub timestamp: i64,
     pub score: f64,
+}
+
+impl From<SearchResult> for HistorySearchHit {
+    fn from(result: SearchResult) -> Self {
+        Self {
+            url: result.url,
+            title: result.title,
+            timestamp: result.timestamp,
+            score: result.score,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -67,31 +80,10 @@ pub fn search_history_in_data_dir(
             continue;
         }
         let results = search_batch(&device_dir, &pages_dir, query, &file_names)?;
-        for result in results {
-            let next = HistorySearchHit {
-                url: result.url.clone(),
-                title: result.title,
-                timestamp: result.timestamp,
-                score: result.score,
-            };
-            match merged_by_url.get_mut(&result.url) {
-                Some(existing) => merge_history_hit(existing, next),
-                None => {
-                    merged_by_url.insert(result.url, next);
-                }
-            }
-        }
+        merge_history_hits(&mut merged_by_url, results.into_iter().map(Into::into));
     }
 
-    let mut hits: Vec<_> = merged_by_url.into_values().collect();
-    hits.sort_by(|left, right| {
-        right
-            .score
-            .total_cmp(&left.score)
-            .then_with(|| right.timestamp.cmp(&left.timestamp))
-            .then_with(|| left.url.cmp(&right.url))
-    });
-    apply_limit(hits, limit)
+    Ok(sorted_history_hits(merged_by_url, limit))
 }
 
 pub fn search_history_parallel_in_data_dir<F>(
@@ -118,9 +110,7 @@ where
     for device_dir in list_subdirs(&logs_root)? {
         let records = latest_history_records_for_device(&device_dir)?;
         for chunk in records.chunks(HISTORY_SEARCH_RECORDS_PER_TASK) {
-            tasks.push(SearchTask {
-                records: chunk.to_vec(),
-            });
+            tasks.push(chunk.to_vec());
         }
     }
 
@@ -146,18 +136,10 @@ where
                     if cancel.load(Ordering::Relaxed) {
                         break;
                     }
-                    let result = search_records(&pages_dir, &query, task.records).map(|results| {
+                    let result = search_records(&pages_dir, &query, task).map(|results| {
                         HistorySearchChunk {
                             worker_id,
-                            results: results
-                                .into_iter()
-                                .map(|result| HistorySearchHit {
-                                    url: result.url,
-                                    title: result.title,
-                                    timestamp: result.timestamp,
-                                    score: result.score,
-                                })
-                                .collect(),
+                            results: results.into_iter().map(Into::into).collect(),
                         }
                     });
                     if tx.send(result).is_err() {
@@ -177,28 +159,13 @@ where
             if chunk.results.is_empty() {
                 continue;
             }
-            for result in &chunk.results {
-                match merged_by_url.get_mut(&result.url) {
-                    Some(existing) => merge_history_hit(existing, result.clone()),
-                    None => {
-                        merged_by_url.insert(result.url.clone(), result.clone());
-                    }
-                }
-            }
+            merge_history_hits(&mut merged_by_url, chunk.results.iter().cloned());
             if limit.is_none() {
                 on_chunk(chunk)?;
             }
         }
 
-        let mut hits: Vec<_> = merged_by_url.into_values().collect();
-        hits.sort_by(|left, right| {
-            right
-                .score
-                .total_cmp(&left.score)
-                .then_with(|| right.timestamp.cmp(&left.timestamp))
-                .then_with(|| left.url.cmp(&right.url))
-        });
-        let hits = apply_limit(hits, limit)?;
+        let hits = sorted_history_hits(merged_by_url, limit);
         if limit.is_some() && !cancel.load(Ordering::Relaxed) && !hits.is_empty() {
             on_chunk(HistorySearchChunk {
                 worker_id: 0,
@@ -227,7 +194,7 @@ pub fn search_notes_in_data_dir(
             score: hit.score,
         })
         .collect();
-    apply_limit(hits, limit)
+    Ok(truncate_to_limit(hits, limit))
 }
 
 pub fn search_snapshots_in_data_dir(
@@ -253,7 +220,7 @@ pub fn search_snapshots_in_data_dir(
             score: hit.score,
         })
         .collect();
-    apply_limit(hits, limit)
+    Ok(truncate_to_limit(hits, limit))
 }
 
 fn list_subdirs(root: &Path) -> io::Result<Vec<PathBuf>> {
@@ -269,11 +236,6 @@ fn list_subdirs(root: &Path) -> io::Result<Vec<PathBuf>> {
     }
     dirs.sort();
     Ok(dirs)
-}
-
-#[derive(Debug, Clone)]
-struct SearchTask {
-    records: Vec<SearchRecord>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -401,11 +363,40 @@ fn merge_history_hit(existing: &mut HistorySearchHit, next: HistorySearchHit) {
     }
 }
 
-fn apply_limit<T>(mut items: Vec<T>, limit: Option<usize>) -> io::Result<Vec<T>> {
+fn merge_history_hits(
+    merged_by_url: &mut HashMap<String, HistorySearchHit>,
+    hits: impl IntoIterator<Item = HistorySearchHit>,
+) {
+    for hit in hits {
+        match merged_by_url.get_mut(&hit.url) {
+            Some(existing) => merge_history_hit(existing, hit),
+            None => {
+                merged_by_url.insert(hit.url.clone(), hit);
+            }
+        }
+    }
+}
+
+fn sorted_history_hits(
+    merged_by_url: HashMap<String, HistorySearchHit>,
+    limit: Option<usize>,
+) -> Vec<HistorySearchHit> {
+    let mut hits: Vec<_> = merged_by_url.into_values().collect();
+    hits.sort_by(|left, right| {
+        right
+            .score
+            .total_cmp(&left.score)
+            .then_with(|| right.timestamp.cmp(&left.timestamp))
+            .then_with(|| left.url.cmp(&right.url))
+    });
+    truncate_to_limit(hits, limit)
+}
+
+fn truncate_to_limit<T>(mut items: Vec<T>, limit: Option<usize>) -> Vec<T> {
     if let Some(limit) = limit {
         items.truncate(limit);
     }
-    Ok(items)
+    items
 }
 
 #[cfg(test)]

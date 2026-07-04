@@ -21,10 +21,14 @@ import {
 } from './utils.js';
 import {
   invalidateSettingsCache,
+  loadListDisplay,
+  loadListTreeProjection,
+  loadAllPageContext,
+  loadPageContext,
+  loadRecycleBin,
   loadSettings,
   loadSettingsValue,
   saveSettingsValue,
-  readDesktopValue,
   reloadApp,
   sendAction,
 } from './desktop-bridge.js';
@@ -374,61 +378,58 @@ function showFatalError(message) {
     .addEventListener('click', () => chrome.runtime.reload());
 }
 
-let _errorBubbleTimer = null;
+const bubbleTimers = new Map();
+
+function showTimedBubble({ id, style, text, duration }) {
+  let bubble = document.getElementById(id);
+  if (!bubble) {
+    bubble = document.createElement('div');
+    bubble.id = id;
+    bubble.style.cssText = style;
+    document.body.appendChild(bubble);
+  }
+  bubble.textContent = text;
+  bubble.style.opacity = '1';
+  clearTimeout(bubbleTimers.get(id));
+  bubbleTimers.set(
+    id,
+    setTimeout(() => {
+      bubble.style.opacity = '0';
+    }, duration),
+  );
+}
+
 function showErrorBubble(
   message,
   { suffix = ' \u2014 please reload the extension.' } = {},
 ) {
-  let bubble = document.getElementById('errorBubble');
-  if (!bubble) {
-    bubble = document.createElement('div');
-    bubble.id = 'errorBubble';
-    bubble.style.cssText =
-      'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:999999;background:rgba(180,30,30,0.92);color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:8px 18px;border-radius:6px;opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:480px;text-align:center;';
-    document.body.appendChild(bubble);
-  }
-  bubble.textContent = message + suffix;
-  bubble.style.opacity = '1';
-  clearTimeout(_errorBubbleTimer);
-  _errorBubbleTimer = setTimeout(() => {
-    bubble.style.opacity = '0';
-  }, 4000);
+  showTimedBubble({
+    id: 'errorBubble',
+    style:
+      'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:999999;background:rgba(180,30,30,0.92);color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:8px 18px;border-radius:6px;opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:480px;text-align:center;',
+    text: message + suffix,
+    duration: 4000,
+  });
 }
 
-let _blockedBubbleTimer = null;
 function showBlockedBubble(message) {
-  let bubble = document.getElementById('blockedBubble');
-  if (!bubble) {
-    bubble = document.createElement('div');
-    bubble.id = 'blockedBubble';
-    bubble.style.cssText =
-      'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:999999;background:rgba(120,120,120,0.88);color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:8px 18px;border-radius:6px;opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:480px;text-align:center;';
-    document.body.appendChild(bubble);
-  }
-  bubble.textContent = '\u2715 ' + message;
-  bubble.style.opacity = '1';
-  clearTimeout(_blockedBubbleTimer);
-  _blockedBubbleTimer = setTimeout(() => {
-    bubble.style.opacity = '0';
-  }, 2000);
+  showTimedBubble({
+    id: 'blockedBubble',
+    style:
+      'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:999999;background:rgba(120,120,120,0.88);color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:8px 18px;border-radius:6px;opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:480px;text-align:center;',
+    text: '\u2715 ' + message,
+    duration: 2000,
+  });
 }
 
-let _infoBubbleTimer = null;
 function showInfoBubble(message) {
-  let bubble = document.getElementById('infoBubble');
-  if (!bubble) {
-    bubble = document.createElement('div');
-    bubble.id = 'infoBubble';
-    bubble.style.cssText =
-      'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:999999;background:var(--bg-surface-solid, rgba(255,255,255,0.75));color:var(--text-secondary, #5E4D3E);font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:8px 18px;border-radius:6px;border:1px solid var(--border-glass, rgba(255,255,255,0.55));backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:0 2px 8px rgba(0,0,0,0.08);opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:480px;text-align:center;';
-    document.body.appendChild(bubble);
-  }
-  bubble.textContent = message;
-  bubble.style.opacity = '1';
-  clearTimeout(_infoBubbleTimer);
-  _infoBubbleTimer = setTimeout(() => {
-    bubble.style.opacity = '0';
-  }, 3000);
+  showTimedBubble({
+    id: 'infoBubble',
+    style:
+      'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:999999;background:var(--bg-surface-solid, rgba(255,255,255,0.75));color:var(--text-secondary, #5E4D3E);font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:8px 18px;border-radius:6px;border:1px solid var(--border-glass, rgba(255,255,255,0.55));backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:0 2px 8px rgba(0,0,0,0.08);opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:480px;text-align:center;',
+    text: message,
+    duration: 3000,
+  });
 }
 
 function applyDesktopConnectorUi(connector = {}) {
@@ -1004,23 +1005,6 @@ function exploreDateFilterContext() {
   return `explore:${committedSearchQuery.trim()}`;
 }
 
-// Run a limited-concurrency pool of async tasks, calling onResult after each completes.
-async function runPool(tasks, concurrency, onResult) {
-  let idx = 0;
-  async function next() {
-    while (idx < tasks.length) {
-      const i = idx++;
-      const result = await tasks[i]();
-      await onResult(result);
-    }
-  }
-  const workers = [];
-  for (let i = 0; i < Math.min(concurrency, tasks.length); i++) {
-    workers.push(next());
-  }
-  await Promise.all(workers);
-}
-
 let latestHistorySearchId = null;
 
 function tauriCoreInvoke(command, payload) {
@@ -1343,15 +1327,12 @@ function latestTimestampFromPage(page) {
 async function buildNoteSearchResults(results) {
   const validResults = (results || []).filter((result) => result?.url);
   if (validResults.length === 0) return [];
-  const pages = await Promise.all(
-    validResults.map((result) =>
-      readDesktopValue(pageKey(generateSlugFromUrl(result.url))),
-    ),
-  );
+  const slugs = validResults.map((result) => generateSlugFromUrl(result.url));
+  const contexts = await loadPageContext(slugs);
   const built = [];
   for (let i = 0; i < validResults.length; i++) {
     const result = validResults[i];
-    const page = pages[i];
+    const page = contexts[slugs[i]]?.page;
     const timestamp = Number(result.timestamp) || latestTimestampFromPage(page);
     if (!Number.isFinite(timestamp) || timestamp <= 0) {
       logDebug('[Phase2a] Note search hit missing page timestamp:', result.url);
@@ -1372,13 +1353,13 @@ async function buildNoteSearchResults(results) {
 async function buildSnapshotSearchResults(matches) {
   const validMatches = (matches || []).filter((match) => match?.slug);
   if (validMatches.length === 0) return [];
-  const pages = await Promise.all(
-    validMatches.map((match) => readDesktopValue(pageKey(match.slug))),
+  const contexts = await loadPageContext(
+    validMatches.map((match) => match.slug),
   );
   const results = [];
   for (let i = 0; i < validMatches.length; i++) {
     const match = validMatches[i];
-    const page = pages[i];
+    const page = contexts[match.slug]?.page;
     if (!page?.url) continue;
     const timestamp = Number(match.timestamp);
     if (!Number.isFinite(timestamp) || timestamp <= 0) {
@@ -1428,52 +1409,50 @@ async function runPhase1(query, gen) {
   }
 }
 
-// Phase 2a: note search.
-async function runPhase2a(query, gen) {
+async function runDaemonContentSearch({
+  query,
+  gen,
+  action,
+  buildResults,
+  source,
+  phaseLabel,
+}) {
   try {
-    try {
-      const desktopResp = await sendAction({
-        action: 'searchNotes',
-        query,
-      });
-      if (Array.isArray(desktopResp.results)) {
-        const noteResults = await buildNoteSearchResults(desktopResp.results);
-        mergeSearchResults(noteResults, 'note', gen);
-        await renderProgressiveResults(gen);
-      }
-    } catch (error) {
-      logDebug('[Phase2a] Desktop note search unavailable:', error.message);
+    const response = await sendAction({ action, query });
+    if (Array.isArray(response.results)) {
+      const results = await buildResults(response.results);
+      mergeSearchResults(results, source, gen);
+      await renderProgressiveResults(gen);
     }
-  } catch (e) {
-    logDebug('[Phase2a] Note search failed:', e.message);
+  } catch (error) {
+    logDebug(`${phaseLabel} unavailable:`, error.message);
   } finally {
     phaseComplete(gen);
   }
 }
 
-// Phase 2b: snapshot search with limited concurrency.
+// Phase 2a: note search.
+async function runPhase2a(query, gen) {
+  return runDaemonContentSearch({
+    query,
+    gen,
+    action: 'searchNotes',
+    buildResults: buildNoteSearchResults,
+    source: 'note',
+    phaseLabel: '[Phase2a] Desktop note search',
+  });
+}
+
+// Phase 2b: snapshot search.
 async function runPhase2b(query, gen) {
-  try {
-    try {
-      const desktopResp = await sendAction({
-        action: 'searchSnapshots',
-        query,
-      });
-      if (Array.isArray(desktopResp.results)) {
-        const snapshotResults = await buildSnapshotSearchResults(
-          desktopResp.results,
-        );
-        mergeSearchResults(snapshotResults, 'snapshot', gen);
-        await renderProgressiveResults(gen);
-      }
-    } catch (error) {
-      logDebug('[Phase2b] Desktop snapshot search unavailable:', error.message);
-    }
-  } catch (e) {
-    logDebug('[Phase2b] Snapshot search failed:', e.message);
-  } finally {
-    phaseComplete(gen);
-  }
+  return runDaemonContentSearch({
+    query,
+    gen,
+    action: 'searchSnapshots',
+    buildResults: buildSnapshotSearchResults,
+    source: 'snapshot',
+    phaseLabel: '[Phase2b] Desktop snapshot search',
+  });
 }
 
 // Lightweight identity scorer for Phase 0 using the shared search-runtime matcher.
@@ -1673,21 +1652,17 @@ function getActivePinListId() {
   return null;
 }
 
-function slugFromPinId(id) {
-  if (id.startsWith(PAGE_PREFIX)) return entitySlug(id);
-  if (id.startsWith(NOTE_PREFIX)) return entitySlug(id);
-}
-
-// Resolve an array of pins to display-ready objects with title/url populated.
-// Loads entity context, resolves each pin via resolvePageRef, falls back to
-// historyState.byUrl for pins with null entity title.
+// Apply UI-only history title fallback to daemon-resolved list pins.
 // Returns { pinsResolved, pageSnap } — pageSnap is needed by enrichPinResult.
 async function resolvePinsForDisplay(pins) {
-  const { pageSnap, noteSnap } = await loadPinContext(pins);
+  const pageSnap = new Map(
+    pins
+      .filter((pin) => pin.kind === 'page')
+      .map((pin) => [pin.slug, { ...pin, user_title: pin.userTitle || null }]),
+  );
   const pinsResolved = pins.map((p) => {
-    const ref = resolvePageRef(p.id, pageSnap, noteSnap);
-    let url = ref?.url || null;
-    let title = ref?.title || null;
+    let title = p.title || null;
+    const url = p.url || null;
     if (!title && url) {
       const hist = historyState.byUrl.get(url);
       if (hist?.title) title = hist.title;
@@ -1696,63 +1671,14 @@ async function resolvePinsForDisplay(pins) {
       ...p,
       url,
       title,
-      user_title: ref?.user_title || null,
-      isNote: ref?.isNote || false,
-      childIds: ref?.childIds || [],
-      parentIds: ref?.parentIds || [],
+      user_title: p.userTitle || null,
+      isNote: p.isNote || false,
+      hasSnapshots: p.hasSnapshots === true,
+      hasHighlightNotes: p.hasHighlightNotes === true,
+      listSlugs: p.listSlugs || [],
     };
   });
   return { pinsResolved, pageSnap };
-}
-
-// Resolve a typed page reference to entity-like data, or null.
-// page:<slug> → page entity from pageSnap. note:<slug> → note entity.
-function resolvePageRef(refId, pageSnap, noteSnap) {
-  if (!refId) return null;
-  if (refId.startsWith(PAGE_PREFIX)) {
-    return pageSnap?.get(entitySlug(refId)) || null;
-  }
-  if (refId.startsWith(NOTE_PREFIX)) {
-    const note = noteSnap?.get(entitySlug(refId));
-    if (!note) return null;
-    return {
-      url: null,
-      title: formatHighlightExcerpt(note.excerpt) || 'Note',
-      user_title: null,
-      isNote: true,
-      note,
-    };
-  }
-  return null;
-}
-
-// Load page entities for a set of pins from Desktop.
-async function loadPinContext(pins) {
-  const pagePinSlugs = [];
-  const notePinSlugs = [];
-  for (const p of pins) {
-    if (p.id?.startsWith(PAGE_PREFIX)) pagePinSlugs.push(entitySlug(p.id));
-    else if (p.id?.startsWith(NOTE_PREFIX)) notePinSlugs.push(entitySlug(p.id));
-  }
-  const pageSnap = new Map();
-  if (pagePinSlugs.length > 0) {
-    const pages = await Promise.all(
-      pagePinSlugs.map((s) => readDesktopValue(pageKey(s))),
-    );
-    for (let i = 0; i < pagePinSlugs.length; i++) {
-      if (pages[i]) pageSnap.set(pagePinSlugs[i], pages[i]);
-    }
-  }
-  const noteSnap = new Map();
-  if (notePinSlugs.length > 0) {
-    const notes = await Promise.all(
-      notePinSlugs.map((s) => readDesktopValue(noteKey(s))),
-    );
-    for (let i = 0; i < notePinSlugs.length; i++) {
-      if (notes[i]) noteSnap.set(notePinSlugs[i], notes[i]);
-    }
-  }
-  return { pageSnap, noteSnap };
 }
 
 async function toggleResultPin(listId, url, title) {
@@ -1802,42 +1728,8 @@ let recycleBinRenderSeq = 0;
 let recycleBinBadgeSeq = 0;
 let recycleBinEmptyBound = false;
 
-async function readOrphanedManifestFresh() {
-  const resp = await sendAction({
-    action: 'readDesktopValue',
-    key: 'manifest:orphaned',
-    includeDeleted: true,
-  });
-  return resp?.value || { timestamp: 0, entries: [] };
-}
-
-async function isRestorableRecycleEntry(entry) {
-  const key = entry?.key || '';
-  if (key.startsWith(SNAPSHOT_PREFIX)) return true;
-  if (!key.startsWith(NOTE_PREFIX) && !key.startsWith(LIST_PREFIX)) return true;
-
-  try {
-    const resp = await sendAction({
-      action: 'readDesktopValue',
-      key,
-      includeDeleted: true,
-    });
-    const entity = resp?.value;
-    if (!entity) return false;
-    if (key.startsWith(NOTE_PREFIX)) {
-      return entity.deletionReason !== 'replaced' && !entity.replacedBy;
-    }
-    return entity.deleted === true;
-  } catch {
-    return false;
-  }
-}
-
 async function loadRecycleBinEntries() {
-  const orphaned = await readOrphanedManifestFresh();
-  const entries = orphaned?.entries || [];
-  const flags = await Promise.all(entries.map(isRestorableRecycleEntry));
-  return entries.filter((_, index) => flags[index]);
+  return loadRecycleBin();
 }
 
 async function showRecycleBin() {
@@ -1880,87 +1772,13 @@ async function showRecycleBin() {
   const emptyBtn = document.querySelector('.empty-bin-btn');
   if (emptyBtn) emptyBtn.disabled = false;
 
-  for (const { key } of entries) {
+  for (const entry of entries) {
+    const { key } = entry;
     const typeLabel = entityTypeLabel(key);
     const typeCls = 'type-' + typeLabel.toLowerCase();
-
-    // Load entity to get human-readable display name
-    let displayName = key;
-    if (key.startsWith(SNAPSHOT_PREFIX)) {
-      const snapStem = entitySlug(key);
-      const lastDash = snapStem.lastIndexOf('-');
-      const pageSlug = snapStem.slice(0, lastDash);
-      const ts = parseInt(snapStem.slice(lastDash + 1), 10);
-      // Try to load page entity for a human title
-      try {
-        const pageResp = await sendAction({
-          action: 'readDesktopValue',
-          key: pageKey(pageSlug),
-          includeDeleted: true,
-        });
-        if (
-          renderSeq !== recycleBinRenderSeq ||
-          activeView.type !== 'recycle-bin'
-        ) {
-          return;
-        }
-        displayName = `${pageResp?.value?.title || pageSlug} — ${new Date(ts).toLocaleString()}`;
-      } catch {
-        if (
-          renderSeq !== recycleBinRenderSeq ||
-          activeView.type !== 'recycle-bin'
-        ) {
-          return;
-        }
-        displayName = `${pageSlug} — ${new Date(ts).toLocaleString()}`;
-      }
-    } else {
-      try {
-        const resp = await sendAction({
-          action: 'readDesktopValue',
-          key,
-          includeDeleted: true,
-        });
-        if (
-          renderSeq !== recycleBinRenderSeq ||
-          activeView.type !== 'recycle-bin'
-        ) {
-          return;
-        }
-        const entity = resp?.value;
-        if (entity) {
-          if (key.startsWith(NOTE_PREFIX)) {
-            const raw = entity.excerpt;
-            const excerptText = Array.isArray(raw)
-              ? raw.join(' ')
-              : typeof raw === 'string'
-                ? raw
-                : '';
-            if (excerptText) displayName = excerptText.substring(0, 80);
-            else if (entity.note)
-              displayName =
-                (entity.excerpt === null
-                  ? tr('desktopPageNotePrefix', 'Page note: ')
-                  : '') + entity.note.substring(0, 60);
-            else if (entity.url)
-              displayName = tr('desktopNoteOn', `Note on ${entity.url}`, [
-                entity.url,
-              ]);
-            else
-              displayName = tr(
-                'desktopNoteWithSlug',
-                `Note (${entitySlug(key)})`,
-                [entitySlug(key)],
-              );
-          } else if (key.startsWith(LIST_PREFIX)) {
-            displayName = entity.name || key;
-          } else if (key.startsWith(PAGE_PREFIX)) {
-            displayName = entity.title || entity.url || key;
-          } else {
-            displayName = entity.name || entity.title || entity.slug || key;
-          }
-        }
-      } catch {}
+    let displayName = entry.title || entry.url || entry.slug || key;
+    if (entry.kind === 'snapshot' && entry.timestamp) {
+      displayName = `${displayName} — ${new Date(entry.timestamp).toLocaleString()}`;
     }
     if (
       renderSeq !== recycleBinRenderSeq ||
@@ -2138,9 +1956,9 @@ async function applyFilters(results) {
     }
     // List filter: when list bubbles active, only show items belonging to at least one enabled list
     if (enabledLists.length > 0) {
-      const itemListSlugs = (item.parentIds || [])
-        .filter((pid) => pid.startsWith(LIST_PREFIX) && !isSystemList(pid))
-        .map((pid) => entitySlug(pid));
+      const itemListSlugs = (item.listSlugs || []).filter(
+        (slug) => !slug.startsWith('system/'),
+      );
       if (!enabledLists.some((ls) => itemListSlugs.includes(ls))) return false;
     }
     // Time filters (days ago)
@@ -2178,11 +1996,7 @@ async function applyFilters(results) {
         return false;
     }
     if (filterState.hasSnapshots === true) {
-      if (
-        !item.childIds ||
-        !item.childIds.some((id) => id.startsWith(SNAPSHOT_PREFIX))
-      )
-        return false;
+      if (!item.hasSnapshots) return false;
     }
     if (filterState.liked === true) {
       if (!item.likes || item.likes <= 0) return false;
@@ -2718,7 +2532,7 @@ function enrichPinResult(r, pins, pageSnap) {
   }
   const attScore = attentionStrength(attSource) || source.attScore || 0;
   const rSlug = slug;
-  const pin = pins.find((p) => slugFromPinId(p.id) === rSlug);
+  const pin = pins.find((p) => p.slug === rSlug);
   const enriched = {
     ...r,
     slug,
@@ -2783,8 +2597,8 @@ async function refreshPins() {
   } else if (activeView.type === 'list') {
     const listId = activeView.id;
     if (!allListPins[listId]) {
-      const entity = await readDesktopValue(listKey(listId));
-      allListPins[listId] = entity?.pins || [];
+      const projection = await loadListDisplay(listId);
+      allListPins[listId] = projection?.pins || [];
     }
     const pins = allListPins[listId];
     updatePinCount(listId, pins.length);
@@ -2847,14 +2661,14 @@ async function showList(list) {
 
     await loadFilterState();
 
-    // Always fetch pins from entity storage
-    const listEntity = await readDesktopValue(listKey(listId));
-    allListPins[listId] = listEntity?.pins || [];
+    const listProjection = await loadListDisplay(listId);
+    if (!listProjection) throw new Error(`List not found: ${listId}`);
+    allListPins[listId] = listProjection.pins;
     const pins = allListPins[listId];
     updatePinCount(listId, pins.length);
 
     // Render rules section
-    renderRulesSection(listId, listEntity?.rules || []);
+    renderRulesSection(listId, listProjection.rules || []);
 
     if (pins.length === 0) {
       listPinsData = [];
@@ -2967,8 +2781,8 @@ function renderRulesList(listId, rules) {
 async function refreshRulesForActiveList() {
   if (activeView.type !== 'list') return;
   const listId = activeView.id;
-  const listEntity = await readDesktopValue(listKey(listId));
-  renderRulesSection(listId, listEntity?.rules || []);
+  const listProjection = await loadListDisplay(listId);
+  renderRulesSection(listId, listProjection?.rules || []);
 }
 
 // ─── Inline rule editing state ───
@@ -3423,14 +3237,13 @@ async function runPreviewAgainstPins(rule, listId, signal) {
   const pinMeta = collectPinnedPreviewEntries();
 
   if (pinMeta.length === 0) {
-    const listEntity = await readDesktopValue(listKey(listId));
-    for (const pin of listEntity?.pins || []) {
+    const listProjection = await loadListDisplay(listId);
+    for (const pin of listProjection?.pins || []) {
       if (signal?.aborted) break;
-      const page = await readDesktopValue(pin.id);
-      if (!page?.url) continue;
-      const title = page.user_title || page.title || '';
+      if (!pin.url) continue;
+      const title = pin.userTitle || pin.title || '';
       if (!title) continue;
-      pinMeta.push({ url: page.url, title });
+      pinMeta.push({ url: pin.url, title });
     }
   }
   if (pinMeta.length === 0) return;
@@ -3687,8 +3500,8 @@ function renderDirectSearchResults(results) {
         timestamps: r.timestamps,
         visitDates: r.visitDates,
         context: 'related',
-        childIds: r.childIds,
-        parentIds: r.parentIds,
+        hasSnapshots: r.hasSnapshots,
+        listSlugs: r.listSlugs,
         likes: r.likes,
         matchSources: r.matchSources,
         hasHighlightNotes: r.hasHighlightNotes,
@@ -3762,8 +3575,8 @@ function renderFilteredPins(pins, listId, searchQuery) {
         context: 'related',
         pinnedAt: r.pinnedAt,
         pinSource: r.pinSource,
-        childIds: r.childIds,
-        parentIds: r.parentIds,
+        hasSnapshots: r.hasSnapshots,
+        listSlugs: r.listSlugs,
         excludeListId: listId,
         likes: r.likes,
         hasHighlightNotes: r.hasHighlightNotes,
@@ -3869,108 +3682,61 @@ function processHistoryForDisplay(entries, { globalDedup = false } = {}) {
   return results;
 }
 
+async function loadProjectedPages(slugs) {
+  const contexts = await loadPageContext(slugs);
+  const pages = {};
+  for (const slug of slugs) {
+    const context = contexts[slug];
+    if (!context) continue;
+    pages[slug] = context.page;
+  }
+  return { contexts, pages };
+}
+
 // Batch-fetch page entities for all unique slugs in entries, enrich with entity titles.
 async function enrichFromEntityStorage(entries, opts = {}) {
   const { includeVisitDates = true } = opts;
   const allSlugs = [...new Set(entries.map((r) => r.slug).filter(Boolean))];
   if (allSlugs.length === 0) return;
-  const loaded = await Promise.all(
-    allSlugs.map((s) => readDesktopValue(pageKey(s))),
-  );
-  const pages = {};
-  for (let i = 0; i < allSlugs.length; i++) {
-    if (loaded[i]) pages[allSlugs[i]] = loaded[i];
-  }
-  // Collect all unique note refs across all pages for batch loading
-  const allNoteRefs = new Set();
-  for (const slug of allSlugs) {
-    const page = pages[slug];
-    if (!page?.childIds) continue;
-    for (const id of page.childIds) {
-      if (id.startsWith(NOTE_PREFIX)) allNoteRefs.add(id);
-    }
-  }
-  // Batch-load note entities to determine which pages have highlight notes
-  const noteMap = new Map();
-  if (allNoteRefs.size > 0) {
-    const noteKeys = [...allNoteRefs];
-    const noteEntities = await Promise.all(
-      noteKeys.map((k) => readDesktopValue(k)),
-    );
-    for (let i = 0; i < noteKeys.length; i++) {
-      if (noteEntities[i]) noteMap.set(noteKeys[i], noteEntities[i]);
-    }
-  }
+  const { contexts, pages } = await loadProjectedPages(allSlugs);
 
   for (const entry of entries) {
     const page = pages[entry.slug];
     if (!page) continue;
+    const context = contexts[entry.slug];
     if (!entry.title && page.title) entry.title = page.title;
     if (!entry.user_title && page.user_title)
       entry.user_title = page.user_title;
-    if (page.childIds) entry.childIds = page.childIds;
-    if (page.parentIds) entry.parentIds = page.parentIds;
+    entry.hasSnapshots = page.hasSnapshots === true;
+    entry.listSlugs = (context?.lists || []).map((list) => list.slug);
     if (page.likes) entry.likes = page.likes;
     if (page.createdAt && !entry.createdAt) entry.createdAt = page.createdAt;
     if (includeVisitDates && entry.dateScope !== 'row' && page.visitDates) {
       entry.visitDates = page.visitDates;
     }
     // Check if any child note is a non-deleted highlight note (excerpt !== null)
-    const noteRefs = (page.childIds || []).filter((id) =>
-      id.startsWith(NOTE_PREFIX),
+    entry.hasHighlightNotes = (context?.notes || []).some(
+      (note) => note.excerpt !== null,
     );
-    entry.hasHighlightNotes = noteRefs.some((ref) => {
-      const note = noteMap.get(ref);
-      return note && note.excerpt !== null && !note.deleted;
-    });
   }
 }
 
-// Enrich results with page entity fields needed by filters (notes, childIds, visitCount).
+// Enrich results with daemon-projected note, snapshot, list, and visit context.
 // Only called when non-default filters are active.
 async function enrichForFilters(entries) {
   const slugs = [...new Set(entries.map((r) => r.slug).filter(Boolean))];
   if (slugs.length === 0) return;
-  const loaded = await Promise.all(
-    slugs.map((s) => readDesktopValue(pageKey(s))),
-  );
-  const pages = {};
-  for (let i = 0; i < slugs.length; i++) {
-    if (loaded[i]) pages[slugs[i]] = loaded[i];
-  }
-  // Batch-load all note entities referenced by childIds
-  const allNoteRefs = new Set();
-  for (const slug of slugs) {
-    const page = pages[slug];
-    if (!page?.childIds) continue;
-    for (const id of page.childIds) {
-      if (id.startsWith(NOTE_PREFIX)) allNoteRefs.add(id);
-    }
-  }
-  const noteMap = new Map();
-  if (allNoteRefs.size > 0) {
-    const noteKeys = [...allNoteRefs];
-    const noteEntities = await Promise.all(
-      noteKeys.map((k) => readDesktopValue(k)),
-    );
-    for (let i = 0; i < noteKeys.length; i++) {
-      if (noteEntities[i]) noteMap.set(noteKeys[i], noteEntities[i]);
-    }
-  }
+  const { contexts, pages } = await loadProjectedPages(slugs);
   // Pre-compute URL→visit-count map once (O(N)) instead of per-entry scan (O(N²))
   let visitCountMap = null;
   for (const entry of entries) {
     const page = pages[entry.slug];
     if (!page) continue;
-    if (page.childIds) {
-      entry.childIds = page.childIds;
-      const noteRefs = page.childIds.filter((id) => id.startsWith(NOTE_PREFIX));
-      const notes = noteRefs
-        .map((ref) => noteMap.get(ref))
-        .filter((n) => n && !n.deleted);
-      if (notes.length > 0) entry.notes = notes;
-    }
-    if (page.parentIds) entry.parentIds = page.parentIds;
+    const context = contexts[entry.slug];
+    const notes = context?.notes || [];
+    if (notes.length > 0) entry.notes = notes;
+    entry.hasSnapshots = page.hasSnapshots === true;
+    entry.listSlugs = (context?.lists || []).map((list) => list.slug);
     if (entry.dateScope !== 'row' && page.visitDates) {
       entry.visitDates = page.visitDates;
     }
@@ -4030,8 +3796,8 @@ async function displayHistoryRows(entries) {
       notes: e.notes,
       timestamps: e.timestamps,
       context: 'global',
-      childIds: e.childIds,
-      parentIds: e.parentIds,
+      hasSnapshots: e.hasSnapshots,
+      listSlugs: e.listSlugs,
       likes: e.likes,
       hasHighlightNotes: e.hasHighlightNotes,
     });
@@ -4112,21 +3878,13 @@ async function loadExtraDetail(url) {
   const snapResp = await sendAction({ action: 'listSnapshots', slug });
   const snapshots = snapResp.snapshots || [];
 
-  // Load page entity for likes
-  const pageEntity = await readDesktopValue(pageKey(slug));
+  const contexts = await loadPageContext([slug]);
+  const context = contexts[slug];
+  const pageEntity = context?.page;
   const likes = pageEntity?.likes || 0;
-
-  // Page entities materialize list membership via parentIds.
-  const lists = await loadLists();
-  const belongedLists = [];
-  const knownLists = new Map(lists.map((lst) => [lst.slug, lst]));
-  for (const parentId of pageEntity?.parentIds || []) {
-    if (!parentId.startsWith(LIST_PREFIX) || isSystemList(parentId)) continue;
-    const listSlug = entitySlug(parentId);
-    const list =
-      knownLists.get(listSlug) || (await readDesktopValue(listKey(listSlug)));
-    if (list && !list.deleted) belongedLists.push(listDisplayName(list));
-  }
+  const belongedLists = (context?.lists || [])
+    .filter((list) => !isSystemList(listKey(list.slug)))
+    .map(listDisplayName);
 
   return {
     notes,
@@ -4524,8 +4282,8 @@ function resultRowHtml(title, url, opts = {}) {
     pinnedAt,
     pinSource,
     cssClass,
-    childIds = [],
-    parentIds = [],
+    hasSnapshots = false,
+    listSlugs = [],
     excludeListId,
     likes = 0,
     matchSources,
@@ -4550,11 +4308,10 @@ function resultRowHtml(title, url, opts = {}) {
   const dates = collectVisitDateKeys({ visitDates, timestamps }).join(',');
 
   const hasNotes = hasHighlightNotes === true;
-  const hasSnaps = childIds.some((id) => id.startsWith(SNAPSHOT_PREFIX));
+  const hasSnaps = hasSnapshots;
   const belongedListNames = [];
-  for (const pid of parentIds) {
-    if (!pid.startsWith(LIST_PREFIX) || isSystemList(pid)) continue;
-    const listSlug = entitySlug(pid);
+  for (const listSlug of listSlugs) {
+    if (listSlug.startsWith('system/')) continue;
     if (excludeListId && listSlug === excludeListId) continue;
     const name = listNameById.get(listSlug);
     if (name) belongedListNames.push(name);
@@ -4859,7 +4616,8 @@ async function openPageDetailFromRoute(url) {
     await showExplore();
   }
   const slug = generateSlugFromUrl(url);
-  const page = await readDesktopValue(pageKey(slug), true).catch(() => null);
+  const contexts = await loadPageContext([slug]).catch(() => ({}));
+  const page = contexts[slug]?.page;
   const title = page?.user_title || page?.title || url;
   const timestamps = Object.values(page?.timestamps || {});
   const cardTimestamp = timestamps.length > 0 ? Math.max(...timestamps) : null;
@@ -5073,23 +4831,7 @@ function updateSidebarActive() {
 
 // --- Lists (pinned searches) ---
 async function loadListTree() {
-  const order = await readDesktopValue('manifest:list-order');
-  return buildTreeFromManifest(order?.tree || []);
-}
-async function buildTreeFromManifest(treeNodes) {
-  const nodes = [];
-  for (const treeNode of treeNodes) {
-    const key = treeNode.id;
-    const entity = await readDesktopValue(key);
-    if (!entity || entity.deleted) continue;
-    const slug = entity.slug || entitySlug(key);
-    const children = treeNode.children?.length
-      ? await buildTreeFromManifest(treeNode.children)
-      : [];
-    const node = { slug, name: entity.name || slug, children };
-    nodes.push(node);
-  }
-  return nodes;
+  return (await loadListTreeProjection()).tree;
 }
 // Flatten the list tree for filter and lookup code that needs a linear view.
 async function loadLists() {
@@ -5245,7 +4987,7 @@ async function handleSidebarDrop(draggedId, targetSlug, relY, tree) {
   let draggedNode = null;
   function extractNode(nodes) {
     for (let i = 0; i < nodes.length; i++) {
-      if (nodes[i].id === listKey(draggedId)) {
+      if (nodes[i].slug === draggedId) {
         draggedNode = nodes.splice(i, 1)[0];
         return true;
       }
@@ -5254,13 +4996,13 @@ async function handleSidebarDrop(draggedId, targetSlug, relY, tree) {
     return false;
   }
   extractNode(tree);
-  if (!draggedNode) draggedNode = { id: listKey(draggedId) };
+  if (!draggedNode) draggedNode = { slug: draggedId, children: [] };
 
   if (relY >= 0.25 && relY <= 0.75) {
     // Nest as child of target
     function appendToTarget(nodes) {
       for (const n of nodes) {
-        if (n.id === listKey(targetSlug)) {
+        if (n.slug === targetSlug) {
           if (!n.children) n.children = [];
           n.children.push(draggedNode);
           return true;
@@ -5274,7 +5016,7 @@ async function handleSidebarDrop(draggedId, targetSlug, relY, tree) {
     // Reorder above/below sibling
     function insertNear(nodes) {
       for (let i = 0; i < nodes.length; i++) {
-        if (nodes[i].id === listKey(targetSlug)) {
+        if (nodes[i].slug === targetSlug) {
           const idx = relY < 0.25 ? i : i + 1;
           nodes.splice(idx, 0, draggedNode);
           return true;
@@ -5433,8 +5175,8 @@ function bindSidebarItemDragDrop(item, node) {
       const rect = item.getBoundingClientRect();
       const relY = (e.clientY - rect.top) / rect.height;
 
-      const order = await readDesktopValue('manifest:list-order');
-      const tree = JSON.parse(JSON.stringify(order?.tree || []));
+      const order = await loadListTreeProjection();
+      const tree = JSON.parse(JSON.stringify(order.order));
       await handleSidebarDrop(draggedId, node.slug, relY, tree);
     } else {
       // Pin drop
@@ -5447,9 +5189,12 @@ function bindSidebarItemDragDrop(item, node) {
         const newUrls = [];
         const titles = [];
         for (const { url, title } of items) {
-          const pinId = pageKey(generateSlugFromUrl(url));
-          if (url && !pins.some((p) => p.id === pinId)) {
-            pins.push({ id: pinId, pinnedAt: Date.now() });
+          const pinSlug = generateSlugFromUrl(url);
+          if (
+            url &&
+            !pins.some((pin) => pin.kind === 'page' && pin.slug === pinSlug)
+          ) {
+            pins.push({ kind: 'page', slug: pinSlug, pinnedAt: Date.now() });
             newUrls.push(url);
             titles.push(title || null);
           }
@@ -6534,6 +6279,31 @@ document
   .addEventListener('click', () => {
     document.getElementById('bookmarkImportPanel').style.display = 'none';
   });
+
+function renderImportFailures(container, failures, getName) {
+  container.innerHTML = '';
+  if (!failures || failures.length === 0) return;
+
+  const details = document.createElement('details');
+  const summary = document.createElement('summary');
+  summary.textContent = tr(
+    'desktopItemsSkipped',
+    `${failures.length} item${failures.length !== 1 ? 's' : ''} skipped`,
+    [failures.length],
+  );
+  details.appendChild(summary);
+
+  const list = document.createElement('ul');
+  list.style.cssText = 'margin:4px 0;padding-left:20px;';
+  for (const failure of failures) {
+    const item = document.createElement('li');
+    item.textContent = `${getName(failure)} — ${failure.reason}`;
+    list.appendChild(item);
+  }
+  details.appendChild(list);
+  container.appendChild(details);
+}
+
 {
   const fileInput = document.getElementById('bookmarkFileInput');
   const treeContainer = document.getElementById('bookmarkTreeContainer');
@@ -6754,29 +6524,6 @@ document
     }));
   }
 
-  function renderBookmarkImportFailures(failures) {
-    failuresEl.innerHTML = '';
-    if (!failures || failures.length === 0) return;
-
-    const details = document.createElement('details');
-    const summary = document.createElement('summary');
-    summary.textContent = tr(
-      'desktopItemsSkipped',
-      `${failures.length} item${failures.length !== 1 ? 's' : ''} skipped`,
-      [failures.length],
-    );
-    details.appendChild(summary);
-    const list = document.createElement('ul');
-    list.style.cssText = 'margin:4px 0;padding-left:20px;';
-    for (const failure of failures) {
-      const li = document.createElement('li');
-      li.textContent = `${failure.title || failure.url} — ${failure.reason}`;
-      list.appendChild(li);
-    }
-    details.appendChild(list);
-    failuresEl.appendChild(details);
-  }
-
   importBtn.addEventListener('click', async () => {
     const selected = collectCheckedTree(treeContainer._items || []);
     if (selected.length === 0) return;
@@ -6798,7 +6545,11 @@ document
         `Done! Imported ${result.listCount} list${result.listCount !== 1 ? 's' : ''} with ${result.bookmarkCount} bookmark${result.bookmarkCount !== 1 ? 's' : ''}.`,
         [result.listCount, result.bookmarkCount],
       );
-      renderBookmarkImportFailures(result.failures || []);
+      renderImportFailures(
+        failuresEl,
+        result.failures || [],
+        (failure) => failure.title || failure.url,
+      );
     } catch (error) {
       progressEl.textContent = tr(
         'desktopImportFailed',
@@ -6867,29 +6618,6 @@ document
       if (normalized) timestamps.add(normalized);
     }
     return [...timestamps].sort((left, right) => left - right);
-  }
-
-  function renderHistoryImportFailures(failures) {
-    failuresEl.innerHTML = '';
-    if (!failures || failures.length === 0) return;
-
-    const details = document.createElement('details');
-    const summary = document.createElement('summary');
-    summary.textContent = tr(
-      'desktopItemsSkipped',
-      `${failures.length} item${failures.length !== 1 ? 's' : ''} skipped`,
-      [failures.length],
-    );
-    details.appendChild(summary);
-    const list = document.createElement('ul');
-    list.style.cssText = 'margin:4px 0;padding-left:20px;';
-    for (const failure of failures) {
-      const li = document.createElement('li');
-      li.textContent = `${failure.title || failure.url || 'entry'} — ${failure.reason}`;
-      list.appendChild(li);
-    }
-    details.appendChild(list);
-    failuresEl.appendChild(details);
   }
 
   function normalizeHistoryImportPayload(payload) {
@@ -6978,7 +6706,11 @@ document
               'desktopNoImportableHistory',
               'No importable history entries found in this file.',
             );
-      renderHistoryImportFailures(parseFailures);
+      renderImportFailures(
+        failuresEl,
+        parseFailures,
+        (failure) => failure.title || failure.url || 'entry',
+      );
       importBtn.disabled = normalizedEntries.length === 0;
     } catch (error) {
       summaryEl.textContent = tr(
@@ -6986,14 +6718,18 @@ document
         `Could not parse history JSON: ${error.message}`,
         [error.message],
       );
-      renderHistoryImportFailures([
-        {
-          reason: tr(
-            'desktopHistoryInvalidJson',
-            'invalid JSON or unsupported history export format',
-          ),
-        },
-      ]);
+      renderImportFailures(
+        failuresEl,
+        [
+          {
+            reason: tr(
+              'desktopHistoryInvalidJson',
+              'invalid JSON or unsupported history export format',
+            ),
+          },
+        ],
+        (failure) => failure.title || failure.url || 'entry',
+      );
     }
   });
 
@@ -7024,7 +6760,11 @@ document
           [skippedCount],
         );
       }
-      renderHistoryImportFailures(parseFailures);
+      renderImportFailures(
+        failuresEl,
+        parseFailures,
+        (failure) => failure.title || failure.url || 'entry',
+      );
     } catch (error) {
       progressEl.textContent = tr(
         'desktopImportFailed',
@@ -7896,38 +7636,15 @@ function bindFilterEvents(container) {
 }
 
 // Entity-scan filter: scan page checkpoints instead of all history JSONL files.
-// Page entities contain materialized state (childIds, visitDates, timestamps, etc.)
+// Page projections contain materialized visit state plus semantic relationships
 // sufficient to answer all filters without loading raw event logs.
 async function runEntityScanFilter(pinnedSlugs) {
   showSearchSpinner();
-  const resp = await sendAction({ action: 'loadAllPages' });
-  if (!resp.pages) {
-    hideSearchSpinner();
-    return null;
-  }
-
-  const pages = resp.pages;
-  const slugs = Object.keys(pages);
-
-  // Batch-load note entities for hasHighlights check
-  const allNoteRefs = new Set();
-  for (const slug of slugs) {
-    const page = pages[slug];
-    if (!page?.childIds) continue;
-    for (const id of page.childIds) {
-      if (id.startsWith(NOTE_PREFIX)) allNoteRefs.add(id);
-    }
-  }
-  const noteMap = new Map();
-  if (allNoteRefs.size > 0) {
-    const noteKeys = [...allNoteRefs];
-    const noteEntities = await Promise.all(
-      noteKeys.map((k) => readDesktopValue(k)),
-    );
-    for (let i = 0; i < noteKeys.length; i++) {
-      if (noteEntities[i]) noteMap.set(noteKeys[i], noteEntities[i]);
-    }
-  }
+  const contexts = await loadAllPageContext();
+  const pages = Object.fromEntries(
+    Object.entries(contexts).map(([slug, context]) => [slug, context.page]),
+  );
+  const slugs = Object.keys(contexts);
 
   // Build display rows from page entities
   const now = Date.now();
@@ -7951,12 +7668,7 @@ async function runEntityScanFilter(pinnedSlugs) {
     const day =
       d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
 
-    const noteRefs = (page.childIds || []).filter((id) =>
-      id.startsWith(NOTE_PREFIX),
-    );
-    const notes = noteRefs
-      .map((ref) => noteMap.get(ref))
-      .filter((n) => n && !n.deleted);
+    const notes = contexts[slug]?.notes || [];
 
     results.push({
       url: page.url,
@@ -7975,14 +7687,11 @@ async function runEntityScanFilter(pinnedSlugs) {
       visitDates: page.visitDates || [],
       latestTs,
       deviceIds: new Set(Object.keys(timestamps)),
-      childIds: page.childIds,
-      parentIds: page.parentIds,
+      hasSnapshots: page.hasSnapshots === true,
+      listSlugs: (contexts[slug]?.lists || []).map((list) => list.slug),
       likes: page.likes,
       createdAt: page.createdAt,
-      hasHighlightNotes: noteRefs.some((ref) => {
-        const note = noteMap.get(ref);
-        return note && note.excerpt !== null && !note.deleted;
-      }),
+      hasHighlightNotes: notes.some((note) => note.excerpt !== null),
       visitCount: page.visitDates?.length || 1,
       firstTimestamp: page.createdAt || latestTs,
       timeOnPage: page.timeOnPage || 0,
@@ -8112,8 +7821,8 @@ async function runSearchFilterPipeline() {
       timestamps: r.timestamps,
       visitDates: r.dateScope === 'row' ? undefined : r.visitDates,
       context: 'related',
-      childIds: r.childIds,
-      parentIds: r.parentIds,
+      hasSnapshots: r.hasSnapshots,
+      listSlugs: r.listSlugs,
       likes: r.likes,
       hasHighlightNotes: r.hasHighlightNotes,
     });
@@ -8283,8 +7992,8 @@ async function openListFocusPanel(listId, listName) {
   try {
     let pins = allListPins[listId];
     if (!pins) {
-      const fpEntity = await readDesktopValue(listKey(listId));
-      pins = fpEntity?.pins || [];
+      const projection = await loadListDisplay(listId);
+      pins = projection?.pins || [];
       allListPins[listId] = pins;
     }
 
@@ -8308,8 +8017,8 @@ async function openListFocusPanel(listId, listName) {
             visitDates: r.visitDates,
             context: 'global',
             pinSource: r.source || null,
-            childIds: r.childIds,
-            parentIds: r.parentIds,
+            hasSnapshots: r.hasSnapshots,
+            listSlugs: r.listSlugs,
           });
         })
         .join('');

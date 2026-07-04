@@ -123,8 +123,6 @@ async function installDesktopShellBridge(page, helper, setupDir) {
           return { success: true, files: [], sizes: {}, devices: [] };
         case 'loadHistoryBatch':
           return { success: true, entries: [] };
-        case 'loadAllPages':
-          return { success: true, pages: {} };
         case 'searchNotes':
         case 'searchSnapshots':
           return { success: true, results: [] };

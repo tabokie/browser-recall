@@ -67,14 +67,19 @@ function createController(overrides = {}) {
       specialNoteIconPaths: SPECIAL_NOTE_ICON_PATHS,
       specialMixedIconPaths: SPECIAL_MIXED_ICON_PATHS,
       syncDesktopConnectorPauseState: vi.fn(),
-      readDesktopValue: overrides.readDesktopValue || vi.fn(async () => null),
+      readPageMarkers: async (url) => {
+        const read = overrides.readDesktopValue || vi.fn(async () => null);
+        const page = await read(`page:${new URL(url).hostname}`);
+        if (!page) return null;
+        return {
+          hasNotes: (page.childIds || []).some(
+            (id) => id.startsWith('note:') || id.startsWith('snapshot:'),
+          ),
+          hasLists: (page.parentIds || []).some((id) => id.startsWith('list:')),
+        };
+      },
       readRecordingPausedState:
         overrides.readRecordingPausedState || vi.fn(async () => false),
-      generateSlugFromUrl: (url) => new URL(url).hostname,
-      pageKey: (slug) => `page:${slug}`,
-      notePrefix: 'note:',
-      snapshotPrefix: 'snapshot:',
-      listPrefix: 'list:',
       resolveTabUrl: overrides.resolveTabUrl,
     }),
   };

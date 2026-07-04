@@ -15,11 +15,7 @@ export function extractHistoryQueue(desktopCommandQueue) {
       }
       return null;
     })
-    .filter(Boolean)
-    .filter(
-      (e) =>
-        !e.action || e.action === 'visit_page' || e.action === 'leave_page',
-    );
+    .filter(Boolean);
 }
 
 /**
@@ -53,8 +49,7 @@ export function mergeQueueIntoHistory(entries, queueEntries) {
  * In the event-sourced model, content is on disk (referenced by mdPath).
  * This returns an empty map — content is not inline in log entries.
  */
-export function getQueueContentMap(queueEntries) {
-  void queueEntries;
+export function getQueueContentMap(_queueEntries) {
   return {};
 }
 

@@ -1055,6 +1055,15 @@
     "message": "스냅샷이 캡처되었습니다.",
     "description": "Snapshot capture success notification."
   },
+  "extensionSnapshotCapturedWithOneWarning": {
+    "message": "스냅샷을 저장했지만 리소스 1개를 사용할 수 없습니다.",
+    "description": "Snapshot capture partial-success warning for one unavailable resource."
+  },
+  "extensionSnapshotCapturedWithWarnings": {
+    "message": "스냅샷을 저장했지만 리소스 $COUNT$개를 사용할 수 없습니다.",
+    "description": "Snapshot capture partial-success warning for multiple unavailable resources.",
+    "placeholders": { "count": { "content": "$1", "example": "2" } }
+  },
   "extensionSomethingWentWrong": {
     "message": "문제가 발생했습니다.",
     "description": "Generic extension error."

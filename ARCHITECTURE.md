@@ -66,7 +66,9 @@ cache.
 - Page and snapshot files are sharded by the first two hex characters of the SHA-256 hash of the logical slug/stem. Logical entity IDs do not include the shard.
 - Page slugs are derived from the page URL the replay layer receives. The readable slug prefix uses domain and path; the hash input is the full received URL. Extension-originated browser observations are canonicalized before they are sent to desktop: query params whose names start with `_` are removed, while ordinary query params and fragments still distinguish pages. JS producers and tests use `packages/core/page-identity.js` for this logic; the extension content script receives a generated classic-script bridge from that same module during staging. The browser-data migration applies the same canonicalization to existing logs and objects.
 
-Mutation commands reserve checkpoint-worker capacity before durable changes, append logs before changing the daemon cache, then apply replay effects to the in-memory projection cache. The reserved checkpoint work is submitted while the write is still serialized, so checkpoint files persist in accepted write order. Checkpoint files may lag briefly; current reads use the daemon cache and only fall through to disk on coordinated cache misses. Shutdown flushes accepted checkpoint work before returning.
+`crates/daemon/src/runtime.rs` owns replay transactions. Local transactions serialize the semantic read/modify/write operation, evolve one replay overlay, reserve checkpoint-worker capacity, append canonical logs before changing the daemon projection cache, advance replay progress, and submit checkpoint work in accepted order. Connector auto-pin and rule policy can inspect the transaction's evolving effects, but cannot perform the durable commit sequence itself. Sync strictly parses every non-empty downloaded JSONL line and evaluates every typed replay effect before any downloaded file is installed. The runtime then flushes prior checkpoint work, writes the validated files once, and publishes the resulting projection/checkpoint work without re-appending remote entries.
+
+Checkpoint files may lag briefly; current reads use the daemon projection cache and only fall through to disk on coordinated cache misses. Shutdown and destructive data clearing flush accepted checkpoint work before returning.
 
 `views/manifest/replay-progress.json` records the latest replayed log timestamp per device that has reached durable checkpoint files. Startup replays log entries newer than each device progress marker before serving, so acknowledged writes that reached JSONL but not checkpoint files survive daemon crashes. Replay progress is persisted coarsely during normal checkpoint work and exactly on checkpoint flush.
 
@@ -75,7 +77,7 @@ Mutation commands reserve checkpoint-worker capacity before durable changes, app
 Every mutation is represented as an event and applied through replay.
 
 - Production replay and replay verification live in `crates/replay/`.
-- The desktop shell and daemon use replay-backed command helpers from `crates/daemon/src/commands.rs`.
+- Shared desktop and connector mutations enter through `crates/daemon/src/command_authority.rs`, which delegates replay-backed work to `crates/daemon/src/commands.rs`.
 
 Key consequences:
 
@@ -121,17 +123,23 @@ Closing the desktop window hides it instead of destroying its webview. Tray clic
 
 ### Daemon Commands
 
-`crates/daemon/src/commands.rs` backs the desktop command surface, including:
+`crates/daemon/src/command_authority.rs` is the transport-neutral semantic mutation seam shared by the Tauri and authenticated WebSocket adapters. Its `execute(action, request)` interface owns supported-action classification, required-field validation, response formation, and typed replay-derived mutation notifications. Required command response fields are validated explicitly; missing or malformed fields fail the command instead of becoming null/default mutation payloads. Notifications are returned only after the delegated replay transaction commits. `main.rs` asks this module whether an action is shared instead of maintaining a second write-command allowlist; `ws_server.rs` retains authentication, encoding, socket lifecycle, browser observations, and notification broadcast.
 
-- entity/page payload reads from the daemon projection cache with disk fallback
+`crates/daemon/src/commands.rs` supplies the authority and read paths with replay-backed implementation helpers, including:
+
+- semantic mutations and specialized history/snapshot reads used behind projection interfaces
 - bookmark import and history import
 - note/list/snapshot/settings mutations
 - rule preview and rule updates
-- replay-backed log generation for browser observations such as visits/leaves
+- replay-backed log generation used by semantic mutations and browser observations
 
-The shell wraps these commands with desktop-specific concerns such as event emission and OS integration.
+`crates/daemon/src/read_projections.rs` owns workflow-shaped daemon reads. Its interfaces cover list display and resolved pin context, page/search enrichment with notes and visible list memberships, page info with snapshot availability, visible list trees plus reorder state, recycle-bin restoration eligibility, popup list summaries, and settings. Projection DTOs expose semantic fields such as `{kind, slug}`, `listSlugs`, and `hasSnapshots`; replay-only IDs, `childIds`, `parentIds`, and raw list-order keys remain inside the daemon. Every entity join uses coordinated projection-cache reads with disk fallback. Missing valid list-pin targets remain explicit as `kind: "missing"`; malformed pin IDs fail the read, and deleted lists and notes are not silently exposed.
 
-Daemon writes are serialized through shared storage/runtime coordination. The websocket connector and desktop command bridge use the same storage projection, so an acknowledged write is immediately visible to reads from either surface even while checkpoint files are still catching up.
+The Tauri adapter exposes workflow actions (`getListDisplay`, `getPageContext`, `getAllPageContext`, `getListTree`, `getRecycleBin`, and `getSettings`) rather than a generic entity-key read. Desktop list, search, detail, tree, recycle-bin, and settings callers consume those projections. The WebSocket adapter uses the same module for page info/summary, popup lists, and settings. Generic WebSocket `get_entity`/`get_all_pages` requests are rejected by production sessions and enabled only by explicit daemon test control; the extension `readDesktopValue` relay is staged only in test builds.
+
+Native window, folder, locale, external-open, and sync operations remain Tauri-only. Pairing, connector status, visit/leave observations, popup access policy, and socket cancellation remain WebSocket-only. Reads and streaming search retain their existing transport-specific response forms rather than widening the mutation interface.
+
+Daemon writes are serialized by replay transactions in `crates/daemon/src/runtime.rs`. Command authority, websocket observation ingest, remote replay, rule batch, and sync paths use that module instead of assembling storage ordering themselves. The websocket connector and desktop command bridge use the same command authority and storage projection, so validation, responses, committed mutations, and immediate reads have identical semantics regardless of ingress even while checkpoint files are still catching up.
 
 ## Connector Extension
 
@@ -140,7 +148,8 @@ The extension is intentionally thin and no longer owns the main product UI.
 ### Responsibilities
 
 - `apps/extension/content.js` captures visit and attention signals. Because declarative content scripts are classic scripts, staged extension builds load a generated `browser-recall-page-identity.js` bridge before `content.js` so page slug generation still comes from the shared core implementation.
-- `apps/extension/savepage-bridge.js` orchestrates snapshot capture.
+- `packages/core/highlight-lifecycle.js` owns the narrow shared highlight lifecycle used by live pages and snapshot documents. Its bounded hydration observer retains saved-note ownership long enough to repair marks removed by client rendering, while each retry skips notes whose owned marks are still intact.
+- `apps/extension/savepage-bridge.js` orchestrates snapshot capture as one identified session per tab. The session owns settings, lifecycle timers, and resource warnings; overlapping captures are rejected, stale messages cannot settle newer captures, and unavailable resources are reported explicitly even when the usable snapshot is persisted.
 - `apps/extension/background.js` buffers semantic connector commands, serves popup requests, manages pairing, and forwards RPC to the daemon. Toolbar clicks do not use a manifest `default_popup`: background prepares the current tab, connector state, access state, and daemon page summary first, stores that data as a one-shot in-memory bootstrap token, then opens `popup.html?bootstrap=...` with `chrome.action.openPopup()`. The token exists because extension action popups accept a URL but not an object payload; it is an in-memory handoff, not product persistence. Preparation is timeout-bounded so a slow daemon opens an explicit popup error instead of leaving the click dead. Engines without programmatic action popups fall back to opening the same prepared extension page in a tab. Test-only reset/seed/queue RPC handlers live in `apps/extension/background-test-control.js` and are staged only by the test fixture.
 - `apps/extension/popup.js` is the current-page dashboard backed by daemon RPC; its list picker is a short-lived popup control, not extension persistence. The picker keeps one input node mounted from initial popup markup through capture and picker modes so startup typing and native IME composition are not interrupted by DOM reparenting or focus replacement. Tokenized toolbar-opened popups consume the prepared bootstrap before rendering, while direct popup loads use daemon RPC fallback. An open popup renders a per-open snapshot plus its own user actions; background mutation broadcasts do not mutate an already-open popup. Reopen the popup to request a fresh page summary. Popup-originated mutations run through one serialized UI lane: explicit command clicks are ignored while the lane is busy, and save-on-edit commits mark the lane busy before later actions can start.
 - `apps/extension/icon-paths.js` and `apps/extension/badge-controller.js` switch packaged toolbar icons at runtime: the default icon is used for normal capture, the closed-eye icon for session-only recording pause, and state-colored backgrounds indicate special page-marker states.
@@ -157,7 +166,7 @@ For production use, persistence, blacklist/title policy, auto-pin synthesis, and
 
 ### Highlights
 
-Highlight notes are persisted through daemon `createNote` commands like other notes. The connector content script owns only page-local selection and DOM range work. Same-block selections, including multiline code inside one block, store one string inside the `excerpt` array and one string inside the `cssPath` array; selections spanning distinct block elements store `excerpt` and `cssPath` as aligned string arrays. Reapply uses saved `cssPath` anchors to scope text matching; intentionally empty `cssPath` entries search the document root. After initial reapply, a bounded mutation watcher retries highlight placement so client-side DOM replacement can settle. Same-document route changes stop the previous watcher, unwrap old page marks, and then load highlights for the new page identity.
+Highlight notes are persisted through daemon `createNote` commands like other notes. `packages/core/highlight-lifecycle.js` owns page-local selection chunking, scoped DOM matching, mark ownership, bounded hydration retries, and route disposal for both live pages and the snapshot viewer. `content.js` adapts browser messages and daemon note reads to that module; staged extension builds generate `browser-recall-highlight-lifecycle.js` from the same factory for the classic content-script runtime. Same-block selections, including multiline code inside one block, store one string inside the `excerpt` array and one string inside the `cssPath` array; selections spanning distinct block elements store `excerpt` and `cssPath` as aligned string arrays. Reapply uses saved `cssPath` anchors to scope text matching; intentionally empty `cssPath` entries search the document root. Browser Recall panel and overlay DOM is never indexed. After initial reapply, a bounded mutation watcher retains all highlightable notes so client-side DOM replacement can settle. Same-document route changes stop the previous watcher, unwrap old page marks, and then load highlights for the new page identity.
 
 ### Localization
 
@@ -193,7 +202,7 @@ Search is daemon-owned.
 - Committed desktop search results are rendered directly from the in-memory merged result set; the virtual scroller remains for all-history Explore rendering where demand loading can grow the result set.
 - Desktop UI history search goes through cancellable Tauri streaming commands. The daemon search adapter splits history JSONL work across a fixed worker pool, emits result chunks as workers finish, and cooperatively stops when the UI starts a newer search or leaves search mode.
 - Explore device filter choices come from the authoritative `logs/<device>/` directories returned by the daemon history-file listing, not from whichever history rows the UI has demand-loaded.
-- The connector websocket protocol exposes daemon history search streaming and cancellation messages (`search_history_stream`, `cancel_history_search`, `history_search_chunk`, `history_search_done`).
+- Full-history streaming and cancellation are desktop-only Tauri capabilities. The connector websocket does not expose full-history search; former history-search message types are rejected as invalid protocol messages.
 - Desktop UI note and snapshot search still use daemon-owned request/response commands.
 - The connector popup only requests page-scoped summaries; it does not run local full-text search.
 
@@ -223,7 +232,8 @@ Rules remain part of the main desktop UI product surface.
 
 `packages/core/` contains code shared by the desktop UI, connector UI, and tests:
 
-- UI helpers such as `search-helpers.js`, `highlight-helpers.js`, `time-chart.js`, and `virtual-scroller.js`
+- UI helpers such as `search-helpers.js`, `time-chart.js`, and `virtual-scroller.js`
+- the shared highlight lifecycle in `highlight-lifecycle.js`, including its generated classic-script bridge source
 - localization helpers and WebExtension-compatible locale catalogs in `i18n.js` and `locales/`
 - page identity helpers in `page-identity.js`, including canonical URL handling, page slug generation, and the generated classic-script bridge source for content scripts
 - shared styling/theme modules

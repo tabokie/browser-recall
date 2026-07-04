@@ -9,7 +9,7 @@
     "./color-scheme-map": "./color-scheme-map.js",
     "./connector-diagnostics": "./connector-diagnostics.js",
     "./entity-types": "./entity-types.js",
-    "./highlight-helpers": "./highlight-helpers.js",
+    "./highlight-lifecycle": "./highlight-lifecycle.js",
     "./logger": "./logger.js",
     "./rule-engine": "./rule-engine.js",
     "./search-helpers": "./search-helpers.js",

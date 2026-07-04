@@ -191,6 +191,7 @@ var extractSrcUrl;
 var swapDevices;  /* from Print Edit WE*/
 var multipleSaves;
 var cspRestriction;
+var captureId;
 
 var skipLazyLoad,cancelSave;
 
@@ -329,6 +330,7 @@ function addListeners()
 
             case "performAction":
 
+                captureId = message.captureId;
                 menuAction = message.menuaction;
                 savedItems = message.saveditems;
                 toggleLazy = message.togglelazy;
@@ -347,13 +349,13 @@ function addListeners()
 
             case "loadSuccess":
 
-                loadSuccess(message.index,message.reason,message.content,message.mimetype,message.charset);
+                if (message.captureId == captureId) loadSuccess(message.index,message.reason,message.content,message.mimetype,message.charset);
 
                 break;
 
             case "loadFailure":
 
-                loadFailure(message.index,message.reason);
+                if (message.captureId == captureId) loadFailure(message.index,message.reason);
 
                 break;
 
@@ -370,7 +372,7 @@ function addListeners()
 
             case "cancelSave":
 
-                cancelSave = true;
+                if (message.captureId == captureId) cancelSave = true;
 
                 break;
         }
@@ -395,7 +397,7 @@ function performAction()
 
         saveState = -1;
 
-        chrome.runtime.sendMessage({ type: "saveExit", pagetype: pageType, savestate: saveState });
+        chrome.runtime.sendMessage({ type: "saveExit", captureId: captureId, pagetype: pageType, savestate: saveState });
     }
 }
 
@@ -470,7 +472,7 @@ function forceLazyContent()
                     {
                         saveState = -1;
                         
-                        chrome.runtime.sendMessage({ type: "saveExit", pagetype: pageType, savestate: saveState });
+                        chrome.runtime.sendMessage({ type: "saveExit", captureId: captureId, pagetype: pageType, savestate: saveState });
                     }
                     else
                     {
@@ -567,7 +569,7 @@ function forceLazyContent()
                         {
                             saveState = -1;
                             
-                            chrome.runtime.sendMessage({ type: "saveExit", pagetype: pageType, savestate: saveState });
+                            chrome.runtime.sendMessage({ type: "saveExit", captureId: captureId, pagetype: pageType, savestate: saveState });
                         }
                         else
                         {
@@ -1750,8 +1752,6 @@ async function loadResource(index,location,referrer,referrerPolicy)
         
         if (debugEnable) console.log("Content Fetch - index: " + index + " - status: " + response.status + " - referrer: " + referrer + " - policy: " + referrerPolicy + " - location: " + location);
         
-        window.clearTimeout(timeout);
-        
         if (response.status == 200)
         {
             contentType = response.headers.get("Content-Type");
@@ -1796,14 +1796,12 @@ async function loadResource(index,location,referrer,referrerPolicy)
             {
                 /* Most likely resource for <link>/<script>/<img>/<audio>/<video> element with crossorigin attribute requiring background fetch */
                 
-                chrome.runtime.sendMessage({ type: "loadResource", index: index, location: location, referrer: referrer, referrerPolicy: referrerPolicy });
+                chrome.runtime.sendMessage({ type: "loadResource", captureId: captureId, index: index, location: location, referrer: referrer, referrerPolicy: referrerPolicy });
             }
         }
     }
     catch (e)
     {
-        window.clearTimeout(timeout);
-        
         if (e.name == "AbortError")
         {
             loadFailure(index,"maxtime");
@@ -1820,9 +1818,13 @@ async function loadResource(index,location,referrer,referrerPolicy)
             {
                 /* Most likely resource for <link>/<script>/<img>/<audio>/<video> element with crossorigin attribute requiring background fetch */
                 
-                chrome.runtime.sendMessage({ type: "loadResource", index: index, location: location, referrer: referrer, referrerPolicy: referrerPolicy });
+                chrome.runtime.sendMessage({ type: "loadResource", captureId: captureId, index: index, location: location, referrer: referrer, referrerPolicy: referrerPolicy });
             }
         }
+    }
+    finally
+    {
+        window.clearTimeout(timeout);
     }
 }
 
@@ -1994,6 +1996,14 @@ function loadSuccess(index,reason,content,mimetype,charset)
 
 function loadFailure(index,reason)
 {
+    var normalizedReason;
+
+    normalizedReason = String(reason).replace(/\*$/,"");
+    if (normalizedReason == "maxtime" || normalizedReason == "maxsize" || normalizedReason == "fetcherr" || normalizedReason.substr(0,5) == "load:")
+    {
+        chrome.runtime.sendMessage({ type: "resourceFailure", captureId: captureId, location: resourceLocation[index], reason: normalizedReason });
+    }
+
     resourceStatus[index] = "failure";
     
     resourceReason[index] = reason;
@@ -2160,7 +2170,7 @@ function generateHTML()
 
         saveState = -1;
 
-        chrome.runtime.sendMessage({ type: "saveExit", pagetype: pageType, savestate: saveState });
+        chrome.runtime.sendMessage({ type: "saveExit", captureId: captureId, pagetype: pageType, savestate: saveState });
     }
     else
     {
@@ -2172,7 +2182,7 @@ function generateHTML()
 
         saveState = 6;
 
-        chrome.runtime.sendMessage({ type: "savepageDone", html: html });
+        chrome.runtime.sendMessage({ type: "savepageDone", captureId: captureId, html: html });
     }
 }
 

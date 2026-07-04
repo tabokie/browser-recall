@@ -6,6 +6,13 @@ use serde_json::Value;
 
 const DEFAULT_URL_BLACKLIST: &[&str] = &["chrome://", "edge://", "about:"];
 
+fn default_url_blacklist() -> Vec<String> {
+    DEFAULT_URL_BLACKLIST
+        .iter()
+        .map(|value| value.to_string())
+        .collect()
+}
+
 fn settings_bool(settings: Option<&Entity>, key: &str) -> Option<bool> {
     let Some(Entity::Settings(settings)) = settings else {
         return None;
@@ -66,10 +73,7 @@ pub fn trim_title_from_settings(settings: Option<&Entity>, raw_title: &str, url:
 
 pub fn blacklist_prefixes(settings: Option<&Entity>) -> Vec<String> {
     if settings_bool(settings, "blacklistEnabled") == Some(false) {
-        return DEFAULT_URL_BLACKLIST
-            .iter()
-            .map(|value| value.to_string())
-            .collect();
+        return default_url_blacklist();
     }
     settings_array(settings, "urlBlacklist")
         .map(|values| {
@@ -80,12 +84,7 @@ pub fn blacklist_prefixes(settings: Option<&Entity>) -> Vec<String> {
                 .collect::<Vec<_>>()
         })
         .filter(|values| !values.is_empty())
-        .unwrap_or_else(|| {
-            DEFAULT_URL_BLACKLIST
-                .iter()
-                .map(|value| value.to_string())
-                .collect()
-        })
+        .unwrap_or_else(default_url_blacklist)
 }
 
 pub async fn should_record_visit(
@@ -110,13 +109,10 @@ pub async fn should_record_visit(
         .load_history_batch(&[date_file])
         .await
         .map_err(|error| error.to_string())?;
-    if entries.iter().any(|entry| {
-        entry
-            .get("url")
-            .and_then(Value::as_str)
-            .map(|entry_url| entry_url == url)
-            .unwrap_or(false)
-    }) {
+    if entries
+        .iter()
+        .any(|entry| entry.get("url").and_then(Value::as_str) == Some(url))
+    {
         return Ok(true);
     }
 

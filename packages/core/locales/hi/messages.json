@@ -1055,6 +1055,15 @@
     "message": "स्नैपशॉट कैप्चर किया गया",
     "description": "Snapshot capture success notification."
   },
+  "extensionSnapshotCapturedWithOneWarning": {
+    "message": "स्नैपशॉट सहेजा गया, लेकिन 1 संसाधन उपलब्ध नहीं था।",
+    "description": "Snapshot capture partial-success warning for one unavailable resource."
+  },
+  "extensionSnapshotCapturedWithWarnings": {
+    "message": "स्नैपशॉट सहेजा गया, लेकिन $COUNT$ संसाधन उपलब्ध नहीं थे।",
+    "description": "Snapshot capture partial-success warning for multiple unavailable resources.",
+    "placeholders": { "count": { "content": "$1", "example": "2" } }
+  },
   "extensionSomethingWentWrong": {
     "message": "कुछ ग़लत हो गया",
     "description": "Generic extension error."

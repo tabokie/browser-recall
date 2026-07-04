@@ -555,6 +555,67 @@ test.describe('Snapshot slug meta tag', () => {
     await viewer.close();
   });
 
+  test('snapshot viewer never reapplies highlights inside Browser Recall UI markup', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
+    const originalUrl = 'https://example.com/snapshot-highlight-ui-exclusion';
+    const slug = getSlugForUrl(originalUrl);
+    const noteSlug = 'snapshot-highlight-ui-exclusion-note';
+    const timestamp = Date.now();
+    const highlightText = 'saved excerpt outside Browser Recall UI';
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url: originalUrl,
+          title: 'Snapshot Highlight UI Exclusion',
+          parentIds: [],
+          childIds: [`snapshot:${slug}-${timestamp}`, `note:${noteSlug}`],
+          timestamps: { 'test-device': timestamp },
+        },
+      },
+      {
+        path: `objects/notes/${noteSlug}.json`,
+        data: {
+          slug: noteSlug,
+          excerpt: [highlightText],
+          note: '',
+          cssPath: [''],
+          url: originalUrl,
+        },
+      },
+      {
+        path: snapshotSidecarPath(slug, timestamp, 'html'),
+        content: `<!doctype html><html><head><title>Snapshot Highlight UI Exclusion</title></head><body><aside id="portal-highlights-panel">${highlightText}</aside><main><p>${highlightText}</p></main></body></html>`,
+      },
+      {
+        path: snapshotSidecarPath(slug, timestamp, 'md'),
+        content: highlightText,
+      },
+    ]);
+
+    const viewer = await extContext.newPage();
+    await viewer.goto(
+      `chrome-extension://${extensionId}/snapshot-viewer.html?slug=${encodeURIComponent(slug)}&ts=${timestamp}`,
+    );
+    const frame = viewer.frameLocator('iframe');
+
+    await expect(frame.locator('mark.portal-highlight')).toHaveCount(1);
+    await expect(
+      frame.locator('#portal-highlights-panel mark.portal-highlight'),
+    ).toHaveCount(0);
+    await expect(frame.locator('main mark.portal-highlight')).toHaveText(
+      highlightText,
+    );
+
+    await viewer.close();
+  });
+
   // captureSnapshot strips portal highlight marks from captured HTML
   test('captureSnapshot strips highlight marks from HTML', async ({
     extContext,

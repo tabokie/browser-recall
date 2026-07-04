@@ -222,6 +222,15 @@ async function readFileText(fileHandle) {
   return file.text();
 }
 
+async function readNamedFileText(directory, name) {
+  try {
+    const fileHandle = await directory.getFileHandle(name);
+    return await readFileText(fileHandle);
+  } catch {
+    return null;
+  }
+}
+
 async function sha256Shard(value) {
   const subtle = globalThis.crypto?.subtle;
   if (!subtle) return null;
@@ -333,14 +342,8 @@ export async function searchBatch(historyDir, pagesDir, query, fileNames) {
   const entries = [];
 
   for (const name of fileNames) {
-    let fileHandle;
-    try {
-      fileHandle = await historyDir.getFileHandle(name);
-    } catch {
-      continue;
-    }
-
-    const text = await readFileText(fileHandle).catch(() => '');
+    const text = await readNamedFileText(historyDir, name);
+    if (text == null) continue;
     for (const line of text.split('\n')) {
       const item = parseHistoryLine(line.trim());
       if (!item || seenUrls.has(item.url)) continue;
@@ -376,14 +379,8 @@ export async function searchNotes(notesDir, query) {
   for await (const entry of notesDir.values()) {
     if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue;
 
-    let fileHandle;
-    try {
-      fileHandle = await notesDir.getFileHandle(entry.name);
-    } catch {
-      continue;
-    }
-
-    const text = await readFileText(fileHandle).catch(() => '');
+    const text = await readNamedFileText(notesDir, entry.name);
+    if (text == null) continue;
     let note;
     try {
       note = JSON.parse(text);
@@ -421,14 +418,8 @@ export async function searchSnapshots(snapshotsDir, query, fileNames) {
     const parts = extractSnapshotPartsFromName(name);
     if (!parts) continue;
 
-    let fileHandle;
-    try {
-      fileHandle = await snapshotsDir.getFileHandle(name);
-    } catch {
-      continue;
-    }
-
-    const text = await readFileText(fileHandle).catch(() => '');
+    const text = await readNamedFileText(snapshotsDir, name);
+    if (text == null) continue;
     const score = scoreSearchFields(words, [{ text, weight: 1 }]);
     if (score != null) {
       matches.push({ ...parts, score });

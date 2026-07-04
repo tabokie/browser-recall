@@ -251,7 +251,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.close();
   });
 
-  it('serves streamed search RPCs from ingested desktop data', async () => {
+  it('serves note and snapshot search RPCs from ingested desktop data', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'browser-recall-search-rpcs-'));
     tempDirs.push(dir);
     const child = launchDaemon(dir, 'allow');
@@ -301,32 +301,6 @@ describe.sequential('phase 2 daemon event flow integration', () => {
       }),
     );
     expect((await nextMessage(socket)).type).toBe('ack');
-
-    const historyMessages = collectMessages(socket, 2);
-    socket.send(
-      JSON.stringify({
-        type: 'search_history_stream',
-        searchId: 'integration-history-search',
-        query: 'banana',
-      }),
-    );
-    const [historyChunk, historyDone] = await historyMessages;
-    expect(historyChunk).toMatchObject({
-      type: 'history_search_chunk',
-      searchId: 'integration-history-search',
-      results: [
-        {
-          url: 'https://example.com/searchable',
-          title: 'Banana Searchable',
-        },
-      ],
-    });
-    expect(historyDone).toMatchObject({
-      type: 'history_search_done',
-      searchId: 'integration-history-search',
-      success: true,
-      cancelled: false,
-    });
 
     socket.send(JSON.stringify({ type: 'search_notes', query: 'banana' }));
     await expect(nextMessage(socket)).resolves.toEqual({
@@ -506,39 +480,6 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     });
     expect(cleanedSnapshotInfo.snapshots || []).toEqual([]);
 
-    socket.send(
-      JSON.stringify({
-        type: 'get_entity',
-        key: `page:${slug}`,
-      }),
-    );
-    await expect(nextMessage(socket)).resolves.toMatchObject({
-      type: 'entity_result',
-      success: true,
-      key: `page:${slug}`,
-      entity: {
-        url: 'https://example.com/popup',
-      },
-    });
-
-    socket.send(
-      JSON.stringify({
-        type: 'get_entity',
-        key: 'note:popup-note',
-      }),
-    );
-    await expect(nextMessage(socket)).resolves.toMatchObject({
-      type: 'entity_result',
-      success: true,
-      key: 'note:popup-note',
-      entity: {
-        slug: 'popup-note',
-        excerpt: ['hello'],
-        note: 'popup annotation',
-        url: 'https://example.com/popup',
-      },
-    });
-
     socket.send(JSON.stringify({ type: 'get_popup_lists' }));
     await expect(nextMessage(socket)).resolves.toEqual({
       type: 'popup_lists_result',
@@ -549,7 +490,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           name: 'Reading',
           pins: [
             {
-              id: expect.stringMatching(/^page:/),
+              kind: 'page',
+              slug,
               pinnedAt: 1710000000950,
             },
           ],
@@ -560,7 +502,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.close();
   });
 
-  it('serves directory history and page-scan rpc responses', async () => {
+  it('serves directory history rpc responses', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'browser-recall-read-rpcs-'));
     tempDirs.push(dir);
     const child = launchDaemon(dir, 'allow');
@@ -630,18 +572,6 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           deviceId: expect.any(String),
         },
       ],
-    });
-
-    socket.send(JSON.stringify({ type: 'get_all_pages' }));
-    await expect(nextMessage(socket)).resolves.toMatchObject({
-      type: 'all_pages_result',
-      success: true,
-      pages: {
-        [generateSlugFromUrl('https://example.com/rpc-page')]: {
-          url: 'https://example.com/rpc-page',
-          title: 'RPC Page',
-        },
-      },
     });
 
     socket.close();

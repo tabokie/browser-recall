@@ -2,10 +2,10 @@ use std::collections::HashSet;
 use std::future::Future;
 
 use crate::{
-    append_to_tree, append_unique, collect_tree_ids, default_list, ensure_page_in_result,
+    append_to_tree, append_unique, collect_tree_ids, default_list, ensure_page_with_overlay,
     entities::Entity, entity_slug, generate_list_id, get_list, get_list_order, get_name_to_id,
-    get_page, is_page_eligible, is_system_list, note_slug_from_path, orphan_key, remove_from_tree,
-    resolve_list_key, touch_timestamp_map, unorphan_key, Context, EntityEffect, EntityMap,
+    get_page, is_system_list, note_slug_from_path, orphan_key, remove_from_tree, resolve_list_key,
+    retain_page_or_delete, touch_timestamp_map, unorphan_key, Context, EntityEffect, EntityMap,
     ListOrderManifest, NameToIdManifest, PinEntity, ReplayError, TreeNode, LIST_ORDER_KEY,
     LIST_PREFIX, NAME_TO_ID_KEY, NOTE_PREFIX, PAGE_PREFIX,
 };
@@ -51,7 +51,8 @@ where
                 .and_then(|values| values.get(index))
                 .and_then(Option::as_deref);
             let (page_key, page) =
-                ensure_page_in_result(&mut result, load, item, timestamp, title, context).await?;
+                ensure_page_with_overlay(&mut result, load, item, timestamp, title, context)
+                    .await?;
             let mut page = page;
             append_unique(&mut page.parent_ids, list_key.clone());
             result.insert(page_key.clone(), EntityEffect::Upsert(Entity::Page(page)));
@@ -115,11 +116,7 @@ where
         }
         if let Some(mut page) = get_page(&result, load, &pin_id).await {
             page.parent_ids.retain(|parent| parent != &list_key);
-            if is_page_eligible(&page) {
-                result.insert(pin_id, EntityEffect::Upsert(Entity::Page(page)));
-            } else {
-                result.insert(pin_id, EntityEffect::Delete);
-            }
+            retain_page_or_delete(&mut result, pin_id, page);
         }
     }
 
@@ -345,11 +342,7 @@ where
         }
         if let Some(mut page) = get_page(&result, load, &pin.id).await {
             page.parent_ids.retain(|parent| parent != &list_key);
-            if is_page_eligible(&page) {
-                result.insert(pin.id.clone(), EntityEffect::Upsert(Entity::Page(page)));
-            } else {
-                result.insert(pin.id.clone(), EntityEffect::Delete);
-            }
+            retain_page_or_delete(&mut result, pin.id, page);
         }
     }
 

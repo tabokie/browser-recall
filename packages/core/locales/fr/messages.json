@@ -1055,6 +1055,15 @@
     "message": "Instantané capturé",
     "description": "Snapshot capture success notification."
   },
+  "extensionSnapshotCapturedWithOneWarning": {
+    "message": "L’instantané a été enregistré, mais 1 ressource était indisponible.",
+    "description": "Snapshot capture partial-success warning for one unavailable resource."
+  },
+  "extensionSnapshotCapturedWithWarnings": {
+    "message": "L’instantané a été enregistré, mais $COUNT$ ressources étaient indisponibles.",
+    "description": "Snapshot capture partial-success warning for multiple unavailable resources.",
+    "placeholders": { "count": { "content": "$1", "example": "2" } }
+  },
   "extensionSomethingWentWrong": {
     "message": "Quelque chose s'est mal passé",
     "description": "Generic extension error."

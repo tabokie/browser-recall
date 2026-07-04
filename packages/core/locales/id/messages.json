@@ -1055,6 +1055,15 @@
     "message": "Cuplikan diambil",
     "description": "Snapshot capture success notification."
   },
+  "extensionSnapshotCapturedWithOneWarning": {
+    "message": "Cuplikan disimpan, tetapi 1 sumber daya tidak tersedia.",
+    "description": "Snapshot capture partial-success warning for one unavailable resource."
+  },
+  "extensionSnapshotCapturedWithWarnings": {
+    "message": "Cuplikan disimpan, tetapi $COUNT$ sumber daya tidak tersedia.",
+    "description": "Snapshot capture partial-success warning for multiple unavailable resources.",
+    "placeholders": { "count": { "content": "$1", "example": "2" } }
+  },
   "extensionSomethingWentWrong": {
     "message": "Ada yang tidak beres",
     "description": "Generic extension error."

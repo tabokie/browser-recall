@@ -2,77 +2,157 @@
 // Only uses Chrome APIs (scripting, tabs, fetch). No deps back to background.js.
 import { logDebug } from './logger.js';
 
-const savepageResolvers = new Map();
-const savepageSettings = new Map();
+const captureSessions = new Map();
+let nextCaptureId = 1;
+
+const CAPTURE_TIMEOUT_MS = 60_000;
+const CAPTURE_CLEANUP_TIMEOUT_MS = 15_000;
+const RESOURCE_TIMEOUT_MS = 10_000;
+const MAX_RESOURCE_SIZE = 50 * 1024 * 1024;
+const VIDEO_URL_PATTERN = /\.(mp4|webm|ogg|mov|avi|m4v)(\?|#|$)/i;
+
+function matchingCaptureSession(tabId, captureId) {
+  const session = captureSessions.get(tabId);
+  return session?.id === captureId ? session : null;
+}
+
+function settleCaptureSession(
+  tabId,
+  session,
+  { html = null, error = null, keepSession = false } = {},
+) {
+  if (captureSessions.get(tabId) !== session) return;
+
+  clearTimeout(session.timeoutId);
+  if (!keepSession) {
+    clearTimeout(session.cleanupTimeoutId);
+    captureSessions.delete(tabId);
+  }
+  if (session.settled) return;
+
+  session.settled = true;
+  if (error) session.reject(error);
+  else {
+    session.resolve({
+      html,
+      warnings: [...session.warnings.values()],
+    });
+  }
+}
+
+async function injectSavepageScripts(tabId) {
+  await chrome.scripting.executeScript({
+    target: { tabId, allFrames: true },
+    files: ['savepage/content-frame.js'],
+  });
+  logDebug('[savepage] content-frame.js injected, now injecting content.js');
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['savepage/content.js'],
+  });
+  logDebug('[savepage] content.js injected, waiting for scriptLoaded message');
+}
 
 export function captureSavePage(tabId, settings = {}) {
+  if (captureSessions.has(tabId)) {
+    return Promise.reject(
+      new Error('Snapshot capture is already in progress for this tab'),
+    );
+  }
+
   return new Promise((resolve, reject) => {
-    savepageResolvers.set(tabId, { resolve, reject });
-    savepageSettings.set(tabId, settings || {});
+    const session = {
+      id: nextCaptureId++,
+      cleanupTimeoutId: null,
+      reject,
+      resolve,
+      settings: settings || {},
+      settled: false,
+      started: false,
+      timeoutId: null,
+      warnings: new Map(),
+    };
+    captureSessions.set(tabId, session);
     logDebug('[savepage] injecting scripts into tab', tabId);
 
-    // Inject content-frame.js into all frames, then content.js into main frame
-    chrome.scripting
-      .executeScript({
-        target: { tabId, allFrames: true },
-        files: ['savepage/content-frame.js'],
-      })
-      .then(() => {
-        logDebug(
-          '[savepage] content-frame.js injected, now injecting content.js',
-        );
-        return chrome.scripting.executeScript({
-          target: { tabId },
-          files: ['savepage/content.js'],
-        });
-      })
-      .then(() => {
-        logDebug(
-          '[savepage] content.js injected, waiting for scriptLoaded message',
-        );
-      })
-      .catch((err) => {
-        logDebug('[savepage] injection error:', err.message);
-        savepageResolvers.delete(tabId);
-        savepageSettings.delete(tabId);
-        reject(err);
-      });
+    injectSavepageScripts(tabId).catch((error) => {
+      logDebug('[savepage] injection error:', error.message);
+      settleCaptureSession(tabId, session, { error });
+    });
 
-    // Timeout after 60s
-    setTimeout(() => {
-      if (savepageResolvers.has(tabId)) {
-        savepageResolvers.delete(tabId);
-        savepageSettings.delete(tabId);
-        reject(new Error('Save Page WE capture timed out'));
-      }
-    }, 60000);
+    session.timeoutId = setTimeout(() => {
+      if (captureSessions.get(tabId) !== session || session.settled) return;
+      chrome.tabs
+        .sendMessage(tabId, {
+          type: 'cancelSave',
+          captureId: session.id,
+        })
+        .catch(() => {});
+      settleCaptureSession(tabId, session, {
+        error: new Error('Save Page WE capture timed out'),
+        keepSession: true,
+      });
+      session.cleanupTimeoutId = setTimeout(() => {
+        if (captureSessions.get(tabId) === session) {
+          captureSessions.delete(tabId);
+        }
+      }, CAPTURE_CLEANUP_TIMEOUT_MS);
+    }, CAPTURE_TIMEOUT_MS);
   });
+}
+
+function sendResourceFailure(tabId, captureId, index, reason) {
+  chrome.tabs.sendMessage(tabId, {
+    type: 'loadFailure',
+    captureId,
+    index,
+    reason,
+  });
+}
+
+function isSupportedResourceType(mimetype) {
+  return (
+    mimetype === 'text/css' ||
+    mimetype === 'image/vnd.microsoft.icon' ||
+    mimetype.startsWith('image/') ||
+    mimetype.startsWith('audio/') ||
+    mimetype.startsWith('video/') ||
+    mimetype.startsWith('font/') ||
+    mimetype.startsWith('application/font') ||
+    mimetype === 'application/octet-stream'
+  );
+}
+
+function arrayBufferToBinaryString(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binaryString = '';
+  for (const byte of bytes) binaryString += String.fromCharCode(byte);
+  return binaryString;
 }
 
 async function loadSavepageResource(
   tabId,
+  captureId,
   index,
   location,
   referrer,
   referrerPolicy,
 ) {
+  const session = matchingCaptureSession(tabId, captureId);
+  if (!session) return;
+
   // Skip video URLs before fetching (SPWE treats loadFailure as "skip resource")
-  if (/\.(mp4|webm|ogg|mov|avi|m4v)(\?|#|$)/i.test(location)) {
-    const settings = savepageSettings.get(tabId) || {};
-    if (settings.captureSnapshotVideo !== true) {
-      chrome.tabs.sendMessage(tabId, {
-        type: 'loadFailure',
-        index,
-        reason: 'blocked*',
-      });
-      return;
-    }
+  if (
+    VIDEO_URL_PATTERN.test(location) &&
+    session.settings.captureSnapshotVideo !== true
+  ) {
+    sendResourceFailure(tabId, captureId, index, 'blocked*');
+    return;
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, 10 * 1000); // maxResourceTime
+  const timeout = setTimeout(() => controller.abort(), RESOURCE_TIMEOUT_MS);
 
   try {
     const response = await fetch(location, {
@@ -83,19 +163,12 @@ async function loadSavepageResource(
       referrerPolicy: referrerPolicy,
       signal: controller.signal,
     });
-    clearTimeout(timeout);
-
     if (response.status === 200) {
       const contentType = response.headers.get('Content-Type') || '';
       const contentLength = +(response.headers.get('Content-Length') || 0);
 
-      if (contentLength > 50 * 1024 * 1024) {
-        // maxResourceSize
-        chrome.tabs.sendMessage(tabId, {
-          type: 'loadFailure',
-          index,
-          reason: 'maxsize*',
-        });
+      if (contentLength > MAX_RESOURCE_SIZE) {
+        sendResourceFailure(tabId, captureId, index, 'maxsize*');
         return;
       }
 
@@ -104,73 +177,37 @@ async function loadSavepageResource(
       const charsetMatch = contentType.match(/;charset=([^;]+)/i);
       const charset = charsetMatch ? charsetMatch[1].toLowerCase() : '';
 
-      if (
-        mimetype !== 'text/css' &&
-        mimetype !== 'image/vnd.microsoft.icon' &&
-        !mimetype.startsWith('image/') &&
-        !mimetype.startsWith('audio/') &&
-        !mimetype.startsWith('video/') &&
-        !mimetype.startsWith('font/') &&
-        !mimetype.startsWith('application/font') &&
-        mimetype !== 'application/octet-stream'
-      ) {
-        chrome.tabs.sendMessage(tabId, {
-          type: 'loadFailure',
-          index,
-          reason: 'blocked*',
-        });
+      if (!isSupportedResourceType(mimetype)) {
+        sendResourceFailure(tabId, captureId, index, 'blocked*');
         return;
       }
 
       // Also catch videos by MIME type (URL extension check above may miss some)
-      if (mimetype.startsWith('video/')) {
-        const settings = savepageSettings.get(tabId) || {};
-        if (settings.captureSnapshotVideo !== true) {
-          chrome.tabs.sendMessage(tabId, {
-            type: 'loadFailure',
-            index,
-            reason: 'blocked*',
-          });
-          return;
-        }
+      if (
+        mimetype.startsWith('video/') &&
+        session.settings.captureSnapshotVideo !== true
+      ) {
+        sendResourceFailure(tabId, captureId, index, 'blocked*');
+        return;
       }
-
-      const buffer = await response.arrayBuffer();
-      const byteArray = new Uint8Array(buffer);
-      let binaryString = '';
-      for (let i = 0; i < byteArray.byteLength; i++)
-        binaryString += String.fromCharCode(byteArray[i]);
 
       chrome.tabs.sendMessage(tabId, {
         type: 'loadSuccess',
+        captureId,
         index,
         reason: '*',
-        content: binaryString,
+        content: arrayBufferToBinaryString(await response.arrayBuffer()),
         mimetype,
         charset,
       });
     } else {
-      chrome.tabs.sendMessage(tabId, {
-        type: 'loadFailure',
-        index,
-        reason: 'load:' + response.status + '*',
-      });
+      sendResourceFailure(tabId, captureId, index, `load:${response.status}*`);
     }
   } catch (e) {
+    const reason = e.name === 'AbortError' ? 'maxtime*' : 'fetcherr*';
+    sendResourceFailure(tabId, captureId, index, reason);
+  } finally {
     clearTimeout(timeout);
-    if (e.name === 'AbortError') {
-      chrome.tabs.sendMessage(tabId, {
-        type: 'loadFailure',
-        index,
-        reason: 'maxtime*',
-      });
-    } else {
-      chrome.tabs.sendMessage(tabId, {
-        type: 'loadFailure',
-        index,
-        reason: 'fetcherr*',
-      });
-    }
   }
 }
 
@@ -186,8 +223,12 @@ export function initSavepageBridge() {
         // Reply with performAction to kick off the save
         logDebug('[savepage] scriptLoaded received from tab', tabId);
         if (tabId != null) {
+          const session = captureSessions.get(tabId);
+          if (!session || session.settled || session.started) break;
+          session.started = true;
           chrome.tabs.sendMessage(tabId, {
             type: 'performAction',
+            captureId: session.id,
             menuaction: 0,
             saveditems: 1,
             togglelazy: false,
@@ -199,6 +240,28 @@ export function initSavepageBridge() {
           });
         }
         break;
+
+      case 'resourceFailure': {
+        if (tabId == null) break;
+        const session = matchingCaptureSession(tabId, message.captureId);
+        if (
+          !session ||
+          session.settled ||
+          !message.location ||
+          !message.reason
+        ) {
+          break;
+        }
+        const warning = {
+          location: String(message.location),
+          reason: String(message.reason),
+        };
+        session.warnings.set(
+          `${warning.reason}\u0000${warning.location}`,
+          warning,
+        );
+        break;
+      }
 
       case 'setDelay':
         setTimeout(() => {
@@ -228,6 +291,7 @@ export function initSavepageBridge() {
         if (tabId != null) {
           loadSavepageResource(
             tabId,
+            message.captureId,
             message.index,
             message.location,
             message.referrer,
@@ -246,26 +310,25 @@ export function initSavepageBridge() {
           'html length:',
           message.html?.length,
         );
-        const resolver = savepageResolvers.get(tabId);
-        if (resolver) {
-          savepageResolvers.delete(tabId);
-          savepageSettings.delete(tabId);
-          resolver.resolve(message.html);
+        const session = matchingCaptureSession(tabId, message.captureId);
+        if (session) {
+          settleCaptureSession(tabId, session, { html: message.html });
         } else {
-          logDebug('[savepage] savepageDone but no resolver for tab', tabId);
+          logDebug(
+            '[savepage] savepageDone but no matching session for tab',
+            tabId,
+          );
         }
         break;
       }
 
       case 'saveExit': {
         logDebug('[savepage] saveExit from tab', tabId);
-        const resolver = savepageResolvers.get(tabId);
-        if (resolver) {
-          savepageResolvers.delete(tabId);
-          savepageSettings.delete(tabId);
-          resolver.reject(
-            new Error('Save Page WE exited without producing HTML'),
-          );
+        const session = matchingCaptureSession(tabId, message.captureId);
+        if (session) {
+          settleCaptureSession(tabId, session, {
+            error: new Error('Save Page WE exited without producing HTML'),
+          });
         }
         break;
       }

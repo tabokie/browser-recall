@@ -690,7 +690,9 @@ describe('popup desktop state rendering', () => {
       {
         slug: 'reading',
         name: 'Reading',
-        pins: pinned ? [{ id: `page:${pageSlug}`, pinnedAt: Date.now() }] : [],
+        pins: pinned
+          ? [{ kind: 'page', slug: pageSlug, pinnedAt: Date.now() }]
+          : [],
       },
     ];
     installDom();
@@ -982,7 +984,9 @@ describe('popup desktop state rendering', () => {
       {
         slug: 'reading',
         name: 'Reading',
-        pins: pinned ? [{ id: `page:${pageSlug}`, pinnedAt: Date.now() }] : [],
+        pins: pinned
+          ? [{ kind: 'page', slug: pageSlug, pinnedAt: Date.now() }]
+          : [],
       },
     ];
     const currentSummary = () => ({
@@ -1505,7 +1509,8 @@ describe('popup desktop state rendering', () => {
               pins: pinned
                 ? [
                     {
-                      id: `page:${generateSlugFromUrl(tab.url)}`,
+                      kind: 'page',
+                      slug: generateSlugFromUrl(tab.url),
                       pinnedAt: Date.now(),
                     },
                   ]
@@ -1697,7 +1702,7 @@ describe('popup desktop state rendering', () => {
             {
               slug: 'summary-list',
               name: 'Summary List',
-              pins: [{ id: `page:${pageSlug}`, pinnedAt: Date.now() }],
+              pins: [{ kind: 'page', slug: pageSlug, pinnedAt: Date.now() }],
             },
           ],
         },
@@ -1875,7 +1880,8 @@ describe('popup desktop state rendering', () => {
               pins: pinned
                 ? [
                     {
-                      id: `page:${generateSlugFromUrl(tab.url)}`,
+                      kind: 'page',
+                      slug: generateSlugFromUrl(tab.url),
                       pinnedAt: Date.now(),
                     },
                   ]
@@ -1892,7 +1898,8 @@ describe('popup desktop state rendering', () => {
               pins: pinned
                 ? [
                     {
-                      id: `page:${generateSlugFromUrl(tab.url)}`,
+                      kind: 'page',
+                      slug: generateSlugFromUrl(tab.url),
                       pinnedAt: Date.now(),
                     },
                   ]
@@ -1938,7 +1945,8 @@ describe('popup desktop state rendering', () => {
         pins: pinned
           ? [
               {
-                id: `page:${pageSlug}`,
+                kind: 'page',
+                slug: pageSlug,
                 pinnedAt: Date.now(),
               },
             ]
@@ -2017,7 +2025,8 @@ describe('popup desktop state rendering', () => {
           name: `Extra ${index + 1}`,
           pins: [
             {
-              id: `page:${pageSlug}`,
+              kind: 'page',
+              slug: pageSlug,
               pinnedAt: Date.now(),
             },
           ],
@@ -2029,7 +2038,8 @@ describe('popup desktop state rendering', () => {
         pins: pinned
           ? [
               {
-                id: `page:${pageSlug}`,
+                kind: 'page',
+                slug: pageSlug,
                 pinnedAt: Date.now(),
               },
             ]
@@ -2111,7 +2121,8 @@ describe('popup desktop state rendering', () => {
           name: 'Reading',
           pins: [
             {
-              id: `page:${pageSlug}`,
+              kind: 'page',
+              slug: pageSlug,
               pinnedAt: Date.now(),
             },
           ],
@@ -2123,7 +2134,8 @@ describe('popup desktop state rendering', () => {
           name: `Extra ${index + 1}`,
           pins: [
             {
-              id: `page:${pageSlug}`,
+              kind: 'page',
+              slug: pageSlug,
               pinnedAt: Date.now(),
             },
           ],
@@ -2188,7 +2200,8 @@ describe('popup desktop state rendering', () => {
           name: `Extra ${index + 1}`,
           pins: [
             {
-              id: `page:${pageSlug}`,
+              kind: 'page',
+              slug: pageSlug,
               pinnedAt: Date.now(),
             },
           ],
@@ -2200,7 +2213,8 @@ describe('popup desktop state rendering', () => {
         pins: pinned
           ? [
               {
-                id: `page:${pageSlug}`,
+                kind: 'page',
+                slug: pageSlug,
                 pinnedAt: Date.now(),
               },
             ]
@@ -2275,7 +2289,8 @@ describe('popup desktop state rendering', () => {
         pins: pinned
           ? [
               {
-                id: `page:${pageSlug}`,
+                kind: 'page',
+                slug: pageSlug,
                 pinnedAt: Date.now(),
               },
             ]

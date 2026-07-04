@@ -1,9 +1,9 @@
 use crate::config::{ConfigStore, DaemonConfig, SyncDeviceRecord, Token};
-use crate::runtime::{effect_with_overlay, EntityMapView};
+use crate::runtime::install_remote_files;
 use crate::storage::Storage;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
-use browser_recall_replay::{Context as ReplayContext, LogEntry};
+use browser_recall_replay::LogEntry;
 use chrono::TimeZone;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use serde_json::{json, Value};
@@ -70,6 +70,37 @@ pub struct SyncSettingsPayload {
 struct SyncExecution {
     result: SyncRunResult,
     devices: BTreeMap<String, SyncDeviceRecord>,
+}
+
+struct RemoteChanges {
+    files: Vec<SyncFile>,
+    entries: Vec<Value>,
+}
+
+fn parse_remote_log_entries(log_files: &[SyncFile]) -> Result<Vec<Value>, SyncError> {
+    let mut entries = Vec::new();
+    for file in log_files {
+        for (index, line) in file.content.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let entry = serde_json::from_str::<Value>(line).map_err(|error| {
+                SyncError::Message(format!(
+                    "{} line {} contains invalid JSON: {error}",
+                    file.path,
+                    index + 1
+                ))
+            })?;
+            entries.push(entry);
+        }
+    }
+    Ok(entries)
+}
+
+enum SyncStart {
+    Started,
+    Unavailable,
+    RateLimited(i64),
 }
 
 #[derive(Default)]
@@ -181,16 +212,7 @@ impl SyncController {
 
         let entries = branches
             .into_iter()
-            .map(|branch| SyncDeviceEntry {
-                paused: paused_devices.contains(&branch.name),
-                last_pushed: device_records
-                    .get(&branch.name)
-                    .and_then(|record| record.last_pushed),
-                last_pulled: device_records
-                    .get(&branch.name)
-                    .and_then(|record| record.last_pulled),
-                device_id: branch.name,
-            })
+            .map(|branch| sync_device_entry(&branch.name, &device_records, &paused_devices))
             .collect::<Vec<_>>();
 
         {
@@ -276,43 +298,28 @@ impl SyncController {
     }
 
     pub async fn sync_now_response(&self, storage: &Storage) -> Value {
-        let start_response = {
-            let mut state = self.state.lock().expect("sync state poisoned");
-            if state.sync_in_progress {
-                json!({
+        match self.start_manual_sync() {
+            SyncStart::Unavailable => {
+                return json!({
                     "success": true,
                     "skipped": true,
                     "error": "Sync already in progress",
-                })
-            } else if state
-                .rate_limited_until_ms
-                .is_some_and(|retry_at_ms| retry_at_ms > chrono::Local::now().timestamp_millis())
-            {
-                let retry_at_ms = state.rate_limited_until_ms.expect("rate limit set");
-                json!({
+                });
+            }
+            SyncStart::RateLimited(retry_at_ms) => {
+                return json!({
                     "success": true,
                     "skipped": true,
                     "error": retry_time_message(retry_at_ms),
-                })
-            } else {
-                state.sync_in_progress = true;
-                state.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
-                Value::Null
+                });
             }
-        };
-        if !start_response.is_null() {
-            return start_response;
+            SyncStart::Started => {}
         }
 
         let outcome = self.execute_sync(storage).await;
         let response = match outcome {
             Ok(execution) => {
-                {
-                    let mut state = self.state.lock().expect("sync state poisoned");
-                    state.devices = execution.devices;
-                    state.rate_limited_until_ms = None;
-                    state.last_result = Some(execution.result.clone());
-                }
+                let result = self.complete_execution(execution);
                 if let Err(error) = self.persist_state() {
                     json!({
                         "success": true,
@@ -321,9 +328,9 @@ impl SyncController {
                 } else {
                     json!({
                         "success": true,
-                        "pushed": execution.result.pushed,
-                        "pulled": execution.result.pulled,
-                        "entriesReplayed": execution.result.entries_replayed,
+                        "pushed": result.pushed,
+                        "pulled": result.pulled,
+                        "entriesReplayed": result.entries_replayed,
                     })
                 }
             }
@@ -331,10 +338,7 @@ impl SyncController {
                 retry_at_ms,
                 message: _,
             }) => {
-                {
-                    let mut state = self.state.lock().expect("sync state poisoned");
-                    state.rate_limited_until_ms = Some(retry_at_ms);
-                }
+                self.record_rate_limit(retry_at_ms);
                 json!({
                     "success": true,
                     "error": retry_time_message(retry_at_ms),
@@ -342,12 +346,7 @@ impl SyncController {
                 })
             }
             Err(SyncError::AuthExpired(message)) => {
-                {
-                    let mut state = self.state.lock().expect("sync state poisoned");
-                    state.session_token = None;
-                    state.github_user = None;
-                    state.last_result = None;
-                }
+                self.expire_auth();
                 if let Err(error) = self.persist_state() {
                     json!({
                         "success": true,
@@ -373,11 +372,7 @@ impl SyncController {
             }),
         };
 
-        {
-            let mut state = self.state.lock().expect("sync state poisoned");
-            state.sync_in_progress = false;
-            state.cancel_flag = None;
-        }
+        self.finish_sync();
         response
     }
 
@@ -392,31 +387,14 @@ impl SyncController {
             return Ok(SyncBackgroundOutcome::Idle);
         }
 
-        {
-            let mut state = self.state.lock().expect("sync state poisoned");
-            if state.session_token.is_none() || state.sync_in_progress {
-                return Ok(SyncBackgroundOutcome::Idle);
-            }
-            if state
-                .rate_limited_until_ms
-                .is_some_and(|retry_at_ms| retry_at_ms > chrono::Local::now().timestamp_millis())
-            {
-                return Ok(SyncBackgroundOutcome::Idle);
-            }
-            state.sync_in_progress = true;
-            state.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
+        if !matches!(self.start_background_sync(), SyncStart::Started) {
+            return Ok(SyncBackgroundOutcome::Idle);
         }
 
         let outcome = self.execute_sync(storage).await;
         let result = match outcome {
             Ok(execution) => {
-                let entries_replayed = execution.result.entries_replayed;
-                {
-                    let mut state = self.state.lock().expect("sync state poisoned");
-                    state.devices = execution.devices;
-                    state.rate_limited_until_ms = None;
-                    state.last_result = Some(execution.result);
-                }
+                let entries_replayed = self.complete_execution(execution).entries_replayed;
                 self.persist_state().map_err(SyncError::Message)?;
                 Ok(if entries_replayed > 0 {
                     SyncBackgroundOutcome::Refreshed
@@ -425,28 +403,18 @@ impl SyncController {
                 })
             }
             Err(SyncError::RateLimited { retry_at_ms, .. }) => {
-                let mut state = self.state.lock().expect("sync state poisoned");
-                state.rate_limited_until_ms = Some(retry_at_ms);
+                self.record_rate_limit(retry_at_ms);
                 Ok(SyncBackgroundOutcome::Idle)
             }
             Err(SyncError::AuthExpired(message)) => {
-                {
-                    let mut state = self.state.lock().expect("sync state poisoned");
-                    state.session_token = None;
-                    state.github_user = None;
-                    state.last_result = None;
-                }
+                self.expire_auth();
                 self.persist_state().map_err(SyncError::Message)?;
                 Err(SyncError::AuthExpired(message))
             }
             Err(error) => Err(error),
         };
 
-        {
-            let mut state = self.state.lock().expect("sync state poisoned");
-            state.sync_in_progress = false;
-            state.cancel_flag = None;
-        }
+        self.finish_sync();
         result
     }
 
@@ -533,16 +501,7 @@ impl SyncController {
 
         let mut devices = branches
             .into_iter()
-            .map(|branch| SyncDeviceEntry {
-                paused: paused_devices.contains(&branch.name),
-                last_pushed: device_records
-                    .get(&branch.name)
-                    .and_then(|record| record.last_pushed),
-                last_pulled: device_records
-                    .get(&branch.name)
-                    .and_then(|record| record.last_pulled),
-                device_id: branch.name,
-            })
+            .map(|branch| sync_device_entry(&branch.name, &device_records, &paused_devices))
             .collect::<Vec<_>>();
 
         if !devices
@@ -551,16 +510,7 @@ impl SyncController {
         {
             devices.insert(
                 0,
-                SyncDeviceEntry {
-                    device_id: self.device_id.clone(),
-                    last_pushed: device_records
-                        .get(&self.device_id)
-                        .and_then(|record| record.last_pushed),
-                    last_pulled: device_records
-                        .get(&self.device_id)
-                        .and_then(|record| record.last_pulled),
-                    paused: paused_devices.contains(&self.device_id),
-                },
+                sync_device_entry(&self.device_id, &device_records, &paused_devices),
             );
         }
 
@@ -573,6 +523,61 @@ impl SyncController {
             },
             devices: device_records,
         })
+    }
+
+    fn start_manual_sync(&self) -> SyncStart {
+        let mut state = self.state.lock().expect("sync state poisoned");
+        Self::start_sync(&mut state)
+    }
+
+    fn start_background_sync(&self) -> SyncStart {
+        let mut state = self.state.lock().expect("sync state poisoned");
+        if state.session_token.is_none() {
+            return SyncStart::Unavailable;
+        }
+        Self::start_sync(&mut state)
+    }
+
+    fn start_sync(state: &mut SyncState) -> SyncStart {
+        if state.sync_in_progress {
+            return SyncStart::Unavailable;
+        }
+        if let Some(retry_at_ms) = state
+            .rate_limited_until_ms
+            .filter(|retry_at_ms| *retry_at_ms > chrono::Local::now().timestamp_millis())
+        {
+            return SyncStart::RateLimited(retry_at_ms);
+        }
+
+        state.sync_in_progress = true;
+        state.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
+        SyncStart::Started
+    }
+
+    fn complete_execution(&self, execution: SyncExecution) -> SyncRunResult {
+        let mut state = self.state.lock().expect("sync state poisoned");
+        state.devices = execution.devices;
+        state.rate_limited_until_ms = None;
+        state.last_result = Some(execution.result.clone());
+        execution.result
+    }
+
+    fn record_rate_limit(&self, retry_at_ms: i64) {
+        let mut state = self.state.lock().expect("sync state poisoned");
+        state.rate_limited_until_ms = Some(retry_at_ms);
+    }
+
+    fn expire_auth(&self) {
+        let mut state = self.state.lock().expect("sync state poisoned");
+        state.session_token = None;
+        state.github_user = None;
+        state.last_result = None;
+    }
+
+    fn finish_sync(&self) {
+        let mut state = self.state.lock().expect("sync state poisoned");
+        state.sync_in_progress = false;
+        state.cancel_flag = None;
     }
 
     fn persist_state(&self) -> Result<(), String> {
@@ -678,13 +683,8 @@ where
 fn collect_sync_device_entries(state: &SyncState, local_device_id: &str) -> Vec<SyncDeviceEntry> {
     let mut entries = state
         .devices
-        .iter()
-        .map(|(device_id, record)| SyncDeviceEntry {
-            device_id: device_id.clone(),
-            last_pushed: record.last_pushed,
-            last_pulled: record.last_pulled,
-            paused: state.paused_devices.contains(device_id),
-        })
+        .keys()
+        .map(|device_id| sync_device_entry(device_id, &state.devices, &state.paused_devices))
         .collect::<Vec<_>>();
 
     if !entries
@@ -693,16 +693,25 @@ fn collect_sync_device_entries(state: &SyncState, local_device_id: &str) -> Vec<
     {
         entries.insert(
             0,
-            SyncDeviceEntry {
-                device_id: local_device_id.to_string(),
-                last_pushed: None,
-                last_pulled: None,
-                paused: state.paused_devices.contains(local_device_id),
-            },
+            sync_device_entry(local_device_id, &state.devices, &state.paused_devices),
         );
     }
 
     entries
+}
+
+fn sync_device_entry(
+    device_id: &str,
+    devices: &BTreeMap<String, SyncDeviceRecord>,
+    paused_devices: &BTreeSet<String>,
+) -> SyncDeviceEntry {
+    let record = devices.get(device_id);
+    SyncDeviceEntry {
+        device_id: device_id.to_string(),
+        last_pushed: record.and_then(|record| record.last_pushed),
+        last_pulled: record.and_then(|record| record.last_pulled),
+        paused: paused_devices.contains(device_id),
+    }
 }
 
 fn retry_time_message(retry_at_ms: i64) -> String {
@@ -1039,12 +1048,77 @@ impl GitHubTransport {
         Ok(())
     }
 
+    async fn download_remote_changes(
+        &self,
+        tree: &[(String, String)],
+        old_files: &serde_json::Map<String, Value>,
+        paused: bool,
+    ) -> Result<RemoteChanges, SyncError> {
+        let mut note_files = Vec::new();
+        let mut log_files = Vec::new();
+        for (path, sha) in tree {
+            if old_files.get(path).and_then(Value::as_str) == Some(sha) {
+                continue;
+            }
+
+            let content = self.get_blob(sha).await?;
+            if path.starts_with("objects/notes/") {
+                note_files.push(SyncFile {
+                    path: path.clone(),
+                    content,
+                });
+            } else if path.starts_with("logs/") {
+                log_files.push(SyncFile {
+                    path: path.clone(),
+                    content,
+                });
+            }
+        }
+
+        let entries = if paused {
+            Vec::new()
+        } else {
+            parse_remote_log_entries(&log_files)?
+        };
+        note_files.extend(log_files);
+        Ok(RemoteChanges {
+            files: note_files,
+            entries,
+        })
+    }
+
+    async fn ingest_remote_changes(
+        peer_name: &str,
+        changes: RemoteChanges,
+        storage: &Storage,
+    ) -> Result<(), SyncError> {
+        if changes.files.is_empty() && changes.entries.is_empty() {
+            return Ok(());
+        }
+
+        let write_files = changes
+            .files
+            .into_iter()
+            .map(|file| (file.path, file.content))
+            .collect::<Vec<_>>();
+        let entries = changes
+            .entries
+            .into_iter()
+            .map(serde_json::from_value::<LogEntry>)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| SyncError::Message(error.to_string()))?;
+        install_remote_files(storage, peer_name, &write_files, entries)
+            .await
+            .map_err(SyncError::Message)?;
+        Ok(())
+    }
+
     pub async fn collect_remote_entries(
         &self,
         device_id: &str,
-        paused_devices: &std::collections::BTreeSet<String>,
-        device_records: &mut BTreeMap<String, crate::SyncDeviceRecord>,
-        storage: &crate::storage::Storage,
+        paused_devices: &BTreeSet<String>,
+        device_records: &mut BTreeMap<String, SyncDeviceRecord>,
+        storage: &Storage,
         cancellation_requested: impl Fn() -> bool,
     ) -> Result<usize, SyncError> {
         let branches = self.list_branches().await?;
@@ -1088,96 +1162,11 @@ impl GitHubTransport {
                 .and_then(Value::as_object)
                 .cloned()
                 .unwrap_or_default();
-            let changed = tree
-                .iter()
-                .filter(|(path, sha)| {
-                    old_files.get(path).and_then(Value::as_str) != Some(sha.as_str())
-                })
-                .cloned()
-                .collect::<Vec<_>>();
-
-            let mut note_files = Vec::new();
-            let mut log_files = Vec::new();
-            for (path, sha) in changed {
-                let content = self.get_blob(&sha).await?;
-                if path.starts_with("objects/notes/") {
-                    note_files.push(SyncFile { path, content });
-                } else if path.starts_with("logs/") {
-                    log_files.push(SyncFile { path, content });
-                }
-            }
-
-            let mut downloaded = Vec::new();
-            downloaded.extend(note_files.iter().cloned());
-            downloaded.extend(log_files.iter().cloned());
-            let entries = if paused_devices.contains(&peer.name) {
-                Vec::new()
-            } else {
-                log_files
-                    .iter()
-                    .flat_map(|file| file.content.lines())
-                    .filter(|line| !line.trim().is_empty())
-                    .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-                    .collect::<Vec<_>>()
-            };
-            replayed += entries.len();
-
-            if !downloaded.is_empty() || !entries.is_empty() {
-                let write_files = downloaded
-                    .iter()
-                    .map(|file| (file.path.clone(), file.content.clone()))
-                    .collect::<Vec<_>>();
-                let _guard = storage.write_guard().await;
-                storage
-                    .flush_checkpoints()
-                    .await
-                    .map_err(|error| SyncError::Message(error.to_string()))?;
-                let checkpoint_slot = if entries.is_empty() {
-                    None
-                } else {
-                    Some(
-                        storage
-                            .reserve_checkpoint_slot()
-                            .await
-                            .map_err(|error| SyncError::Message(error.to_string()))?,
-                    )
-                };
-                if !write_files.is_empty() {
-                    storage
-                        .write_sync_files(&write_files)
-                        .await
-                        .map_err(|error| SyncError::Message(error.to_string()))?;
-                }
-
-                let mut overlay = EntityMapView::new();
-                let mut replay_progress = std::collections::BTreeMap::new();
-                let replay_context = ReplayContext {
-                    device_id: peer.name.clone(),
-                };
-                for entry in entries {
-                    let parsed: LogEntry = serde_json::from_value(entry)
-                        .map_err(|error| SyncError::Message(error.to_string()))?;
-                    let current = replay_progress.entry(peer.name.clone()).or_insert(i64::MIN);
-                    *current = (*current).max(parsed.timestamp());
-                    let effects = effect_with_overlay(parsed, storage, &overlay, &replay_context)
-                        .await
-                        .map_err(|error| SyncError::Message(error.to_string()))?;
-                    overlay.extend(effects);
-                }
-
-                for (key, effect) in &overlay {
-                    storage.apply_effect_to_cache(key, effect);
-                }
-                if let Some(checkpoint_slot) =
-                    checkpoint_slot.filter(|_| !overlay.is_empty() || !replay_progress.is_empty())
-                {
-                    Storage::send_reserved_checkpoint_work(
-                        checkpoint_slot,
-                        overlay,
-                        replay_progress,
-                    );
-                }
-            }
+            let changes = self
+                .download_remote_changes(&tree, &old_files, paused_devices.contains(&peer.name))
+                .await?;
+            replayed += changes.entries.len();
+            Self::ingest_remote_changes(&peer.name, changes, storage).await?;
 
             let mut new_files = serde_json::Map::new();
             for (path, sha) in tree {
@@ -1319,4 +1308,26 @@ pub async fn fetch_github_user(token: &str) -> Result<String, SyncError> {
         .and_then(Value::as_str)
         .map(str::to_string)
         .ok_or_else(|| SyncError::Message("GitHub user payload missing login".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_remote_log_entries, SyncFile};
+
+    #[test]
+    fn malformed_remote_log_line_is_rejected_with_file_and_line_context() {
+        let files = vec![SyncFile {
+            path: "logs/peer/2026-07-04.jsonl".to_string(),
+            content: concat!(
+                "{\"timestamp\":1,\"action\":\"visit_page\",\"url\":\"https://example.com\"}\n",
+                "{not-json}\n"
+            )
+            .to_string(),
+        }];
+
+        let error = parse_remote_log_entries(&files).expect_err("malformed line must fail sync");
+        let message = error.message();
+        assert!(message.contains("logs/peer/2026-07-04.jsonl"));
+        assert!(message.contains("line 2"));
+    }
 }

@@ -74,14 +74,6 @@ pub struct TestSeedFilePayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct HistorySearchResult {
-    pub url: String,
-    pub title: String,
-    pub timestamp: i64,
-    pub score: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct NoteSearchResult {
     pub url: String,
     #[serde(rename = "noteSlug")]
@@ -149,7 +141,8 @@ pub struct PopupSnapshotResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PopupPinResult {
-    pub id: String,
+    pub kind: String,
+    pub slug: String,
     #[serde(rename = "pinnedAt")]
     pub pinned_at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -240,6 +233,7 @@ pub enum ConnectorMessage {
     GetPageSummary {
         url: String,
     },
+    GetSettings,
     GetSnapshotHtml {
         slug: String,
         ts: i64,
@@ -276,17 +270,6 @@ pub enum ConnectorMessage {
     PreviewRule {
         rule: RulePayload,
         entries: Vec<RuleBatchEntry>,
-    },
-    SearchHistoryStream {
-        #[serde(rename = "searchId")]
-        search_id: String,
-        query: String,
-        #[serde(default)]
-        limit: Option<usize>,
-    },
-    CancelHistorySearch {
-        #[serde(rename = "searchId")]
-        search_id: String,
     },
     SearchNotes {
         query: String,
@@ -471,6 +454,13 @@ pub enum DaemonMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
+    SettingsResult {
+        success: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        settings: Option<BTreeMap<String, Value>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
     SnapshotHtmlResult {
         success: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -518,22 +508,6 @@ pub enum DaemonMessage {
         success: bool,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         results: Vec<PreviewRuleHit>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-    },
-    HistorySearchChunk {
-        #[serde(rename = "searchId")]
-        search_id: String,
-        #[serde(rename = "workerId")]
-        worker_id: usize,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        results: Vec<HistorySearchResult>,
-    },
-    HistorySearchDone {
-        #[serde(rename = "searchId")]
-        search_id: String,
-        success: bool,
-        cancelled: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },

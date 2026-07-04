@@ -200,21 +200,16 @@ impl Storage {
     }
 
     pub async fn load_page(&self, slug: &str) -> io::Result<Option<PageEntity>> {
-        if let Some(cached) = self.cache_get(&format!("page:{slug}")) {
-            return Ok(match cached {
-                Some(Entity::Page(page)) => Some(page),
+        self.load_cached_json(
+            &format!("page:{slug}"),
+            self.page_path(slug),
+            Entity::Page,
+            |entity| match entity {
+                Entity::Page(page) => Some(page),
                 _ => None,
-            });
-        }
-        let path = self.page_path(slug);
-        if !path.exists() {
-            self.cache_put(format!("page:{slug}"), None);
-            return Ok(None);
-        }
-        let raw = fs::read_to_string(path).await?;
-        let page: PageEntity = serde_json::from_str(&raw).map_err(invalid_data)?;
-        self.cache_put(format!("page:{slug}"), Some(Entity::Page(page.clone())));
-        Ok(Some(page))
+            },
+        )
+        .await
     }
 
     pub async fn load_page_coordinated(&self, slug: &str) -> io::Result<Option<PageEntity>> {
@@ -370,21 +365,16 @@ impl Storage {
     }
 
     pub async fn load_note(&self, slug: &str) -> io::Result<Option<NoteEntity>> {
-        if let Some(cached) = self.cache_get(&format!("note:{slug}")) {
-            return Ok(match cached {
-                Some(Entity::Note(note)) => Some(note),
+        self.load_cached_json(
+            &format!("note:{slug}"),
+            self.note_path(slug),
+            Entity::Note,
+            |entity| match entity {
+                Entity::Note(note) => Some(note),
                 _ => None,
-            });
-        }
-        let path = self.note_path(slug);
-        if !path.exists() {
-            self.cache_put(format!("note:{slug}"), None);
-            return Ok(None);
-        }
-        let raw = fs::read_to_string(path).await?;
-        let note: NoteEntity = serde_json::from_str(&raw).map_err(invalid_data)?;
-        self.cache_put(format!("note:{slug}"), Some(Entity::Note(note.clone())));
-        Ok(Some(note))
+            },
+        )
+        .await
     }
 
     pub async fn load_note_coordinated(&self, slug: &str) -> io::Result<Option<NoteEntity>> {
@@ -406,21 +396,16 @@ impl Storage {
     }
 
     pub async fn load_list(&self, slug: &str) -> io::Result<Option<ListEntity>> {
-        if let Some(cached) = self.cache_get(&format!("list:{slug}")) {
-            return Ok(match cached {
-                Some(Entity::List(list)) => Some(list),
+        self.load_cached_json(
+            &format!("list:{slug}"),
+            self.list_path(slug),
+            Entity::List,
+            |entity| match entity {
+                Entity::List(list) => Some(list),
                 _ => None,
-            });
-        }
-        let path = self.list_path(slug);
-        if !path.exists() {
-            self.cache_put(format!("list:{slug}"), None);
-            return Ok(None);
-        }
-        let raw = fs::read_to_string(path).await?;
-        let list: ListEntity = serde_json::from_str(&raw).map_err(invalid_data)?;
-        self.cache_put(format!("list:{slug}"), Some(Entity::List(list.clone())));
-        Ok(Some(list))
+            },
+        )
+        .await
     }
 
     pub async fn load_list_coordinated(&self, slug: &str) -> io::Result<Option<ListEntity>> {
@@ -442,16 +427,16 @@ impl Storage {
     }
 
     pub async fn load_settings(&self) -> io::Result<Option<SettingsEntity>> {
-        let key = "manifest:settings";
-        if let Some(cached) = self.cache_get(key) {
-            return Ok(match cached {
-                Some(Entity::Settings(settings)) => Some(settings),
+        self.load_cached_json(
+            "manifest:settings",
+            self.manifest_path("settings.json"),
+            Entity::Settings,
+            |entity| match entity {
+                Entity::Settings(settings) => Some(settings),
                 _ => None,
-            });
-        }
-        let value = load_json(self.manifest_path("settings.json")).await?;
-        self.cache_put(key.to_string(), value.clone().map(Entity::Settings));
-        Ok(value)
+            },
+        )
+        .await
     }
 
     pub async fn save_settings(&self, settings: &SettingsEntity) -> io::Result<()> {
@@ -464,16 +449,16 @@ impl Storage {
     }
 
     pub async fn load_name_to_id(&self) -> io::Result<Option<NameToIdManifest>> {
-        let key = "manifest:name-to-id";
-        if let Some(cached) = self.cache_get(key) {
-            return Ok(match cached {
-                Some(Entity::NameToId(manifest)) => Some(manifest),
+        self.load_cached_json(
+            "manifest:name-to-id",
+            self.manifest_path("list-name-to-id.json"),
+            Entity::NameToId,
+            |entity| match entity {
+                Entity::NameToId(manifest) => Some(manifest),
                 _ => None,
-            });
-        }
-        let value = load_json(self.manifest_path("list-name-to-id.json")).await?;
-        self.cache_put(key.to_string(), value.clone().map(Entity::NameToId));
-        Ok(value)
+            },
+        )
+        .await
     }
 
     pub async fn save_name_to_id(&self, manifest: &NameToIdManifest) -> io::Result<()> {
@@ -486,16 +471,16 @@ impl Storage {
     }
 
     pub async fn load_list_order(&self) -> io::Result<Option<ListOrderManifest>> {
-        let key = "manifest:list-order";
-        if let Some(cached) = self.cache_get(key) {
-            return Ok(match cached {
-                Some(Entity::ListOrder(manifest)) => Some(manifest),
+        self.load_cached_json(
+            "manifest:list-order",
+            self.manifest_path("list-order.json"),
+            Entity::ListOrder,
+            |entity| match entity {
+                Entity::ListOrder(manifest) => Some(manifest),
                 _ => None,
-            });
-        }
-        let value = load_json(self.manifest_path("list-order.json")).await?;
-        self.cache_put(key.to_string(), value.clone().map(Entity::ListOrder));
-        Ok(value)
+            },
+        )
+        .await
     }
 
     pub async fn load_list_order_coordinated(&self) -> io::Result<Option<ListOrderManifest>> {
@@ -517,16 +502,16 @@ impl Storage {
     }
 
     pub async fn load_orphaned(&self) -> io::Result<Option<OrphanedManifest>> {
-        let key = "manifest:orphaned";
-        if let Some(cached) = self.cache_get(key) {
-            return Ok(match cached {
-                Some(Entity::Orphaned(manifest)) => Some(manifest),
+        self.load_cached_json(
+            "manifest:orphaned",
+            self.manifest_path("orphaned.json"),
+            Entity::Orphaned,
+            |entity| match entity {
+                Entity::Orphaned(manifest) => Some(manifest),
                 _ => None,
-            });
-        }
-        let value = load_json(self.manifest_path("orphaned.json")).await?;
-        self.cache_put(key.to_string(), value.clone().map(Entity::Orphaned));
-        Ok(value)
+            },
+        )
+        .await
     }
 
     pub async fn save_orphaned(&self, manifest: &OrphanedManifest) -> io::Result<()> {
@@ -585,16 +570,8 @@ impl Storage {
         timestamp: i64,
         html: &str,
     ) -> io::Result<PathBuf> {
-        let stem = snapshot_stem(slug, timestamp);
-        let directory = self
-            .root()
-            .join("objects")
-            .join("snapshots")
-            .join(shard_for(&stem));
-        fs::create_dir_all(&directory).await?;
-        let path = directory.join(format!("{stem}.html"));
-        fs::write(&path, html.as_bytes()).await?;
-        Ok(path)
+        self.save_snapshot_sidecar(slug, timestamp, "html", html)
+            .await
     }
 
     pub async fn save_snapshot_markdown(
@@ -603,16 +580,8 @@ impl Storage {
         timestamp: i64,
         markdown: &str,
     ) -> io::Result<PathBuf> {
-        let stem = snapshot_stem(slug, timestamp);
-        let directory = self
-            .root()
-            .join("objects")
-            .join("snapshots")
-            .join(shard_for(&stem));
-        fs::create_dir_all(&directory).await?;
-        let path = directory.join(format!("{stem}.md"));
-        fs::write(&path, markdown.as_bytes()).await?;
-        Ok(path)
+        self.save_snapshot_sidecar(slug, timestamp, "md", markdown)
+            .await
     }
 
     pub async fn load_snapshot_html(
@@ -1069,19 +1038,35 @@ impl Storage {
     }
 
     fn snapshot_html_path(&self, slug: &str, timestamp: i64) -> PathBuf {
-        self.root()
-            .join("objects")
-            .join("snapshots")
-            .join(shard_for(&snapshot_stem(slug, timestamp)))
-            .join(format!("{}.html", snapshot_stem(slug, timestamp)))
+        self.snapshot_path(slug, timestamp, "html")
     }
 
     fn snapshot_markdown_path(&self, slug: &str, timestamp: i64) -> PathBuf {
+        self.snapshot_path(slug, timestamp, "md")
+    }
+
+    fn snapshot_path(&self, slug: &str, timestamp: i64, extension: &str) -> PathBuf {
+        let stem = snapshot_stem(slug, timestamp);
         self.root()
             .join("objects")
             .join("snapshots")
-            .join(shard_for(&snapshot_stem(slug, timestamp)))
-            .join(format!("{}.md", snapshot_stem(slug, timestamp)))
+            .join(shard_for(&stem))
+            .join(format!("{stem}.{extension}"))
+    }
+
+    async fn save_snapshot_sidecar(
+        &self,
+        slug: &str,
+        timestamp: i64,
+        extension: &str,
+        content: &str,
+    ) -> io::Result<PathBuf> {
+        let path = self.snapshot_path(slug, timestamp, extension);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+        fs::write(&path, content.as_bytes()).await?;
+        Ok(path)
     }
 
     fn cache_get(&self, key: &str) -> Option<Option<Entity>> {
@@ -1090,6 +1075,24 @@ impl Storage {
             .lock()
             .expect("storage cache mutex poisoned")
             .get(key)
+    }
+
+    async fn load_cached_json<T>(
+        &self,
+        key: &str,
+        path: PathBuf,
+        into_entity: fn(T) -> Entity,
+        from_entity: fn(Entity) -> Option<T>,
+    ) -> io::Result<Option<T>>
+    where
+        T: serde::de::DeserializeOwned + Clone,
+    {
+        if let Some(cached) = self.cache_get(key) {
+            return Ok(cached.and_then(from_entity));
+        }
+        let value = load_json(path).await?;
+        self.cache_put(key.to_string(), value.clone().map(into_entity));
+        Ok(value)
     }
 
     fn cache_put(&self, key: String, value: Option<Entity>) {

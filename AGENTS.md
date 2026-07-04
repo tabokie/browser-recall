@@ -61,6 +61,7 @@ Project name: **browser-recall** (display name "Browser Recall"). Version 1.0 ta
 - Multi-line objects evade single-line transforms; verify multi-line schema and payload construction separately.
 - Avoid compatibility paths after an intentional schema migration. Migrate the data, then remove fallback readers/writers so drift is visible.
 - When a verifier validates production behavior, keep the verifier on the production implementation rather than porting policy into another language.
+- Generate classic-script bridges from the shared module factory and verify their staged output; never maintain mirrored production implementations.
 
 ## CSS Lessons
 

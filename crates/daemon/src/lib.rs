@@ -1,10 +1,12 @@
 pub mod capture_policy;
+pub mod command_authority;
 pub mod commands;
 pub mod config;
 pub mod connectors;
 pub mod mutations;
 pub mod pairing;
 pub mod protocol;
+pub mod read_projections;
 pub mod rules;
 pub mod runtime;
 pub mod search;

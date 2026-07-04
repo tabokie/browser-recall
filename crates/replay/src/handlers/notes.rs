@@ -3,9 +3,10 @@ use std::future::Future;
 use serde_json::Value;
 
 use crate::{
-    append_unique, default_note, ensure_page, entities::Entity, find_lists_with_pin, get_orphaned,
-    is_page_eligible, load_note, note_slug_from_path, orphan_key, unorphan_key, Context,
-    EntityEffect, EntityMap, ReplayError, NOTE_PREFIX, ORPHANED_KEY,
+    append_unique, default_note, ensure_page, ensure_page_with_overlay, entities::Entity,
+    find_lists_with_pin, get_orphaned, load_note, note_slug_from_path, orphan_key,
+    retain_page_or_delete, unorphan_key, Context, EntityEffect, EntityMap, ReplayError,
+    NOTE_PREFIX, ORPHANED_KEY,
 };
 
 pub(crate) struct CreateNoteRequest<'a> {
@@ -46,22 +47,9 @@ where
         note_body,
         css_path,
     } = request;
-    let slug = crate::generate_slug_from_url(url)?;
-    let page_key = format!("{}{}", crate::PAGE_PREFIX, slug);
-    let mut created = false;
-    let mut page = crate::load_page(load, &page_key).await.unwrap_or_else(|| {
-        created = true;
-        let mut page = crate::default_page(&slug);
-        page.created_at = Some(timestamp);
-        page
-    });
-    crate::touch_timestamp(&mut page, &context.device_id, timestamp);
-    page.url = Some(url.to_string());
-    if created {
-        if let Some(title_value) = title {
-            page.title = Some(title_value.to_string());
-        }
-    }
+    let mut result = EntityMap::new();
+    let (page_key, mut page) =
+        ensure_page_with_overlay(&mut result, load, url, timestamp, title, context).await?;
 
     let note_slug = note_slug_from_path(path);
     let note_key = format!("{NOTE_PREFIX}{note_slug}");
@@ -79,7 +67,6 @@ where
     note.deletion_reason = None;
     note.replaced_by = None;
 
-    let mut result = EntityMap::new();
     result.insert(page_key, EntityEffect::Upsert(Entity::Page(page)));
     result.insert(note_key, EntityEffect::Upsert(Entity::Note(note)));
     Ok(result)
@@ -116,11 +103,7 @@ where
     if let Some(note_url) = note_url {
         let (page_key, mut page) = ensure_page(load, &note_url, timestamp).await?;
         page.child_ids.retain(|child| child != &note_key);
-        if is_page_eligible(&page) {
-            result.insert(page_key, EntityEffect::Upsert(Entity::Page(page)));
-        } else {
-            result.insert(page_key, EntityEffect::Delete);
-        }
+        retain_page_or_delete(&mut result, page_key, page);
 
         for (list_key, mut list) in find_lists_with_pin(&result, load, &note_key).await {
             list.pins.retain(|pin| pin.id != note_key);

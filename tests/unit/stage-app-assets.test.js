@@ -293,6 +293,10 @@ describe('extension staged assets', () => {
       join(outDir, 'browser-recall-page-identity.js'),
       'utf8',
     );
+    const highlightLifecycleSource = readFileSync(
+      join(outDir, 'browser-recall-highlight-lifecycle.js'),
+      'utf8',
+    );
     const snapshotViewerSource = readFileSync(
       join(outDir, 'snapshot-viewer.js'),
       'utf8',
@@ -307,12 +311,19 @@ describe('extension staged assets', () => {
       'browser-api.js',
       'extension-surface.js',
       'browser-recall-page-identity.js',
+      'browser-recall-highlight-lifecycle.js',
       'content.js',
     ]);
     expect(pageIdentitySource).toContain(
       'globalThis.browserRecallPageIdentity',
     );
     expect(contentSource).toContain('globalThis.browserRecallPageIdentity');
+    expect(highlightLifecycleSource).toContain(
+      'globalThis.browserRecallHighlightLifecycle',
+    );
+    expect(contentSource).toContain(
+      'globalThis.browserRecallHighlightLifecycle',
+    );
     expect(snapshotViewerHtml).toContain(
       '<script src="extension-surface.js"></script>',
     );
@@ -394,6 +405,7 @@ describe('extension staged assets', () => {
       'browser-api.js',
       'extension-surface.js',
       'browser-recall-page-identity.js',
+      'browser-recall-highlight-lifecycle.js',
       'content.js',
     ]);
     expect(manifest.content_scripts[2].js).toEqual([

@@ -1,0 +1,46 @@
+- Improve the popup list search algo. It should use prefix search instead of matching at arbitrary position.
+- Remind me, what is the default data directory when user first installs the desktop app?
+- What is the idiomatic default data dir for a MacOS desktop app?
+- What about ~/Documents/browser-recall ? Because I see Codex created a dir ~/Documents/Codex
+- You are saying if using ~/Documents/browser-recall, we need to create a OS permission popup during bootstrap?
+- /clear
+- List the main modules of this codebase. Divide into modules with a size suitable to run the flatten skill individually. By suitable, I mean having enough detail and understanding of the module within 258k context window to make good simplification decisions.
+- Save the module and their scope into a temporary document MODULES.md
+- Actually, to avoid always loading the full file, let's split the module into one file for each, put them under ./modules/<name>.md, keep each file succinct no need to explain the context.
+- /clear
+- [$flatten](/Users/xyt/dev/skills/flatten/SKILL.md) Scope is defined at ./modules/desktop-shell.md
+- /clear
+- [$flatten](/Users/xyt/dev/skills/flatten/SKILL.md) Scope is defined at ./modules/desktop-ui.md
+- Snapshot capture times out on this site: https://www.lesspenguiny.com/articles/how-to-be-approachable, let's investigate the cause
+- [$flatten](/Users/xyt/dev/skills/flatten/SKILL.md) Scope is defined at ./modules/daemon-commands.md
+- Fix it
+- [$flatten](/Users/xyt/dev/skills/flatten/SKILL.md) Scope is defined at ./modules/daemon-storage.md
+- [$flatten](/Users/xyt/dev/skills/flatten/SKILL.md) Scope is defined at ./modules/daemon-sync.md
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) 
+- Fix them all
+- [$flatten](/Users/xyt/dev/skills/flatten/SKILL.md) Scope is defined at ./modules/daemon-websocket.md
+- [$flatten](/Users/xyt/dev/skills/flatten/SKILL.md) Scope is defined at ./modules/extension-background.md
+- [$flatten](/Users/xyt/dev/skills/flatten/SKILL.md) Scope is defined at ./modules/replay-engine.md
+- [$flatten](/Users/xyt/dev/skills/flatten/SKILL.md) Scope is defined at ./modules/search-stack.md
+- [$flatten](/Users/xyt/dev/skills/flatten/SKILL.md) Scope is defined at ./modules/shared-web-primitives.md
+- [$flatten](/Users/xyt/dev/skills/flatten/SKILL.md) Scope is defined at ./modules/snapshot-integration.md
+- [$flatten](/Users/xyt/dev/skills/flatten/SKILL.md) Scope is defined at ./modules/extension-capture.md
+- [$flatten](/Users/xyt/dev/skills/flatten/SKILL.md) Scope is defined at ./modules/popup-ui.md
+- [$mold](/Users/xyt/dev/skills/mold/SKILL.md) 
+- With regard to the 3 and 5 recommendation, explain again why do we need two types of adapters (tauri and websocket)
+- Yes, and I mean why we need the two paths, more specifically, what functionalities need to be served at two places simultaneously?
+- Revise #5, then create plan files for each of the five recommendations individually, write the files to ./plans/*.md. No need to do additional investigation to write the plan, write unresolved questions as they are.
+- Work on architecture-01-replay-transaction-module.md
+- Work on architecture-02-highlight-lifecycle-module.md
+- Work on architecture-03-desktop-command-seam.md
+- Work on architecture-04-daemon-read-projections.md
+- It is not yet complete?
+- Go ahead don't stop until complete
+- Work on architecture-05-remove-websocket-history-search.md
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) 
+- Please review my uncommitted changes
+- Fix all of the architectural gaps and other bugs & issues
+- Fix them all
+- Continue
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.5 Codex
+- yes

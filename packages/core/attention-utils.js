@@ -1,27 +1,31 @@
 // Attention scoring — pure functions, no DOM or Chrome API deps
 
-export function attentionStrength(att) {
+export function attentionStrength(attention) {
   // Composite score: weighted sum of normalized metrics
   let score = 0;
-  if (att.timeOnPage) score += Math.min(att.timeOnPage / 60000, 10); // minutes, cap at 10
-  if (att.scrollDepth) score += (att.scrollDepth / 100) * 2; // 0-2
-  if (att.likes) score += Math.min(Math.max(att.likes, 0), 5); // 1 per like, cap at 5, floor at 0
+  if (attention.timeOnPage) {
+    score += Math.min(attention.timeOnPage / 60000, 10);
+  }
+  if (attention.scrollDepth) score += (attention.scrollDepth / 100) * 2;
+  if (attention.likes) {
+    score += Math.min(Math.max(attention.likes, 0), 5);
+  }
   return score;
 }
 
 // Compute aggregate attention for a group of history entries (flat fields)
 export function aggregateAttention(entries) {
   let total = 0;
-  let att = null;
-  for (const i of entries) {
+  let latestAttention = null;
+  for (const entry of entries) {
     if (
-      i.scrollDepth !== undefined ||
-      i.timeOnPage !== undefined ||
-      i.likes !== undefined
+      entry.scrollDepth !== undefined ||
+      entry.timeOnPage !== undefined ||
+      entry.likes !== undefined
     ) {
-      total += attentionStrength(i);
-      att = i; // keep last one for details
+      total += attentionStrength(entry);
+      latestAttention = entry;
     }
   }
-  return { score: total, detail: att };
+  return { score: total, detail: latestAttention };
 }

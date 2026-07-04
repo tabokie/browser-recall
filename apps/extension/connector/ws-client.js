@@ -501,6 +501,118 @@ async function markSocketAuthenticated(socket, { source, storagePatch = {} }) {
   void refreshAfterAuthentication(source);
 }
 
+async function setPausedState(payload) {
+  await setState(CONNECTOR_STATES.PAUSED, {
+    [STORAGE_KEYS.lastError]: payload.message || 'Browser Recall is paused',
+    [STORAGE_KEYS.lastErrorCode]: payload.code || 'paused',
+  });
+}
+
+function daemonResponseError(payload) {
+  const error = new Error(payload.message || payload.error || 'Daemon error');
+  error.code = payload.code || payload.error || 'daemon_error';
+  error.payload = payload;
+  return error;
+}
+
+async function settlePendingRequest(payload) {
+  if (!pendingRequest?.acceptTypes.includes(payload.type)) return false;
+  const request = pendingRequest;
+  pendingRequest = null;
+  if (payload.type === 'error') {
+    if (payload.error === 'paused') await setPausedState(payload);
+    request.reject(daemonResponseError(payload));
+  } else {
+    request.resolve(payload);
+  }
+  return true;
+}
+
+async function handleSocketMessage(socket, payload) {
+  if (await settlePendingRequest(payload)) return;
+
+  switch (payload.type) {
+    case 'pair_approved':
+      await markSocketAuthenticated(socket, {
+        source: 'pair',
+        storagePatch: {
+          [STORAGE_KEYS.deviceId]: payload.deviceId,
+          [STORAGE_KEYS.token]: payload.token,
+        },
+      });
+      break;
+    case 'auth_ok':
+      await markSocketAuthenticated(socket, { source: 'auth' });
+      break;
+    case 'pair_pending':
+      await setState(CONNECTOR_STATES.PAIR_PENDING);
+      break;
+    case 'auth_fail':
+      await setDiagnostic('auth_fail', {
+        reason: payload.reason || null,
+      });
+      socket._closeState = CONNECTOR_STATES.AUTH_FAILED;
+      socket._reconnectDelayMs = 250;
+      removeConnectorStorageCache([STORAGE_KEYS.token]);
+      await chrome.storage.local.remove([STORAGE_KEYS.token]);
+      socket.close();
+      break;
+    case 'pair_denied':
+      await setDiagnostic('pair_denied');
+      socket._closeState = CONNECTOR_STATES.PAIR_DENIED;
+      socket._reconnectDelayMs = 30_000;
+      socket.close();
+      break;
+    case 'error':
+      if (payload.error === 'paused') {
+        await setPausedState(payload);
+      } else {
+        await setDiagnostic(payload.code || payload.error || 'daemon_error', {
+          message: payload.message || payload.error || 'Daemon error',
+          error: payload.error || null,
+        });
+        socket._closeState = CONNECTOR_STATES.OFFLINE;
+        socket._reconnectDelayMs = RECONNECT_DELAY_MS;
+        socket.close();
+      }
+      break;
+    case 'change':
+      broadcastDaemonMutations(payload.mutations);
+      break;
+    default:
+      break;
+  }
+}
+
+async function handleSocketClose(socket) {
+  if (socket._ignoreClose) return;
+  if (currentSocket === socket) currentSocket = null;
+  if (pendingRequest) {
+    pendingRequest.reject(new Error('Desktop bridge disconnected'));
+    pendingRequest = null;
+  }
+  if (socket._closeState) {
+    await setState(socket._closeState);
+    scheduleReconnect(socket._reconnectDelayMs ?? RECONNECT_DELAY_MS);
+    return;
+  }
+  if (socket._authenticated) {
+    await setDiagnostic('socket_closed', {
+      state: 'authenticated_socket_closed',
+      readyState: socketReadyStateName(socket),
+    });
+    await setState(CONNECTOR_STATES.CONNECTING);
+    void connect({ storedOnly: true });
+    return;
+  }
+  await setDiagnostic('socket_closed', {
+    state: 'unauthenticated_socket_closed',
+    readyState: socketReadyStateName(socket),
+  });
+  await setState(CONNECTOR_STATES.OFFLINE);
+  scheduleReconnect(RECONNECT_DELAY_MS);
+}
+
 function attachSocket(socket) {
   socket.addEventListener('message', async (event) => {
     let payload;
@@ -509,122 +621,12 @@ function attachSocket(socket) {
     } catch {
       return;
     }
-
-    if (pendingRequest && pendingRequest.acceptTypes.includes(payload.type)) {
-      const resolve = pendingRequest.resolve;
-      const reject = pendingRequest.reject;
-      pendingRequest = null;
-      if (payload.type === 'error') {
-        if (payload.error === 'paused') {
-          await setState(CONNECTOR_STATES.PAUSED, {
-            [STORAGE_KEYS.lastError]:
-              payload.message || 'Browser Recall is paused',
-            [STORAGE_KEYS.lastErrorCode]: payload.code || 'paused',
-          });
-        }
-        const error = new Error(
-          payload.message || payload.error || 'Daemon error',
-        );
-        error.code = payload.code || payload.error || 'daemon_error';
-        error.payload = payload;
-        reject(error);
-      } else {
-        resolve(payload);
-      }
-      return;
-    }
-
-    switch (payload.type) {
-      case 'pair_approved':
-        await markSocketAuthenticated(socket, {
-          source: 'pair',
-          storagePatch: {
-            [STORAGE_KEYS.deviceId]: payload.deviceId,
-            [STORAGE_KEYS.token]: payload.token,
-          },
-        });
-        break;
-      case 'auth_ok':
-        await markSocketAuthenticated(socket, { source: 'auth' });
-        break;
-      case 'pair_pending':
-        await setState(CONNECTOR_STATES.PAIR_PENDING);
-        break;
-      case 'auth_fail':
-        await setDiagnostic('auth_fail', {
-          reason: payload.reason || null,
-        });
-        socket._closeState = CONNECTOR_STATES.AUTH_FAILED;
-        socket._reconnectDelayMs = 250;
-        removeConnectorStorageCache([STORAGE_KEYS.token]);
-        await chrome.storage.local.remove([STORAGE_KEYS.token]);
-        socket.close();
-        break;
-      case 'pair_denied':
-        await setDiagnostic('pair_denied');
-        socket._closeState = CONNECTOR_STATES.PAIR_DENIED;
-        socket._reconnectDelayMs = 30_000;
-        socket.close();
-        break;
-      case 'error':
-        if (payload.error === 'paused') {
-          await setState(CONNECTOR_STATES.PAUSED, {
-            [STORAGE_KEYS.lastError]:
-              payload.message || 'Browser Recall is paused',
-            [STORAGE_KEYS.lastErrorCode]: payload.code || 'paused',
-          });
-        } else {
-          await setDiagnostic(payload.code || payload.error || 'daemon_error', {
-            message: payload.message || payload.error || 'Daemon error',
-            error: payload.error || null,
-          });
-          socket._closeState = CONNECTOR_STATES.OFFLINE;
-          socket._reconnectDelayMs = RECONNECT_DELAY_MS;
-          socket.close();
-        }
-        break;
-      case 'pong':
-        break;
-      case 'change':
-        broadcastDaemonMutations(payload.mutations);
-        break;
-      default:
-        break;
-    }
+    await handleSocketMessage(socket, payload);
   });
 
-  socket.addEventListener(
-    'close',
-    async () => {
-      if (socket._ignoreClose) return;
-      if (currentSocket === socket) currentSocket = null;
-      if (pendingRequest) {
-        pendingRequest.reject(new Error('Desktop bridge disconnected'));
-        pendingRequest = null;
-      }
-      if (socket._closeState) {
-        await setState(socket._closeState);
-        scheduleReconnect(socket._reconnectDelayMs ?? RECONNECT_DELAY_MS);
-        return;
-      }
-      if (socket._authenticated) {
-        await setDiagnostic('socket_closed', {
-          state: 'authenticated_socket_closed',
-          readyState: socketReadyStateName(socket),
-        });
-        await setState(CONNECTOR_STATES.CONNECTING);
-        void connect({ storedOnly: true });
-        return;
-      }
-      await setDiagnostic('socket_closed', {
-        state: 'unauthenticated_socket_closed',
-        readyState: socketReadyStateName(socket),
-      });
-      await setState(CONNECTOR_STATES.OFFLINE);
-      scheduleReconnect(RECONNECT_DELAY_MS);
-    },
-    { once: true },
-  );
+  socket.addEventListener('close', () => handleSocketClose(socket), {
+    once: true,
+  });
 }
 
 async function refreshAfterAuthentication(source) {
@@ -1041,9 +1043,13 @@ export async function getConnectorBridgeState() {
   return cachedConnectorState();
 }
 
-export async function requestDesktopPageInfo(slug) {
+async function requestDesktopPayload(message, acceptTypes) {
   await waitForIdleBridge();
-  return sendBridgeMessage(
+  return sendBridgeMessage(message, acceptTypes);
+}
+
+export async function requestDesktopPageInfo(slug) {
+  return requestDesktopPayload(
     {
       type: 'get_page_info',
       slug,
@@ -1054,8 +1060,7 @@ export async function requestDesktopPageInfo(slug) {
 
 export async function requestDesktopPageSummary(url) {
   const canonicalUrl = canonicalizePageUrl(url);
-  await waitForIdleBridge();
-  return sendBridgeMessage(
+  return requestDesktopPayload(
     {
       type: 'get_page_summary',
       url: canonicalUrl,
@@ -1064,9 +1069,15 @@ export async function requestDesktopPageSummary(url) {
   );
 }
 
+export async function requestDesktopSettings() {
+  return requestDesktopPayload({ type: 'get_settings' }, [
+    'settings_result',
+    'error',
+  ]);
+}
+
 export async function requestDesktopSnapshotHtml(slug, timestamp) {
-  await waitForIdleBridge();
-  return sendBridgeMessage(
+  return requestDesktopPayload(
     {
       type: 'get_snapshot_html',
       slug,
@@ -1077,8 +1088,7 @@ export async function requestDesktopSnapshotHtml(slug, timestamp) {
 }
 
 export async function requestDesktopEntity(key) {
-  await waitForIdleBridge();
-  return sendBridgeMessage(
+  return requestDesktopPayload(
     {
       type: 'get_entity',
       key,
@@ -1088,8 +1098,7 @@ export async function requestDesktopEntity(key) {
 }
 
 export async function requestDesktopSetDeviceId(deviceId) {
-  await waitForIdleBridge();
-  const payload = await sendBridgeMessage(
+  const payload = await requestDesktopPayload(
     {
       type: 'set_device_id',
       deviceId,
@@ -1105,8 +1114,7 @@ export async function requestDesktopSetDeviceId(deviceId) {
 }
 
 export async function requestDesktopTestReset() {
-  await waitForIdleBridge();
-  const payload = await sendBridgeMessage(
+  const payload = await requestDesktopPayload(
     {
       type: 'test_reset_data',
     },
@@ -1121,8 +1129,7 @@ export async function requestDesktopTestReset() {
 }
 
 export async function requestDesktopTestSeed(files) {
-  await waitForIdleBridge();
-  return sendBridgeMessage(
+  return requestDesktopPayload(
     {
       type: 'test_seed_data',
       files,
@@ -1132,8 +1139,7 @@ export async function requestDesktopTestSeed(files) {
 }
 
 export async function requestDesktopHistoryFiles(includeSizes = false) {
-  await waitForIdleBridge();
-  return sendBridgeMessage(
+  return requestDesktopPayload(
     {
       type: 'list_history_files',
       includeSizes,
@@ -1143,8 +1149,7 @@ export async function requestDesktopHistoryFiles(includeSizes = false) {
 }
 
 export async function requestDesktopHistoryBatch(files) {
-  await waitForIdleBridge();
-  return sendBridgeMessage(
+  return requestDesktopPayload(
     {
       type: 'load_history_batch',
       files,
@@ -1154,8 +1159,7 @@ export async function requestDesktopHistoryBatch(files) {
 }
 
 export async function requestDesktopPopupLists() {
-  await waitForIdleBridge();
-  return sendBridgeMessage(
+  return requestDesktopPayload(
     {
       type: 'get_popup_lists',
     },
@@ -1165,8 +1169,7 @@ export async function requestDesktopPopupLists() {
 
 export async function requestDesktopCommand(action, request = {}) {
   const canonicalRequest = canonicalizePageRequest(request);
-  await waitForIdleBridge();
-  const payload = await sendBridgeMessage(
+  const payload = await requestDesktopPayload(
     {
       type: 'run_command',
       action,

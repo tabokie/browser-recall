@@ -639,6 +639,72 @@ async fn connector_source_errors_are_protocol_errors_not_socket_disconnects() {
 }
 
 #[tokio::test]
+async fn legacy_websocket_history_search_messages_are_explicitly_unsupported() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+    let (mut socket, _data_dir, _device_id) = paired_socket(handle.port(), &config_store).await;
+
+    for message in [
+        json!({
+            "type": "search_history_stream",
+            "searchId": "removed-search",
+            "query": "banana"
+        }),
+        json!({
+            "type": "cancel_history_search",
+            "searchId": "removed-search"
+        }),
+    ] {
+        send_raw(&mut socket, message).await;
+        match next_daemon(&mut socket).await {
+            DaemonMessage::Error { error, code, .. } => {
+                assert_eq!(error, "invalid_message");
+                assert_eq!(code, "invalid_message");
+            }
+            other => panic!("expected explicit invalid_message error, got {other:?}"),
+        }
+    }
+
+    send_connector(&mut socket, ConnectorMessage::GetStatus).await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::Status { .. }
+    ));
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn generic_entity_diagnostics_are_disabled_in_production_sessions() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+    let (mut socket, _data_dir, _device_id) = paired_socket(handle.port(), &config_store).await;
+
+    for message in [
+        ConnectorMessage::GetAllPages,
+        ConnectorMessage::GetEntity {
+            key: "manifest:settings".to_string(),
+        },
+    ] {
+        send_connector(&mut socket, message).await;
+        match next_daemon(&mut socket).await {
+            DaemonMessage::Error { error, code, .. } => {
+                assert_eq!(error, "test_control_disabled");
+                assert_eq!(code, "test_control_disabled");
+            }
+            other => panic!("expected disabled diagnostic error, got {other:?}"),
+        }
+    }
+
+    handle.shutdown().await;
+}
+
+#[tokio::test]
 async fn websocket_auth_control_and_error_matrix_keeps_connections_predictable() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());
@@ -1576,7 +1642,7 @@ async fn websocket_read_error_and_secondary_command_matrix_is_structured() {
 async fn websocket_get_entity_covers_manifest_and_child_entities() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());
-    let handle = start_server(test_server_options(config_store.clone()))
+    let handle = start_server(test_control_server_options(config_store.clone()))
         .await
         .expect("server starts");
 
@@ -1909,7 +1975,7 @@ async fn clear_all_data_recreates_empty_layout_without_current_marker() {
 }
 
 #[tokio::test]
-async fn search_messages_return_history_note_and_snapshot_hits() {
+async fn search_messages_return_note_and_snapshot_hits() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());
     let handle = start_server(test_server_options(config_store.clone()))
@@ -1952,41 +2018,6 @@ async fn search_messages_return_history_note_and_snapshot_hits() {
     )
     .await;
     expect_ack(&mut socket).await;
-
-    send_connector(
-        &mut socket,
-        ConnectorMessage::SearchHistoryStream {
-            search_id: "history-stream-1".to_string(),
-            query: "banana".to_string(),
-            limit: None,
-        },
-    )
-    .await;
-    let mut streamed_urls = Vec::new();
-    loop {
-        match next_daemon(&mut socket).await {
-            DaemonMessage::HistorySearchChunk {
-                search_id, results, ..
-            } => {
-                assert_eq!(search_id, "history-stream-1");
-                streamed_urls.extend(results.into_iter().map(|result| result.url));
-            }
-            DaemonMessage::HistorySearchDone {
-                search_id,
-                success,
-                cancelled,
-                error,
-            } => {
-                assert_eq!(search_id, "history-stream-1");
-                assert!(success);
-                assert!(!cancelled);
-                assert!(error.is_none());
-                break;
-            }
-            other => panic!("expected streamed history search message, got {other:?}"),
-        }
-    }
-    assert_eq!(streamed_urls, vec!["https://example.com/page"]);
 
     send_connector(
         &mut socket,
@@ -2045,7 +2076,7 @@ async fn search_messages_return_history_note_and_snapshot_hits() {
 async fn popup_read_messages_return_page_info_and_lists() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());
-    let handle = start_server(test_server_options(config_store.clone()))
+    let handle = start_server(test_control_server_options(config_store.clone()))
         .await
         .expect("server starts");
 
@@ -2221,9 +2252,24 @@ async fn popup_read_messages_return_page_info_and_lists() {
             assert_eq!(lists[0].slug, "reading");
             assert_eq!(lists[0].name, "Reading");
             assert_eq!(lists[0].pins.len(), 1);
-            assert!(lists[0].pins[0].id.starts_with("page:"));
+            assert_eq!(lists[0].pins[0].kind, "page");
+            assert!(!lists[0].pins[0].slug.is_empty());
         }
         other => panic!("expected popup lists result, got {other:?}"),
+    }
+
+    send_raw(&mut socket, json!({ "type": "get_settings" })).await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::SettingsResult {
+            success,
+            settings,
+            error,
+        } => {
+            assert!(success);
+            assert!(error.is_none());
+            assert!(settings.is_none());
+        }
+        other => panic!("expected settings result, got {other:?}"),
     }
 
     handle.shutdown().await;
@@ -2371,6 +2417,46 @@ async fn run_command_executes_desktop_mutation() {
 }
 
 #[tokio::test]
+async fn desktop_and_websocket_adapters_share_command_validation() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+    let (mut socket, _, _) = paired_socket(handle.port(), &config_store).await;
+
+    let desktop_error = handle
+        .control_handle()
+        .run_command("renamePage", json!({ "userTitle": "Missing URL" }))
+        .await
+        .expect_err("desktop validation failure")
+        .to_string();
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "renamePage",
+            "request": { "userTitle": "Missing URL" }
+        }),
+    )
+    .await;
+    let websocket_error = match next_daemon(&mut socket).await {
+        DaemonMessage::CommandResult {
+            success: false,
+            error: Some(error),
+            ..
+        } => error,
+        other => panic!("expected websocket validation failure, got {other:?}"),
+    };
+
+    assert_eq!(desktop_error, "renamePage missing url");
+    assert_eq!(websocket_error, desktop_error);
+
+    handle.shutdown().await;
+}
+
+#[tokio::test]
 async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());
@@ -2436,7 +2522,7 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         } => {
             assert!(!success);
             assert!(response.is_none());
-            assert!(error.contains("unsupported desktop command"));
+            assert!(error.contains("unsupported connector command"));
         }
         other => panic!("expected unsupported command result, got {other:?}"),
     }
@@ -2671,7 +2757,7 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
             "type": "run_command",
             "action": "updateListTree",
             "request": {
-                "tree": [{ "id": format!("list:{list_id}"), "children": [] }]
+                "tree": [{ "slug": list_id, "children": [] }]
             }
         }),
     )
@@ -2924,20 +3010,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         other => panic!("expected history batch, got {other:?}"),
     }
 
-    send_connector(&mut socket, ConnectorMessage::GetAllPages).await;
-    match next_daemon(&mut socket).await {
-        DaemonMessage::AllPagesResult {
-            success,
-            pages,
-            error,
-        } => {
-            assert!(success);
-            assert!(error.is_none());
-            assert!(pages.contains_key(&page_slug));
-        }
-        other => panic!("expected all pages, got {other:?}"),
-    }
-
     send_connector(
         &mut socket,
         ConnectorMessage::GetPageSummary {
@@ -2980,27 +3052,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
             assert_eq!(error, "Not found");
         }
         other => panic!("expected missing snapshot html, got {other:?}"),
-    }
-
-    send_connector(
-        &mut socket,
-        ConnectorMessage::GetEntity {
-            key: "page:missing".to_string(),
-        },
-    )
-    .await;
-    match next_daemon(&mut socket).await {
-        DaemonMessage::EntityResult {
-            success,
-            entity,
-            error,
-            ..
-        } => {
-            assert!(success);
-            assert!(entity.is_none());
-            assert!(error.is_none());
-        }
-        other => panic!("expected missing entity result, got {other:?}"),
     }
 
     send_connector(

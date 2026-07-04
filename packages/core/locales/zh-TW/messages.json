@@ -1055,6 +1055,15 @@
     "message": "捕捉到的快照",
     "description": "Snapshot capture success notification."
   },
+  "extensionSnapshotCapturedWithOneWarning": {
+    "message": "快照已儲存，但有 1 個資源無法使用。",
+    "description": "Snapshot capture partial-success warning for one unavailable resource."
+  },
+  "extensionSnapshotCapturedWithWarnings": {
+    "message": "快照已儲存，但有 $COUNT$ 個資源無法使用。",
+    "description": "Snapshot capture partial-success warning for multiple unavailable resources.",
+    "placeholders": { "count": { "content": "$1", "example": "2" } }
+  },
   "extensionSomethingWentWrong": {
     "message": "出了點問題",
     "description": "Generic extension error."

@@ -189,7 +189,8 @@ describe.sequential('popup rpc integration', () => {
           name: 'Reading',
           pins: expect.arrayContaining([
             expect.objectContaining({
-              id: `page:${slug}`,
+              kind: 'page',
+              slug,
             }),
           ]),
         }),

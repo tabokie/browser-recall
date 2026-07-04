@@ -86,13 +86,7 @@ pub fn match_list_rules_strict(
 ) -> Result<Vec<RuleMatch>, String> {
     let mut results = Vec::new();
     for rule in &list.rules {
-        let matched = evaluate_rule_spec_strict(
-            &RuleSpec {
-                rule_type: rule.rule_type.clone(),
-                config: rule.config.clone(),
-            },
-            page,
-        )?;
+        let matched = evaluate_rule_strict(&rule.rule_type, &rule.config, page)?;
         if matched {
             results.push(RuleMatch {
                 rule_id: rule.id.clone(),
@@ -104,13 +98,13 @@ pub fn match_list_rules_strict(
 }
 
 pub fn preview_rule(rule: &RuleSpec, page: &PageData) -> Result<bool, String> {
-    evaluate_rule_spec_strict(rule, page)
+    evaluate_rule_strict(&rule.rule_type, &rule.config, page)
 }
 
 pub fn validate_rule(rule: &RuleSpec) -> Result<(), String> {
     match rule.rule_type.as_str() {
         "keyword" => validate_keyword_rule(rule),
-        "function" => compile_function_rule(rule),
+        "function" => compile_function_rule(&rule.config),
         _ => Ok(()),
     }
 }
@@ -150,8 +144,8 @@ pub fn validate_fn_rule_source(fn_source: &str) -> ValidationResult {
 
 fn match_rule(rule: &RuleEntity, page: &PageData) -> bool {
     match rule.rule_type.as_str() {
-        "keyword" => match_keyword_rule(rule, page),
-        "function" => match execute_function_rule(rule, page) {
+        "keyword" => match_keyword_rule(&rule.config, page),
+        "function" => match execute_function_rule(&rule.config, page) {
             Ok(result) => result,
             Err(error) => {
                 warn!(rule_id = rule.id.as_str(), error = %error, "function rule evaluation failed");
@@ -162,19 +156,19 @@ fn match_rule(rule: &RuleEntity, page: &PageData) -> bool {
     }
 }
 
-fn evaluate_rule_spec_strict(rule: &RuleSpec, page: &PageData) -> Result<bool, String> {
-    match rule.rule_type.as_str() {
-        "keyword" => Ok(match_keyword_rule_from_config(&rule.config, page)),
-        "function" => execute_function_rule_spec(rule, page),
+fn evaluate_rule_strict(
+    rule_type: &str,
+    config: &BTreeMap<String, Value>,
+    page: &PageData,
+) -> Result<bool, String> {
+    match rule_type {
+        "keyword" => Ok(match_keyword_rule(config, page)),
+        "function" => execute_function_rule(config, page),
         _ => Ok(false),
     }
 }
 
-fn match_keyword_rule(rule: &RuleEntity, page: &PageData) -> bool {
-    match_keyword_rule_from_config(&rule.config, page)
-}
-
-fn match_keyword_rule_from_config(config: &BTreeMap<String, Value>, page: &PageData) -> bool {
+fn match_keyword_rule(config: &BTreeMap<String, Value>, page: &PageData) -> bool {
     let pattern = config
         .get("pattern")
         .and_then(Value::as_str)
@@ -195,23 +189,15 @@ fn match_keyword_rule_from_config(config: &BTreeMap<String, Value>, page: &PageD
     page.title.to_lowercase().contains(&needle)
 }
 
-fn execute_function_rule(rule: &RuleEntity, page: &PageData) -> Result<bool, String> {
-    execute_function_rule_spec(
-        &RuleSpec {
-            rule_type: rule.rule_type.clone(),
-            config: rule.config.clone(),
-        },
-        page,
-    )
-}
-
-fn execute_function_rule_spec(rule: &RuleSpec, page: &PageData) -> Result<bool, String> {
-    let fn_source = rule
-        .config
+fn execute_function_rule(
+    config: &BTreeMap<String, Value>,
+    page: &PageData,
+) -> Result<bool, String> {
+    let fn_source = config
         .get("fnSource")
         .and_then(Value::as_str)
         .ok_or_else(|| "missing fnSource".to_string())?;
-    compile_function_rule(rule)?;
+    compile_function_rule(config)?;
 
     let runtime = Runtime::new().map_err(|error| error.to_string())?;
     runtime.set_memory_limit(1 << 20);
@@ -265,9 +251,8 @@ Boolean((function(page) {{
     result.map_err(|error| error.to_string())
 }
 
-fn compile_function_rule(rule: &RuleSpec) -> Result<(), String> {
-    let fn_source = rule
-        .config
+fn compile_function_rule(config: &BTreeMap<String, Value>) -> Result<(), String> {
+    let fn_source = config
         .get("fnSource")
         .and_then(Value::as_str)
         .ok_or_else(|| "missing fnSource".to_string())?;

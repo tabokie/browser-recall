@@ -1,15 +1,15 @@
 use browser_recall_daemon::commands::{
     add_list_pins, add_rule, create_note, delete_list, delete_note, delete_snapshot,
     ensure_default_lists, get_snapshot_html, import_bookmarks, import_history, list_event_fields,
-    list_history_files, list_paired_browsers, load_all_pages_payload, load_history_batch,
-    load_page_notes_payload, load_page_snapshot_payload, page_relations_payload,
+    list_history_files, list_paired_browsers, load_history_batch, page_relations_payload,
     pair_browser_revoke, permanent_delete_candidates, permanent_delete_keys, preview_rule_payload,
-    read_desktop_value, recover_checkpoint_tail, remove_rule, rename_page, replay_entries,
-    replay_entry, restore_list, restore_note, restore_snapshot, save_list_meta, save_settings_key,
-    search_notes, search_snapshots, submit_event, toggle_list_pin, update_note, update_rule,
-    BookmarkImportEntry, BookmarkImportNode, BookmarkImportSkipped, HistoryImportEntry,
+    recover_checkpoint_tail, remove_rule, rename_page, replay_entries, replay_entry, restore_list,
+    restore_note, restore_snapshot, save_list_meta, save_settings_key, search_notes,
+    search_snapshots, submit_event, toggle_list_pin, update_note, update_rule, BookmarkImportEntry,
+    BookmarkImportNode, BookmarkImportSkipped, HistoryImportEntry,
 };
 use browser_recall_daemon::protocol::{RuleBatchEntry, RulePayload};
+use browser_recall_daemon::read_projections::ReadProjections;
 use browser_recall_daemon::storage::Storage;
 use browser_recall_daemon::{ApprovedConnector, ConfigStore, Token};
 use browser_recall_replay::entities::{
@@ -19,6 +19,42 @@ use browser_recall_replay::{generate_slug_from_url, LogEntry, RuleInput};
 use std::collections::BTreeMap;
 use std::path::Path;
 use tempfile::tempdir;
+
+async fn load_page_notes_payload(
+    storage: &Storage,
+    slug: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    ReadProjections::new(storage.clone())
+        .page_info(slug)
+        .await?
+        .notes
+        .into_iter()
+        .map(|note| serde_json::to_value(note).map_err(|error| error.to_string()))
+        .collect()
+}
+
+async fn load_page_snapshot_payload(
+    storage: &Storage,
+    slug: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    ReadProjections::new(storage.clone())
+        .page_info(slug)
+        .await?
+        .snapshots
+        .into_iter()
+        .map(|snapshot| serde_json::to_value(snapshot).map_err(|error| error.to_string()))
+        .collect()
+}
+
+async fn load_all_pages_payload(storage: &Storage) -> Result<serde_json::Value, String> {
+    let pages = ReadProjections::new(storage.clone())
+        .all_page_context()
+        .await?
+        .into_iter()
+        .map(|(slug, context)| (slug, context.page))
+        .collect::<BTreeMap<_, _>>();
+    serde_json::to_value(pages).map_err(|error| error.to_string())
+}
 
 async fn read_log_files(log_dir: &Path) -> Vec<String> {
     let mut entries = tokio::fs::read_dir(log_dir).await.expect("log dir exists");
@@ -79,38 +115,6 @@ async fn import_history_creates_pages_and_log_entries() {
         .await
         .expect("history batch");
     assert_eq!(batch.len(), 2);
-}
-
-#[tokio::test]
-async fn read_desktop_value_filters_deleted_entities() {
-    let dir = tempdir().expect("tempdir");
-    let storage = Storage::new(dir.path());
-    storage
-        .ensure_layout("device-a")
-        .await
-        .expect("storage layout");
-
-    let mut list = ListEntity::new("test-list".to_string());
-    list.name = "Test List".to_string();
-    list.deleted = true;
-    storage
-        .save_list("test-list", &list)
-        .await
-        .expect("save list");
-
-    let hidden = read_desktop_value(&storage, "list:test-list", false)
-        .await
-        .expect("read hidden");
-    assert!(hidden.is_none());
-
-    let visible = read_desktop_value(&storage, "list:test-list", true)
-        .await
-        .expect("read visible")
-        .expect("value exists");
-    assert_eq!(
-        visible.get("deleted").and_then(|value| value.as_bool()),
-        Some(true)
-    );
 }
 
 #[tokio::test]
@@ -1433,12 +1437,6 @@ async fn command_error_and_normalization_paths_are_explicit() {
         .await
         .expect("storage layout");
 
-    assert_eq!(
-        read_desktop_value(&storage, "page:missing", false)
-            .await
-            .expect("read missing"),
-        None
-    );
     assert!(load_page_notes_payload(&storage, "missing")
         .await
         .expect("missing notes")

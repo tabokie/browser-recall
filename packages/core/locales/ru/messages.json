@@ -1055,6 +1055,15 @@
     "message": "Снимок сделан",
     "description": "Snapshot capture success notification."
   },
+  "extensionSnapshotCapturedWithOneWarning": {
+    "message": "Снимок сохранён, но 1 ресурс был недоступен.",
+    "description": "Snapshot capture partial-success warning for one unavailable resource."
+  },
+  "extensionSnapshotCapturedWithWarnings": {
+    "message": "Снимок сохранён, но $COUNT$ ресурсов были недоступны.",
+    "description": "Snapshot capture partial-success warning for multiple unavailable resources.",
+    "placeholders": { "count": { "content": "$1", "example": "2" } }
+  },
   "extensionSomethingWentWrong": {
     "message": "Что-то пошло не так",
     "description": "Generic extension error."

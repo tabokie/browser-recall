@@ -389,6 +389,224 @@ async function installDesktopBridgeMock(page, options = {}) {
         return clone(stores.session.get(key)) ?? null;
       }
 
+      function getListDisplay(listId) {
+        const list = readDesktopValue(`list:${listId}`);
+        if (!list || list.deleted) return null;
+        const pins = (list.pins || []).map((pin) => {
+          const [prefix, ...slugParts] = String(pin.id || '').split(':');
+          const slug = slugParts.join(':');
+          const entity = readDesktopValue(pin.id);
+          if (prefix === 'page' && entity) {
+            return {
+              kind: 'page',
+              slug,
+              pinnedAt: pin.pinnedAt,
+              source: pin.source,
+              url: entity.url || null,
+              title: entity.title || null,
+              userTitle: entity.user_title || null,
+              isNote: false,
+              hasSnapshots: (entity.childIds || []).some((id) =>
+                id.startsWith('snapshot:'),
+              ),
+              hasHighlightNotes: (entity.childIds || [])
+                .filter((id) => id.startsWith('note:'))
+                .map(readDesktopValue)
+                .some((note) => note && !note.deleted && note.excerpt != null),
+              listSlugs: (entity.parentIds || [])
+                .filter((id) => id.startsWith('list:'))
+                .map((id) => id.slice('list:'.length)),
+              scrollDepth: entity.scrollDepth,
+              timeOnPage: entity.timeOnPage,
+              likes: entity.likes,
+              createdAt: entity.createdAt,
+              visitDates: entity.visitDates || [],
+              timestamps: entity.timestamps || {},
+            };
+          }
+          if (prefix === 'note' && entity && !entity.deleted) {
+            const title = Array.isArray(entity.excerpt)
+              ? entity.excerpt
+                  .map((part) => String(part || ''))
+                  .filter(Boolean)
+                  .join('\n')
+              : '';
+            return {
+              kind: 'note',
+              slug,
+              pinnedAt: pin.pinnedAt,
+              source: pin.source,
+              url: entity.url || null,
+              title: title || null,
+              userTitle: null,
+              isNote: true,
+              hasSnapshots: false,
+              hasHighlightNotes: true,
+              listSlugs: [],
+              excerpt: entity.excerpt,
+              note: entity.note,
+              visitDates: [],
+              timestamps: {},
+            };
+          }
+          return {
+            kind: 'missing',
+            slug,
+            pinnedAt: pin.pinnedAt,
+            source: pin.source,
+            url: null,
+            title: null,
+            userTitle: null,
+            isNote: false,
+            hasSnapshots: false,
+            hasHighlightNotes: false,
+            listSlugs: [],
+            visitDates: [],
+            timestamps: {},
+          };
+        });
+        return {
+          slug: list.slug || listId,
+          name: list.name || '',
+          rules: list.rules || [],
+          pins,
+        };
+      }
+
+      function getPageContext(slugs) {
+        return Object.fromEntries(
+          (slugs || []).flatMap((slug) => {
+            const page = readDesktopValue(`page:${slug}`);
+            if (!page) return [];
+            const notes = (page.childIds || [])
+              .filter((id) => id.startsWith('note:'))
+              .map(readDesktopValue)
+              .filter((note) => note && !note.deleted);
+            const lists = (page.parentIds || [])
+              .filter((id) => id.startsWith('list:'))
+              .map(readDesktopValue)
+              .filter((list) => list && !list.deleted)
+              .map((list) => ({ slug: list.slug, name: list.name || '' }));
+            const {
+              childIds: _children,
+              parentIds: _parents,
+              ...pageFields
+            } = page;
+            return [
+              [
+                slug,
+                {
+                  page: {
+                    ...pageFields,
+                    hasSnapshots: (page.childIds || []).some((id) =>
+                      id.startsWith('snapshot:'),
+                    ),
+                  },
+                  notes,
+                  lists,
+                },
+              ],
+            ];
+          }),
+        );
+      }
+
+      function getListTreeProjection() {
+        const order = readDesktopValue('manifest:list-order')?.tree || [];
+        function project(nodes) {
+          return (nodes || []).flatMap((node) => {
+            const list = readDesktopValue(node.id);
+            if (!list || list.deleted) return [];
+            return [
+              {
+                slug: list.slug,
+                name: list.name || list.slug,
+                children: project(node.children),
+              },
+            ];
+          });
+        }
+        function projectOrder(nodes) {
+          return (nodes || []).flatMap((node) => {
+            const list = readDesktopValue(node.id);
+            if (!list || list.deleted) return [];
+            return [
+              {
+                slug: list.slug,
+                children: projectOrder(node.children),
+              },
+            ];
+          });
+        }
+        return { tree: project(order), order: projectOrder(order) };
+      }
+
+      function getRecycleBin() {
+        const orphaned = readDesktopValue('manifest:orphaned');
+        return (orphaned?.entries || []).flatMap((entry) => {
+          const key = entry.key || '';
+          if (key.startsWith('note:')) {
+            const note = readDesktopValue(key);
+            if (
+              !note?.deleted ||
+              note.deletionReason === 'replaced' ||
+              note.replacedBy
+            )
+              return [];
+            const excerpt = Array.isArray(note.excerpt)
+              ? note.excerpt
+                  .map((part) => String(part || ''))
+                  .filter(Boolean)
+                  .join('\n')
+              : '';
+            return [
+              {
+                key,
+                kind: 'note',
+                slug: key.slice(5),
+                timestamp: note.deletedTs,
+                url: note.url,
+                title: excerpt || note.note || null,
+              },
+            ];
+          }
+          if (key.startsWith('list:')) {
+            const list = readDesktopValue(key);
+            if (!list?.deleted) return [];
+            return [
+              {
+                key,
+                kind: 'list',
+                slug: key.slice(5),
+                timestamp: list.deletedTs,
+                url: entry.url,
+                title: list.name || null,
+              },
+            ];
+          }
+          if (key.startsWith('snapshot:')) {
+            const stem = key.slice(9);
+            const dash = stem.lastIndexOf('-');
+            const slug = dash >= 0 ? stem.slice(0, dash) : stem;
+            const timestamp = dash >= 0 ? Number(stem.slice(dash + 1)) : null;
+            const page = readDesktopValue(`page:${slug}`);
+            return [
+              {
+                key,
+                kind: 'snapshot',
+                slug,
+                timestamp,
+                url: entry.url,
+                title: page?.user_title || page?.title || null,
+              },
+            ];
+          }
+          return [
+            { key, kind: 'unknown', slug: key, url: entry.url, title: null },
+          ];
+        });
+      }
+
       function historyFiles(includeSizes = false) {
         const files = [...stores.session.keys()]
           .filter((key) => key.startsWith('log:'))
@@ -427,15 +645,6 @@ async function installDesktopBridgeMock(page, options = {}) {
           return (left.timestamp || 0) - (right.timestamp || 0);
         });
         return entries;
-      }
-
-      function loadAllPages() {
-        const pages = {};
-        for (const [key, value] of stores.session.entries()) {
-          if (!key.startsWith('page:') || value?.deleted) continue;
-          pages[key.slice('page:'.length)] = clone(value);
-        }
-        return pages;
       }
 
       function emitRuntimeMessage(message) {
@@ -648,11 +857,6 @@ async function installDesktopBridgeMock(page, options = {}) {
               success: true,
               entries: loadHistoryBatch(request.files),
             };
-          case 'loadAllPages':
-            return {
-              success: true,
-              pages: loadAllPages(),
-            };
           case 'searchNotes':
             return {
               success: true,
@@ -724,13 +928,32 @@ async function installDesktopBridgeMock(page, options = {}) {
           }
           case 'getDirectorySize':
             return { success: true, size: 4096 };
-          case 'readDesktopValue':
+          case 'getListDisplay':
             if (readDesktopValueDelayMs > 0) {
               await new Promise((resolve) =>
                 setTimeout(resolve, readDesktopValueDelayMs),
               );
             }
-            return { success: true, value: readDesktopValue(request.key) };
+            return { success: true, list: getListDisplay(request.listId) };
+          case 'getPageContext':
+            return { success: true, pages: getPageContext(request.slugs) };
+          case 'getAllPageContext': {
+            const slugs = [...stores.session.keys()]
+              .filter((key) => key.startsWith('page:'))
+              .map((key) => key.slice('page:'.length));
+            return { success: true, pages: getPageContext(slugs) };
+          }
+          case 'getListTree': {
+            const projection = getListTreeProjection();
+            return { success: true, ...projection };
+          }
+          case 'getRecycleBin':
+            return { success: true, entries: getRecycleBin() };
+          case 'getSettings':
+            return {
+              success: true,
+              settings: readDesktopValue('manifest:settings'),
+            };
           case 'saveSettingsKey': {
             const settings = readDesktopValue('manifest:settings') || {};
             settings[request.key] = request.value;
@@ -834,9 +1057,15 @@ async function installDesktopBridgeMock(page, options = {}) {
             return { success: true };
           }
           case 'updateListTree':
+            function toEntityTree(nodes) {
+              return (nodes || []).map((node) => ({
+                id: `list:${node.slug}`,
+                children: toEntityTree(node.children),
+              }));
+            }
             stores.session.set('manifest:list-order', {
               timestamp: Date.now(),
-              tree: clone(request.tree || []),
+              tree: toEntityTree(request.tree),
             });
             return { success: true };
           case 'startWindowDrag':
@@ -4046,7 +4275,7 @@ test.describe('desktop visual regression', () => {
             (item) =>
               item.url ===
                 'https://example.com/history-chart-per-day-duplicate' &&
-              Array.isArray(item.parentIds),
+              Array.isArray(item.listSlugs),
           ),
       );
 

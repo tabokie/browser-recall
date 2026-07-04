@@ -18,13 +18,29 @@ export async function sendAction(msg) {
   return resp ?? {};
 }
 
-export async function readDesktopValue(key, includeDeleted = false) {
-  const resp = await sendAction({
-    action: 'readDesktopValue',
-    key,
-    includeDeleted,
-  });
-  return resp?.value;
+export async function loadListDisplay(listId) {
+  const resp = await sendAction({ action: 'getListDisplay', listId });
+  return resp?.list ?? null;
+}
+
+export async function loadPageContext(slugs) {
+  const resp = await sendAction({ action: 'getPageContext', slugs });
+  return resp?.pages ?? {};
+}
+
+export async function loadAllPageContext() {
+  const resp = await sendAction({ action: 'getAllPageContext' });
+  return resp?.pages ?? {};
+}
+
+export async function loadListTreeProjection() {
+  const resp = await sendAction({ action: 'getListTree' });
+  return { tree: resp?.tree ?? [], order: resp?.order ?? [] };
+}
+
+export async function loadRecycleBin() {
+  const resp = await sendAction({ action: 'getRecycleBin' });
+  return resp?.entries ?? [];
 }
 
 let settingsCache = null;
@@ -32,7 +48,8 @@ let settingsCachePromise = null;
 
 export async function loadSettings() {
   if (!settingsCachePromise) {
-    settingsCachePromise = readDesktopValue('manifest:settings')
+    settingsCachePromise = sendAction({ action: 'getSettings' })
+      .then((resp) => resp?.settings)
       .then((settings) => {
         settingsCache = settings || {};
         return settingsCache;

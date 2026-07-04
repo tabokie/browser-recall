@@ -20,27 +20,6 @@ export function isInternalBrowserUrl(url) {
   );
 }
 
-// Desktop-backed entity read through the background bridge.
-// Keys use entity key format: 'manifest:settings', 'manifest:orphaned', 'list:reading', etc.
-export async function readDesktopValue(key, includeDeleted = false) {
-  const resp = await chrome.runtime.sendMessage({
-    action: 'readDesktopValue',
-    key,
-    includeDeleted,
-  });
-  if (resp?.success === false) {
-    throw new Error(resp.error || `Failed to load ${key}`);
-  }
-  return resp?.value;
-}
-
-// Read a settings sub-key from the unified settings entity.
-export async function loadSettingsValue(key, defaultValue) {
-  const settings = await readDesktopValue('manifest:settings');
-  const v = settings?.[key];
-  return v !== undefined ? v : defaultValue;
-}
-
 // Send a message to background and throw on error response.
 // Use for all data-reading messages where silent defaults are unacceptable.
 export async function sendAction(msg) {

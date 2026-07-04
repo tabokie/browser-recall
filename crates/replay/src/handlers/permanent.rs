@@ -3,7 +3,7 @@ use std::future::Future;
 
 use crate::{
     entities::Entity, entity_slug, find_lists_with_pin, generate_slug_from_url, get_list_order,
-    get_name_to_id, get_orphaned, get_page, is_page_eligible, remove_from_tree,
+    get_name_to_id, get_orphaned, get_page, remove_from_tree, retain_page_or_delete,
     touch_timestamp_map, Context, EntityEffect, EntityMap, ReplayError, LIST_ORDER_KEY,
     LIST_PREFIX, NAME_TO_ID_KEY, NOTE_PREFIX, ORPHANED_KEY, PAGE_PREFIX, SNAPSHOT_PREFIX,
 };
@@ -117,11 +117,7 @@ async fn remove_list_references<L, Fut>(
             if let Some(mut page) = get_page(result, load, &pin.id).await {
                 page.parent_ids.retain(|parent| parent != list_key);
                 touch_timestamp_map(&mut page.timestamps, &context.device_id, timestamp);
-                if is_page_eligible(&page) {
-                    result.insert(pin.id, EntityEffect::Upsert(Entity::Page(page)));
-                } else {
-                    result.insert(pin.id, EntityEffect::Delete);
-                }
+                retain_page_or_delete(result, pin.id, page);
             }
         }
     }
@@ -173,14 +169,7 @@ async fn remove_child_from_page<L, Fut>(
     if let Some(mut page) = get_page(result, load, page_key).await {
         page.child_ids.retain(|child| child != child_key);
         touch_timestamp_map(&mut page.timestamps, &context.device_id, timestamp);
-        if is_page_eligible(&page) {
-            result.insert(
-                page_key.to_string(),
-                EntityEffect::Upsert(Entity::Page(page)),
-            );
-        } else {
-            result.insert(page_key.to_string(), EntityEffect::Delete);
-        }
+        retain_page_or_delete(result, page_key.to_string(), page);
     }
 }
 

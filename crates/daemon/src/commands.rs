@@ -4,11 +4,11 @@ use crate::storage::{HistoryFileListing, Storage};
 use crate::{
     protocol::{RuleBatchEntry, RulePayload},
     rules::{preview_rule, validate_rule, PageData, RuleSpec},
-    runtime::{effect_with_overlay, EntityMapView},
+    runtime::{self, ReplayTransaction},
 };
-use browser_recall_replay::entities::{Entity, TreeNode};
+use browser_recall_replay::entities::{Entity, ListEntity, TreeNode};
 use browser_recall_replay::{
-    generate_slug_from_url, Context as ReplayContext, LogEntry, RuleInput, PERSISTENT_SETTINGS_KEYS,
+    generate_slug_from_url, LogEntry, RuleInput, PERSISTENT_SETTINGS_KEYS,
 };
 use chrono::TimeZone;
 use serde::{Deserialize, Serialize};
@@ -68,118 +68,6 @@ pub struct HistoryImportEntry {
     pub referrer_url: Option<String>,
     #[serde(default)]
     pub visit_times: Vec<i64>,
-}
-
-fn entity_to_json(entity: Entity) -> Result<Value, String> {
-    serde_json::to_value(entity).map_err(|error| error.to_string())
-}
-
-fn entity_visible(value: &Value, include_deleted: bool) -> bool {
-    include_deleted
-        || !value
-            .get("deleted")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-}
-
-pub async fn read_desktop_value(
-    storage: &Storage,
-    key: &str,
-    include_deleted: bool,
-) -> Result<Option<Value>, String> {
-    let value = match storage
-        .load_entity_coordinated(key)
-        .await
-        .map_err(|error| error.to_string())?
-    {
-        Some(entity) => {
-            let value = entity_to_json(entity)?;
-            if entity_visible(&value, include_deleted) {
-                Some(value)
-            } else {
-                None
-            }
-        }
-        None => None,
-    };
-    Ok(value)
-}
-
-pub async fn load_page_notes_payload(storage: &Storage, slug: &str) -> Result<Vec<Value>, String> {
-    let page = storage
-        .load_page_coordinated(slug)
-        .await
-        .map_err(|error| error.to_string())?;
-    let mut notes = Vec::new();
-    if let Some(page) = page {
-        for child_id in &page.child_ids {
-            let Some(note_slug) = child_id.strip_prefix("note:") else {
-                continue;
-            };
-            let Some(note) = storage
-                .load_note_coordinated(note_slug)
-                .await
-                .map_err(|error| error.to_string())?
-            else {
-                continue;
-            };
-            notes.push(json!({
-                "slug": note.slug,
-                "excerpt": note.excerpt,
-                "note": note.note,
-                "cssPath": note.css_path,
-                "url": note.url,
-            }));
-        }
-    }
-    Ok(notes)
-}
-
-pub async fn load_page_snapshot_payload(
-    storage: &Storage,
-    slug: &str,
-) -> Result<Vec<Value>, String> {
-    let page = storage
-        .load_page_coordinated(slug)
-        .await
-        .map_err(|error| error.to_string())?;
-    let mut snapshots = Vec::new();
-    if let Some(page) = page {
-        for child_id in &page.child_ids {
-            let Some(snapshot_stem) = child_id.strip_prefix("snapshot:") else {
-                continue;
-            };
-            let Some(last_dash) = snapshot_stem.rfind('-') else {
-                continue;
-            };
-            let Ok(timestamp) = snapshot_stem[last_dash + 1..].parse::<i64>() else {
-                continue;
-            };
-            let page_slug = &snapshot_stem[..last_dash];
-            let has_md = storage
-                .snapshot_html_file_path(page_slug, timestamp)
-                .with_extension("md")
-                .exists();
-            let has_html = storage
-                .snapshot_html_file_path(page_slug, timestamp)
-                .exists();
-            snapshots.push(json!({
-                "timestamp": timestamp,
-                "hasMd": has_md,
-                "hasHtml": has_html,
-            }));
-        }
-    }
-    snapshots.sort_by(|left, right| right["timestamp"].as_i64().cmp(&left["timestamp"].as_i64()));
-    Ok(snapshots)
-}
-
-pub async fn load_all_pages_payload(storage: &Storage) -> Result<Value, String> {
-    let pages = storage
-        .load_all_pages()
-        .await
-        .map_err(|error| error.to_string())?;
-    serde_json::to_value(pages).map_err(|error| error.to_string())
 }
 
 pub async fn page_relations_payload(storage: &Storage, url: &str) -> Result<Value, String> {
@@ -310,137 +198,23 @@ pub async fn replay_entries(
     device_id: &str,
     entries: Vec<LogEntry>,
 ) -> Result<(), String> {
-    let _guard = storage.write_guard().await;
-    replay_entries_locked(storage, device_id, entries).await
+    runtime::commit_local_entries(storage, device_id, entries)
+        .await
+        .map(|_| ())
 }
 
-async fn replay_entries_locked(
-    storage: &Storage,
-    device_id: &str,
+async fn replay_entries_in_transaction(
+    mut transaction: ReplayTransaction<'_>,
     entries: Vec<LogEntry>,
 ) -> Result<(), String> {
-    if entries.is_empty() {
-        return Ok(());
-    }
-    let entries = entries
-        .into_iter()
-        .map(|entry| serde_json::to_value(&entry).map(|raw| (entry, raw)))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
-
-    let replay_context = ReplayContext {
-        device_id: device_id.to_string(),
-    };
-    let mut effects = EntityMapView::new();
-    for (entry, _) in &entries {
-        let next_effects = effect_with_overlay(entry.clone(), storage, &effects, &replay_context)
-            .await
-            .map_err(|error| error.to_string())?;
-        effects.extend(next_effects);
-    }
-
-    commit_effects_locked(storage, device_id, &entries, effects).await
-}
-
-pub async fn commit_effects_locked(
-    storage: &Storage,
-    device_id: &str,
-    entries: &[(LogEntry, Value)],
-    effects: EntityMapView,
-) -> Result<(), String> {
-    let persisted_progress = storage
-        .load_replay_progress()
-        .await
-        .map_err(|error| error.to_string())?;
-    let must_flush_before_ack = persisted_progress.get(device_id).is_some_and(|progress| {
-        entries
-            .iter()
-            .any(|(entry, _)| entry.timestamp() <= *progress)
-    });
-    let replay_progress =
-        replay_progress_for_entries(device_id, entries.iter().map(|(entry, _)| entry));
-    let checkpoint_slot = if effects.is_empty() && replay_progress.is_empty() {
-        None
-    } else {
-        Some(
-            storage
-                .reserve_checkpoint_slot()
-                .await
-                .map_err(|error| error.to_string())?,
-        )
-    };
-
-    for (entry, _) in entries {
-        let raw = serde_json::to_value(entry).map_err(|error| error.to_string())?;
-        storage
-            .append_log_entry(device_id, entry.timestamp(), &raw)
-            .await
-            .map_err(|error| error.to_string())?;
-    }
-
-    for (key, effect) in &effects {
-        storage.apply_effect_to_cache(key, effect);
-    }
-    if let Some(checkpoint_slot) = checkpoint_slot {
-        Storage::send_reserved_checkpoint_work(checkpoint_slot, effects, replay_progress);
-    }
-    if must_flush_before_ack {
-        storage
-            .flush_checkpoints()
-            .await
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
-fn replay_progress_for_entries<'a>(
-    device_id: &str,
-    entries: impl Iterator<Item = &'a LogEntry>,
-) -> BTreeMap<String, i64> {
-    let mut replay_progress = BTreeMap::new();
     for entry in entries {
-        let current = replay_progress
-            .entry(device_id.to_string())
-            .or_insert(i64::MIN);
-        *current = (*current).max(entry.timestamp());
+        transaction.apply(entry).await?;
     }
-    replay_progress
+    transaction.commit().await.map(|_| ())
 }
 
 pub async fn recover_checkpoint_tail(storage: &Storage) -> Result<usize, String> {
-    let _guard = storage.write_guard().await;
-    let entries = storage
-        .load_log_entries_after_replay_progress()
-        .await
-        .map_err(|error| error.to_string())?;
-    if entries.is_empty() {
-        return Ok(0);
-    }
-
-    let mut effects = EntityMapView::new();
-    let mut replay_progress = BTreeMap::new();
-    for (device_id, entry) in &entries {
-        let replay_context = ReplayContext {
-            device_id: device_id.clone(),
-        };
-        let next_effects = effect_with_overlay(entry.clone(), storage, &effects, &replay_context)
-            .await
-            .map_err(|error| error.to_string())?;
-        effects.extend(next_effects);
-        let current = replay_progress.entry(device_id.clone()).or_insert(i64::MIN);
-        *current = (*current).max(entry.timestamp());
-    }
-
-    for (key, effect) in &effects {
-        storage.apply_effect_to_cache(key, effect);
-    }
-
-    let checkpoint_slot = storage
-        .reserve_checkpoint_slot()
-        .await
-        .map_err(|error| error.to_string())?;
-    Storage::send_reserved_checkpoint_work(checkpoint_slot, effects, replay_progress);
-    Ok(entries.len())
+    runtime::recover_checkpoint_tail(storage).await
 }
 
 pub async fn submit_event(
@@ -469,10 +243,14 @@ pub async fn list_event_fields(
     else {
         return Ok(None);
     };
-    Ok(Some((
-        list.name,
-        list.owner.unwrap_or_else(|| device_id.to_string()),
-    )))
+    Ok(Some(list_event_fields_from_list(&list, device_id)))
+}
+
+fn list_event_fields_from_list(list: &ListEntity, device_id: &str) -> (String, String) {
+    (
+        list.name.clone(),
+        list.owner.clone().unwrap_or_else(|| device_id.to_string()),
+    )
 }
 
 fn note_text_value(field_name: &str, value: Option<&Value>) -> Result<Option<Value>, String> {
@@ -541,7 +319,7 @@ fn note_slug_text(value: Option<&Value>) -> Option<String> {
     }
 }
 
-fn generate_slug_like_js(text: &str, hash_input: &str) -> String {
+fn normalized_slug_base(text: &str, fallback: &str) -> String {
     let mut base = String::new();
     let mut pending_dash = false;
     for character in text.chars().flat_map(char::to_lowercase) {
@@ -560,9 +338,12 @@ fn generate_slug_like_js(text: &str, hash_input: &str) -> String {
         base.pop();
     }
     if base.is_empty() {
-        base = "note".to_string();
+        base = fallback.to_string();
     }
+    base
+}
 
+fn js_hash_base36(hash_input: &str) -> String {
     let mut hash: i32 = 0;
     for unit in hash_input.encode_utf16() {
         hash = hash
@@ -570,7 +351,12 @@ fn generate_slug_like_js(text: &str, hash_input: &str) -> String {
             .wrapping_sub(hash)
             .wrapping_add(unit as i32);
     }
-    let hash_base36 = to_base36(i64::from(hash).unsigned_abs());
+    to_base36(i64::from(hash).unsigned_abs())
+}
+
+fn generate_slug_like_js(text: &str, hash_input: &str) -> String {
+    let base = normalized_slug_base(text, "note");
+    let hash_base36 = js_hash_base36(hash_input);
     let slug = format!("{base}-{hash_base36}");
     slug.chars().take(80).collect()
 }
@@ -626,7 +412,7 @@ pub async fn save_settings_key(
 }
 
 pub async fn ensure_default_lists(storage: &Storage, device_id: &str) -> Result<bool, String> {
-    let _guard = storage.write_guard().await;
+    let transaction = ReplayTransaction::begin(storage, device_id).await?;
     let name_map = storage
         .load_name_to_id()
         .await
@@ -669,9 +455,8 @@ pub async fn ensure_default_lists(storage: &Storage, device_id: &str) -> Result<
             .join("\n"),
         ),
     );
-    replay_entries_locked(
-        storage,
-        device_id,
+    replay_entries_in_transaction(
+        transaction,
         vec![
             LogEntry::CreateList {
                 timestamp: list_timestamp,
@@ -703,7 +488,7 @@ pub async fn create_note(
     request: &Value,
 ) -> Result<Value, String> {
     let (page_slug, note_slug) = {
-        let _guard = storage.write_guard().await;
+        let transaction = ReplayTransaction::begin(storage, device_id).await?;
         let timestamp = storage.next_command_timestamp_millis();
         let page_slug = request
             .get("pageSlug")
@@ -738,9 +523,8 @@ pub async fn create_note(
                 .map(str::to_string)
         });
 
-        replay_entries_locked(
-            storage,
-            device_id,
+        replay_entries_in_transaction(
+            transaction,
             vec![LogEntry::CreateNote {
                 timestamp,
                 url: page_url,
@@ -758,7 +542,10 @@ pub async fn create_note(
         (page_slug, note_slug)
     };
     let notes = if let Some(page_slug) = page_slug.as_deref() {
-        load_page_notes_payload(storage, page_slug).await?
+        crate::read_projections::ReadProjections::new(storage.clone())
+            .page_info(page_slug)
+            .await?
+            .notes
     } else {
         Vec::new()
     };
@@ -775,7 +562,7 @@ pub async fn delete_note(
     device_id: &str,
     note_slug: &str,
 ) -> Result<Value, String> {
-    let _guard = storage.write_guard().await;
+    let transaction = ReplayTransaction::begin(storage, device_id).await?;
     let note = storage
         .load_note(note_slug)
         .await
@@ -784,9 +571,8 @@ pub async fn delete_note(
     let page_slug = note_url
         .as_deref()
         .and_then(|url| generate_slug_from_url(url).ok());
-    replay_entries_locked(
-        storage,
-        device_id,
+    replay_entries_in_transaction(
+        transaction,
         vec![LogEntry::DeleteNote {
             timestamp: storage.next_command_timestamp_millis(),
             url: note_url.clone(),
@@ -808,7 +594,7 @@ pub async fn update_note(
     note_slug: &str,
     note_value: &str,
 ) -> Result<Value, String> {
-    let _guard = storage.write_guard().await;
+    let transaction = ReplayTransaction::begin(storage, device_id).await?;
     let old_note = storage
         .load_note(note_slug)
         .await
@@ -828,9 +614,8 @@ pub async fn update_note(
         timestamp += 1;
         new_note_slug = generate_note_slug(timestamp, slug_text.as_deref());
     }
-    replay_entries_locked(
-        storage,
-        device_id,
+    replay_entries_in_transaction(
+        transaction,
         vec![LogEntry::ReplaceNote {
             timestamp,
             url: old_note.url.clone(),
@@ -854,19 +639,17 @@ pub async fn toggle_list_pin(
     device_id: &str,
     request: &Value,
 ) -> Result<Value, String> {
-    let _guard = storage.write_guard().await;
+    let transaction = ReplayTransaction::begin(storage, device_id).await?;
     let list_id = request
         .get("listId")
         .and_then(Value::as_str)
         .ok_or_else(|| "toggleListPin missing listId".to_string())?;
-    let (list_name, list_owner) = list_event_fields(storage, device_id, list_id)
-        .await?
-        .ok_or_else(|| "List not found".to_string())?;
     let list = storage
         .load_list(list_id)
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "List not found".to_string())?;
+    let (list_name, list_owner) = list_event_fields_from_list(&list, device_id);
     let note_id = request.get("id").and_then(Value::as_str);
     let pin_item = if let Some(note_id) = note_id.filter(|value| value.starts_with("note:")) {
         format!("objects/notes/{}.json", &note_id["note:".len()..])
@@ -904,9 +687,8 @@ pub async fn toggle_list_pin(
     } else {
         None
     };
-    replay_entries_locked(
-        storage,
-        device_id,
+    replay_entries_in_transaction(
+        transaction,
         vec![if is_pinned {
             LogEntry::UnpinFromList {
                 timestamp: storage.next_command_timestamp_millis(),
@@ -937,7 +719,7 @@ pub async fn add_list_pins(
     device_id: &str,
     request: &Value,
 ) -> Result<(), String> {
-    let _guard = storage.write_guard().await;
+    let transaction = ReplayTransaction::begin(storage, device_id).await?;
     let list_id = request
         .get("listId")
         .and_then(Value::as_str)
@@ -979,9 +761,8 @@ pub async fn add_list_pins(
             }
         }
     }
-    replay_entries_locked(
-        storage,
-        device_id,
+    replay_entries_in_transaction(
+        transaction,
         vec![LogEntry::PinToList {
             timestamp: storage.next_command_timestamp_millis(),
             name: list_name,
@@ -999,7 +780,7 @@ pub async fn save_list_meta(
     device_id: &str,
     request: &Value,
 ) -> Result<Value, String> {
-    let _guard = storage.write_guard().await;
+    let transaction = ReplayTransaction::begin(storage, device_id).await?;
     let list_id = request.get("listId").and_then(Value::as_str);
     let name = request
         .get("name")
@@ -1019,9 +800,8 @@ pub async fn save_list_meta(
         if list.name == new_name {
             return Ok(json!({ "success": true }));
         }
-        replay_entries_locked(
-            storage,
-            device_id,
+        replay_entries_in_transaction(
+            transaction,
             vec![LogEntry::UpdateList {
                 timestamp: storage.next_command_timestamp_millis(),
                 name: list.name,
@@ -1035,9 +815,8 @@ pub async fn save_list_meta(
         let name = name.ok_or_else(|| "saveListMeta missing name".to_string())?;
         let timestamp = storage.next_command_timestamp_millis();
         let generated_list_id = generate_list_id(&name, timestamp);
-        replay_entries_locked(
-            storage,
-            device_id,
+        replay_entries_in_transaction(
+            transaction,
             vec![LogEntry::CreateList {
                 timestamp,
                 name,
@@ -1061,7 +840,7 @@ pub async fn delete_list(
     device_id: &str,
     list_id: &str,
 ) -> Result<Value, String> {
-    let _guard = storage.write_guard().await;
+    let transaction = ReplayTransaction::begin(storage, device_id).await?;
     let list = storage
         .load_list(list_id)
         .await
@@ -1082,12 +861,9 @@ pub async fn delete_list(
             }
         }
     }
-    let (list_name, list_owner) = list_event_fields(storage, device_id, list_id)
-        .await?
-        .ok_or_else(|| "List not found".to_string())?;
-    replay_entries_locked(
-        storage,
-        device_id,
+    let (list_name, list_owner) = list_event_fields_from_list(&list, device_id);
+    replay_entries_in_transaction(
+        transaction,
         vec![LogEntry::DeleteList {
             timestamp: storage.next_command_timestamp_millis(),
             name: list_name,
@@ -1107,10 +883,9 @@ pub async fn update_list_tree(
     device_id: &str,
     tree: Vec<TreeNode>,
 ) -> Result<(), String> {
-    let _guard = storage.write_guard().await;
-    replay_entries_locked(
-        storage,
-        device_id,
+    let transaction = ReplayTransaction::begin(storage, device_id).await?;
+    replay_entries_in_transaction(
+        transaction,
         vec![LogEntry::UpdateListTree {
             timestamp: storage.next_command_timestamp_millis(),
             tree,
@@ -1124,7 +899,7 @@ pub async fn restore_note(
     device_id: &str,
     note_slug: &str,
 ) -> Result<(), String> {
-    let _guard = storage.write_guard().await;
+    let transaction = ReplayTransaction::begin(storage, device_id).await?;
     let orphaned = storage
         .load_orphaned()
         .await
@@ -1143,9 +918,8 @@ pub async fn restore_note(
                 .and_then(|entry| entry.url.clone())
         })
         .or_else(|| note.and_then(|value| value.url));
-    replay_entries_locked(
-        storage,
-        device_id,
+    replay_entries_in_transaction(
+        transaction,
         vec![LogEntry::RestoreNote {
             timestamp: storage.next_command_timestamp_millis(),
             url: page_url,
@@ -1160,7 +934,7 @@ pub async fn restore_snapshot(
     device_id: &str,
     snapshot_stem: &str,
 ) -> Result<String, String> {
-    let _guard = storage.write_guard().await;
+    let transaction = ReplayTransaction::begin(storage, device_id).await?;
     let (page_slug, timestamp) = split_snapshot_stem(snapshot_stem)
         .ok_or_else(|| "restoreSnapshot invalid snapSlug".to_string())?;
     let orphaned = storage
@@ -1182,9 +956,8 @@ pub async fn restore_snapshot(
         })
         .or_else(|| page.and_then(|value| value.url))
         .ok_or_else(|| "Cannot determine page URL for snapshot".to_string())?;
-    replay_entries_locked(
-        storage,
-        device_id,
+    replay_entries_in_transaction(
+        transaction,
         vec![LogEntry::RestoreSnapshot {
             timestamp: storage.next_command_timestamp_millis(),
             url: page_url,
@@ -1196,15 +969,14 @@ pub async fn restore_snapshot(
 }
 
 pub async fn restore_list(storage: &Storage, device_id: &str, list_id: &str) -> Result<(), String> {
-    let _guard = storage.write_guard().await;
+    let transaction = ReplayTransaction::begin(storage, device_id).await?;
     let list = storage
         .load_list(list_id)
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "List not found".to_string())?;
-    replay_entries_locked(
-        storage,
-        device_id,
+    replay_entries_in_transaction(
+        transaction,
         vec![LogEntry::RestoreList {
             timestamp: storage.next_command_timestamp_millis(),
             name: list.name,
@@ -1220,7 +992,7 @@ pub async fn delete_snapshot(
     slug: &str,
     timestamp: i64,
 ) -> Result<(), String> {
-    let _guard = storage.write_guard().await;
+    let transaction = ReplayTransaction::begin(storage, device_id).await?;
     let page = storage
         .load_page(slug)
         .await
@@ -1229,9 +1001,8 @@ pub async fn delete_snapshot(
     let url = page
         .url
         .ok_or_else(|| "Page entity missing URL for snapshot".to_string())?;
-    replay_entries_locked(
-        storage,
-        device_id,
+    replay_entries_in_transaction(
+        transaction,
         vec![LogEntry::DeleteSnapshot {
             timestamp: storage.next_command_timestamp_millis(),
             url,
@@ -1246,18 +1017,13 @@ pub async fn permanent_delete_keys(
     device_id: &str,
     keys: &[String],
 ) -> Result<Vec<String>, String> {
-    let _guard = storage.write_guard().await;
+    let transaction = ReplayTransaction::begin(storage, device_id).await?;
     let deleted_keys = permanent_delete_candidates(keys);
     if deleted_keys.is_empty() {
         return Ok(deleted_keys);
     }
-    storage
-        .flush_checkpoints()
-        .await
-        .map_err(|error| error.to_string())?;
-    replay_entries_locked(
-        storage,
-        device_id,
+    replay_entries_in_transaction(
+        transaction,
         vec![LogEntry::PermanentDelete {
             timestamp: storage.next_command_timestamp_millis(),
             keys: deleted_keys.clone(),
@@ -1384,7 +1150,7 @@ pub async fn add_rule(
     list_id: &str,
     rule: RulePayload,
 ) -> Result<Value, String> {
-    let _guard = storage.write_guard().await;
+    let transaction = ReplayTransaction::begin(storage, device_id).await?;
     let (list_name, list_owner) = list_event_fields(storage, device_id, list_id)
         .await?
         .ok_or_else(|| "List not found".to_string())?;
@@ -1399,9 +1165,8 @@ pub async fn add_rule(
         }));
     }
 
-    replay_entries_locked(
-        storage,
-        device_id,
+    replay_entries_in_transaction(
+        transaction,
         vec![LogEntry::AddRule {
             timestamp: storage.next_command_timestamp_millis(),
             name: list_name,
@@ -1423,13 +1188,12 @@ pub async fn remove_rule(
     list_id: &str,
     rule_id: &str,
 ) -> Result<(), String> {
-    let _guard = storage.write_guard().await;
+    let transaction = ReplayTransaction::begin(storage, device_id).await?;
     let (list_name, list_owner) = list_event_fields(storage, device_id, list_id)
         .await?
         .ok_or_else(|| "List not found".to_string())?;
-    replay_entries_locked(
-        storage,
-        device_id,
+    replay_entries_in_transaction(
+        transaction,
         vec![LogEntry::RemoveRule {
             timestamp: storage.next_command_timestamp_millis(),
             name: list_name,
@@ -1447,13 +1211,12 @@ pub async fn update_rule(
     rule_id: &str,
     config: BTreeMap<String, Value>,
 ) -> Result<(), String> {
-    let _guard = storage.write_guard().await;
+    let transaction = ReplayTransaction::begin(storage, device_id).await?;
     let (list_name, list_owner) = list_event_fields(storage, device_id, list_id)
         .await?
         .ok_or_else(|| "List not found".to_string())?;
-    replay_entries_locked(
-        storage,
-        device_id,
+    replay_entries_in_transaction(
+        transaction,
         vec![LogEntry::UpdateRule {
             timestamp: storage.next_command_timestamp_millis(),
             name: list_name,
@@ -1509,39 +1272,8 @@ fn to_base36(mut value: u64) -> String {
 }
 
 fn generate_list_id(name: &str, timestamp: i64) -> String {
-    let mut normalized = String::new();
-    let mut pending_dash = false;
-    for character in name.chars().flat_map(char::to_lowercase) {
-        if character.is_alphanumeric() {
-            if pending_dash && !normalized.is_empty() {
-                normalized.push('-');
-            }
-            normalized.push(character);
-            pending_dash = false;
-        } else if !normalized.is_empty() {
-            pending_dash = true;
-        }
-    }
-    let mut base = normalized
-        .trim_matches('-')
-        .chars()
-        .take(30)
-        .collect::<String>();
-    while base.ends_with('-') {
-        base.pop();
-    }
-    if base.is_empty() {
-        base = "list".to_string();
-    }
-
-    let mut hash: i32 = 0;
-    for unit in format!("{name}{timestamp}").encode_utf16() {
-        hash = hash
-            .wrapping_shl(5)
-            .wrapping_sub(hash)
-            .wrapping_add(unit as i32);
-    }
-    let suffix = to_base36(i64::from(hash).unsigned_abs());
+    let base = normalized_slug_base(name, "list");
+    let suffix = js_hash_base36(&format!("{name}{timestamp}"));
     format!("{base}-{suffix}")
 }
 
@@ -1601,6 +1333,7 @@ pub async fn import_bookmarks(
                 urls.push(bookmark.url.clone());
                 titles.push((!bookmark.title.trim().is_empty()).then_some(bookmark.title));
             }
+            bookmark_count += urls.len();
 
             replay_entry(
                 storage,
@@ -1609,13 +1342,12 @@ pub async fn import_bookmarks(
                     timestamp: storage.next_command_timestamp_millis(),
                     name: list_name.clone(),
                     list_owner: device_id.to_string(),
-                    urls: urls.clone(),
+                    urls,
                     titles: titles.iter().any(Option::is_some).then_some(titles),
                     source: None,
                 },
             )
             .await?;
-            bookmark_count += urls.len();
         }
 
         failures.extend(node.skipped.into_iter().map(|skipped| {

@@ -3,7 +3,7 @@ export * from './color-scheme-map.js';
 export * from './connector-diagnostics.js';
 export * from './entity-types.js';
 export * from './highlight-format.js';
-export * from './highlight-helpers.js';
+export * from './highlight-lifecycle.js';
 export * from './logger.js';
 export * from './rule-engine.js';
 export * from './search-helpers.js';

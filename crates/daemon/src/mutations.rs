@@ -2,7 +2,7 @@ use crate::protocol::MutationPayload;
 use crate::runtime::EntityMapView;
 use browser_recall_replay::{generate_slug_from_url, LogEntry};
 use serde_json::Value;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 
 pub fn dedupe_mutations(mutations: Vec<MutationPayload>) -> Vec<MutationPayload> {
     let mut seen = HashSet::new();
@@ -47,7 +47,7 @@ fn note_slug_from_path(path: &str) -> Option<String> {
 
 fn snapshot_slug_from_path(path: &str) -> Option<String> {
     path.strip_prefix("objects/snapshots/")
-        .and_then(|value| value.rsplit_once('/').map(|(_, stem)| stem).or(Some(value)))
+        .and_then(|value| value.rsplit('/').next())
         .and_then(|value| value.rsplit_once('-').map(|(slug, _)| slug.to_string()))
 }
 
@@ -167,34 +167,12 @@ pub fn build_mutations(
     if effects.contains_key("manifest:list-order") || effects.contains_key("manifest:name-to-id") {
         mutations.push(mutation("lists"));
     }
-    if raw_entry
-        .get("source")
-        .and_then(Value::as_str)
-        .is_some_and(|value| value == "auto")
-    {
+    if raw_entry.get("source").and_then(Value::as_str) == Some("auto") {
         mutations.push(MutationPayload {
             list_id: first_list_id_from_effects(effects),
             ..mutation("pins")
         });
     }
 
-    let mut deduped = Vec::new();
-    let mut seen = BTreeSet::new();
-    for item in mutations {
-        let signature = format!(
-            "{}|{}|{}|{}|{}|{}|{}|{}",
-            item.mutation_type,
-            item.list_id.as_deref().unwrap_or_default(),
-            item.page_slug.as_deref().unwrap_or_default(),
-            item.note_slug.as_deref().unwrap_or_default(),
-            item.old_note_slug.as_deref().unwrap_or_default(),
-            item.slug.as_deref().unwrap_or_default(),
-            item.url.as_deref().unwrap_or_default(),
-            item.key.as_deref().unwrap_or_default()
-        );
-        if seen.insert(signature) {
-            deduped.push(item);
-        }
-    }
-    deduped
+    dedupe_mutations(mutations)
 }

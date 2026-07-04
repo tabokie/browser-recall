@@ -29,7 +29,7 @@ import {
   requestDesktopHistoryBatch,
   requestDesktopPageInfo,
   requestDesktopPageSummary,
-  requestDesktopEntity,
+  requestDesktopSettings,
   requestDesktopCommand,
   requestDesktopPopupLists,
   requestDesktopSnapshotHtml,
@@ -158,16 +158,23 @@ const badgeController = createBadgeController({
   specialNoteIconPaths: SPECIAL_NOTE_ICON_PATHS,
   specialMixedIconPaths: SPECIAL_MIXED_ICON_PATHS,
   syncDesktopConnectorPauseState,
-  readDesktopValue,
+  readPageMarkers: async (url) => {
+    const summary = await handleGetPageSummary({ url });
+    if (!summary.success || !summary.page) return null;
+    const slug = generateSlugFromUrl(url);
+    return {
+      hasNotes: summary.notes.length > 0 || summary.snapshots.length > 0,
+      hasLists: summary.lists.some((list) =>
+        (list.pins || []).some(
+          (pin) => pin.kind === 'page' && pin.slug === slug,
+        ),
+      ),
+    };
+  },
   readRecordingPausedState: async () => {
     const workspace = await getWorkspaceState();
     return workspace?.mode === 'private';
   },
-  generateSlugFromUrl,
-  pageKey,
-  notePrefix: NOTE_PREFIX,
-  snapshotPrefix: SNAPSHOT_PREFIX,
-  listPrefix: LIST_PREFIX,
   resolveTabUrl: badgeIdentityUrlForTab,
   getBadgeAccentColor,
 });
@@ -272,22 +279,6 @@ async function runDesktopCommand(action, request = {}) {
   }
 }
 
-async function loadDesktopEntityValue(key) {
-  try {
-    const desktopResp = await requestDesktopEntity(key);
-    if (!desktopResp?.success) {
-      throw new Error(desktopResp?.error || `Desktop read failed for ${key}`);
-    }
-    return {
-      hit: true,
-      value: desktopResp.entity ?? null,
-    };
-  } catch (error) {
-    logDebug(`[desktop] read entity failed for ${key}:`, error.message);
-    throw error;
-  }
-}
-
 async function loadDesktopHistoryRange(from, to) {
   const filesResp = await requestDesktopHistoryFiles(false);
   if (!filesResp?.success) {
@@ -308,16 +299,6 @@ async function loadDesktopHistoryRange(from, to) {
     (left, right) => (left.timestamp || 0) - (right.timestamp || 0),
   );
   return { entries, files };
-}
-
-async function readDesktopValueFromDaemon(key) {
-  if (key.startsWith('log:')) {
-    const dateStr = key.slice('log:'.length);
-    const desktop = await loadDesktopHistoryRange(dateStr, dateStr);
-    return desktop.entries;
-  }
-  const desktop = await loadDesktopEntityValue(key);
-  return desktop.hit ? desktop.value : undefined;
 }
 
 async function mirrorSnapshotToDesktop(snapshot) {
@@ -641,12 +622,6 @@ async function buildLeaveReport(url, title, scrollDepth, timeOnPage) {
 
 // ─── Settings Keys ───────────────────────────────────────────────────
 
-async function readDesktopValue(key, includeDeleted = false) {
-  const value = await readDesktopValueFromDaemon(key);
-  if (!includeDeleted && value?.deleted) return null;
-  return value;
-}
-
 async function ensureDefaultLists() {
   try {
     const response = await runDesktopCommand('ensureDefaultLists');
@@ -833,9 +808,6 @@ async function getBadgeAccentColor() {
   return SCHEME_HEX[colorScheme] || SCHEME_HEX.amber;
 }
 
-async function startSpinnerBadge(tabId) {
-  await badgeController.startSpinnerBadge(tabId);
-}
 async function stopSpinnerBadge(tabId) {
   try {
     const tab = await chrome.tabs.get(tabId);
@@ -903,7 +875,7 @@ function prepareSnapshotHtml(html, slug, url = null) {
 }
 
 async function captureAndLog(tabId, slug, timestamp, url, title) {
-  startSpinnerBadge(tabId);
+  badgeController.startSpinnerBadge(tabId);
   try {
     const cannotCapturePdfMessage = tr(
       'extensionCannotCapturePdf',
@@ -931,12 +903,15 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
     const mdResp = await chrome.tabs.sendMessage(tabId, {
       action: 'extractMarkdown',
     });
-    const settings = (await readDesktopValue('manifest:settings')) || {};
-    const html = prepareSnapshotHtml(
-      await captureSavePage(tabId, settings),
-      slug,
-      url,
-    );
+    const settingsResponse = await requestDesktopSettings();
+    if (!settingsResponse?.success) {
+      throw new Error(
+        settingsResponse?.error || 'Desktop settings unavailable',
+      );
+    }
+    const settings = settingsResponse.settings || {};
+    const capture = await captureSavePage(tabId, settings);
+    const html = prepareSnapshotHtml(capture.html, slug, url);
     const markdown = mdResp?.markdown || '';
     if (!markdown && !html) {
       throw new Error(
@@ -957,9 +932,26 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
     await flushInteractiveWrites();
     void badgeController.refreshBadgesForUrls([url]);
     notifyMutation('snapshot', { slug });
+    return { warnings: capture.warnings || [] };
   } finally {
     stopSpinnerBadge(tabId);
   }
+}
+
+function captureWarningMessage(warnings) {
+  const count = warnings?.length || 0;
+  if (count === 0) return null;
+  if (count === 1) {
+    return tr(
+      'extensionSnapshotCapturedWithOneWarning',
+      'Snapshot captured, but 1 resource was unavailable.',
+    );
+  }
+  return tr(
+    'extensionSnapshotCapturedWithWarnings',
+    `Snapshot captured, but ${count} resources were unavailable.`,
+    [String(count)],
+  );
 }
 
 // ─── Context Menu ─────────────────────────────────────────────────────
@@ -1024,15 +1016,8 @@ async function handleContextMenuHighlight(url, title, selectionText, tabId) {
 
   // Show highlights panel in the tab's content script
   if (tabId > 0) {
-    const page = await readDesktopValue(pageKey(slug));
-    const noteRefs = (page?.childIds || []).filter((c) =>
-      c.startsWith(NOTE_PREFIX),
-    );
-    const notes = [];
-    for (const ref of noteRefs) {
-      const note = await readDesktopValue(ref);
-      if (note) notes.push(note);
-    }
+    const pageInfo = await handleGetPageInfo({ slug });
+    const notes = pageInfo.success ? pageInfo.notes : [];
     chrome.tabs
       .sendMessage(tabId, {
         action: 'showHighlightsPanel',
@@ -1110,13 +1095,24 @@ chrome.commands.onCommand.addListener(async (command) => {
     try {
       const slug = generateSlugFromUrl(tab.url);
       const timestamp = await nextLogTimestamp();
-      await captureAndLog(tab.id, slug, timestamp, tab.url, tab.title);
+      const capture = await captureAndLog(
+        tab.id,
+        slug,
+        timestamp,
+        tab.url,
+        tab.title,
+      );
       chrome.tabs
         .sendMessage(tab.id, { action: 'hideCaptureSpinner' })
         .catch(() => {});
-      chrome.tabs
-        .sendMessage(tab.id, { action: 'showCaptureNotification' })
-        .catch(() => {});
+      const warning = captureWarningMessage(capture.warnings);
+      if (warning) {
+        await notifyTabUserActionError(tab.id, warning, warning);
+      } else {
+        chrome.tabs
+          .sendMessage(tab.id, { action: 'showCaptureNotification' })
+          .catch(() => {});
+      }
     } catch (error) {
       logDebug('[capture] ERROR:', error.message, error);
       chrome.tabs
@@ -1293,8 +1289,19 @@ async function handleCaptureCurrentPageFromPopup() {
       };
     const slug = generateSlugFromUrl(tab.url);
     const timestamp = await nextLogTimestamp();
-    await captureAndLog(tab.id, slug, timestamp, tab.url, tab.title);
-    return { success: true, timestamp };
+    const capture = await captureAndLog(
+      tab.id,
+      slug,
+      timestamp,
+      tab.url,
+      tab.title,
+    );
+    return {
+      success: true,
+      timestamp,
+      warning: captureWarningMessage(capture.warnings),
+      warnings: capture.warnings,
+    };
   } catch (error) {
     logDebug('[capture-popup] ERROR:', error.message, error);
     return { success: false, error: error.message };
@@ -1398,15 +1405,6 @@ async function handleGetDeviceId() {
     };
   }
   return { success: true, deviceId };
-}
-
-async function handleReadDesktopValue(request) {
-  try {
-    const value = await readDesktopValue(request.key, request.includeDeleted);
-    return { success: true, value };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
 }
 
 async function handleGetPopupAccessState(request) {
@@ -1786,7 +1784,7 @@ async function handleListSnapshots(request) {
   return { success: true, snapshots };
 }
 
-async function handleGetSnapshotUrl(request) {
+async function requestSnapshotHtml(request, fallbackError) {
   try {
     const desktopResp = await requestDesktopSnapshotHtml(
       request.slug,
@@ -1795,44 +1793,32 @@ async function handleGetSnapshotUrl(request) {
     if (!desktopResp?.success || !desktopResp?.html) {
       return {
         success: false,
-        error: desktopResp?.error || 'Desktop snapshot url failed',
+        error: desktopResp?.error || fallbackError,
       };
     }
-    return {
-      success: true,
-      url:
-        'data:text/html;charset=utf-8,' + encodeURIComponent(desktopResp.html),
-    };
+    return { success: true, html: desktopResp.html };
   } catch (error) {
     return {
       success: false,
-      error: error.message || 'Desktop snapshot url failed',
+      error: error.message || fallbackError,
     };
   }
 }
 
-async function handleGetSnapshotHtml(request) {
-  try {
-    const desktopResp = await requestDesktopSnapshotHtml(
-      request.slug,
-      request.timestamp,
-    );
-    if (!desktopResp?.success || !desktopResp?.html) {
-      return {
-        success: false,
-        error: desktopResp?.error || 'Desktop snapshot html failed',
-      };
-    }
-    return {
-      success: true,
-      html: desktopResp.html,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error: error.message || 'Desktop snapshot html failed',
-    };
-  }
+async function handleGetSnapshotUrl(request) {
+  const response = await requestSnapshotHtml(
+    request,
+    'Desktop snapshot url failed',
+  );
+  if (!response.success) return response;
+  return {
+    success: true,
+    url: 'data:text/html;charset=utf-8,' + encodeURIComponent(response.html),
+  };
+}
+
+function handleGetSnapshotHtml(request) {
+  return requestSnapshotHtml(request, 'Desktop snapshot html failed');
 }
 
 async function handleOpenSnapshot(request) {
@@ -1988,13 +1974,13 @@ async function handleInitializeFilesystem(request) {
 }
 
 async function handleDeleteSnapshot(request) {
-  const pageBefore = request.slug
-    ? await readDesktopValue(pageKey(request.slug)).catch(() => null)
+  const pageInfo = request.slug
+    ? await handleGetPageInfo({ slug: request.slug }).catch(() => null)
     : null;
   const response = await runDesktopCommand('deleteSnapshot', request);
   if (!response.success) return response;
-  if (pageBefore?.url) {
-    void badgeController.refreshBadgesForUrls([pageBefore.url]);
+  if (pageInfo?.entry?.url) {
+    void badgeController.refreshBadgesForUrls([pageInfo.entry.url]);
   } else {
     void badgeController.refreshActiveTabBadge();
   }
@@ -2054,11 +2040,7 @@ async function handleSetRecordingPaused(request) {
       mode: paused ? 'private' : 'default',
     },
   });
-  if (paused) {
-    await badgeController.setRecordingPaused(true);
-    return { success: true };
-  }
-  await badgeController.setRecordingPaused(false);
+  await badgeController.setRecordingPaused(paused);
   return { success: true };
 }
 
@@ -2127,9 +2109,6 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
           break;
         case 'connectDesktopBridge':
           sendResponse(await handleConnectDesktopBridge());
-          break;
-        case 'readDesktopValue':
-          sendResponse(await handleReadDesktopValue(request));
           break;
         case 'getPopupAccessState':
           sendResponse(await handleGetPopupAccessState(request));

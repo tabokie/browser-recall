@@ -36,16 +36,16 @@ where
     if !page.visit_dates.contains(&visit_date) {
         page.visit_dates.push(visit_date);
     }
-    if let Some(referrer) = referrer_url {
-        let parent_slug = crate::generate_slug_from_url(referrer)?;
-        let parent_key = format!("{PAGE_PREFIX}{parent_slug}");
-        append_capped(&mut page.parent_ids, parent_key);
+    let parent_key = referrer_url
+        .map(crate::generate_slug_from_url)
+        .transpose()?
+        .map(|slug| format!("{PAGE_PREFIX}{slug}"));
+    if let Some(parent_key) = &parent_key {
+        append_capped(&mut page.parent_ids, parent_key.clone());
     }
     result.insert(page_key.clone(), EntityEffect::Upsert(Entity::Page(page)));
 
-    if let Some(referrer) = referrer_url {
-        let parent_slug = crate::generate_slug_from_url(referrer)?;
-        let parent_key = format!("{PAGE_PREFIX}{parent_slug}");
+    if let Some(parent_key) = parent_key {
         if parent_key != page_key {
             if let Some(mut parent) = load_page(load, &parent_key).await {
                 touch_timestamp(&mut parent, &context.device_id, timestamp);

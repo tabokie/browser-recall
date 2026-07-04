@@ -3,11 +3,11 @@ mod logging;
 mod login_item;
 mod search;
 
+use browser_recall_daemon::command_authority::CommandAuthority;
 use browser_recall_daemon::commands::{
-    list_history_files, list_paired_browsers, load_all_pages_payload, load_history_batch,
-    load_page_notes_payload, load_page_snapshot_payload, page_relations_payload,
-    pair_browser_revoke, preview_rule_payload, read_desktop_value,
-    search_notes as command_search_notes, search_snapshots as command_search_snapshots,
+    list_history_files, list_paired_browsers, load_history_batch, page_relations_payload,
+    pair_browser_revoke, preview_rule_payload, search_notes as command_search_notes,
+    search_snapshots as command_search_snapshots,
 };
 use browser_recall_daemon::pairing::{
     ApprovalFuture, PairingApprover, PairingDecision, PairingRequest,
@@ -15,6 +15,7 @@ use browser_recall_daemon::pairing::{
 use browser_recall_daemon::protocol::{
     DaemonMessage, MutationPayload, RuleBatchEntry, RulePayload,
 };
+use browser_recall_daemon::read_projections::ReadProjections;
 use browser_recall_daemon::search::{
     search_history_parallel_in_data_dir, search_notes_in_data_dir, search_snapshots_in_data_dir,
     NoteSearchHit, SnapshotSearchHit,
@@ -72,7 +73,7 @@ struct ShellState {
 }
 
 struct DesktopState {
-    _server: Mutex<Option<ServerHandle>>,
+    server: Mutex<Option<ServerHandle>>,
     config_store: ConfigStore,
     shell: Mutex<ShellState>,
     sync: SyncController,
@@ -530,13 +531,17 @@ fn update_shell_settings(app: AppHandle, payload: ShellSettingsUpdate) -> Result
 
 #[tauri::command]
 fn resume_shell_service(app: AppHandle) -> Result<(), String> {
+    resume_daemon(&app)
+}
+
+fn resume_daemon(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<DesktopState>();
-    let server = state._server.lock().expect("server state poisoned");
+    let server = state.server.lock().expect("server state poisoned");
     let server = server
         .as_ref()
         .ok_or_else(|| "Browser Recall daemon is not running".to_string())?;
     tauri::async_runtime::block_on(server.resume());
-    update_shell_state(&app, |state| state.route = Some("settings".to_string()));
+    update_shell_state(app, |state| state.route = Some("settings".to_string()));
     Ok(())
 }
 
@@ -685,7 +690,7 @@ fn shell_snapshot(app: &AppHandle) -> ServerSnapshot {
 fn storage_for_app(app: &AppHandle) -> Result<Storage, String> {
     let server_storage = {
         let state = app.state::<DesktopState>();
-        let server = state._server.lock().expect("server state poisoned");
+        let server = state.server.lock().expect("server state poisoned");
         server.as_ref().map(ServerHandle::storage)
     };
     if let Some(storage) = server_storage {
@@ -696,39 +701,8 @@ fn storage_for_app(app: &AppHandle) -> Result<Storage, String> {
 
 fn server_control_for_app(app: &AppHandle) -> Option<ServerControlHandle> {
     let state = app.state::<DesktopState>();
-    let server = state._server.lock().expect("server state poisoned");
+    let server = state.server.lock().expect("server state poisoned");
     server.as_ref().map(ServerHandle::control_handle)
-}
-
-fn is_daemon_write_command(action: &str) -> bool {
-    matches!(
-        action,
-        "saveSettingsKey"
-            | "ensureDefaultLists"
-            | "renamePage"
-            | "reportVisit"
-            | "reportLeave"
-            | "ratePage"
-            | "createNote"
-            | "deleteNote"
-            | "updateNote"
-            | "toggleListPin"
-            | "addListPins"
-            | "saveListMeta"
-            | "importBookmarks"
-            | "importHistory"
-            | "deleteList"
-            | "updateListTree"
-            | "restoreNote"
-            | "restoreSnapshot"
-            | "restoreList"
-            | "permanentDeleteAll"
-            | "deleteSnapshot"
-            | "clearAllData"
-            | "addRule"
-            | "removeRule"
-            | "updateRule"
-    )
 }
 
 fn shell_device_id(app: &AppHandle) -> String {
@@ -782,7 +756,7 @@ async fn start_shell_server(app: &AppHandle) -> Result<ServerSnapshot, String> {
     let config_store = {
         let state = app.state::<DesktopState>();
         if state
-            ._server
+            .server
             .lock()
             .expect("server state poisoned")
             .is_some()
@@ -810,7 +784,7 @@ async fn start_shell_server(app: &AppHandle) -> Result<ServerSnapshot, String> {
 
     {
         let state = app.state::<DesktopState>();
-        let mut server_slot = state._server.lock().expect("server state poisoned");
+        let mut server_slot = state.server.lock().expect("server state poisoned");
         *server_slot = Some(server);
     }
 
@@ -972,6 +946,179 @@ async fn run_background_sync_once(app: AppHandle) {
     }
 }
 
+fn desktop_connector_state_response(
+    snapshot: &ServerSnapshot,
+    storage: &Storage,
+    setup_complete: bool,
+) -> Value {
+    if !setup_complete {
+        return json!({
+            "success": true,
+            "state": "setup_required",
+            "port": null,
+            "deviceId": null,
+            "hasToken": false,
+            "pendingCommands": 0,
+            "pendingBytes": 0,
+            "refuseMode": false,
+            "lastError": null,
+            "lastErrorCode": null,
+            "lastDrainedAt": null,
+            "dataFolder": null,
+            "daemonBufferDepth": 0,
+        });
+    }
+
+    let state = if snapshot.service_status == ServiceStatus::Paused {
+        "paused"
+    } else {
+        "connected"
+    };
+    json!({
+        "success": true,
+        "state": state,
+        "port": snapshot.port,
+        "deviceId": snapshot.device_id,
+        "hasToken": true,
+        "pendingCommands": 0,
+        "pendingBytes": 0,
+        "refuseMode": false,
+        "lastError": snapshot.last_error,
+        "lastErrorCode": snapshot.last_error_code,
+        "lastDrainedAt": null,
+        "dataFolder": storage.root().to_string_lossy().to_string(),
+        "daemonBufferDepth": 0,
+    })
+}
+
+fn paired_browser_payloads(
+    config_store: &ConfigStore,
+    snapshot: &ServerSnapshot,
+) -> Result<Vec<Value>, String> {
+    let connected = snapshot
+        .connected_connectors
+        .iter()
+        .map(|connector| (connector.browser_id.clone(), connector.extension_id.clone()))
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut paired_browsers = list_paired_browsers(config_store)?
+        .into_iter()
+        .map(|connector| {
+            let is_connected =
+                connected.contains(&(connector.browser_id.clone(), connector.extension_id.clone()));
+            (is_connected, connector)
+        })
+        .collect::<Vec<_>>();
+    paired_browsers.sort_by(|(left_connected, left), (right_connected, right)| {
+        right_connected
+            .cmp(left_connected)
+            .then_with(|| right.last_seen.cmp(&left.last_seen))
+            .then_with(|| right.approved_at.cmp(&left.approved_at))
+            .then_with(|| left.browser_name.cmp(&right.browser_name))
+            .then_with(|| left.browser_profile.cmp(&right.browser_profile))
+            .then_with(|| left.browser_id.cmp(&right.browser_id))
+            .then_with(|| left.extension_id.cmp(&right.extension_id))
+    });
+    Ok(paired_browsers
+        .into_iter()
+        .map(|(connected, connector)| {
+            json!({
+                "browserId": connector.browser_id,
+                "browserName": connector.browser_name,
+                "browserProfile": connector.browser_profile,
+                "extensionId": connector.extension_id,
+                "approvedAt": connector.approved_at,
+                "lastSeen": connector.last_seen,
+                "connected": connected,
+            })
+        })
+        .collect())
+}
+
+fn choose_desktop_data_folder(app: &AppHandle) -> Result<Value, String> {
+    if app
+        .state::<DesktopState>()
+        .server
+        .lock()
+        .expect("server state poisoned")
+        .is_some()
+    {
+        return Err("The data folder can only be changed before setup starts.".to_string());
+    }
+
+    let folder = app
+        .dialog()
+        .file()
+        .set_title("Choose Browser Recall Data Folder")
+        .blocking_pick_folder();
+    let Some(folder) = folder else {
+        return Ok(json!({
+            "success": true,
+            "cancelled": true,
+        }));
+    };
+    let data_dir = folder.into_path().map_err(|error| error.to_string())?;
+    std::fs::create_dir_all(&data_dir).map_err(|error| error.to_string())?;
+
+    let config_store = app.state::<DesktopState>().config_store.clone();
+    let mut config = config_store
+        .load_or_create()
+        .map_err(|error| error.to_string())?;
+    config.data_dir = data_dir.clone();
+    config.setup_complete = false;
+    config_store
+        .save(&config)
+        .map_err(|error| error.to_string())?;
+    drop(config);
+
+    update_shell_state(app, |state| {
+        state.data_dir = data_dir.display().to_string();
+        state.setup_complete = false;
+    });
+    Ok(json!({
+        "success": true,
+        "cancelled": false,
+        "dataFolder": data_dir.to_string_lossy().to_string(),
+    }))
+}
+
+async fn complete_desktop_setup(app: &AppHandle, request: &Value) -> Result<Value, String> {
+    let config_store = app.state::<DesktopState>().config_store.clone();
+    let mut config = config_store
+        .load_or_create()
+        .map_err(|error| error.to_string())?;
+    if config.data_dir.as_os_str().is_empty() {
+        return Err("Choose a data folder before starting Browser Recall.".to_string());
+    }
+    let launch_at_login = request
+        .get("launchAtLogin")
+        .and_then(Value::as_bool)
+        .unwrap_or(config.launch_at_login);
+    if launch_at_login && !login_item::is_supported() {
+        return Err("Launch at login is unavailable on this OS".to_string());
+    }
+
+    config.setup_complete = true;
+    config.launch_at_login = launch_at_login;
+    login_item::sync_login_item(launch_at_login).map_err(|error| error.to_string())?;
+    config_store
+        .save(&config)
+        .map_err(|error| error.to_string())?;
+    update_shell_state(app, |state| {
+        state.data_dir = config.data_dir.display().to_string();
+        state.setup_complete = true;
+        state.launch_at_login = launch_at_login;
+    });
+    let snapshot = start_shell_server(app).await?;
+    app.state::<DesktopState>().sync.request_worker();
+
+    Ok(json!({
+        "success": true,
+        "dataFolder": config.data_dir.to_string_lossy().to_string(),
+        "deviceId": snapshot.device_id,
+        "port": snapshot.port,
+    }))
+}
+
 #[tauri::command]
 async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> {
     let action = request
@@ -984,7 +1131,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             "locale": sys_locale::get_locale(),
         }));
     }
-    if is_daemon_write_command(action) {
+    if CommandAuthority::supports(action) {
         if let Some(server) = server_control_for_app(&app) {
             return server
                 .run_command(action, request.clone())
@@ -1008,124 +1155,13 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             },
             "setupComplete": setup_complete,
         }),
-        "getDesktopConnectorState" => {
-            if !setup_complete {
-                return Ok(json!({
-                    "success": true,
-                    "state": "setup_required",
-                    "port": null,
-                    "deviceId": null,
-                    "hasToken": false,
-                    "pendingCommands": 0,
-                    "pendingBytes": 0,
-                    "refuseMode": false,
-                    "lastError": null,
-                    "lastErrorCode": null,
-                    "lastDrainedAt": null,
-                    "dataFolder": null,
-                    "daemonBufferDepth": 0,
-                }));
-            }
-            let state = if snapshot.service_status == ServiceStatus::Paused {
-                "paused"
-            } else {
-                "connected"
-            };
-            json!({
-                "success": true,
-                "state": state,
-                "port": snapshot.port,
-                "deviceId": snapshot.device_id,
-                "hasToken": true,
-                "pendingCommands": 0,
-                "pendingBytes": 0,
-                "refuseMode": false,
-                "lastError": snapshot.last_error,
-                "lastErrorCode": snapshot.last_error_code,
-                "lastDrainedAt": null,
-                "dataFolder": storage.root().to_string_lossy().to_string(),
-                "daemonBufferDepth": 0,
-            })
-        }
-        "triggerDesktopPairing" => {
-            if !setup_complete {
-                return Ok(json!({
-                    "success": true,
-                    "state": "setup_required",
-                    "port": null,
-                    "deviceId": null,
-                    "hasToken": false,
-                    "pendingCommands": 0,
-                    "pendingBytes": 0,
-                    "refuseMode": false,
-                    "lastError": null,
-                    "lastErrorCode": null,
-                    "lastDrainedAt": null,
-                    "dataFolder": null,
-                    "daemonBufferDepth": 0,
-                }));
-            }
-            let state = if snapshot.service_status == ServiceStatus::Paused {
-                "paused"
-            } else {
-                "connected"
-            };
-            json!({
-                "success": true,
-                "state": state,
-                "port": snapshot.port,
-                "deviceId": snapshot.device_id,
-                "hasToken": true,
-                "pendingCommands": 0,
-                "pendingBytes": 0,
-                "refuseMode": false,
-                "lastError": snapshot.last_error,
-                "lastErrorCode": snapshot.last_error_code,
-                "lastDrainedAt": null,
-                "dataFolder": storage.root().to_string_lossy().to_string(),
-                "daemonBufferDepth": 0,
-            })
+        "getDesktopConnectorState" | "triggerDesktopPairing" => {
+            desktop_connector_state_response(&snapshot, &storage, setup_complete)
         }
         "getDesktopShellState" => {
             let state = app.state::<DesktopState>();
             let shell = state.shell.lock().expect("shell state poisoned");
-            let connected = snapshot
-                .connected_connectors
-                .iter()
-                .map(|connector| (connector.browser_id.clone(), connector.extension_id.clone()))
-                .collect::<std::collections::BTreeSet<_>>();
-            let mut paired_browsers = list_paired_browsers(&state.config_store)?
-                .into_iter()
-                .map(|connector| {
-                    let connected = connected
-                        .contains(&(connector.browser_id.clone(), connector.extension_id.clone()));
-                    (connected, connector)
-                })
-                .collect::<Vec<_>>();
-            paired_browsers.sort_by(|(left_connected, left), (right_connected, right)| {
-                right_connected
-                    .cmp(left_connected)
-                    .then_with(|| right.last_seen.cmp(&left.last_seen))
-                    .then_with(|| right.approved_at.cmp(&left.approved_at))
-                    .then_with(|| left.browser_name.cmp(&right.browser_name))
-                    .then_with(|| left.browser_profile.cmp(&right.browser_profile))
-                    .then_with(|| left.browser_id.cmp(&right.browser_id))
-                    .then_with(|| left.extension_id.cmp(&right.extension_id))
-            });
-            let paired_browsers = paired_browsers
-                .into_iter()
-                .map(|(connected, connector)| {
-                    json!({
-                        "browserId": connector.browser_id,
-                        "browserName": connector.browser_name.clone(),
-                        "browserProfile": connector.browser_profile,
-                        "extensionId": connector.extension_id,
-                        "approvedAt": connector.approved_at,
-                        "lastSeen": connector.last_seen,
-                        "connected": connected,
-                    })
-                })
-                .collect::<Vec<_>>();
+            let paired_browsers = paired_browser_payloads(&state.config_store, &snapshot)?;
             json!({
                 "success": true,
                 "loginItemSupported": shell.login_item_supported,
@@ -1164,87 +1200,8 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .map_err(|error| error.to_string())?;
             json!({ "success": true })
         }
-        "chooseDesktopDataFolder" => {
-            if app
-                .state::<DesktopState>()
-                ._server
-                .lock()
-                .expect("server state poisoned")
-                .is_some()
-            {
-                return Err("The data folder can only be changed before setup starts.".to_string());
-            }
-            let folder = app
-                .dialog()
-                .file()
-                .set_title("Choose Browser Recall Data Folder")
-                .blocking_pick_folder();
-            let Some(folder) = folder else {
-                return Ok(json!({
-                    "success": true,
-                    "cancelled": true,
-                }));
-            };
-            let data_dir = folder.into_path().map_err(|error| error.to_string())?;
-            std::fs::create_dir_all(&data_dir).map_err(|error| error.to_string())?;
-
-            let config_store = app.state::<DesktopState>().config_store.clone();
-            let mut config = config_store
-                .load_or_create()
-                .map_err(|error| error.to_string())?;
-            config.data_dir = data_dir.clone();
-            config.setup_complete = false;
-            config_store
-                .save(&config)
-                .map_err(|error| error.to_string())?;
-            drop(config);
-
-            update_shell_state(&app, |state| {
-                state.data_dir = data_dir.display().to_string();
-                state.setup_complete = false;
-            });
-            json!({
-                "success": true,
-                "cancelled": false,
-                "dataFolder": data_dir.to_string_lossy().to_string(),
-            })
-        }
-        "completeDesktopSetup" => {
-            let config_store = app.state::<DesktopState>().config_store.clone();
-            let mut config = config_store
-                .load_or_create()
-                .map_err(|error| error.to_string())?;
-            if config.data_dir.as_os_str().is_empty() {
-                return Err("Choose a data folder before starting Browser Recall.".to_string());
-            }
-            let launch_at_login = request
-                .get("launchAtLogin")
-                .and_then(Value::as_bool)
-                .unwrap_or(config.launch_at_login);
-            if launch_at_login && !login_item::is_supported() {
-                return Err("Launch at login is unavailable on this OS".to_string());
-            }
-            config.setup_complete = true;
-            config.launch_at_login = launch_at_login;
-            login_item::sync_login_item(launch_at_login).map_err(|error| error.to_string())?;
-            config_store
-                .save(&config)
-                .map_err(|error| error.to_string())?;
-            update_shell_state(&app, |state| {
-                state.data_dir = config.data_dir.display().to_string();
-                state.setup_complete = true;
-                state.launch_at_login = launch_at_login;
-            });
-            let snapshot = start_shell_server(&app).await?;
-            app.state::<DesktopState>().sync.request_worker();
-
-            json!({
-                "success": true,
-                "dataFolder": config.data_dir.to_string_lossy().to_string(),
-                "deviceId": snapshot.device_id,
-                "port": snapshot.port,
-            })
-        }
+        "chooseDesktopDataFolder" => choose_desktop_data_folder(&app)?,
+        "completeDesktopSetup" => complete_desktop_setup(&app, &request).await?,
         "updateDesktopShellSettings" => {
             let launch_at_login = request
                 .get("launchAtLogin")
@@ -1275,7 +1232,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             let state = app.state::<DesktopState>();
             let server = {
                 state
-                    ._server
+                    .server
                     .lock()
                     .expect("server state poisoned")
                     .as_ref()
@@ -1317,20 +1274,58 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             "success": true,
             "size": storage.directory_size().await.map_err(|error| error.to_string())?,
         }),
-        "readDesktopValue" => {
-            let key = request
-                .get("key")
+        "getListDisplay" => {
+            let list_id = request
+                .get("listId")
                 .and_then(Value::as_str)
-                .ok_or_else(|| "readDesktopValue missing key".to_string())?;
-            let include_deleted = request
-                .get("includeDeleted")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            let value = read_desktop_value(&storage, key, include_deleted).await?;
+                .ok_or_else(|| "getListDisplay missing listId".to_string())?;
+            let list = ReadProjections::new(storage.clone())
+                .list_display(list_id)
+                .await?;
             json!({
                 "success": true,
-                "value": value,
+                "list": list,
             })
+        }
+        "getPageContext" => {
+            let slugs = request
+                .get("slugs")
+                .and_then(Value::as_array)
+                .ok_or_else(|| "getPageContext missing slugs".to_string())?
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .map(str::to_string)
+                        .ok_or_else(|| "getPageContext slugs must be strings".to_string())
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let pages = ReadProjections::new(storage.clone())
+                .page_context(&slugs)
+                .await?;
+            json!({ "success": true, "pages": pages })
+        }
+        "getAllPageContext" => {
+            let pages = ReadProjections::new(storage.clone())
+                .all_page_context()
+                .await?;
+            json!({ "success": true, "pages": pages })
+        }
+        "getListTree" => {
+            let projection = ReadProjections::new(storage.clone()).list_tree().await?;
+            json!({
+                "success": true,
+                "tree": projection.tree,
+                "order": projection.order,
+            })
+        }
+        "getRecycleBin" => {
+            let entries = ReadProjections::new(storage.clone()).recycle_bin().await?;
+            json!({ "success": true, "entries": entries })
+        }
+        "getSettings" => {
+            let settings = ReadProjections::new(storage.clone()).settings().await?;
+            json!({ "success": true, "settings": settings })
         }
         "listHistoryFiles" => {
             let include_sizes = request
@@ -1387,20 +1382,20 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .get("slug")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "loadPageNotes missing slug".to_string())?;
-            json!({
-                "success": true,
-                "notes": load_page_notes_payload(&storage, slug).await?,
-            })
+            let page = ReadProjections::new(storage.clone())
+                .page_info(slug)
+                .await?;
+            json!({ "success": true, "notes": page.notes })
         }
         "listSnapshots" => {
             let slug = request
                 .get("slug")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "listSnapshots missing slug".to_string())?;
-            json!({
-                "success": true,
-                "snapshots": load_page_snapshot_payload(&storage, slug).await?,
-            })
+            let page = ReadProjections::new(storage.clone())
+                .page_info(slug)
+                .await?;
+            json!({ "success": true, "snapshots": page.snapshots })
         }
         "getSnapshotHtml" => {
             let slug = request
@@ -1426,10 +1421,6 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 }),
             }
         }
-        "loadAllPages" => json!({
-            "success": true,
-            "pages": load_all_pages_payload(&storage).await?,
-        }),
         "getPageRelations" => {
             let url = request
                 .get("url")
@@ -1479,13 +1470,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             preview_rule_payload(rule, entries)?
         }
         "resumeService" => {
-            let state = app.state::<DesktopState>();
-            let server = state._server.lock().expect("server state poisoned");
-            let server = server
-                .as_ref()
-                .ok_or_else(|| "Browser Recall daemon is not running".to_string())?;
-            tauri::async_runtime::block_on(server.resume());
-            update_shell_state(&app, |state| state.route = Some("settings".to_string()));
+            resume_daemon(&app)?;
             json!({ "success": true })
         }
         "getSyncDevices" => {
@@ -1817,7 +1802,7 @@ fn main() {
             create_tray(app.handle())?;
             let sync_notify = Arc::new(Notify::new());
             app.manage(DesktopState {
-                _server: Mutex::new(server_handle),
+                server: Mutex::new(server_handle),
                 config_store: bootstrap.config_store.clone(),
                 shell: Mutex::new(ShellState {
                     snapshot: initial_snapshot,

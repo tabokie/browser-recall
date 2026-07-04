@@ -222,6 +222,15 @@ function updatePopupUiMutationState() {
   applyRecordingBarState();
 }
 
+function finishPopupUiMutation(stateKey) {
+  popupUiMutationState[stateKey] = false;
+  popupUiMutationState.action = null;
+  updatePopupUiMutationState();
+  const resolvers = popupUiMutationActiveIdleResolvers;
+  popupUiMutationActiveIdleResolvers = [];
+  resolvers.forEach((resolve) => resolve());
+}
+
 async function runPopupUiMutationNow(action, task) {
   if (popupUiMutationState.active) return false;
   popupUiMutationState.active = true;
@@ -231,12 +240,7 @@ async function runPopupUiMutationNow(action, task) {
     await task();
     return true;
   } finally {
-    popupUiMutationState.active = false;
-    popupUiMutationState.action = null;
-    updatePopupUiMutationState();
-    const resolvers = popupUiMutationActiveIdleResolvers;
-    popupUiMutationActiveIdleResolvers = [];
-    resolvers.forEach((resolve) => resolve());
+    finishPopupUiMutation('active');
   }
 }
 
@@ -254,12 +258,7 @@ async function runSilentPopupUiMutation(action, task) {
     await task();
     return true;
   } finally {
-    popupUiMutationState.silentActive = false;
-    popupUiMutationState.action = null;
-    updatePopupUiMutationState();
-    const resolvers = popupUiMutationActiveIdleResolvers;
-    popupUiMutationActiveIdleResolvers = [];
-    resolvers.forEach((resolve) => resolve());
+    finishPopupUiMutation('silentActive');
   }
 }
 
@@ -524,7 +523,6 @@ function formatDuration(ms) {
 
 function applyDesktopConnectorUi(connector = {}) {
   const formatted = formatDesktopConnectorState(connector);
-  const connectIds = ['setupDesktopConnectBtn'];
   const pending = desktopConnectInFlight || connector.state === 'pair_pending';
   const checking = desktopConnectInFlight;
 
@@ -533,15 +531,13 @@ function applyDesktopConnectorUi(connector = {}) {
   const meta = document.getElementById('setupRequiredMeta');
   if (meta) meta.textContent = formatted.meta;
 
-  for (const id of connectIds) {
-    const element = document.getElementById(id);
-    if (!element) continue;
-    element.disabled = pending;
-    element.textContent = pending
-      ? tr('extensionWaitingApproval', 'Waiting for Approval', undefined)
-      : tr('extensionCheckAgain', 'Check Again', undefined);
-    element.classList.toggle('is-checking', checking);
-  }
+  const connectButton = document.getElementById('setupDesktopConnectBtn');
+  if (!connectButton) return;
+  connectButton.disabled = pending;
+  connectButton.textContent = pending
+    ? tr('extensionWaitingApproval', 'Waiting for Approval', undefined)
+    : tr('extensionCheckAgain', 'Check Again', undefined);
+  connectButton.classList.toggle('is-checking', checking);
 }
 
 function showDesktopConnectorError(message) {
@@ -664,6 +660,21 @@ function hideSection(id) {
   if (section) section.style.display = 'none';
 }
 
+function clearPageDiagnosticContent() {
+  const pageHeader = document.getElementById('pageHeader');
+  if (pageHeader) pageHeader.style.display = '';
+  const detail = document.getElementById('pageDiagnosticDetail');
+  if (detail) {
+    detail.style.display = 'none';
+    detail.textContent = '';
+  }
+  const actions = document.getElementById('pageDiagnosticActions');
+  if (actions) {
+    actions.style.display = 'none';
+    actions.innerHTML = '';
+  }
+}
+
 function resetDashboardSections() {
   closeListPicker();
   for (const id of [
@@ -676,20 +687,7 @@ function resetDashboardSections() {
     hideSection(id);
     document.getElementById(id)?.classList.remove('is-empty');
   }
-  const pageHeader = document.getElementById('pageHeader');
-  if (pageHeader) pageHeader.style.display = '';
-  const pageDiagnosticDetail = document.getElementById('pageDiagnosticDetail');
-  if (pageDiagnosticDetail) {
-    pageDiagnosticDetail.style.display = 'none';
-    pageDiagnosticDetail.textContent = '';
-  }
-  const pageDiagnosticActions = document.getElementById(
-    'pageDiagnosticActions',
-  );
-  if (pageDiagnosticActions) {
-    pageDiagnosticActions.style.display = 'none';
-    pageDiagnosticActions.innerHTML = '';
-  }
+  clearPageDiagnosticContent();
   const attention = document.getElementById('attentionGrid');
   if (attention) attention.innerHTML = '';
   const listChips = document.getElementById('listChips');
@@ -713,20 +711,7 @@ function clearPageDiagnosticSection() {
   document
     .getElementById('pageDiagnosticSection')
     ?.classList.remove('is-empty');
-  const pageHeader = document.getElementById('pageHeader');
-  if (pageHeader) pageHeader.style.display = '';
-  const pageDiagnosticDetail = document.getElementById('pageDiagnosticDetail');
-  if (pageDiagnosticDetail) {
-    pageDiagnosticDetail.style.display = 'none';
-    pageDiagnosticDetail.textContent = '';
-  }
-  const pageDiagnosticActions = document.getElementById(
-    'pageDiagnosticActions',
-  );
-  if (pageDiagnosticActions) {
-    pageDiagnosticActions.style.display = 'none';
-    pageDiagnosticActions.innerHTML = '';
-  }
+  clearPageDiagnosticContent();
 }
 
 async function refreshDesktopConnectorState() {
@@ -1173,55 +1158,43 @@ async function loadListPins(lists = null) {
 function isPagePinned(allPins, listId, url) {
   const pins = allPins[listId] || [];
   const slug = generateSlugFromUrl(url);
-  const pageId = pageKey(slug);
-  return pins.some((p) => p.id === pageId || p.url === url);
+  return pins.some(
+    (pin) => (pin.kind === 'page' && pin.slug === slug) || pin.url === url,
+  );
+}
+
+function updatedPinsForCurrentPage(existingPins, pinned) {
+  const pins = Array.isArray(existingPins) ? [...existingPins] : [];
+  const slug = generateSlugFromUrl(currentPage.url);
+  const existingIndex = pins.findIndex(
+    (pin) =>
+      (pin.kind === 'page' && pin.slug === slug) || pin.url === currentPage.url,
+  );
+
+  if (pinned && existingIndex < 0) {
+    pins.push({
+      kind: 'page',
+      slug,
+      url: currentPage.url,
+      title: currentPage.title || currentPage.tab?.title || '',
+      pinnedAt: Date.now(),
+    });
+  } else if (!pinned && existingIndex >= 0) {
+    pins.splice(existingIndex, 1);
+  }
+  return pins;
 }
 
 function applyPinStateToLists(lists, listId, pinned) {
   if (!Array.isArray(lists) || !currentPage.url) return;
   const list = lists.find((candidate) => candidate.slug === listId);
   if (!list) return;
-  const slug = generateSlugFromUrl(currentPage.url);
-  const id = pageKey(slug);
-  const pins = Array.isArray(list.pins) ? [...list.pins] : [];
-  const existingIndex = pins.findIndex(
-    (pin) => pin.id === id || pin.url === currentPage.url,
-  );
-  if (pinned) {
-    if (existingIndex < 0) {
-      pins.push({
-        id,
-        url: currentPage.url,
-        title: currentPage.title || currentPage.tab?.title || '',
-        pinnedAt: Date.now(),
-      });
-    }
-  } else if (existingIndex >= 0) {
-    pins.splice(existingIndex, 1);
-  }
-  list.pins = pins;
+  list.pins = updatedPinsForCurrentPage(list.pins, pinned);
 }
 
 function applyPinStateToPinMap(allPins, listId, pinned) {
   if (!allPins || !currentPage.url) return;
-  const slug = generateSlugFromUrl(currentPage.url);
-  const id = pageKey(slug);
-  const pins = Array.isArray(allPins[listId]) ? [...allPins[listId]] : [];
-  const existingIndex = pins.findIndex(
-    (pin) => pin.id === id || pin.url === currentPage.url,
-  );
-  if (pinned) {
-    if (existingIndex < 0) {
-      pins.push({
-        id,
-        url: currentPage.url,
-        title: currentPage.title || currentPage.tab?.title || '',
-        pinnedAt: Date.now(),
-      });
-    }
-  } else if (existingIndex >= 0) {
-    pins.splice(existingIndex, 1);
-  }
+  const pins = updatedPinsForCurrentPage(allPins[listId], pinned);
   if (pins.length > 0) allPins[listId] = pins;
   else delete allPins[listId];
 }
@@ -1258,9 +1231,10 @@ function syncListCountFromSummary() {
   const nextCount = lists.reduce((count, list) => {
     const pins = Array.isArray(list?.pins) ? list.pins : [];
     const slug = generateSlugFromUrl(currentPage.url || '');
-    const pageId = pageKey(slug);
     const pinned = pins.some(
-      (pin) => pin.id === pageId || pin.url === currentPage.url,
+      (pin) =>
+        (pin.kind === 'page' && pin.slug === slug) ||
+        pin.url === currentPage.url,
     );
     return count + (pinned ? 1 : 0);
   }, 0);
@@ -1764,7 +1738,7 @@ function openListPicker(lists, allPins, options = {}) {
 
     const query = input.value.trim().toLowerCase();
     const filtered = query
-      ? pickerLists.filter((c) => c.name.toLowerCase().includes(query))
+      ? pickerLists.filter((c) => c.name.toLowerCase().startsWith(query))
       : pickerLists;
 
     let rowsHtml = filtered
@@ -2315,6 +2289,9 @@ document.getElementById('captureBtn').addEventListener('click', () => {
       logDebug('[popup] Capture response:', resp);
       if (resp && resp.success) {
         await refreshCurrentPageSummary();
+        if (resp.warning) {
+          await notifyActivePageError(resp.warning, resp.warning);
+        }
       } else {
         logDebug('[popup] Capture failed:', resp);
         await notifyActivePageError(
@@ -2345,15 +2322,10 @@ function restoreDashboardContent() {
 
 async function resolvePageIdentity(tab) {
   const effectiveUrl = tab._effectiveUrl || tab.url;
-  let title = tab._effectiveTitle || tab.title || '<unknown>';
-  try {
-    const resp = await chrome.runtime.sendMessage({
-      action: 'trimTitle',
-      title,
-      url: effectiveUrl,
-    });
-    if (resp?.title) title = resp.title;
-  } catch {}
+  const title = await trimDisplayTitle(
+    tab._effectiveTitle || tab.title,
+    effectiveUrl,
+  );
   const slug = tab._effectiveSlug || generateSlugFromUrl(effectiveUrl);
   return { slug, url: effectiveUrl, title };
 }
@@ -2379,8 +2351,7 @@ function pageSummaryFallback(tab, slug, summary = {}) {
     url,
     title: currentPage.title || tab.title || '<unknown>',
     visitDates: [],
-    childIds: [],
-    parentIds: [],
+    hasSnapshots: false,
   };
 }
 
@@ -2565,6 +2536,13 @@ function scheduleDelayedTitleCheck(tab, initialTitle) {
   }, 1000);
 }
 
+async function finishDashboardRender(tab, generation) {
+  await renderRecordingBar();
+  if (generation !== currentPage.generation) return;
+  showDashboardUI({ updateRecordingBar: false });
+  scheduleDelayedTitleCheck(tab, tab.title || '');
+}
+
 // Show dashboard for a tab: set up state, fetch data, render sections
 async function showDashboard(tab, options = {}) {
   const { hideContentUntilReady = false, compactUntilReady = false } = options;
@@ -2592,10 +2570,7 @@ async function showDashboard(tab, options = {}) {
     : null;
   await renderListChips(summaryLists || (await loadLists()));
   if (generation !== currentPage.generation) return;
-  await renderRecordingBar();
-  if (generation !== currentPage.generation) return;
-  showDashboardUI({ updateRecordingBar: false });
-  scheduleDelayedTitleCheck(tab, tab.title || '');
+  await finishDashboardRender(tab, generation);
 }
 
 // ─── Init phases ─────────────────────────────────────────────────────
@@ -2643,14 +2618,12 @@ function isSnapshotViewerUrl(url) {
 
 async function resolveEffectiveUrl(tab) {
   let effectiveUrl = tab.url;
-  let reportedUrl = null;
   try {
     const reported = await chrome.runtime.sendMessage({
       action: 'getReportedUrl',
       tabId: tab.id,
     });
     if (reported?.success && reported.url) {
-      reportedUrl = reported.url;
       effectiveUrl = reported.url;
     }
   } catch {}
@@ -2762,7 +2735,13 @@ function renderBlacklistDiagnostic(tab, effectiveUrl) {
               const resp = await chrome.runtime.sendMessage({
                 action: 'captureCurrentPageFromPopup',
               });
-              if (resp && !resp.success) {
+              if (resp?.success && resp.warning) {
+                await notifyPageError({
+                  tabId: tab.id,
+                  message: resp.warning,
+                  fallback: resp.warning,
+                });
+              } else if (resp && !resp.success) {
                 await notifyPageError({
                   tabId: tab.id,
                   message: resp.error,
@@ -2857,10 +2836,7 @@ async function renderPreparedDashboard(bootstrap) {
   renderNotes(summary.notes || []);
   await renderListChips(Array.isArray(summary.lists) ? summary.lists : []);
   if (generation !== currentPage.generation) return;
-  await renderRecordingBar();
-  if (generation !== currentPage.generation) return;
-  showDashboardUI({ updateRecordingBar: false });
-  scheduleDelayedTitleCheck(tab, tab.title || '');
+  await finishDashboardRender(tab, generation);
 }
 
 async function renderPreparedPopup(bootstrap) {
@@ -2931,38 +2907,34 @@ async function initPopup() {
   await initializeExtensionI18n();
   localizeDocument();
   await applyTheme();
-  try {
-    const bootstrap = await consumePopupBootstrap();
-    if (bootstrap && (await renderPreparedPopup(bootstrap))) return;
+  const bootstrap = await consumePopupBootstrap();
+  if (bootstrap && (await renderPreparedPopup(bootstrap))) return;
 
-    const cachedConnector = await getCachedDesktopConnectorState();
-    if (
-      cachedConnector?.state === 'connected' &&
-      cachedConnector.deviceId &&
-      !cachedConnector.refuseMode
-    ) {
-      void refreshDesktopConnectorState().catch((error) => {
-        logDebug('[popup] background connector refresh failed:', error.message);
-      });
-      await loadConnectedDashboard(cachedConnector);
-      return;
-    }
-    if (cachedConnector && cachedConnector.state !== 'starting') {
-      showSetupRequired(cachedConnector);
-      refreshDesktopConnectorStateInBackground();
-      return;
-    }
-
-    const connector = await refreshDesktopConnectorState();
-    if (connector?.state !== 'connected' || !connector?.deviceId) {
-      showSetupRequired(connector || { state: 'offline' });
-      return;
-    }
-
-    await loadConnectedDashboard(connector);
-  } catch (error) {
-    throw error;
+  const cachedConnector = await getCachedDesktopConnectorState();
+  if (
+    cachedConnector?.state === 'connected' &&
+    cachedConnector.deviceId &&
+    !cachedConnector.refuseMode
+  ) {
+    void refreshDesktopConnectorState().catch((error) => {
+      logDebug('[popup] background connector refresh failed:', error.message);
+    });
+    await loadConnectedDashboard(cachedConnector);
+    return;
   }
+  if (cachedConnector && cachedConnector.state !== 'starting') {
+    showSetupRequired(cachedConnector);
+    refreshDesktopConnectorStateInBackground();
+    return;
+  }
+
+  const connector = await refreshDesktopConnectorState();
+  if (connector?.state !== 'connected' || !connector?.deviceId) {
+    showSetupRequired(connector || { state: 'offline' });
+    return;
+  }
+
+  await loadConnectedDashboard(connector);
 }
 ensureListSearchCapture();
 listSearchInput().focus({ preventScroll: true });

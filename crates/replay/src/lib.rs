@@ -80,30 +80,14 @@ impl EntityEffect {
     pub fn as_page(&self) -> Option<&PageEntity> {
         match self {
             Self::Upsert(Entity::Page(page)) => Some(page),
-            Self::Upsert(
-                Entity::Note(_)
-                | Entity::List(_)
-                | Entity::Settings(_)
-                | Entity::NameToId(_)
-                | Entity::ListOrder(_)
-                | Entity::Orphaned(_),
-            )
-            | Self::Delete => None,
+            _ => None,
         }
     }
 
     pub fn as_note(&self) -> Option<&NoteEntity> {
         match self {
             Self::Upsert(Entity::Note(note)) => Some(note),
-            Self::Upsert(
-                Entity::Page(_)
-                | Entity::List(_)
-                | Entity::Settings(_)
-                | Entity::NameToId(_)
-                | Entity::ListOrder(_)
-                | Entity::Orphaned(_),
-            )
-            | Self::Delete => None,
+            _ => None,
         }
     }
 
@@ -371,6 +355,7 @@ impl LogEntry {
 pub enum ReplayError {
     InvalidEntry(String),
     InvalidUrl(String),
+    Load(String),
 }
 
 impl fmt::Display for ReplayError {
@@ -378,6 +363,7 @@ impl fmt::Display for ReplayError {
         match self {
             Self::InvalidEntry(message) => write!(f, "invalid log entry: {message}"),
             Self::InvalidUrl(url) => write!(f, "invalid url: {url}"),
+            Self::Load(message) => write!(f, "replay entity load failed: {message}"),
         }
     }
 }
@@ -853,7 +839,7 @@ where
     Ok((page_key, page))
 }
 
-pub(crate) async fn ensure_page_in_result<L, Fut>(
+pub(crate) async fn ensure_page_with_overlay<L, Fut>(
     result: &mut EntityMap,
     load: &L,
     url: &str,
@@ -888,9 +874,7 @@ where
 }
 
 pub(crate) fn touch_timestamp(page: &mut PageEntity, device_id: &str, timestamp: i64) {
-    let current = page.timestamps.get(device_id).copied().unwrap_or(0);
-    page.timestamps
-        .insert(device_id.to_string(), current.max(timestamp));
+    touch_timestamp_map(&mut page.timestamps, device_id, timestamp);
 }
 
 pub(crate) fn touch_timestamp_map(
@@ -944,8 +928,13 @@ pub fn page_retains_checkpoint(page: &PageEntity) -> bool {
         || page.likes.unwrap_or(0) != 0
 }
 
-pub(crate) fn is_page_eligible(page: &PageEntity) -> bool {
-    page_retains_checkpoint(page)
+pub(crate) fn retain_page_or_delete(result: &mut EntityMap, key: String, page: PageEntity) {
+    let effect = if page_retains_checkpoint(&page) {
+        EntityEffect::Upsert(Entity::Page(page))
+    } else {
+        EntityEffect::Delete
+    };
+    result.insert(key, effect);
 }
 
 pub(crate) fn append_capped(items: &mut Vec<String>, value: String) {
@@ -1106,27 +1095,7 @@ pub(crate) fn collect_tree_ids(tree: &[TreeNode]) -> HashSet<String> {
 }
 
 pub(crate) fn generate_list_id(name: &str, timestamp: i64) -> String {
-    let mut normalized = String::new();
-    let mut pending_dash = false;
-    for character in name.chars().flat_map(char::to_lowercase) {
-        if character.is_alphanumeric() {
-            if pending_dash && !normalized.is_empty() {
-                normalized.push('-');
-            }
-            normalized.push(character);
-            pending_dash = false;
-        } else if !normalized.is_empty() {
-            pending_dash = true;
-        }
-    }
-    let mut base = normalized
-        .trim_matches('-')
-        .chars()
-        .take(30)
-        .collect::<String>();
-    while base.ends_with('-') {
-        base.pop();
-    }
+    let base = normalized_slug_base(name);
     format!(
         "{base}-{}",
         to_base36(hash_string(&(name.to_string() + &timestamp.to_string())))
@@ -1188,6 +1157,20 @@ pub fn generate_slug_from_url(url: &str) -> Result<String, ReplayError> {
 }
 
 fn generate_slug(text: &str, hash_input: &str) -> String {
+    let base = normalized_slug_base(text);
+    let hash_str = to_base36(hash_string(hash_input));
+    let mut slug = if base.is_empty() {
+        hash_str
+    } else {
+        format!("{base}-{hash_str}")
+    };
+    if slug.len() > 80 {
+        slug.truncate(80);
+    }
+    slug
+}
+
+fn normalized_slug_base(text: &str) -> String {
     let mut base = String::new();
     let mut pending_hyphen = false;
     for character in text.chars().flat_map(char::to_lowercase) {
@@ -1205,25 +1188,7 @@ fn generate_slug(text: &str, hash_input: &str) -> String {
     while base.ends_with('-') {
         base.pop();
     }
-
-    let mut hash: i32 = 0;
-    for unit in hash_input.encode_utf16() {
-        hash = hash
-            .wrapping_shl(5)
-            .wrapping_sub(hash)
-            .wrapping_add(i32::from(unit));
-    }
-    let hash_value = i64::from(hash).abs();
-    let hash_str = to_base36(hash_value as u64);
-    let mut slug = if base.is_empty() {
-        hash_str
-    } else {
-        format!("{base}-{hash_str}")
-    };
-    if slug.len() > 80 {
-        slug.truncate(80);
-    }
-    slug
+    base
 }
 
 fn to_base36(mut value: u64) -> String {
@@ -1300,28 +1265,28 @@ mod tests {
     }
 
     #[test]
-    fn is_page_eligible_matches_retention_rules() {
+    fn page_retains_checkpoint_matches_retention_rules() {
         let mut page = default_page("page-slug");
-        assert!(!is_page_eligible(&page));
+        assert!(!page_retains_checkpoint(&page));
 
         page.parent_ids.push("list:test".to_string());
-        assert!(is_page_eligible(&page));
+        assert!(page_retains_checkpoint(&page));
         page.parent_ids = vec!["page:referrer".to_string()];
-        assert!(!is_page_eligible(&page));
+        assert!(!page_retains_checkpoint(&page));
 
         page.child_ids.push("note:n1".to_string());
-        assert!(is_page_eligible(&page));
+        assert!(page_retains_checkpoint(&page));
         page.child_ids = vec!["snapshot:s1".to_string()];
-        assert!(is_page_eligible(&page));
+        assert!(page_retains_checkpoint(&page));
         page.child_ids = vec!["page:child".to_string()];
-        assert!(!is_page_eligible(&page));
+        assert!(!page_retains_checkpoint(&page));
 
         page.user_title = Some("Kept".to_string());
-        assert!(is_page_eligible(&page));
+        assert!(page_retains_checkpoint(&page));
         page.user_title = None;
 
         page.likes = Some(1);
-        assert!(is_page_eligible(&page));
+        assert!(page_retains_checkpoint(&page));
     }
 
     #[test]

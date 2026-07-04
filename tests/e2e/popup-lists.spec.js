@@ -1739,7 +1739,7 @@ test.describe('Popup list chip behavior', () => {
     await expect(input).toBeVisible();
     await expect(input).toHaveValue('r');
     await expect(popup.locator('#listPickerList')).toContainText('Reading');
-    await expect(popup.locator('#listPickerList')).toContainText('Archive');
+    await expect(popup.locator('#listPickerList')).not.toContainText('Archive');
 
     await popup.close();
     await page.close();

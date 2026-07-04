@@ -117,27 +117,15 @@ export function matchKeywordRule(rule, pageData) {
   const value = pageData.title;
   if (!pattern || !value) return 0;
 
-  let isRegex = false;
-  let regex = null;
-
   if (pattern.startsWith('/') && pattern.endsWith('/')) {
-    isRegex = true;
     try {
-      regex = new RegExp(pattern.slice(1, -1), 'i');
+      return new RegExp(pattern.slice(1, -1), 'i').test(value) ? 1 : 0;
     } catch {
       return 0;
     }
   }
 
-  if (isRegex) {
-    if (regex.test(value)) return 1;
-  } else {
-    const haystack = value.toLowerCase();
-    const needle = pattern.toLowerCase();
-    if (haystack.includes(needle)) return 1;
-  }
-
-  return 0;
+  return value.toLowerCase().includes(pattern.toLowerCase()) ? 1 : 0;
 }
 
 /**
@@ -158,17 +146,17 @@ export async function matchRules(
   const results = [];
 
   for (const rule of rules) {
+    let match;
     if (rule.type === RULE_TYPES.KEYWORD) {
-      const match = matchKeywordRule(rule, pageData) === 1;
-      if (allResults || match) {
-        results.push({ ruleId: rule.id, match });
-      }
+      match = matchKeywordRule(rule, pageData) === 1;
     } else if (rule.type === RULE_TYPES.FUNCTION) {
       if (!sandbox) continue;
-      const match = await sandbox(rule.config.fnSource, pageData);
-      if (allResults || match) {
-        results.push({ ruleId: rule.id, match });
-      }
+      match = await sandbox(rule.config.fnSource, pageData);
+    } else {
+      continue;
+    }
+    if (allResults || match) {
+      results.push({ ruleId: rule.id, match });
     }
   }
 

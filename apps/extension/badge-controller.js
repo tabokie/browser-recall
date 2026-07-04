@@ -7,13 +7,8 @@ export function createBadgeController({
   specialNoteIconPaths = normalIconPaths,
   specialMixedIconPaths = normalIconPaths,
   syncDesktopConnectorPauseState,
-  readDesktopValue,
+  readPageMarkers,
   readRecordingPausedState = async () => false,
-  generateSlugFromUrl,
-  pageKey,
-  notePrefix,
-  snapshotPrefix,
-  listPrefix,
   resolveTabUrl = (_tabId, url) => url,
   getBadgeAccentColor = async () => '#078C9B',
 }) {
@@ -36,6 +31,14 @@ export function createBadgeController({
     'Browser Recall is paused',
   );
   let spinnerInterval = null;
+
+  async function queryActiveTab() {
+    const [tab] = await api.tabs.query({
+      active: true,
+      lastFocusedWindow: true,
+    });
+    return tab;
+  }
 
   async function applyRecordingPausedBadge(tabId) {
     await api.action.setTitle({
@@ -172,10 +175,7 @@ export function createBadgeController({
 
   async function clearActivePageMarker({ inheritGlobalBadge = false } = {}) {
     try {
-      const [tab] = await api.tabs.query({
-        active: true,
-        lastFocusedWindow: true,
-      });
+      const tab = await queryActiveTab();
       if (tab?.id > 0)
         await clearPageMarkerBadge(tab.id, { inheritGlobalBadge });
     } catch (error) {
@@ -301,19 +301,12 @@ export function createBadgeController({
       }
       syncDesktopConnectorPauseState(connectorState);
 
-      const slug = generateSlugFromUrl(badgeUrl);
-      const page = await readDesktopValue(pageKey(slug));
-      if (!page) {
+      const markers = await readPageMarkers(badgeUrl);
+      if (!markers) {
         await clearPageMarkerBadge(tabId);
         return;
       }
-      const childIds = page.childIds || [];
-      const hasNoteRefs = childIds.some((c) => c.startsWith(notePrefix));
-      const hasSnapshotRefs = childIds.some((c) =>
-        c.startsWith(snapshotPrefix),
-      );
-      const hasNotes = hasNoteRefs || hasSnapshotRefs;
-      const hasLists = page.parentIds?.some((id) => id.startsWith(listPrefix));
+      const { hasNotes, hasLists } = markers;
       if (!hasNotes && !hasLists) {
         await clearPageMarkerBadge(tabId);
         return;
@@ -349,10 +342,7 @@ export function createBadgeController({
     }
 
     try {
-      const [tab] = await api.tabs.query({
-        active: true,
-        lastFocusedWindow: true,
-      });
+      const tab = await queryActiveTab();
       if (tab?.id > 0) void updateBadgeForTab(tab.id, tab.url);
     } catch (error) {
       logDebug('[badge] active-tab badge refresh failed:', error.message);
@@ -361,10 +351,7 @@ export function createBadgeController({
 
   async function refreshActiveTabBadge() {
     try {
-      const [tab] = await api.tabs.query({
-        active: true,
-        lastFocusedWindow: true,
-      });
+      const tab = await queryActiveTab();
       if (tab?.id > 0) await updateBadgeForTab(tab.id, tab.url);
     } catch (error) {
       logDebug('[badge] active-tab badge refresh failed:', error.message);
