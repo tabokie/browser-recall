@@ -33,6 +33,7 @@ pub(crate) async fn pair_once(port: u16) -> String {
     socket
         .send(Message::Text(
             serde_json::to_string(&ConnectorMessage::PairRequest {
+                protocol_version: Some(1),
                 browser_id: "browser-install-1".into(),
                 browser_name: "Chrome".into(),
                 extension_id: "abcdefghijklmnop".into(),
@@ -68,6 +69,7 @@ pub(crate) async fn paired_socket(
     socket
         .send(Message::Text(
             serde_json::to_string(&ConnectorMessage::PairRequest {
+                protocol_version: Some(1),
                 browser_id: "browser-install-1".into(),
                 browser_name: "Chrome".into(),
                 extension_id: "abcdefghijklmnop".into(),

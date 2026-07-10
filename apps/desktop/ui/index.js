@@ -32,7 +32,6 @@ import {
   reloadApp,
   sendAction,
 } from './desktop-bridge.js';
-import { matchKeywordRule } from './rule-engine.js';
 import { formatHighlightExcerpt } from './highlight-format.js';
 import { attentionStrength, aggregateAttention } from './attention-utils.js';
 import {
@@ -2792,24 +2791,6 @@ let previewHistoryRunning = false;
 let previewPinsRunning = false;
 let previewAbort = null;
 
-function previewEntriesLocally(rule, entries) {
-  if (rule?.type !== 'keyword') return null;
-  return (entries || []).map((entry) => {
-    const pageData = {
-      title: entry.title || '',
-      url: entry.url || '',
-    };
-    if (entry.bodyPreview || entry.body) {
-      pageData.body = entry.bodyPreview || entry.body;
-    }
-    return {
-      url: entry.url,
-      title: entry.title || '',
-      match: matchKeywordRule(rule, pageData) === 1,
-    };
-  });
-}
-
 function collectPinnedPreviewEntries() {
   return Array.from(document.querySelectorAll('.result-row[data-url]'))
     .map((row) => ({
@@ -2820,10 +2801,6 @@ function collectPinnedPreviewEntries() {
 }
 
 async function previewRuleEntries(rule, entries) {
-  const localResults = previewEntriesLocally(rule, entries);
-  if (localResults) {
-    return { success: true, results: localResults };
-  }
   return await sendAction({ action: 'previewRule', rule, entries });
 }
 
@@ -3256,7 +3233,10 @@ async function runPreviewAgainstPins(rule, listId, signal) {
   for (let i = 0; i < pinMeta.length; i += BATCH_SIZE) {
     if (signal?.aborted) break;
     const batch = pinMeta.slice(i, i + BATCH_SIZE);
-    const bodies = await Promise.all(batch.map((e) => fetchPageBody(e.url)));
+    const bodies =
+      rule?.type === 'keyword'
+        ? batch.map(() => '')
+        : await Promise.all(batch.map((e) => fetchPageBody(e.url)));
     const entries = [];
     for (let j = 0; j < batch.length; j++) {
       const entry = {
@@ -3330,16 +3310,6 @@ async function runPreview() {
   }
   previewEl.style.display = '';
 
-  const keywordPinPreview = previewEntriesLocally(
-    built.rule,
-    collectPinnedPreviewEntries(),
-  );
-  if (keywordPinPreview && keywordPinPreview.length > 0) {
-    document.getElementById('rulesPinsPreview').style.display = '';
-    previewPinsResults = keywordPinPreview;
-    rerenderPreview();
-  }
-
   try {
     await runPreviewAgainstHistory(built.rule, ac.signal);
 
@@ -3349,7 +3319,7 @@ async function runPreview() {
           ? activeView.id
           : document.querySelector('.sidebar-item.active[data-list-id]')
               ?.dataset.listId || null;
-      if (listId && !keywordPinPreview) {
+      if (listId) {
         await runPreviewAgainstPins(built.rule, listId, ac.signal);
       }
     }

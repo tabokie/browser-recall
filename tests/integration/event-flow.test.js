@@ -129,6 +129,7 @@ async function pairSocket(port) {
   socket.send(
     JSON.stringify({
       type: 'pair_request',
+      protocolVersion: 1,
       browserId: 'browser-install-1',
       browserName: 'Chrome',
       extensionId: 'abcdefghijklmnop',
@@ -845,6 +846,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
 
     const pageRaw = await waitForFileContent(
       pagePath(dataRoot, generateSlugFromUrl('https://example.com/note-page')),
+      (raw) =>
+        raw.includes('"note:n1"') && raw.includes('"title": "Note Page"'),
     );
     expect(pageRaw).toContain('"note:n1"');
     expect(pageRaw).toContain('"title": "Note Page"');

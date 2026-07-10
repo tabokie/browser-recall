@@ -47,6 +47,10 @@ async fn note_command_returns_committed_response_and_mutation_together() {
         outcome.mutations[0].page_slug.as_deref(),
         Some(response_page_slug)
     );
+    assert_eq!(
+        outcome.mutations[0].url.as_deref(),
+        Some("https://example.com/authority-note")
+    );
 
     let note = storage
         .load_note(&note_slug)
@@ -148,6 +152,11 @@ async fn page_list_and_snapshot_commands_report_their_committed_meaning() {
     assert_eq!(pin.response["pinned"].as_bool(), Some(true));
     assert_eq!(pin.mutations[0].mutation_type, "pins");
     assert_eq!(pin.mutations[0].list_id.as_deref(), Some(list_id.as_str()));
+    assert_eq!(pin.mutations[0].url.as_deref(), Some(url));
+    assert_eq!(
+        pin.mutations[0].urls.as_deref(),
+        Some(&[url.to_string()][..])
+    );
 
     let snapshot_timestamp = 1_710_040_000_000;
     storage
@@ -185,6 +194,58 @@ async fn page_list_and_snapshot_commands_report_their_committed_meaning() {
     assert_eq!(
         deleted.mutations[0].slug.as_deref(),
         Some(page_slug.as_str())
+    );
+    assert_eq!(deleted.mutations[0].url.as_deref(), Some(url));
+}
+
+#[tokio::test]
+async fn note_pin_toggle_does_not_require_a_page_url() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("storage layout");
+    let authority = CommandAuthority::new(storage, "device-a".to_string());
+    let created = authority
+        .execute(
+            "createNote",
+            json!({
+                "url": "https://example.com/note-pin",
+                "title": "Note pin",
+                "excerpt": ["note pin"],
+                "note": "body",
+                "cssPath": ["main"]
+            }),
+        )
+        .await
+        .expect("create note");
+    let note_slug = created.response["noteSlug"].as_str().expect("note slug");
+    let list = authority
+        .execute("saveListMeta", json!({ "name": "Notes" }))
+        .await
+        .expect("create list");
+    let list_id = list.response["listId"].as_str().expect("list id");
+
+    let pin = authority
+        .execute(
+            "toggleListPin",
+            json!({ "listId": list_id, "id": format!("note:{note_slug}") }),
+        )
+        .await
+        .expect("toggle note pin");
+
+    assert_eq!(pin.response["pinned"].as_bool(), Some(true));
+    assert_eq!(pin.mutations.len(), 1);
+    assert_eq!(pin.mutations[0].mutation_type, "pins");
+    assert_eq!(pin.mutations[0].list_id.as_deref(), Some(list_id));
+    assert_eq!(
+        pin.mutations[0].url.as_deref(),
+        Some("https://example.com/note-pin")
+    );
+    assert_eq!(
+        pin.mutations[0].urls.as_deref(),
+        Some(&["https://example.com/note-pin".to_string()][..])
     );
 }
 

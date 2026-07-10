@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+pub const CONNECTOR_PROTOCOL_VERSION: u32 = 1;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DirectoryInfoPayload {
     pub name: String,
@@ -186,6 +188,8 @@ pub struct MutationPayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub urls: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
 }
 
@@ -193,6 +197,8 @@ pub struct MutationPayload {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ConnectorMessage {
     PairRequest {
+        #[serde(default, rename = "protocolVersion")]
+        protocol_version: Option<u32>,
         #[serde(rename = "browserId")]
         browser_id: String,
         #[serde(rename = "browserName")]
@@ -203,6 +209,8 @@ pub enum ConnectorMessage {
         browser_profile: Option<String>,
     },
     Auth {
+        #[serde(default, rename = "protocolVersion")]
+        protocol_version: Option<u32>,
         token: String,
     },
     Ping,
@@ -332,9 +340,14 @@ pub enum DaemonMessage {
         token: String,
         #[serde(rename = "deviceId")]
         device_id: String,
+        #[serde(rename = "protocolVersion")]
+        protocol_version: u32,
     },
     PairDenied,
-    AuthOk,
+    AuthOk {
+        #[serde(rename = "protocolVersion")]
+        protocol_version: u32,
+    },
     AuthFail {
         reason: String,
     },

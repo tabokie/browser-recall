@@ -11,7 +11,7 @@ use crate::protocol::{
     ConnectorMessage, DaemonMessage, DirectoryInfoPayload, MutationPayload, NoteSearchResult,
     PopupAttentionResult, PopupListResult, PopupNoteResult, PopupPageInfoEntry, PopupPinResult,
     PopupSnapshotResult, PreviewRuleHit, RuleBatchEntry, RuleBatchHit, RuleMatchResult,
-    RulePayload, SnapshotSearchResult, TestSeedFilePayload,
+    RulePayload, SnapshotSearchResult, TestSeedFilePayload, CONNECTOR_PROTOCOL_VERSION,
 };
 use crate::rules::{
     list_matches_page, match_list_rules_strict, page_data_from_raw_entry, preview_rule,
@@ -649,7 +649,14 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
             ConnectorMessage::TestSeedData { files } => {
                 send_json(&mut write, &handle_test_seed_data(&shared, files).await).await?;
             }
-            ConnectorMessage::Auth { token } => {
+            ConnectorMessage::Auth {
+                token,
+                protocol_version,
+            } => {
+                if protocol_version != Some(CONNECTOR_PROTOCOL_VERSION) {
+                    send_json(&mut write, &incompatible_protocol_error(protocol_version)).await?;
+                    break;
+                }
                 let maybe_browser = {
                     let config = shared.config.lock().await;
                     config.connectors.iter().find_map(|connector| {
@@ -676,7 +683,13 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                     authenticated = true;
                     set_connected(&shared, connection_id, active_connector, true).await;
                     info!("connector authenticated");
-                    send_json(&mut write, &DaemonMessage::AuthOk).await?;
+                    send_json(
+                        &mut write,
+                        &DaemonMessage::AuthOk {
+                            protocol_version: CONNECTOR_PROTOCOL_VERSION,
+                        },
+                    )
+                    .await?;
                 } else {
                     warn!("connector auth failed");
                     send_json(
@@ -690,11 +703,16 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                 }
             }
             ConnectorMessage::PairRequest {
+                protocol_version,
                 browser_id,
                 browser_name,
                 extension_id,
                 browser_profile,
             } => {
+                if protocol_version != Some(CONNECTOR_PROTOCOL_VERSION) {
+                    send_json(&mut write, &incompatible_protocol_error(protocol_version)).await?;
+                    break;
+                }
                 let request = PairingRequest {
                     request_id: random_string(12),
                     browser_id,
@@ -762,6 +780,7 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                             &DaemonMessage::PairApproved {
                                 token: token.0,
                                 device_id,
+                                protocol_version: CONNECTOR_PROTOCOL_VERSION,
                             },
                         )
                         .await?;
@@ -2368,6 +2387,19 @@ fn invalid_message_error(reason: impl Into<String>) -> DaemonMessage {
         error: "invalid_message".into(),
         code: "invalid_message".into(),
         message: format!("Invalid connector message: {}", reason.into()),
+    }
+}
+
+fn incompatible_protocol_error(actual: Option<u32>) -> DaemonMessage {
+    let actual = actual
+        .map(|version| version.to_string())
+        .unwrap_or_else(|| "missing".into());
+    DaemonMessage::Error {
+        error: "incompatible_protocol".into(),
+        code: "incompatible_protocol".into(),
+        message: format!(
+            "Connector protocol mismatch: expected {CONNECTOR_PROTOCOL_VERSION}, received {actual}."
+        ),
     }
 }
 

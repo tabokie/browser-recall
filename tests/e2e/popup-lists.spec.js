@@ -87,6 +87,21 @@ async function getBadgeForUrl(helper, url) {
   }, url);
 }
 
+async function getActionIconForUrl(helper, url) {
+  return helper.evaluate(async (pageUrl) => {
+    const tabs = await chrome.tabs.query({ url: pageUrl });
+    if (!tabs.length) return null;
+    const response = await chrome.runtime.sendMessage({
+      action: 'getActionIconForTest',
+      tabId: tabs[0].id,
+    });
+    if (!response?.success) {
+      throw new Error(response?.error || 'getActionIconForTest failed');
+    }
+    return response.path;
+  }, url);
+}
+
 async function waitForContentScript(helper, page, url) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const ready = await helper.evaluate(async (pageUrl) => {
@@ -341,11 +356,11 @@ test.describe('Popup list chip behavior', () => {
   }) => {
     const now = Date.now();
     void setupDir;
-    localServer.addPage('/prepared-toolbar-popup', {
-      title: 'Prepared Toolbar Popup',
-      body: '<main>Prepared toolbar popup page</main>',
+    localServer.addPage('/item?id=48789428', {
+      title: 'Show HN: Browser Recall',
+      body: '<main>Hacker News item 48789428</main>',
     });
-    const url = localServer.url('/prepared-toolbar-popup');
+    const url = localServer.url('/item?id=48789428');
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
@@ -361,7 +376,7 @@ test.describe('Popup list chip behavior', () => {
         path: 'views/lists/prepared-list.json',
         data: {
           slug: 'prepared-list',
-          name: 'Prepared List',
+          name: 'AI',
           owner: 'test-device',
           timestamp: now,
           pins: [{ id: `page:${slug}`, pinnedAt: now }],
@@ -372,7 +387,7 @@ test.describe('Popup list chip behavior', () => {
         data: {
           slug,
           url,
-          title: 'Prepared Toolbar Popup',
+          title: 'Show HN: Browser Recall',
           timestamp: now,
           parentIds: ['list:prepared-list'],
           childIds: [],
@@ -403,6 +418,9 @@ test.describe('Popup list chip behavior', () => {
     expect(prepared.success).toBe(true);
     expect(prepared.mode).toBe('dashboard');
     expect(prepared.popupPath).toMatch(/^popup\.html\?bootstrap=/);
+    await expect
+      .poll(() => getActionIconForUrl(helper, url))
+      .toMatchObject({ 16: 'icons/icon16-special-lists.png' });
     await helper.close();
 
     const popup = await extContext.newPage();
@@ -433,14 +451,119 @@ test.describe('Popup list chip behavior', () => {
 
     await expect(popup.locator('#dashboard')).toBeVisible();
     await expect(popup.locator('#pageTitle')).toHaveText(
-      'Prepared Toolbar Popup',
+      'Show HN: Browser Recall',
     );
     await expect(
-      popup.locator('#listChips .list-chip', { hasText: 'Prepared List' }),
+      popup.locator('#listChips .list-chip.selected', { hasText: 'AI' }),
     ).toBeVisible();
     expect(
       await popup.evaluate(() => globalThis.__preparedPopupStartupFetches),
     ).toEqual([]);
+
+    await popup.close();
+    await page.close();
+  });
+
+  test('prepared toolbar bootstrap invalidates when membership changes before popup opens', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    const now = Date.now();
+    void setupDir;
+    localServer.addPage('/prepared-popup-membership-race', {
+      title: 'Prepared Popup Membership Race',
+      body: '<main>Prepared popup membership race</main>',
+    });
+    const url = localServer.url('/prepared-popup-membership-race');
+    const slug = getSlugForUrl(url);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: 'views/manifest/list-order.json',
+        data: {
+          timestamp: now,
+          tree: [{ id: 'list:ai' }],
+        },
+      },
+      {
+        path: 'views/lists/ai.json',
+        data: {
+          slug: 'ai',
+          name: 'AI',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: 'views/manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/AI': 'ai' },
+        },
+      },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url,
+          title: 'Prepared Popup Membership Race',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+          visitDates: [20260617],
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+    await page.bringToFront();
+
+    const helper = await openHelperPage(extContext, extensionId);
+    const tabId = await helper.evaluate(async (pageUrl) => {
+      const tabs = await chrome.tabs.query({ url: pageUrl });
+      return tabs[0]?.id || null;
+    }, url);
+    expect(tabId).toBeTruthy();
+    const prepared = await helper.evaluate(
+      (targetTabId) =>
+        chrome.runtime.sendMessage({
+          action: 'preparePopupBootstrapForTest',
+          tabId: targetTabId,
+        }),
+      tabId,
+    );
+    expect(prepared).toMatchObject({ success: true, mode: 'dashboard' });
+
+    const pinResponse = await helper.evaluate(
+      ({ pageUrl, pageTitle }) =>
+        chrome.runtime.sendMessage({
+          action: 'toggleListPin',
+          listId: 'ai',
+          url: pageUrl,
+          title: pageTitle,
+        }),
+      { pageUrl: url, pageTitle: 'Prepared Popup Membership Race' },
+    );
+    expect(pinResponse.success).toBe(true);
+    await expect
+      .poll(() => getActionIconForUrl(helper, url))
+      .toMatchObject({ 16: 'icons/icon16-special-lists.png' });
+    await helper.close();
+
+    const popup = await extContext.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
+
+    await expect(popup.locator('#dashboard')).toBeVisible();
+    await expect(popup.locator('#listCount')).toHaveText('01');
+    await expect(
+      popup.locator('#listChips .list-chip.selected', { hasText: 'AI' }),
+    ).toBeVisible();
 
     await popup.close();
     await page.close();
@@ -2279,7 +2402,7 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
-  test(`popup reads desktop mutations only when reopened seed=${POPUP_MUTATION_SEED}`, async ({
+  test(`open popup and badge consume live desktop mutations seed=${POPUP_MUTATION_SEED}`, async ({
     extContext,
     extensionId,
     setupDir,
@@ -2292,13 +2415,11 @@ test.describe('Popup list chip behavior', () => {
     const noun = pickSeeded(random, nouns);
     const verb = pickSeeded(random, verbs);
     const title = `${noun} popup mutation ${verb}`;
-    const excerpt = `${noun} selected excerpt ${verb}`;
-    const note = `${verb} note ${noun}`;
     const listName = `Reading ${pickSeeded(random, nouns)}`;
 
     localServer.addPage('/popup-live-mutation-combo', {
       title,
-      body: `<main><h1>${noun}</h1><p>${excerpt}</p></main>`,
+      body: `<main><h1>${noun}</h1><p>${verb}</p></main>`,
     });
     const url = localServer.url('/popup-live-mutation-combo');
     const slug = getSlugForUrl(url);
@@ -2349,26 +2470,7 @@ test.describe('Popup list chip behavior', () => {
       url,
       title,
     });
-
-    await expect(popup.locator('#highlightList')).not.toContainText(excerpt);
     await expect(popup.locator('#listCount')).toHaveText('00');
-
-    const noteResp = await helper.evaluate(
-      ({ pageUrl, pageTitle, pageExcerpt, pageNote }) =>
-        chrome.runtime.sendMessage({
-          action: 'createNote',
-          url: pageUrl,
-          title: pageTitle,
-          excerpt: [pageExcerpt],
-          note: pageNote,
-          cssPath: [''],
-        }),
-      { pageUrl: url, pageTitle: title, pageExcerpt: excerpt, pageNote: note },
-    );
-    expect(noteResp.success).toBe(true);
-
-    await expect(popup.locator('#highlightList')).not.toContainText(excerpt);
-    await expect(popup.locator('#highlightList')).not.toContainText(note);
 
     const pinResp = await helper.evaluate(
       (pageUrl) =>
@@ -2381,27 +2483,12 @@ test.describe('Popup list chip behavior', () => {
     );
     expect(pinResp.success).toBe(true);
 
-    await expect(popup.locator('#listCount')).toHaveText('00');
-    await expect(popup.locator('.list-chip.selected')).toHaveCount(0);
+    await expect(popup.locator('#listCount')).toHaveText('01');
+    await expect(popup.locator('.list-chip.selected')).toContainText(listName);
     await expect
-      .poll(() => getBadgeForUrl(helper, url))
-      .toMatchObject({ text: '' });
-
+      .poll(() => getActionIconForUrl(helper, url))
+      .toMatchObject({ 16: 'icons/icon16-special-lists.png' });
     await popup.close();
-    const reopenedPopup = await openPopupForUrl(extContext, extensionId, {
-      url,
-      title,
-    });
-    await expect(reopenedPopup.locator('#highlightList')).toContainText(
-      excerpt,
-    );
-    await expect(reopenedPopup.locator('#highlightList')).toContainText(note);
-    await expect(reopenedPopup.locator('#listCount')).toHaveText('01');
-    await expect(reopenedPopup.locator('.list-chip.selected')).toContainText(
-      listName,
-    );
-
-    await reopenedPopup.close();
     await helper.close();
     await page.close();
   });

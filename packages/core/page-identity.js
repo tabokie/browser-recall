@@ -52,6 +52,20 @@ export function generateSlugFromUrl(url) {
   return generateSlug(pageSlugTextFromUrl(canonicalUrl), canonicalUrl);
 }
 
+export function isSameDocumentPageUrl(left, right) {
+  try {
+    const leftUrl = new URL(left);
+    const rightUrl = new URL(right);
+    return (
+      leftUrl.origin === rightUrl.origin &&
+      leftUrl.pathname === rightUrl.pathname &&
+      leftUrl.search === rightUrl.search
+    );
+  } catch {
+    return left === right;
+  }
+}
+
 export function createPageIdentityGlobalScript() {
   return `// Generated from packages/core/page-identity.js by scripts/stage-app-assets.mjs.
 (function installBrowserRecallPageIdentity() {
@@ -59,10 +73,12 @@ export function createPageIdentityGlobalScript() {
   const canonicalizePageUrl = ${canonicalizePageUrl.toString()};
   const pageSlugTextFromUrl = ${pageSlugTextFromUrl.toString()};
   const generateSlugFromUrl = ${generateSlugFromUrl.toString()};
+  const isSameDocumentPageUrl = ${isSameDocumentPageUrl.toString()};
 
   globalThis.browserRecallPageIdentity = Object.freeze({
     canonicalizePageUrl,
     generateSlugFromUrl,
+    isSameDocumentPageUrl,
   });
 })();
 `;

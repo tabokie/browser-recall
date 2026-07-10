@@ -59,6 +59,8 @@ let popupUiMutationQueue = Promise.resolve();
 let popupUiMutationActiveIdleResolvers = [];
 let focusedAutosaveQueue = Promise.resolve();
 let listChipsClickBound = false;
+let liveListRefreshQueued = false;
+let pendingLiveListMutation = null;
 
 function resetCurrentPageIdentity({ slug, url, title, tab }) {
   Object.assign(
@@ -2480,6 +2482,50 @@ async function refreshCurrentPageSummary(options = {}) {
   await Promise.all(followUps);
 }
 
+function listMutationTargetsCurrentPage(request) {
+  if (request?.type === 'lists') return true;
+  if (request?.type !== 'pins') return false;
+  const urls = [request.url, ...(request.urls || [])].filter(
+    (url) => typeof url === 'string' && url,
+  );
+  if (urls.length === 0) return true;
+  try {
+    return urls.some((url) => generateSlugFromUrl(url) === currentPage.slug);
+  } catch (error) {
+    logDebug('[popup] invalid list mutation URL:', error.message);
+    return false;
+  }
+}
+
+function scheduleLiveListRefresh(request) {
+  if (!currentPage.slug) {
+    pendingLiveListMutation = request;
+    return;
+  }
+  if (!listMutationTargetsCurrentPage(request) || liveListRefreshQueued) return;
+  liveListRefreshQueued = true;
+  void enqueuePopupUiMutation('refresh-live-list-mutation', async () => {
+    liveListRefreshQueued = false;
+    await refreshCurrentPageSummary({
+      renderSections: false,
+      renderLists: true,
+    });
+  }).catch((error) => {
+    liveListRefreshQueued = false;
+    logDebug('[popup] live list refresh failed:', error.message);
+  });
+}
+
+function schedulePendingLiveListRefresh() {
+  const request = pendingLiveListMutation;
+  pendingLiveListMutation = null;
+  if (request) scheduleLiveListRefresh(request);
+}
+
+chrome.runtime.onMessage.addListener((request) => {
+  if (request?.action === 'mutation') scheduleLiveListRefresh(request);
+});
+
 function renderPageDashboardShell(options = {}) {
   const { updateRecordingBar = true } = options;
   hideElement('blacklisted');
@@ -2571,6 +2617,7 @@ async function showDashboard(tab, options = {}) {
   await renderListChips(summaryLists || (await loadLists()));
   if (generation !== currentPage.generation) return;
   await finishDashboardRender(tab, generation);
+  schedulePendingLiveListRefresh();
 }
 
 // ─── Init phases ─────────────────────────────────────────────────────
@@ -2837,6 +2884,7 @@ async function renderPreparedDashboard(bootstrap) {
   await renderListChips(Array.isArray(summary.lists) ? summary.lists : []);
   if (generation !== currentPage.generation) return;
   await finishDashboardRender(tab, generation);
+  schedulePendingLiveListRefresh();
 }
 
 async function renderPreparedPopup(bootstrap) {

@@ -307,6 +307,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       readDesktopValueDelayMs,
       initialRoute,
       systemLocale,
+      previewRuleMatchesByPattern,
     }) => {
       if (initialRoute) window.__BR_STATE__ = { route: initialRoute };
       const listeners = new Map();
@@ -319,6 +320,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       const cancelledHistorySearchIds = [];
       const searchHistoryInvocations = [];
       const loadHistoryBatchInvocations = [];
+      const previewRuleInvocations = [];
 
       function clone(value) {
         return value === undefined
@@ -771,6 +773,9 @@ async function installDesktopBridgeMock(page, options = {}) {
         loadHistoryBatchInvocationCount() {
           return loadHistoryBatchInvocations.length;
         },
+        previewRuleInvocations() {
+          return clone(previewRuleInvocations);
+        },
         sessionValue(key) {
           return clone(stores.session.get(key));
         },
@@ -873,6 +878,21 @@ async function installDesktopBridgeMock(page, options = {}) {
                 request.query,
               ),
             };
+          case 'previewRule': {
+            previewRuleInvocations.push(clone(request));
+            const pattern = String(request.rule?.config?.pattern || '');
+            const matchingUrls = new Set(
+              previewRuleMatchesByPattern[pattern] || [],
+            );
+            return {
+              success: true,
+              results: (request.entries || []).map((entry) => ({
+                url: entry.url,
+                title: entry.title || '',
+                match: matchingUrls.has(entry.url),
+              })),
+            };
+          }
           case 'loadPageNotes':
             return {
               success: true,
@@ -1180,6 +1200,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       readDesktopValueDelayMs: options.readDesktopValueDelayMs || 0,
       initialRoute: options.initialRoute || '',
       systemLocale: options.systemLocale || 'en',
+      previewRuleMatchesByPattern: options.previewRuleMatchesByPattern || {},
     },
   );
 }
@@ -4819,6 +4840,9 @@ test.describe('desktop visual regression', () => {
         setupComplete: true,
         colorScheme: 'amber',
         historyEntries,
+        previewRuleMatchesByPattern: {
+          needle: ['https://example.com/rule-preview-match'],
+        },
       });
 
       await page.locator('.sidebar-item[data-list-id="research"]').click();
@@ -4830,6 +4854,13 @@ test.describe('desktop visual regression', () => {
       await expect(page.locator('#rulesPreviewList')).toContainText(
         'Rule preview needle',
       );
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () => window.__desktopVisualHarness.previewRuleInvocations().length,
+          ),
+        )
+        .toBeGreaterThan(0);
       await expect(
         page.getByText('No visits found to match against'),
       ).toHaveCount(0);
@@ -4862,6 +4893,10 @@ test.describe('desktop visual regression', () => {
         setupComplete: true,
         colorScheme: 'amber',
         historyEntries,
+        previewRuleMatchesByPattern: {
+          needle: ['https://example.com/rule-preview/first'],
+          marker: ['https://example.com/rule-preview/second'],
+        },
       });
 
       await page.locator('.sidebar-item[data-list-id="research"]').click();
@@ -4932,6 +4967,9 @@ test.describe('desktop visual regression', () => {
         colorScheme: 'amber',
         historyEntries,
         extraSession,
+        previewRuleMatchesByPattern: {
+          needle: ['https://example.com/rule-preview/title-match', pinnedUrl],
+        },
       });
 
       await page.locator('.sidebar-item[data-list-id="research"]').click();

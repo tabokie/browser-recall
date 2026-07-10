@@ -29,6 +29,7 @@ async fn fresh_pairing_persists_token() {
     let (mut socket, _) = connect_async(request).await.expect("ws connect");
 
     let pair_request = serde_json::to_string(&ConnectorMessage::PairRequest {
+        protocol_version: Some(1),
         browser_id: "browser-install-1".into(),
         browser_name: "Chrome".into(),
         extension_id: "abcdefghijklmnop".into(),
@@ -50,7 +51,11 @@ async fn fresh_pairing_persists_token() {
         DaemonMessage::PairApproved {
             token,
             device_id: _,
-        } => token,
+            protocol_version,
+        } => {
+            assert_eq!(protocol_version, 1);
+            token
+        }
         other => panic!("expected pair approved, got {other:?}"),
     };
     assert!(!token.is_empty());
@@ -64,6 +69,52 @@ async fn fresh_pairing_persists_token() {
         Some("Default profile")
     );
     assert!(saved.connectors[0].last_seen_at.is_some());
+
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn pairing_rejects_a_client_without_a_protocol_version() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+
+    let mut request = format!("ws://127.0.0.1:{}/", handle.port())
+        .into_client_request()
+        .expect("request");
+    request.headers_mut().insert(
+        "Origin",
+        "chrome-extension://abcdefghijklmnop".parse().unwrap(),
+    );
+    let (mut socket, _) = connect_async(request).await.expect("ws connect");
+
+    socket
+        .send(Message::Text(
+            serde_json::json!({
+                "type": "pair_request",
+                "browserId": "legacy-browser-install",
+                "browserName": "Chrome",
+                "extensionId": "abcdefghijklmnop",
+                "browserProfile": "Default profile"
+            })
+            .to_string(),
+        ))
+        .await
+        .expect("send legacy pair request");
+
+    let response = next_text_message(&mut socket).await;
+    let response: DaemonMessage = serde_json::from_str(&response).expect("error json");
+    assert!(matches!(
+        response,
+        DaemonMessage::Error { ref code, .. } if code == "incompatible_protocol"
+    ));
+    assert!(config_store
+        .load_or_create()
+        .expect("config reload")
+        .connectors
+        .is_empty());
 
     handle.shutdown().await;
 }
@@ -88,6 +139,7 @@ async fn firefox_extension_origin_can_pair() {
     let (mut socket, _) = connect_async(request).await.expect("ws connect");
 
     let pair_request = serde_json::to_string(&ConnectorMessage::PairRequest {
+        protocol_version: Some(1),
         browser_id: "firefox-install-1".into(),
         browser_name: "Firefox".into(),
         extension_id: "12345678-1234-1234-1234-123456789abc".into(),
@@ -161,6 +213,7 @@ async fn connect_pair_socket(port: u16, browser_name: &str) -> support::TestSock
     );
     let (mut socket, _) = connect_async(request).await.expect("ws connect");
     let pair_request = serde_json::to_string(&ConnectorMessage::PairRequest {
+        protocol_version: Some(1),
         browser_id: "firefox-install-1".into(),
         browser_name: browser_name.into(),
         extension_id: "12345678-1234-1234-1234-123456789abc".into(),
@@ -234,14 +287,61 @@ async fn auth_with_cached_token_succeeds() {
     );
     let (mut socket, _) = connect_async(request).await.expect("ws connect");
 
-    let auth_message = serde_json::to_string(&ConnectorMessage::Auth { token }).expect("auth");
+    let auth_message = serde_json::to_string(&ConnectorMessage::Auth {
+        protocol_version: Some(1),
+        token,
+    })
+    .expect("auth");
     socket
         .send(Message::Text(auth_message))
         .await
         .expect("send auth");
     let response = next_text_message(&mut socket).await;
     let response: DaemonMessage = serde_json::from_str(&response).expect("auth json");
-    assert!(matches!(response, DaemonMessage::AuthOk));
+    assert!(matches!(
+        response,
+        DaemonMessage::AuthOk {
+            protocol_version: 1
+        }
+    ));
+
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn auth_rejects_a_mismatched_protocol_version() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+    let token = pair_once(handle.port()).await;
+
+    let mut request = format!("ws://127.0.0.1:{}/", handle.port())
+        .into_client_request()
+        .expect("request");
+    request.headers_mut().insert(
+        "Origin",
+        "chrome-extension://abcdefghijklmnop".parse().unwrap(),
+    );
+    let (mut socket, _) = connect_async(request).await.expect("ws connect");
+    socket
+        .send(Message::Text(
+            serde_json::to_string(&ConnectorMessage::Auth {
+                protocol_version: Some(2),
+                token,
+            })
+            .expect("auth json"),
+        ))
+        .await
+        .expect("send auth");
+
+    let response = next_text_message(&mut socket).await;
+    let response: DaemonMessage = serde_json::from_str(&response).expect("error json");
+    assert!(matches!(
+        response,
+        DaemonMessage::Error { ref code, .. } if code == "incompatible_protocol"
+    ));
 
     handle.shutdown().await;
 }

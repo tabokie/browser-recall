@@ -1,4 +1,5 @@
 use crate::commands;
+use crate::mutations::{mutation_batch as mutation, mutation_batch_with as mutation_with};
 use crate::protocol::MutationPayload;
 use crate::runtime;
 use crate::storage::Storage;
@@ -179,6 +180,10 @@ impl CommandAuthority {
                 )
             }
             Command::CreateNote => {
+                let request_url = request
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
                 let response =
                     commands::create_note(&self.storage, &self.device_id, &request).await?;
                 let note_slug = required_response_string(&response, "createNote", "noteSlug")?;
@@ -186,6 +191,7 @@ impl CommandAuthority {
                 let mutations = mutation_with("note", |fields| {
                     fields.page_slug = page_slug;
                     fields.note_slug = Some(note_slug);
+                    fields.url = request_url;
                 });
                 CommandOutcome::new(response, mutations)
             }
@@ -224,25 +230,50 @@ impl CommandAuthority {
             }
             Command::ToggleListPin => {
                 let list_id = request_string("listId")?;
+                let url = if let Some(url) = request.get("url").and_then(Value::as_str) {
+                    Some(url.to_string())
+                } else if let Some(note_slug) = request
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| id.strip_prefix("note:"))
+                {
+                    self.storage
+                        .load_note(note_slug)
+                        .await
+                        .map_err(|error| error.to_string())?
+                        .and_then(|note| note.url)
+                } else {
+                    None
+                };
                 let response =
                     commands::toggle_list_pin(&self.storage, &self.device_id, &request).await?;
                 CommandOutcome::new(
                     response,
                     mutation_with("pins", |fields| {
                         fields.list_id = Some(list_id);
-                        fields.url = request
-                            .get("url")
-                            .and_then(Value::as_str)
-                            .map(str::to_string);
+                        fields.url = url.clone();
+                        fields.urls = url.map(|value| vec![value]);
                     }),
                 )
             }
             Command::AddListPins => {
                 let list_id = request_string("listId")?;
+                let urls = request
+                    .get("urls")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| "addListPins missing urls".to_string())?
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
                 commands::add_list_pins(&self.storage, &self.device_id, &request).await?;
                 CommandOutcome::new(
                     json!({ "success": true }),
-                    mutation_with("pins", |fields| fields.list_id = Some(list_id)),
+                    mutation_with("pins", |fields| {
+                        fields.list_id = Some(list_id);
+                        fields.url = urls.first().cloned();
+                        fields.urls = Some(urls);
+                    }),
                 )
             }
             Command::SaveListMeta => {
@@ -295,8 +326,19 @@ impl CommandAuthority {
                 let response =
                     commands::delete_list(&self.storage, &self.device_id, &list_id).await?;
                 let response_list_id = required_response_string(&response, "deleteList", "listId")?;
-                let mut mutations =
-                    mutation_with("lists", |fields| fields.list_id = Some(response_list_id));
+                let urls = response
+                    .get("urls")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                let mut mutations = mutation_with("lists", |fields| {
+                    fields.list_id = Some(response_list_id);
+                    fields.url = urls.first().cloned();
+                    fields.urls = Some(urls);
+                });
                 mutations.extend(mutation("orphaned"));
                 CommandOutcome::new(response, mutations)
             }
@@ -347,8 +389,13 @@ impl CommandAuthority {
                     .or_else(|| request.get("ts"))
                     .and_then(Value::as_i64)
                     .ok_or_else(|| "deleteSnapshot missing timestamp".to_string())?;
-                commands::delete_snapshot(&self.storage, &self.device_id, &slug, timestamp).await?;
-                let mut mutations = mutation_with("snapshot", |fields| fields.slug = Some(slug));
+                let url =
+                    commands::delete_snapshot(&self.storage, &self.device_id, &slug, timestamp)
+                        .await?;
+                let mut mutations = mutation_with("snapshot", |fields| {
+                    fields.slug = Some(slug);
+                    fields.url = Some(url);
+                });
                 mutations.extend(mutation("orphaned"));
                 CommandOutcome::new(json!({ "success": true }), mutations)
             }
@@ -441,28 +488,6 @@ impl CommandOutcome {
             mutations,
         }
     }
-}
-
-fn mutation(mutation_type: &str) -> Vec<MutationPayload> {
-    mutation_with(mutation_type, |_| {})
-}
-
-fn mutation_with(
-    mutation_type: &str,
-    configure: impl FnOnce(&mut MutationPayload),
-) -> Vec<MutationPayload> {
-    let mut mutation = MutationPayload {
-        mutation_type: mutation_type.to_string(),
-        list_id: None,
-        page_slug: None,
-        note_slug: None,
-        old_note_slug: None,
-        slug: None,
-        url: None,
-        key: None,
-    };
-    configure(&mut mutation);
-    vec![mutation]
 }
 
 fn required_response_string(response: &Value, action: &str, key: &str) -> Result<String, String> {

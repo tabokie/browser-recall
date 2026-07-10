@@ -35,6 +35,7 @@ async function pairSocket(port) {
   socket.send(
     JSON.stringify({
       type: 'pair_request',
+      protocolVersion: 1,
       browserId: 'browser-install-1',
       browserName: 'Chrome',
       extensionId: 'abcdefghijklmnop',

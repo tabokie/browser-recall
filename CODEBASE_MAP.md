@@ -65,6 +65,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `crates/daemon/src/ws_server.rs` | Browser pairing, authenticated websocket adapter, browser observations, streaming, and change broadcasts |
 | `crates/daemon/src/pairing.rs` | Pairing data/state helpers |
 | `crates/replay/src/lib.rs` | Production replay engine |
+| `crates/replay/examples/page-identity.rs` | Test-only batch adapter exposing native replay URL slug generation to cross-language identity parity coverage |
 | `crates/replay/src/bin/replay-verify.rs` | Full-log checkpoint verifier using the production replay and checkpoint policy |
 | `crates/search/src/lib.rs` | Native search primitives |
 | `scripts/stage-app-assets.mjs` | Stages loadable app assets under `dist/extension/{chrome,firefox}/` and `dist/desktop/ui/`, validates registered locale catalog parity, and generates filtered WebExtension locale files and the content-script page identity bridge |
@@ -73,9 +74,8 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `scripts/test-coverage-monitor.mjs` | Test investment and JS/Rust uncovered-line monitor; enforces no JS or inline Rust unit-test LoC growth |
 | `scripts/generate-icons.mjs` | Renders root SVG icon sources into opaque desktop/extension icons, the transparent tray icon, and the macOS `.icns` pack |
 | `packages/core/index.js` | Shared package exports |
-| `packages/core/page-identity.js` | Shared page URL canonicalization and slug generation, plus generated classic-script bridge source for content scripts |
+| `packages/core/page-identity.js` | Shared page URL canonicalization, slug generation, and same-document classification, plus generated classic-script bridge source for content scripts |
 | `packages/core/utils.js` | Shared utility helpers that re-export page identity and provide connector request canonicalization |
-| `packages/core/rule-engine.js` | Shared rule validation/matching helpers; keyword rules are title-only |
 | `packages/core/search-helpers.js` | Shared query parsing/search helper logic |
 | `packages/core/i18n.js` | Shared locale registry and UI localization runtime for catalog lookup, desktop language options, document localization, and WebExtension i18n adaptation |
 | `packages/core/locales/en/messages.json` | Canonical English message catalog, used by desktop UI assets and filtered into extension `/_locales` |
@@ -96,9 +96,9 @@ This map intentionally excludes removed extension-only storage/sync internals.
 
 ### Connector Popup
 
-- `apps/extension/popup.js` consumes prepared bootstrap payloads when present, requests page summaries as the direct-load fallback, submits popup mutations through a serialized UI lane, renders an open-popup snapshot without background mutation refreshes, and owns the transient list-picker/search keyboard UI. Its capture and picker modes share one statically mounted input node so popup startup and native IME composition never cross a reparent or replacement boundary.
+- `apps/extension/popup.js` consumes prepared bootstrap payloads when present, requests page summaries as the direct-load fallback, submits popup mutations through a serialized UI lane, refreshes current-page list metadata from committed daemon pin/list mutations through that same lane, and owns the transient list-picker/search keyboard UI. Its capture and picker modes share one statically mounted input node so popup startup and native IME composition never cross a reparent or replacement boundary.
 - Extension UI and manifest localization use browser-native WebExtension `i18n` files staged from `packages/core/locales/`; only `extension*`, `command*`, and `common*` keys are packaged. The extension follows the browser's UI locale and does not persist a product locale override.
-- `apps/extension/background.js` resolves popup actions through the daemon connection. Toolbar clicks prepare current-tab and daemon popup data before opening `popup.html?bootstrap=...`, avoiding a manifest `default_popup` first frame. Prepared popup data is handed off by a one-shot in-memory token, has a bounded timeout, and falls back to an extension tab when an engine lacks programmatic action popups. Test-only background RPCs are split into `apps/extension/background-test-control.js` and included only in staged test extensions.
+- `apps/extension/background.js` resolves popup actions through the daemon connection. Toolbar clicks prepare current-tab and daemon popup data before opening `popup.html?bootstrap=...`, avoiding a manifest `default_popup` first frame. Prepared popup data is handed off by a one-shot in-memory token, has a bounded timeout, and is rebuilt when a committed daemon mutation invalidates it before consumption. Engines without programmatic action popups fall back to an extension tab. Pairing/authentication negotiate the connector protocol in both directions, rejecting incompatible peers before connected state. Test-only background RPCs are split into `apps/extension/background-test-control.js` and included only in staged test extensions.
 - `apps/extension/icon-paths.js` defines packaged toolbar icon sets for normal capture, paused recording, and special page-marker states; `apps/extension/badge-controller.js` applies those icons at runtime.
 - `apps/extension/options-stub.js` only opens the desktop app; it is not a settings surface.
 
@@ -112,10 +112,11 @@ This map intentionally excludes removed extension-only storage/sync internals.
 ### Replay and Storage
 
 - `crates/replay/` is the production replay engine and owns replay-derived checkpoint policy used by verification and daemon persistence.
-- `packages/core/page-identity.js` canonicalizes extension-originated page URLs before they are sent to desktop, removing underscore-prefixed query params while keeping ordinary query params and fragments. `packages/core/utils.js`, migration scripts, integration tests, and the generated content-script bridge all use that shared implementation. `crates/replay/src/lib.rs` hashes the URL it receives; non-extension producers must send canonical URLs to get the same identity behavior.
+- `packages/core/page-identity.js` canonicalizes extension-originated page URLs before they are sent to desktop, removes underscore-prefixed query params while keeping ordinary query params and fragments, and classifies same-document navigation for both background and content-script callers. `packages/core/utils.js`, migration scripts, and the generated content-script bridge use that shared implementation. `crates/replay/src/lib.rs` hashes the URL it receives with a native Rust implementation; non-extension producers must send canonical URLs, and `tests/integration/page-identity-parity.test.js` differentially checks both implementations over a deterministic generated corpus.
 - `crates/daemon/src/storage.rs` owns coordinated cache-miss reads, filesystem primitives, the current projection cache, synchronous log append, history file/device-directory listing, the ordered async checkpoint worker, replay-progress files, and the current `logs/`, `objects/`, `views/` path layout.
-- `crates/daemon/src/command_authority.rs` is the shared semantic mutation interface used by the in-process Tauri adapter and authenticated WebSocket adapter. It owns the supported action set, validation, response formation, and post-commit mutation meaning; native shell actions and connector observations remain adapter-specific.
+- `crates/daemon/src/command_authority.rs` is the shared semantic mutation interface used by the in-process Tauri adapter and authenticated WebSocket adapter. It owns the supported action set, validation, response formation, and post-commit mutation meaning, including affected URL sets used by connector surfaces; note-pin commands derive that URL from the authoritative note when the request has no page URL. Mutation payload construction is shared with replay notification paths through `crates/daemon/src/mutations.rs`. Native shell actions and connector observations remain adapter-specific. Extension command handlers consume this notification stream instead of reclassifying mutations or directly refreshing product badges.
 - `crates/daemon/src/commands.rs` implements replay-backed reads and mutations behind daemon interfaces, constructs strict replay entries, and keeps command-only fields out of JSONL.
+- `crates/daemon/src/rules.rs` is the sole rule validation, preview, and automatic-matching implementation; desktop keyword and function previews both call this native module through daemon commands.
 - `crates/daemon/src/read_projections.rs` owns workflow joins and visibility policy for deep read interfaces. It supplies list display, page/search context, all-page filter context, page info/snapshots, list trees, recycle-bin entries, popup list summaries, and settings through coordinated cache/disk reads. Tauri and WebSocket adapters translate these results without leaking entity-key construction into product callers.
 - Generic WebSocket `get_entity`/`get_all_pages` are available only when daemon test control is explicitly enabled, and the extension `readDesktopValue` relay is staged only in test builds. The Tauri generic read and shared-web generic-read exports were removed; production code has no generic entity-read caller.
 - `crates/daemon/src/runtime.rs` owns the replay transaction interface used by commands, websocket ingest, remote replay, rule batches, sync ingestion, startup recovery, and destructive clearing. It is the only production caller of checkpoint-capacity reservation, direct projection-cache effects, and reserved checkpoint submission.
@@ -133,7 +134,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 - `crates/daemon/src/ws_server.rs` owns paired-browser websocket sessions.
 - `apps/extension/connector/pairing.js` and `apps/extension/connector/ws-client.js` manage the browser side.
 - `apps/desktop/src-tauri/src/main.rs` rebroadcasts daemon change notifications to desktop webviews.
-- Authenticated connector sockets also receive daemon change notifications for live connector surfaces such as tab badges. Open popups intentionally do not refresh from background mutation broadcasts; they read fresh page data on the next open.
+- Authenticated connector sockets also receive daemon change notifications for live connector surfaces such as tab badges and open-popup list membership.
 
 ### Sync
 
@@ -149,8 +150,9 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `tests/integration/popup-rpc.test.js` | Popup ↔ daemon RPC integration |
 | `tests/integration/pairing.test.js` | Browser pairing flow |
 | `tests/integration/event-flow.test.js` | Connector event flow into the daemon |
+| `tests/integration/page-identity-parity.test.js` | Deterministic cross-language property coverage for JavaScript canonical identity and Rust replay identity |
 | `crates/daemon/tests/read_projections.rs` | Daemon list-display projection coverage, including non-empty page/note pins, deleted visibility, explicit missing targets, and cache-miss-to-disk reads |
-| `tests/e2e/popup-lists.spec.js` | Popup list interactions in the shipped connector |
+| `tests/e2e/popup-lists.spec.js` | Popup list interactions in the shipped connector, including pre-existing membership and toolbar icon state for query-bearing HN-shaped URLs |
 | `tests/e2e/badge.spec.js` | Popup/badge behavior in the shipped connector |
 | `tests/e2e/extension-error-popouts.spec.js` | Browser-level extension popup and snapshot error popout styling |
 | `tests/e2e/snapshot-resource-timeout.spec.js` | Snapshot resource body timeouts, CORS fallback reporting, and partial-capture warnings through the real connector/daemon path |

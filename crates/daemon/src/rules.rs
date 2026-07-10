@@ -105,7 +105,7 @@ pub fn validate_rule(rule: &RuleSpec) -> Result<(), String> {
     match rule.rule_type.as_str() {
         "keyword" => validate_keyword_rule(rule),
         "function" => compile_function_rule(&rule.config),
-        _ => Ok(()),
+        unknown => Err(format!("Unsupported rule type: {unknown}")),
     }
 }
 
@@ -114,6 +114,18 @@ fn validate_keyword_rule(rule: &RuleSpec) -> Result<(), String> {
         if key != "pattern" {
             return Err(format!("Unsupported keyword rule field: {key}"));
         }
+    }
+    let pattern = rule
+        .config
+        .get("pattern")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Keyword rule requires a string pattern".to_string())?;
+    if pattern.trim().is_empty() {
+        return Err("Keyword rule pattern must not be empty".to_string());
+    }
+    if pattern.starts_with('/') && pattern.ends_with('/') && pattern.len() >= 2 {
+        regex::Regex::new(&format!("(?i){}", &pattern[1..pattern.len() - 1]))
+            .map_err(|error| format!("Invalid keyword regular expression: {error}"))?;
     }
     Ok(())
 }
@@ -252,10 +264,20 @@ Boolean((function(page) {{
 }
 
 fn compile_function_rule(config: &BTreeMap<String, Value>) -> Result<(), String> {
+    let description = config
+        .get("description")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Function rule requires a string description".to_string())?;
+    if description.trim().is_empty() {
+        return Err("Function rule description must not be empty".to_string());
+    }
     let fn_source = config
         .get("fnSource")
         .and_then(Value::as_str)
-        .ok_or_else(|| "missing fnSource".to_string())?;
+        .ok_or_else(|| "Function rule requires string fnSource".to_string())?;
+    if fn_source.trim().is_empty() {
+        return Err("Function rule fnSource must not be empty".to_string());
+    }
     let validation = validate_fn_rule_source(fn_source);
     if !validation.valid {
         return Err(validation.errors.join("; "));
@@ -403,6 +425,46 @@ mod tests {
         });
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn rule_validation_rejects_incomplete_or_unknown_rules() {
+        for config in [
+            BTreeMap::new(),
+            BTreeMap::from([("pattern".to_string(), json!(""))]),
+            BTreeMap::from([("pattern".to_string(), json!(42))]),
+            BTreeMap::from([("pattern".to_string(), json!("/[invalid/"))]),
+        ] {
+            assert!(validate_rule(&RuleSpec {
+                rule_type: "keyword".to_string(),
+                config,
+            })
+            .is_err());
+        }
+
+        assert!(validate_rule(&RuleSpec {
+            rule_type: "future-rule".to_string(),
+            config: BTreeMap::new(),
+        })
+        .is_err());
+
+        for config in [
+            BTreeMap::from([("fnSource".to_string(), json!("return true;"))]),
+            BTreeMap::from([
+                ("description".to_string(), json!("")),
+                ("fnSource".to_string(), json!("return true;")),
+            ]),
+            BTreeMap::from([
+                ("description".to_string(), json!("Description")),
+                ("fnSource".to_string(), json!("")),
+            ]),
+        ] {
+            assert!(validate_rule(&RuleSpec {
+                rule_type: "function".to_string(),
+                config,
+            })
+            .is_err());
+        }
     }
 
     #[test]

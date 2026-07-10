@@ -991,7 +991,7 @@ pub async fn delete_snapshot(
     device_id: &str,
     slug: &str,
     timestamp: i64,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let transaction = ReplayTransaction::begin(storage, device_id).await?;
     let page = storage
         .load_page(slug)
@@ -1005,11 +1005,12 @@ pub async fn delete_snapshot(
         transaction,
         vec![LogEntry::DeleteSnapshot {
             timestamp: storage.next_command_timestamp_millis(),
-            url,
+            url: url.clone(),
             path: storage.snapshot_sidecar_relative_path(slug, timestamp),
         }],
     )
-    .await
+    .await?;
+    Ok(url)
 }
 
 pub async fn permanent_delete_keys(

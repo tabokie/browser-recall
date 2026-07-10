@@ -9,7 +9,7 @@ pub fn dedupe_mutations(mutations: Vec<MutationPayload>) -> Vec<MutationPayload>
     let mut deduped = Vec::new();
     for mutation in mutations {
         let key = format!(
-            "{}|{}|{}|{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}|{}|{}|{:?}|{}",
             mutation.mutation_type,
             mutation.list_id.as_deref().unwrap_or(""),
             mutation.page_slug.as_deref().unwrap_or(""),
@@ -17,6 +17,7 @@ pub fn dedupe_mutations(mutations: Vec<MutationPayload>) -> Vec<MutationPayload>
             mutation.old_note_slug.as_deref().unwrap_or(""),
             mutation.slug.as_deref().unwrap_or(""),
             mutation.url.as_deref().unwrap_or(""),
+            mutation.urls.as_deref().unwrap_or(&[]),
             mutation.key.as_deref().unwrap_or(""),
         );
         if seen.insert(key) {
@@ -35,8 +36,22 @@ pub fn mutation(mutation_type: &str) -> MutationPayload {
         old_note_slug: None,
         slug: None,
         url: None,
+        urls: None,
         key: None,
     }
+}
+
+pub fn mutation_batch(mutation_type: &str) -> Vec<MutationPayload> {
+    vec![mutation(mutation_type)]
+}
+
+pub fn mutation_batch_with(
+    mutation_type: &str,
+    configure: impl FnOnce(&mut MutationPayload),
+) -> Vec<MutationPayload> {
+    let mut payload = mutation(mutation_type);
+    configure(&mut payload);
+    vec![payload]
 }
 
 fn note_slug_from_path(path: &str) -> Option<String> {
@@ -89,6 +104,7 @@ pub fn build_mutations(
             mutations.push(MutationPayload {
                 list_id,
                 url: urls.first().cloned(),
+                urls: Some(urls.clone()),
                 ..mutation("pins")
             });
         }
@@ -168,8 +184,14 @@ pub fn build_mutations(
         mutations.push(mutation("lists"));
     }
     if raw_entry.get("source").and_then(Value::as_str) == Some("auto") {
+        let url = raw_entry
+            .get("url")
+            .and_then(Value::as_str)
+            .map(str::to_string);
         mutations.push(MutationPayload {
             list_id: first_list_id_from_effects(effects),
+            urls: url.clone().map(|value| vec![value]),
+            url,
             ..mutation("pins")
         });
     }

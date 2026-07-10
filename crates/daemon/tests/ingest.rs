@@ -54,6 +54,7 @@ async fn authenticated_socket(port: u16, token: &str) -> TestSocket {
     socket
         .send(Message::Text(
             serde_json::to_string(&ConnectorMessage::Auth {
+                protocol_version: Some(1),
                 token: token.into(),
             })
             .expect("auth json"),
@@ -62,7 +63,12 @@ async fn authenticated_socket(port: u16, token: &str) -> TestSocket {
         .expect("send auth");
     let auth = next_text_message(&mut socket).await;
     let auth: DaemonMessage = serde_json::from_str(&auth).expect("auth response json");
-    assert!(matches!(auth, DaemonMessage::AuthOk));
+    assert!(matches!(
+        auth,
+        DaemonMessage::AuthOk {
+            protocol_version: 1
+        }
+    ));
     socket
 }
 
@@ -839,6 +845,7 @@ async fn websocket_auth_control_and_error_matrix_keeps_connections_predictable()
     send_connector(
         &mut bad_auth,
         ConnectorMessage::Auth {
+            protocol_version: Some(1),
             token: "missing-token".to_string(),
         },
     )
@@ -887,6 +894,7 @@ async fn websocket_pairing_denial_is_explicit_and_closes_request() {
     send_connector(
         &mut socket,
         ConnectorMessage::PairRequest {
+            protocol_version: Some(1),
             browser_id: "denied-browser".to_string(),
             browser_name: "Chrome".to_string(),
             extension_id: "abcdefghijklmnop".to_string(),

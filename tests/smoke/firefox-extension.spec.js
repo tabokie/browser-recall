@@ -5,6 +5,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import vm from 'node:vm';
 import { JSDOM } from 'jsdom';
+import { generateSlugFromUrl } from '../../packages/core/page-identity.js';
 
 import {
   cleanupStagedAssets,
@@ -615,7 +616,7 @@ class SuccessfulWebSocket {
     if (payload.type === 'auth') {
       queueMicrotask(() =>
         this.#emit('message', {
-          data: JSON.stringify({ type: 'auth_ok' }),
+          data: JSON.stringify({ type: 'auth_ok', protocolVersion: 1 }),
         }),
       );
       return;
@@ -628,6 +629,48 @@ class SuccessfulWebSocket {
             deviceId: 'firefox-device',
             bufferDepth: 0,
             lastDrainedAt: Date.now(),
+          }),
+        }),
+      );
+      return;
+    }
+    if (payload.type === 'get_settings') {
+      queueMicrotask(() =>
+        this.#emit('message', {
+          data: JSON.stringify({
+            type: 'settings_result',
+            success: true,
+            settings: {},
+          }),
+        }),
+      );
+      return;
+    }
+    if (payload.type === 'get_page_summary') {
+      const slug = generateSlugFromUrl(payload.url);
+      const page = SuccessfulWebSocket.entityForKey(`page:${slug}`);
+      const notes = (page?.childIds || [])
+        .filter((id) => id.startsWith('note:'))
+        .map((id) => ({ slug: id.slice('note:'.length) }));
+      const snapshots = (page?.childIds || [])
+        .filter((id) => id.startsWith('snapshot:'))
+        .map((id) => ({ slug: id.slice('snapshot:'.length) }));
+      const lists = (page?.parentIds || [])
+        .filter((id) => id.startsWith('list:'))
+        .map((id) => ({
+          slug: id.slice('list:'.length),
+          pins: [{ kind: 'page', slug }],
+        }));
+      queueMicrotask(() =>
+        this.#emit('message', {
+          data: JSON.stringify({
+            type: 'page_summary_result',
+            success: true,
+            url: payload.url,
+            page,
+            notes,
+            snapshots,
+            lists,
           }),
         }),
       );
@@ -670,6 +713,26 @@ class SuccessfulWebSocket {
           }),
         }),
       );
+      return;
+    }
+    if (payload.type === 'snapshot') {
+      queueMicrotask(() => {
+        this.#emit('message', {
+          data: JSON.stringify({
+            type: 'ack',
+            bufferDepth: 0,
+            lastDrainedAt: Date.now(),
+          }),
+        });
+        this.#emit('message', {
+          data: JSON.stringify({
+            type: 'change',
+            mutations: [
+              { type: 'snapshot', slug: payload.slug, url: payload.url },
+            ],
+          }),
+        });
+      });
       return;
     }
     queueMicrotask(() =>
@@ -1116,16 +1179,25 @@ test.describe('Firefox extension smoke', () => {
         if (message?.action === 'extractMarkdown') {
           return { markdown: 'captured markdown' };
         }
+        if (message?.type === 'performAction') {
+          queueMicrotask(() => {
+            void api.events.runtimeMessage.dispatch(
+              {
+                type: 'savepageDone',
+                captureId: message.captureId,
+                html: '<html><body>captured html</body></html>',
+              },
+              { tab: activeTab },
+            );
+          });
+        }
         return { success: true };
       };
       api.browserApi.scripting.executeScript = async ({ files }) => {
         if (files?.includes('savepage/content.js')) {
           queueMicrotask(() => {
             void api.events.runtimeMessage.dispatch(
-              {
-                type: 'savepageDone',
-                html: '<html><body>captured html</body></html>',
-              },
+              { type: 'scriptLoaded' },
               { tab: activeTab },
             );
           });

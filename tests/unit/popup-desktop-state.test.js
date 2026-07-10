@@ -1130,7 +1130,7 @@ describe('popup desktop state rendering', () => {
     expect(document.body.classList.contains('popup-compact')).toBe(false);
   });
 
-  it('ignores background mutation messages while a popup session is open', async () => {
+  it('queues a live list refresh behind an active recording mutation', async () => {
     const tab = {
       id: 49,
       url: 'https://example.com/resume-mutation-race',
@@ -1208,6 +1208,7 @@ describe('popup desktop state rendering', () => {
         document.getElementById('dashboardContent')?.style.display ===
           'block' && toggle.disabled === false,
     );
+    await waitFor(() => summaryCalls === 3);
     expect(document.body.classList.contains('popup-compact')).toBe(false);
     expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
   });

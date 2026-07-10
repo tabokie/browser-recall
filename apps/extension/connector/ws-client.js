@@ -1,4 +1,4 @@
-import { buildPairRequest } from './pairing.js';
+import { buildPairRequest, CONNECTOR_PROTOCOL_VERSION } from './pairing.js';
 import {
   bufferStats,
   bufferedMessageSize,
@@ -460,6 +460,7 @@ async function connect(options = {}) {
           socket.send(
             JSON.stringify({
               type: 'auth',
+              protocolVersion: CONNECTOR_PROTOCOL_VERSION,
               token: stored[STORAGE_KEYS.token],
             }),
           );
@@ -508,6 +509,26 @@ async function setPausedState(payload) {
   });
 }
 
+async function rejectIncompatibleDaemon(socket, payload) {
+  const actual = payload.protocolVersion ?? null;
+  await setDiagnostic('incompatible_protocol', {
+    expected: CONNECTOR_PROTOCOL_VERSION,
+    actual,
+  });
+  socket._closeState = CONNECTOR_STATES.INCOMPATIBLE;
+  socket._reconnectDelayMs = RECONNECT_DELAY_MS;
+  await setState(CONNECTOR_STATES.INCOMPATIBLE, {
+    [STORAGE_KEYS.lastError]:
+      'Desktop app and browser extension versions are incompatible. Update and restart both.',
+    [STORAGE_KEYS.lastErrorCode]: 'incompatible_protocol',
+  });
+  socket.close();
+}
+
+function hasCompatibleDaemonProtocol(payload) {
+  return payload.protocolVersion === CONNECTOR_PROTOCOL_VERSION;
+}
+
 function daemonResponseError(payload) {
   const error = new Error(payload.message || payload.error || 'Daemon error');
   error.code = payload.code || payload.error || 'daemon_error';
@@ -533,6 +554,10 @@ async function handleSocketMessage(socket, payload) {
 
   switch (payload.type) {
     case 'pair_approved':
+      if (!hasCompatibleDaemonProtocol(payload)) {
+        await rejectIncompatibleDaemon(socket, payload);
+        break;
+      }
       await markSocketAuthenticated(socket, {
         source: 'pair',
         storagePatch: {
@@ -542,6 +567,10 @@ async function handleSocketMessage(socket, payload) {
       });
       break;
     case 'auth_ok':
+      if (!hasCompatibleDaemonProtocol(payload)) {
+        await rejectIncompatibleDaemon(socket, payload);
+        break;
+      }
       await markSocketAuthenticated(socket, { source: 'auth' });
       break;
     case 'pair_pending':
@@ -564,7 +593,9 @@ async function handleSocketMessage(socket, payload) {
       socket.close();
       break;
     case 'error':
-      if (payload.error === 'paused') {
+      if (payload.code === 'incompatible_protocol') {
+        await rejectIncompatibleDaemon(socket, payload);
+      } else if (payload.error === 'paused') {
         await setPausedState(payload);
       } else {
         await setDiagnostic(payload.code || payload.error || 'daemon_error', {

@@ -5,6 +5,7 @@ import {
   canonicalizePageRequest,
   canonicalizePageUrl,
   generateSlugFromUrl,
+  isSameDocumentPageUrl,
 } from '../../apps/extension/utils.js';
 
 describe('generateSlugFromUrl', () => {
@@ -73,6 +74,10 @@ describe('generateSlugFromUrl', () => {
     expect(context.browserRecallPageIdentity.generateSlugFromUrl(url)).toBe(
       generateSlugFromUrl(url),
     );
+    const fragmentUrl = `${url}#comments`;
+    expect(
+      context.browserRecallPageIdentity.isSameDocumentPageUrl(url, fragmentUrl),
+    ).toBe(isSameDocumentPageUrl(url, fragmentUrl));
   });
 });
 

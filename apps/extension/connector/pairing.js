@@ -2,6 +2,8 @@ const STORAGE_KEYS = {
   browserId: 'connectorBrowserId',
 };
 
+export const CONNECTOR_PROTOCOL_VERSION = 1;
+
 async function ensureBrowserInstallId() {
   const stored = await chrome.storage.local.get([STORAGE_KEYS.browserId]);
   if (stored[STORAGE_KEYS.browserId]) {
@@ -39,6 +41,7 @@ export async function buildPairRequest() {
   }
   return {
     type: 'pair_request',
+    protocolVersion: CONNECTOR_PROTOCOL_VERSION,
     browserId: await ensureBrowserInstallId(),
     browserName: await detectBrowserName(),
     browserProfile: detectBrowserProfile(),

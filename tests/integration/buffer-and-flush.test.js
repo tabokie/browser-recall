@@ -174,6 +174,8 @@ class BrowserLikeWebSocket {
   static delayMessagePredicate = null;
   static closeOnNextStatus = false;
   static hangOnNextStatus = false;
+  static simulateLegacyProtocol = false;
+  static sendMismatchedProtocol = false;
   static instances = [];
 
   constructor(url) {
@@ -194,7 +196,14 @@ class BrowserLikeWebSocket {
     }
     const wrapped = (...args) => {
       if (type === 'message') {
-        const data = args[0].toString();
+        let data = args[0].toString();
+        if (BrowserLikeWebSocket.simulateLegacyProtocol) {
+          const payload = JSON.parse(data);
+          if (payload.type === 'pair_approved' || payload.type === 'auth_ok') {
+            delete payload.protocolVersion;
+            data = JSON.stringify(payload);
+          }
+        }
         if (
           BrowserLikeWebSocket.delayMessageMs > 0 &&
           BrowserLikeWebSocket.delayMessagePredicate?.(data)
@@ -222,6 +231,14 @@ class BrowserLikeWebSocket {
   send(payload) {
     try {
       const message = JSON.parse(payload);
+      if (
+        BrowserLikeWebSocket.sendMismatchedProtocol &&
+        (message.type === 'auth' || message.type === 'pair_request')
+      ) {
+        message.protocolVersion = 2;
+        this.socket.send(JSON.stringify(message));
+        return;
+      }
       if (message.type === 'get_status') {
         if (BrowserLikeWebSocket.closeOnNextStatus) {
           BrowserLikeWebSocket.closeOnNextStatus = false;
@@ -313,6 +330,8 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     BrowserLikeWebSocket.delayMessagePredicate = null;
     BrowserLikeWebSocket.closeOnNextStatus = false;
     BrowserLikeWebSocket.hangOnNextStatus = false;
+    BrowserLikeWebSocket.simulateLegacyProtocol = false;
+    BrowserLikeWebSocket.sendMismatchedProtocol = false;
     BrowserLikeWebSocket.instances = [];
     RefusingWebSocket.urls = [];
 
@@ -320,6 +339,106 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('reports an incompatible desktop instead of authenticating silently', async () => {
+    const dir = mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-incompatible-protocol-'),
+    );
+    tempDirs.push(dir);
+
+    originalWebSocket = globalThis.WebSocket;
+    originalChrome = globalThis.chrome;
+    originalNavigator = globalThis.navigator;
+    originalSetTimeout = globalThis.setTimeout;
+
+    const { chrome, store } = createChromeMock();
+    globalThis.chrome = chrome;
+    globalThis.WebSocket = BrowserLikeWebSocket;
+    BrowserLikeWebSocket.simulateLegacyProtocol = true;
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { userAgent: 'Chrome/123.0.0.0 Safari/537.36' },
+      configurable: true,
+    });
+    globalThis.setTimeout = (fn, delay, ...args) => {
+      const timer = originalSetTimeout(fn, delay, ...args);
+      timer?.unref?.();
+      return timer;
+    };
+
+    const child = launchDaemon(dir, 'allow');
+    childProcesses.push(child);
+    store.connectorDaemonPort = await waitForListening(child);
+    const wsClient =
+      await import('../../apps/extension/connector/ws-client.js');
+
+    await wsClient.initConnectorBridge();
+    await waitFor(() => store.connectorState === 'incompatible');
+
+    expect(store.connectorLastErrorCode).toBe('incompatible_protocol');
+    expect(store.connectorAuthToken).toBeUndefined();
+    expect(store.connectorLastDiagnostic).toMatchObject({
+      code: 'incompatible_protocol',
+      expected: 1,
+      actual: null,
+    });
+
+    const manualState = await Promise.race([
+      wsClient.connectDesktopBridge(),
+      new Promise((_, reject) => {
+        originalSetTimeout(
+          () =>
+            reject(
+              new Error('manual reconnect did not return incompatibility'),
+            ),
+          2000,
+        );
+      }),
+    ]);
+    expect(manualState.state).toBe('incompatible');
+    expect(manualState.lastErrorCode).toBe('incompatible_protocol');
+  }, 30_000);
+
+  it('reports an explicit daemon protocol rejection as incompatible', async () => {
+    const dir = mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-daemon-protocol-rejection-'),
+    );
+    tempDirs.push(dir);
+
+    originalWebSocket = globalThis.WebSocket;
+    originalChrome = globalThis.chrome;
+    originalNavigator = globalThis.navigator;
+    originalSetTimeout = globalThis.setTimeout;
+
+    const { chrome, store } = createChromeMock();
+    globalThis.chrome = chrome;
+    globalThis.WebSocket = BrowserLikeWebSocket;
+    BrowserLikeWebSocket.sendMismatchedProtocol = true;
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { userAgent: 'Chrome/123.0.0.0 Safari/537.36' },
+      configurable: true,
+    });
+    globalThis.setTimeout = (fn, delay, ...args) => {
+      const timer = originalSetTimeout(fn, delay, ...args);
+      timer?.unref?.();
+      return timer;
+    };
+
+    const child = launchDaemon(dir, 'allow');
+    childProcesses.push(child);
+    store.connectorDaemonPort = await waitForListening(child);
+    const wsClient =
+      await import('../../apps/extension/connector/ws-client.js');
+
+    await wsClient.initConnectorBridge();
+    await waitFor(() => store.connectorState === 'incompatible');
+
+    expect(store.connectorLastErrorCode).toBe('incompatible_protocol');
+    expect(store.connectorAuthToken).toBeUndefined();
+    expect(store.connectorLastDiagnostic).toMatchObject({
+      code: 'incompatible_protocol',
+      expected: 1,
+    });
+  }, 30_000);
 
   it('queues connector commands while offline and flushes them in order after reconnect', async () => {
     const dir = mkdtempSync(
@@ -674,6 +793,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     socket.send(
       JSON.stringify({
         type: 'pair_request',
+        protocolVersion: 1,
         browserId: 'raw-browser',
         browserName: 'Raw Browser',
         extensionId: 'abcdefghijklmnop',

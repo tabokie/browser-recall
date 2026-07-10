@@ -6,7 +6,11 @@ import {
 } from './page-identity.js';
 import { logDebug } from './logger.js';
 
-export { canonicalizePageUrl, generateSlugFromUrl } from './page-identity.js';
+export {
+  canonicalizePageUrl,
+  generateSlugFromUrl,
+  isSameDocumentPageUrl,
+} from './page-identity.js';
 
 /** Max words of page body text captured for rule matching. Duplicated in content.js (non-module). */
 export const BODY_WORD_LIMIT = 200;

@@ -2,7 +2,11 @@
 // Central authority for extension reads and mutations. Persistent data and
 // replay are owned by the desktop daemon.
 import './browser-api.js';
-import { generateSlugFromUrl, isInternalBrowserUrl } from './utils.js';
+import {
+  generateSlugFromUrl,
+  isInternalBrowserUrl,
+  isSameDocumentPageUrl,
+} from './utils.js';
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
 import { SCHEME_HEX } from './color-scheme-map.js';
 import { logDebug, logError } from './logger.js';
@@ -66,24 +70,11 @@ const BROWSER_CAPABILITIES = getBrowserCapabilities();
 
 let lastLogTimestamp = 0;
 const pendingPopupBootstraps = new Map();
+let popupBootstrapMutationRevision = 0;
 
 // tabId → URL from the content script's initial recordPageActivity.
 // Used by popup to avoid slug mismatch when tab.url drifts (SPA pushState, etc.).
 const tabReportedUrls = new Map();
-
-function isSameDocumentPageUrl(left, right) {
-  try {
-    const leftUrl = new URL(left);
-    const rightUrl = new URL(right);
-    return (
-      leftUrl.origin === rightUrl.origin &&
-      leftUrl.pathname === rightUrl.pathname &&
-      leftUrl.search === rightUrl.search
-    );
-  } catch {
-    return left === right;
-  }
-}
 
 function badgeIdentityUrlForTab(tabId, url) {
   const reportedUrl = tabReportedUrls.get(tabId);
@@ -320,15 +311,6 @@ async function mirrorSnapshotToDesktop(snapshot) {
   }
 }
 
-// ─── Mutation Notifications ───────────────────────────────────────────
-// Notify extension pages (options, popup) after data mutations so they can refresh.
-
-function notifyMutation(type, detail) {
-  chrome.runtime
-    .sendMessage({ action: 'mutation', type, ...detail })
-    .catch(() => {});
-}
-
 function isExtensionRuntimeFailure(error) {
   return Boolean(
     globalThis.browserRecallWebExtension?.isRuntimeFailure?.(error),
@@ -543,6 +525,7 @@ subscribeConnectorBridgeState((connector) => {
 });
 
 subscribeDaemonMutations((mutation) => {
+  popupBootstrapMutationRevision += 1;
   handleRuntimeMutation(mutation);
 });
 
@@ -583,9 +566,6 @@ async function enqueueReportCommand(action, request, { flush = false } = {}) {
   } else {
     scheduleDrainNotify();
   }
-  if (request.url) {
-    void badgeController.refreshBadgesForUrls([request.url]);
-  }
   return {};
 }
 
@@ -624,11 +604,7 @@ async function buildLeaveReport(url, title, scrollDepth, timeOnPage) {
 
 async function ensureDefaultLists() {
   try {
-    const response = await runDesktopCommand('ensureDefaultLists');
-    if (response?.success && response.created) {
-      notifyMutation('lists');
-      notifyMutation('rules', { listId: 'hubs' });
-    }
+    await runDesktopCommand('ensureDefaultLists');
   } catch (e) {
     logDebug('First-run default list creation failed:', e.message);
   }
@@ -930,8 +906,6 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
       html: html || '',
     });
     await flushInteractiveWrites();
-    void badgeController.refreshBadgesForUrls([url]);
-    notifyMutation('snapshot', { slug });
     return { warnings: capture.warnings || [] };
   } finally {
     stopSpinnerBadge(tabId);
@@ -1010,10 +984,6 @@ async function handleContextMenuHighlight(url, title, selectionText, tabId) {
     title,
   });
   if (!response.success) return response;
-  void badgeController.refreshBadgesForUrls([url]);
-
-  notifyMutation('note', { pageSlug: slug, noteSlug: response.noteSlug });
-
   // Show highlights panel in the tab's content script
   if (tabId > 0) {
     const pageInfo = await handleGetPageInfo({ slug });
@@ -1158,7 +1128,6 @@ chrome.commands.onCommand.addListener(async (command) => {
         throw new Error(
           response.error || tr('extensionRatePageFailed', 'ratePage failed'),
         );
-      notifyMutation('history', { url: tab.url });
       await notifyTabUserActionSuccess(
         tab.id,
         delta >= 0
@@ -1351,7 +1320,6 @@ async function handleRecordPageActivity(request, sender) {
       );
       const response = await enqueueReportCommand('reportVisit', report);
 
-      notifyMutation('history', { url });
       return response;
     } else if (request.isLeaving) {
       const report = await buildLeaveReport(
@@ -1424,13 +1392,14 @@ function popupBootstrapToken() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function storePopupBootstrap(bootstrap) {
+function storePopupBootstrap(bootstrap, mutationRevision) {
   // The popup can only receive a URL from chrome.action.openPopup(), not an
   // object payload. Keep the prepared model in memory and pass a one-shot token
   // so normal toolbar opens avoid extension-side persistent product caches.
   const token = popupBootstrapToken();
   pendingPopupBootstraps.set(token, {
     bootstrap,
+    mutationRevision,
     expiresAt: Date.now() + POPUP_BOOTSTRAP_TTL_MS,
   });
   setTimeout(() => {
@@ -1440,10 +1409,23 @@ function storePopupBootstrap(bootstrap) {
   return token;
 }
 
-function consumePopupBootstrapEntry(token, entry) {
+async function consumePopupBootstrapEntry(token, entry) {
   if (token) pendingPopupBootstraps.delete(token);
   if (entry.expiresAt <= Date.now()) {
     return { success: false, error: 'Popup bootstrap expired' };
+  }
+  if (entry.mutationRevision !== popupBootstrapMutationRevision) {
+    const preparedTab = entry.bootstrap?.tab;
+    const tab = Number.isFinite(preparedTab?.id)
+      ? await chrome.tabs.get(preparedTab.id).catch(() => preparedTab)
+      : preparedTab;
+    if (!tab) {
+      clearPreparedActionPopup(preparedTab?.id);
+      return { success: false, error: 'Popup bootstrap invalidated' };
+    }
+    const bootstrap = await preparePopupBootstrapWithTimeout(tab);
+    clearPreparedActionPopup(tab.id);
+    return { success: true, bootstrap };
   }
   clearPreparedActionPopup(entry.bootstrap?.tab?.id);
   return { success: true, bootstrap: entry.bootstrap };
@@ -1452,7 +1434,7 @@ function consumePopupBootstrapEntry(token, entry) {
 async function handleConsumePopupBootstrap(request) {
   const token = typeof request.token === 'string' ? request.token : '';
   const entry = token ? pendingPopupBootstraps.get(token) : null;
-  if (entry) return consumePopupBootstrapEntry(token, entry);
+  if (entry) return await consumePopupBootstrapEntry(token, entry);
   return { success: false, error: 'Popup bootstrap not found' };
 }
 
@@ -1676,8 +1658,9 @@ async function preparePopupBootstrapWithTimeout(tab) {
 }
 
 async function preparePopupOpenPayload(tab) {
+  const mutationRevision = popupBootstrapMutationRevision;
   const bootstrap = await preparePopupBootstrapWithTimeout(tab);
-  const token = storePopupBootstrap(bootstrap);
+  const token = storePopupBootstrap(bootstrap, mutationRevision);
   return {
     bootstrap,
     popupPath: `popup.html?bootstrap=${encodeURIComponent(token)}`,
@@ -1852,7 +1835,6 @@ async function handleSaveSettingsKey(request) {
     value: request.value,
   });
   if (!response.success) return response;
-  notifyMutation('settings', { key: request.key });
   if (request.key === 'colorScheme') {
     await chrome.storage.session.set({ colorScheme: request.value });
   }
@@ -1867,40 +1849,18 @@ async function handleCreateNote(request, sender) {
     url: request.url || sender?.tab?.url,
   });
   if (!response.success) return response;
-  if (request.url || sender?.tab?.url) {
-    void badgeController.refreshBadgesForUrls([request.url || sender.tab.url]);
-  }
-  notifyMutation('note', {
-    pageSlug: response.pageSlug || request.pageSlug,
-    noteSlug: response.noteSlug,
-  });
   return response;
 }
 
 async function handleDeleteNote(request) {
   const response = await runDesktopCommand('deleteNote', request);
   if (!response.success) return response;
-  if (response.url) {
-    void badgeController.refreshBadgesForUrls([response.url]);
-  } else {
-    void badgeController.refreshActiveTabBadge();
-  }
-  notifyMutation('note', {
-    noteSlug: response.noteSlug || request.noteSlug,
-    pageSlug: response.pageSlug,
-    url: response.url,
-  });
-  notifyMutation('orphaned');
   return response;
 }
 
 async function handleUpdateNote(request) {
   const response = await runDesktopCommand('updateNote', request);
   if (!response.success) return response;
-  notifyMutation('note', {
-    noteSlug: response.noteSlug || request.noteSlug,
-    oldNoteSlug: response.oldNoteSlug,
-  });
   return response;
 }
 
@@ -1909,48 +1869,30 @@ async function handleUpdateNote(request) {
 async function handleToggleListPin(request) {
   const response = await runDesktopCommand('toggleListPin', request);
   if (!response.success) return response;
-  if (request.url) void badgeController.refreshBadgesForUrls([request.url]);
-  notifyMutation('pins', { listId: request.listId, url: request.url });
   return response;
 }
 
 async function handleAddListPins(request) {
   const response = await runDesktopCommand('addListPins', request);
   if (!response.success) return response;
-  if (Array.isArray(request.urls) && request.urls.length > 0) {
-    void badgeController.refreshBadgesForUrls(request.urls);
-  }
-  notifyMutation('pins', { listId: request.listId });
   return response;
 }
 
 async function handleSaveListMeta(request) {
   const response = await runDesktopCommand('saveListMeta', request);
   if (!response.success) return response;
-  notifyMutation('lists');
   return response;
 }
 
 async function handleDeleteList(request) {
   const response = await runDesktopCommand('deleteList', request);
   if (!response.success) return response;
-  if (Array.isArray(response.urls) && response.urls.length > 0) {
-    void badgeController.refreshBadgesForUrls(response.urls);
-  } else {
-    void badgeController.refreshActiveTabBadge();
-  }
-  notifyMutation('lists', {
-    listId: response.listId || request.listId,
-    urls: response.urls,
-  });
-  notifyMutation('orphaned');
   return response;
 }
 
 async function handleUpdateListTree(request) {
   const response = await runDesktopCommand('updateListTree', request);
   if (!response.success) return response;
-  notifyMutation('lists');
   return response;
 }
 
@@ -1974,18 +1916,8 @@ async function handleInitializeFilesystem(request) {
 }
 
 async function handleDeleteSnapshot(request) {
-  const pageInfo = request.slug
-    ? await handleGetPageInfo({ slug: request.slug }).catch(() => null)
-    : null;
   const response = await runDesktopCommand('deleteSnapshot', request);
   if (!response.success) return response;
-  if (pageInfo?.entry?.url) {
-    void badgeController.refreshBadgesForUrls([pageInfo.entry.url]);
-  } else {
-    void badgeController.refreshActiveTabBadge();
-  }
-  notifyMutation('snapshot', { slug: request.slug });
-  notifyMutation('orphaned');
   return response;
 }
 

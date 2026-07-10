@@ -70,6 +70,7 @@ describe('connector pairing browser detection', () => {
 
     await expect(buildPairRequest()).resolves.toMatchObject({
       type: 'pair_request',
+      protocolVersion: 1,
       browserId: 'browser-install-firefox',
       browserName: 'Firefox',
       extensionId: 'browser-recall@example.invalid',

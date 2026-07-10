@@ -18,7 +18,10 @@ function tr(key, fallback, substitutions) {
   );
 }
 
-if (!pageIdentity?.generateSlugFromUrl) {
+if (
+  !pageIdentity?.generateSlugFromUrl ||
+  !pageIdentity?.isSameDocumentPageUrl
+) {
   throw new Error(
     'Browser Recall page identity helper was not loaded before content.js',
   );
@@ -255,20 +258,6 @@ function initContentScript() {
       return pageIdentity.generateSlugFromUrl(url);
     } catch (e) {
       return null;
-    }
-  }
-
-  function isSameDocumentPageUrl(left, right) {
-    try {
-      const leftUrl = new URL(left);
-      const rightUrl = new URL(right);
-      return (
-        leftUrl.origin === rightUrl.origin &&
-        leftUrl.pathname === rightUrl.pathname &&
-        leftUrl.search === rightUrl.search
-      );
-    } catch {
-      return left === right;
     }
   }
 
@@ -776,7 +765,7 @@ function initContentScript() {
 
   function handleSameDocumentNavigation(nextUrl = window.location.href) {
     if (nextUrl === activePageUrl) return;
-    if (isSameDocumentPageUrl(activePageUrl, nextUrl)) return;
+    if (pageIdentity.isSameDocumentPageUrl(activePageUrl, nextUrl)) return;
 
     const previousUrl = activePageUrl;
     onLeavePage(previousUrl);
