@@ -129,7 +129,7 @@ async function pairSocket(port) {
   socket.send(
     JSON.stringify({
       type: 'pair_request',
-      protocolVersion: 1,
+      protocolVersion: 2,
       browserId: 'browser-install-1',
       browserName: 'Chrome',
       extensionId: 'abcdefghijklmnop',
@@ -481,21 +481,21 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     });
     expect(cleanedSnapshotInfo.snapshots || []).toEqual([]);
 
-    socket.send(JSON.stringify({ type: 'get_popup_lists' }));
-    await expect(nextMessage(socket)).resolves.toEqual({
-      type: 'popup_lists_result',
+    socket.send(
+      JSON.stringify({
+        type: 'get_page_summary',
+        url: 'https://example.com/popup',
+      }),
+    );
+    await expect(nextMessage(socket)).resolves.toMatchObject({
+      type: 'page_summary_result',
       success: true,
       lists: [
         {
           slug: 'reading',
           name: 'Reading',
-          pins: [
-            {
-              kind: 'page',
-              slug,
-              pinnedAt: 1710000000950,
-            },
-          ],
+          containsPage: true,
+          lastActivity: 1710000000950,
         },
       ],
     });

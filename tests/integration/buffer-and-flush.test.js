@@ -235,7 +235,7 @@ class BrowserLikeWebSocket {
         BrowserLikeWebSocket.sendMismatchedProtocol &&
         (message.type === 'auth' || message.type === 'pair_request')
       ) {
-        message.protocolVersion = 2;
+        message.protocolVersion = 1;
         this.socket.send(JSON.stringify(message));
         return;
       }
@@ -378,7 +378,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(store.connectorAuthToken).toBeUndefined();
     expect(store.connectorLastDiagnostic).toMatchObject({
       code: 'incompatible_protocol',
-      expected: 1,
+      expected: 2,
       actual: null,
     });
 
@@ -436,7 +436,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(store.connectorAuthToken).toBeUndefined();
     expect(store.connectorLastDiagnostic).toMatchObject({
       code: 'incompatible_protocol',
-      expected: 1,
+      expected: 2,
     });
   }, 30_000);
 
@@ -793,7 +793,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     socket.send(
       JSON.stringify({
         type: 'pair_request',
-        protocolVersion: 1,
+        protocolVersion: 2,
         browserId: 'raw-browser',
         browserName: 'Raw Browser',
         extensionId: 'abcdefghijklmnop',

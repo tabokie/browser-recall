@@ -835,6 +835,60 @@ pub async fn save_list_meta(
     }
 }
 
+pub async fn create_list_and_pin(
+    storage: &Storage,
+    device_id: &str,
+    request: &Value,
+) -> Result<Value, String> {
+    let name = request
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "createListAndPin missing name".to_string())?
+        .to_string();
+    let url = request
+        .get("url")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "createListAndPin missing url".to_string())?
+        .to_string();
+    let title = request
+        .get("title")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let transaction = ReplayTransaction::begin(storage, device_id).await?;
+    let create_timestamp = storage.next_command_timestamp_millis();
+    let list_id = generate_list_id(&name, create_timestamp);
+    replay_entries_in_transaction(
+        transaction,
+        vec![
+            LogEntry::CreateList {
+                timestamp: create_timestamp,
+                name: name.clone(),
+                list_owner: device_id.to_string(),
+                list_id: Some(list_id.clone()),
+                parent_list_id: None,
+            },
+            LogEntry::PinToList {
+                timestamp: storage.next_command_timestamp_millis(),
+                name,
+                list_owner: device_id.to_string(),
+                urls: vec![url],
+                titles: title.map(|value| vec![Some(value)]),
+                source: None,
+            },
+        ],
+    )
+    .await?;
+    Ok(json!({
+        "success": true,
+        "listId": list_id,
+        "pinned": true,
+    }))
+}
+
 pub async fn delete_list(
     storage: &Storage,
     device_id: &str,

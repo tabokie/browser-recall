@@ -9,7 +9,7 @@ use crate::mutations::{build_mutations, dedupe_mutations};
 use crate::pairing::{with_timeout, PairingApprover, PairingDecision, PairingRequest};
 use crate::protocol::{
     ConnectorMessage, DaemonMessage, DirectoryInfoPayload, MutationPayload, NoteSearchResult,
-    PopupAttentionResult, PopupListResult, PopupNoteResult, PopupPageInfoEntry, PopupPinResult,
+    PopupAccessResult, PopupAttentionResult, PopupListResult, PopupNoteResult, PopupPageInfoEntry,
     PopupSnapshotResult, PreviewRuleHit, RuleBatchEntry, RuleBatchHit, RuleMatchResult,
     RulePayload, SnapshotSearchResult, TestSeedFilePayload, CONNECTOR_PROTOCOL_VERSION,
 };
@@ -542,8 +542,12 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
             ConnectorMessage::GetPageInfo { slug } => {
                 send_json(&mut write, &handle_get_page_info(&shared, slug).await).await?;
             }
-            ConnectorMessage::GetPageSummary { url } => {
-                send_json(&mut write, &handle_get_page_summary(&shared, url).await).await?;
+            ConnectorMessage::GetPageSummary { url, title } => {
+                send_json(
+                    &mut write,
+                    &handle_get_page_summary(&shared, url, title).await,
+                )
+                .await?;
             }
             ConnectorMessage::GetSettings => {
                 let message =
@@ -591,9 +595,6 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                         }
                     }
                 }
-            }
-            ConnectorMessage::GetPopupLists => {
-                send_json(&mut write, &handle_get_popup_lists(&shared).await).await?;
             }
             ConnectorMessage::RunCommand {
                 action,
@@ -1581,51 +1582,6 @@ async fn report_leave_command(
     commit_report_entry(shared, &device_id, transaction, entry, raw_entry).await
 }
 
-async fn trim_title_command(
-    shared: &SharedState,
-    request: &Value,
-) -> Result<(Value, Vec<MutationPayload>), WsServerError> {
-    let title = request.get("title").and_then(Value::as_str).unwrap_or("");
-    let url = request.get("url").and_then(Value::as_str).unwrap_or("");
-    let settings = shared.storage.load_entity("manifest:settings").await?;
-    Ok((
-        json!({
-            "success": true,
-            "title": trim_title_from_settings(settings.as_ref(), title, url),
-        }),
-        Vec::new(),
-    ))
-}
-
-async fn popup_access_state_command(
-    shared: &SharedState,
-    request: &Value,
-) -> Result<(Value, Vec<MutationPayload>), WsServerError> {
-    let url = request
-        .get("url")
-        .and_then(Value::as_str)
-        .ok_or_else(|| WsServerError::Ingest("getPopupAccessState missing url".into()))?;
-    let settings = shared.storage.load_entity("manifest:settings").await?;
-    let blacklisted_by_policy = blacklist_prefixes(settings.as_ref())
-        .iter()
-        .any(|prefix| url.starts_with(prefix));
-    let slug =
-        generate_slug_from_url(url).map_err(|error| WsServerError::Ingest(error.to_string()))?;
-    let has_visit_history = shared
-        .storage
-        .load_entity(&format!("page:{slug}"))
-        .await?
-        .is_some();
-    Ok((
-        json!({
-            "success": true,
-            "blacklisted": blacklisted_by_policy && !has_visit_history,
-            "hasVisitHistory": has_visit_history,
-        }),
-        Vec::new(),
-    ))
-}
-
 async fn run_shared_command(
     shared: &SharedState,
     action: &str,
@@ -1665,8 +1621,6 @@ async fn run_connector_command(
     }
 
     let (response, mutations) = match action {
-        "trimTitle" => trim_title_command(shared, &request).await?,
-        "getPopupAccessState" => popup_access_state_command(shared, &request).await?,
         "reportVisit" => report_visit_command(shared, &request).await?,
         "reportLeave" => report_leave_command(shared, &request).await?,
         other => {
@@ -1810,13 +1764,27 @@ async fn handle_get_page_info(shared: &SharedState, slug: String) -> DaemonMessa
     }
 }
 
-async fn handle_get_page_summary(shared: &SharedState, url: String) -> DaemonMessage {
+async fn handle_get_page_summary(
+    shared: &SharedState,
+    url: String,
+    requested_title: Option<String>,
+) -> DaemonMessage {
+    let fallback_title = requested_title
+        .as_deref()
+        .filter(|title| !title.is_empty())
+        .unwrap_or("<unknown>")
+        .to_string();
     let slug = match generate_slug_from_url(&url) {
         Ok(slug) => slug,
         Err(error) => {
             return DaemonMessage::PageSummaryResult {
                 success: false,
                 url,
+                display_title: fallback_title,
+                access: PopupAccessResult {
+                    blacklisted: false,
+                    has_visit_history: false,
+                },
                 page: None,
                 notes: Vec::new(),
                 snapshots: Vec::new(),
@@ -1833,6 +1801,11 @@ async fn handle_get_page_summary(shared: &SharedState, url: String) -> DaemonMes
             return DaemonMessage::PageSummaryResult {
                 success: false,
                 url,
+                display_title: fallback_title,
+                access: PopupAccessResult {
+                    blacklisted: false,
+                    has_visit_history: page.is_some(),
+                },
                 page: page.as_ref().map(map_popup_page_entry),
                 notes,
                 snapshots,
@@ -1843,12 +1816,65 @@ async fn handle_get_page_summary(shared: &SharedState, url: String) -> DaemonMes
         }
     };
 
-    let lists = match load_popup_lists(shared).await {
+    let settings = match shared.storage.load_entity("manifest:settings").await {
+        Ok(settings) => settings,
+        Err(error) => {
+            return DaemonMessage::PageSummaryResult {
+                success: false,
+                url,
+                display_title: fallback_title,
+                access: PopupAccessResult {
+                    blacklisted: false,
+                    has_visit_history: page.is_some(),
+                },
+                page: page.as_ref().map(map_popup_page_entry),
+                notes,
+                snapshots,
+                lists: Vec::new(),
+                attention: None,
+                error: Some(error.to_string()),
+            };
+        }
+    };
+    let title = page
+        .as_ref()
+        .and_then(|page| page.title.as_deref())
+        .or_else(|| requested_title.as_deref().filter(|title| !title.is_empty()))
+        .unwrap_or("<unknown>");
+    let display_title = trim_title_from_settings(settings.as_ref(), title, &url);
+    let has_visit_history = page.is_some();
+    let blacklisted = blacklist_prefixes(settings.as_ref())
+        .iter()
+        .any(|prefix| url.starts_with(prefix))
+        && !has_visit_history;
+    let access = PopupAccessResult {
+        blacklisted,
+        has_visit_history,
+    };
+
+    if blacklisted {
+        return DaemonMessage::PageSummaryResult {
+            success: true,
+            url,
+            display_title,
+            access,
+            page: page.as_ref().map(map_popup_page_entry),
+            notes,
+            snapshots,
+            lists: Vec::new(),
+            attention: None,
+            error: None,
+        };
+    }
+
+    let lists = match load_popup_lists(shared, &slug).await {
         Ok(lists) => lists,
         Err(error) => {
             return DaemonMessage::PageSummaryResult {
                 success: false,
                 url,
+                display_title,
+                access,
                 page: page.as_ref().map(map_popup_page_entry),
                 notes,
                 snapshots,
@@ -1867,6 +1893,8 @@ async fn handle_get_page_summary(shared: &SharedState, url: String) -> DaemonMes
     DaemonMessage::PageSummaryResult {
         success: true,
         url,
+        display_title,
+        access,
         page: page.as_ref().map(map_popup_page_entry),
         notes,
         snapshots,
@@ -2237,21 +2265,6 @@ async fn handle_permanent_delete(
     })
 }
 
-async fn handle_get_popup_lists(shared: &SharedState) -> DaemonMessage {
-    match load_popup_lists(shared).await {
-        Ok(lists) => DaemonMessage::PopupListsResult {
-            success: true,
-            lists,
-            error: None,
-        },
-        Err(error) => DaemonMessage::PopupListsResult {
-            success: false,
-            lists: Vec::new(),
-            error: Some(error),
-        },
-    }
-}
-
 async fn load_page_info_parts(
     shared: &SharedState,
     slug: &str,
@@ -2297,25 +2310,20 @@ async fn load_page_info_parts(
     }
 }
 
-async fn load_popup_lists(shared: &SharedState) -> Result<Vec<PopupListResult>, String> {
+async fn load_popup_lists(
+    shared: &SharedState,
+    page_slug: &str,
+) -> Result<Vec<PopupListResult>, String> {
     Ok(
         crate::read_projections::ReadProjections::new(shared.storage.clone())
-            .list_summaries()
+            .popup_lists(page_slug)
             .await?
             .into_iter()
             .map(|list| PopupListResult {
                 slug: list.slug,
                 name: list.name,
-                pins: list
-                    .pins
-                    .into_iter()
-                    .map(|pin| PopupPinResult {
-                        kind: pin.kind,
-                        slug: pin.slug,
-                        pinned_at: pin.pinned_at,
-                        source: pin.source,
-                    })
-                    .collect(),
+                contains_page: list.contains_page,
+                last_activity: list.last_activity,
             })
             .collect(),
     )

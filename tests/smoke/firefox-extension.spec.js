@@ -616,7 +616,7 @@ class SuccessfulWebSocket {
     if (payload.type === 'auth') {
       queueMicrotask(() =>
         this.#emit('message', {
-          data: JSON.stringify({ type: 'auth_ok', protocolVersion: 1 }),
+          data: JSON.stringify({ type: 'auth_ok', protocolVersion: 2 }),
         }),
       );
       return;
@@ -659,7 +659,9 @@ class SuccessfulWebSocket {
         .filter((id) => id.startsWith('list:'))
         .map((id) => ({
           slug: id.slice('list:'.length),
-          pins: [{ kind: 'page', slug }],
+          name: id.slice('list:'.length),
+          containsPage: true,
+          lastActivity: 0,
         }));
       queueMicrotask(() =>
         this.#emit('message', {
@@ -667,6 +669,11 @@ class SuccessfulWebSocket {
             type: 'page_summary_result',
             success: true,
             url: payload.url,
+            displayTitle: page?.title || '',
+            access: {
+              blacklisted: false,
+              hasVisitHistory: Boolean(page),
+            },
             page,
             notes,
             snapshots,
@@ -1284,11 +1291,14 @@ test.describe('Firefox extension smoke', () => {
               };
             case 'getReportedUrl':
               return { success: true, url: activeTab.url };
-            case 'trimTitle':
-              return { title: activeTab.title };
             case 'getPageSummary':
               return {
                 success: true,
+                displayTitle: activeTab.title,
+                access: {
+                  blacklisted: false,
+                  hasVisitHistory: true,
+                },
                 page: {
                   slug: 'orion-page',
                   url: activeTab.url,
@@ -1299,8 +1309,6 @@ test.describe('Firefox extension smoke', () => {
                 snapshots: [],
                 lists: [],
               };
-            case 'getPopupLists':
-              return { success: true, lists: [] };
             default:
               return { success: true };
           }
@@ -1394,9 +1402,13 @@ test.describe('Firefox extension smoke', () => {
             };
           },
           getReportedUrl: { success: true, url: activeTab.url },
-          trimTitle: { title: activeTab.title },
           getPageSummary: {
             success: true,
+            displayTitle: activeTab.title,
+            access: {
+              blacklisted: false,
+              hasVisitHistory: true,
+            },
             page: {
               slug: 'orion-callback-page',
               url: activeTab.url,
@@ -1407,7 +1419,6 @@ test.describe('Firefox extension smoke', () => {
             snapshots: [],
             lists: [],
           },
-          getPopupLists: { success: true, lists: [] },
         },
       });
 

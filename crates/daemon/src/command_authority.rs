@@ -51,6 +51,7 @@ enum Command {
     ToggleListPin,
     AddListPins,
     SaveListMeta,
+    CreateListAndPin,
     ImportBookmarks,
     ImportHistory,
     DeleteList,
@@ -79,6 +80,7 @@ impl Command {
             "toggleListPin" => Some(Self::ToggleListPin),
             "addListPins" => Some(Self::AddListPins),
             "saveListMeta" => Some(Self::SaveListMeta),
+            "createListAndPin" => Some(Self::CreateListAndPin),
             "importBookmarks" => Some(Self::ImportBookmarks),
             "importHistory" => Some(Self::ImportHistory),
             "deleteList" => Some(Self::DeleteList),
@@ -280,6 +282,22 @@ impl CommandAuthority {
                 let response =
                     commands::save_list_meta(&self.storage, &self.device_id, &request).await?;
                 CommandOutcome::new(response, mutation("lists"))
+            }
+            Command::CreateListAndPin => {
+                let url = request_string("url")?;
+                let response =
+                    commands::create_list_and_pin(&self.storage, &self.device_id, &request).await?;
+                let list_id = response["listId"]
+                    .as_str()
+                    .ok_or_else(|| "createListAndPin returned no listId".to_string())?
+                    .to_string();
+                let mut mutations = mutation("lists");
+                mutations.extend(mutation_with("pins", |fields| {
+                    fields.list_id = Some(list_id);
+                    fields.url = Some(url.clone());
+                    fields.urls = Some(vec![url]);
+                }));
+                CommandOutcome::new(response, mutations)
             }
             Command::ImportBookmarks => {
                 let tree = serde_json::from_value::<Vec<commands::BookmarkImportNode>>(

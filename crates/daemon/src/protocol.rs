@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-pub const CONNECTOR_PROTOCOL_VERSION: u32 = 1;
+pub const CONNECTOR_PROTOCOL_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DirectoryInfoPayload {
@@ -142,21 +142,12 @@ pub struct PopupSnapshotResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PopupPinResult {
-    pub kind: String,
-    pub slug: String,
-    #[serde(rename = "pinnedAt")]
-    pub pinned_at: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct PopupListResult {
     pub slug: String,
     pub name: String,
-    #[serde(default)]
-    pub pins: Vec<PopupPinResult>,
+    pub contains_page: bool,
+    pub last_activity: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -165,6 +156,13 @@ pub struct PopupAttentionResult {
     pub total_seconds: i64,
     #[serde(default, rename = "lastVisit", skip_serializing_if = "Option::is_none")]
     pub last_visit: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PopupAccessResult {
+    pub blacklisted: bool,
+    pub has_visit_history: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -240,6 +238,8 @@ pub enum ConnectorMessage {
     },
     GetPageSummary {
         url: String,
+        #[serde(default)]
+        title: Option<String>,
     },
     GetSettings,
     GetSnapshotHtml {
@@ -252,7 +252,6 @@ pub enum ConnectorMessage {
     PermanentDelete {
         keys: Vec<String>,
     },
-    GetPopupLists,
     RunCommand {
         action: String,
         #[serde(default)]
@@ -454,6 +453,9 @@ pub enum DaemonMessage {
     PageSummaryResult {
         success: bool,
         url: String,
+        #[serde(rename = "displayTitle")]
+        display_title: String,
+        access: PopupAccessResult,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         page: Option<PopupPageInfoEntry>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -493,13 +495,6 @@ pub enum DaemonMessage {
         success: bool,
         #[serde(default, rename = "deletedKeys", skip_serializing_if = "Vec::is_empty")]
         deleted_keys: Vec<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-    },
-    PopupListsResult {
-        success: bool,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        lists: Vec<PopupListResult>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },

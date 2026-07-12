@@ -29,7 +29,7 @@ async fn fresh_pairing_persists_token() {
     let (mut socket, _) = connect_async(request).await.expect("ws connect");
 
     let pair_request = serde_json::to_string(&ConnectorMessage::PairRequest {
-        protocol_version: Some(1),
+        protocol_version: Some(2),
         browser_id: "browser-install-1".into(),
         browser_name: "Chrome".into(),
         extension_id: "abcdefghijklmnop".into(),
@@ -53,7 +53,7 @@ async fn fresh_pairing_persists_token() {
             device_id: _,
             protocol_version,
         } => {
-            assert_eq!(protocol_version, 1);
+            assert_eq!(protocol_version, 2);
             token
         }
         other => panic!("expected pair approved, got {other:?}"),
@@ -139,7 +139,7 @@ async fn firefox_extension_origin_can_pair() {
     let (mut socket, _) = connect_async(request).await.expect("ws connect");
 
     let pair_request = serde_json::to_string(&ConnectorMessage::PairRequest {
-        protocol_version: Some(1),
+        protocol_version: Some(2),
         browser_id: "firefox-install-1".into(),
         browser_name: "Firefox".into(),
         extension_id: "12345678-1234-1234-1234-123456789abc".into(),
@@ -213,7 +213,7 @@ async fn connect_pair_socket(port: u16, browser_name: &str) -> support::TestSock
     );
     let (mut socket, _) = connect_async(request).await.expect("ws connect");
     let pair_request = serde_json::to_string(&ConnectorMessage::PairRequest {
-        protocol_version: Some(1),
+        protocol_version: Some(2),
         browser_id: "firefox-install-1".into(),
         browser_name: browser_name.into(),
         extension_id: "12345678-1234-1234-1234-123456789abc".into(),
@@ -288,7 +288,7 @@ async fn auth_with_cached_token_succeeds() {
     let (mut socket, _) = connect_async(request).await.expect("ws connect");
 
     let auth_message = serde_json::to_string(&ConnectorMessage::Auth {
-        protocol_version: Some(1),
+        protocol_version: Some(2),
         token,
     })
     .expect("auth");
@@ -301,7 +301,7 @@ async fn auth_with_cached_token_succeeds() {
     assert!(matches!(
         response,
         DaemonMessage::AuthOk {
-            protocol_version: 1
+            protocol_version: 2
         }
     ));
 
@@ -328,7 +328,7 @@ async fn auth_rejects_a_mismatched_protocol_version() {
     socket
         .send(Message::Text(
             serde_json::to_string(&ConnectorMessage::Auth {
-                protocol_version: Some(2),
+                protocol_version: Some(1),
                 token,
             })
             .expect("auth json"),

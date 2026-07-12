@@ -460,6 +460,12 @@ test.describe('Popup list chip behavior', () => {
       await popup.evaluate(() => globalThis.__preparedPopupStartupFetches),
     ).toEqual([]);
 
+    await popup.locator('#listAddBtn').click();
+    await expect(popup.locator('#listPickerHost.list-picker')).toBeVisible();
+    expect(
+      await popup.evaluate(() => globalThis.__preparedPopupStartupFetches),
+    ).toEqual([]);
+
     await popup.close();
     await page.close();
   });
@@ -631,9 +637,13 @@ test.describe('Popup list chip behavior', () => {
     await popup.addInitScript(
       ({ url }) => {
         let releaseToggle;
+        let releaseRefresh;
+        let stallRefresh = false;
         const toggleEvents = [];
         globalThis.__releaseListToggleForTest = () => releaseToggle?.();
+        globalThis.__releaseListRefreshForTest = () => releaseRefresh?.();
         globalThis.__listToggleEventsForTest = toggleEvents;
+        globalThis.__popupMutatingTransitionsForTest = [];
 
         const patchApis = () => {
           if (!globalThis.chrome?.tabs?.query || !chrome.runtime?.sendMessage) {
@@ -665,9 +675,33 @@ test.describe('Popup list chip behavior', () => {
                 releaseToggle = resolve;
               });
               toggleEvents.push(`released:${request.listId}`);
+              stallRefresh = true;
+            } else if (request?.action === 'getPageSummary' && stallRefresh) {
+              toggleEvents.push('refresh-started');
+              await new Promise((resolve) => {
+                releaseRefresh = resolve;
+              });
+              toggleEvents.push('refresh-released');
+              stallRefresh = false;
             }
             return originalSendMessage(request, ...rest);
           };
+
+          const observeMutationState = () => {
+            if (!document.body) {
+              setTimeout(observeMutationState, 0);
+              return;
+            }
+            new MutationObserver(() => {
+              globalThis.__popupMutatingTransitionsForTest.push(
+                document.body.classList.contains('popup-ui-mutating'),
+              );
+            }).observe(document.body, {
+              attributes: true,
+              attributeFilter: ['class'],
+            });
+          };
+          observeMutationState();
         };
         patchApis();
       },
@@ -709,7 +743,6 @@ test.describe('Popup list chip behavior', () => {
         .toBe('1');
       await expect(popup.locator('#dashboard')).toBeVisible();
       await expect(popup.locator('#loading')).toBeHidden();
-      await popup.screenshot();
     };
 
     await popup
@@ -719,12 +752,23 @@ test.describe('Popup list chip behavior', () => {
       .poll(() => popup.evaluate(() => globalThis.__listToggleEventsForTest))
       .toContain('started:chip-list');
     await expectPopupNotDimmed();
+    await popup.evaluate(() => {
+      globalThis.__popupMutatingTransitionsForTest.length = 0;
+    });
     await popup.evaluate(() => globalThis.__releaseListToggleForTest());
+    await expect
+      .poll(() => popup.evaluate(() => globalThis.__listToggleEventsForTest))
+      .toContain('refresh-started');
     await expect(
       popup.locator('#listChips .list-chip.selected', {
         hasText: 'Chip List',
       }),
     ).toBeVisible();
+    expect(
+      await popup.evaluate(() => globalThis.__popupMutatingTransitionsForTest),
+    ).not.toContain(true);
+    await expectPopupNotDimmed();
+    await popup.evaluate(() => globalThis.__releaseListRefreshForTest());
 
     await popup.locator('#listAddBtn').click();
     await expect(popup.locator('#listPickerHost.list-picker')).toBeVisible();
@@ -754,12 +798,23 @@ test.describe('Popup list chip behavior', () => {
         ),
       )
       .toBe('1');
+    await popup.evaluate(() => {
+      globalThis.__popupMutatingTransitionsForTest.length = 0;
+    });
     await popup.evaluate(() => globalThis.__releaseListToggleForTest());
+    await expect
+      .poll(() => popup.evaluate(() => globalThis.__listToggleEventsForTest))
+      .toContain('refresh-started');
     await expect(
       popup.locator('#listPickerHost.list-picker .list-picker-row.selected', {
         hasText: 'Picker List',
       }),
     ).toBeVisible();
+    expect(
+      await popup.evaluate(() => globalThis.__popupMutatingTransitionsForTest),
+    ).not.toContain(true);
+    await expectPopupNotDimmed();
+    await popup.evaluate(() => globalThis.__releaseListRefreshForTest());
 
     await popup.close();
   });
@@ -801,7 +856,11 @@ test.describe('Popup list chip behavior', () => {
     );
     expect(existingResp.success).toBe(true);
     const warmed = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'getPopupLists' }),
+      chrome.runtime.sendMessage({
+        action: 'getPageSummary',
+        url: 'https://example.com/popup-list-warmup',
+        title: 'Popup list warmup',
+      }),
     );
     expect(warmed.success).toBe(true);
     expect(warmed.lists.map((list) => list.name)).toContain('Existing');
@@ -933,6 +992,12 @@ test.describe('Popup list chip behavior', () => {
           const events = [];
           globalThis.__popupFastListEvents = events;
           chrome.runtime.sendMessage = async (request, ...rest) => {
+            if (
+              request?.action === 'trimTitle' ||
+              request?.action === 'getPopupAccessState'
+            ) {
+              events.push({ action: request.action, phase: 'start' });
+            }
             if (request?.action === 'getPageSummary') {
               events.push({ action: request.action, phase: 'start' });
               await new Promise((resolve) => setTimeout(resolve, 450));
@@ -995,6 +1060,13 @@ test.describe('Popup list chip behavior', () => {
       popup.locator('#listChips .list-chip', { hasText: 'Fast List' }),
     ).toBeVisible();
     await expect(popup.locator('#pageTitle')).toHaveText('Popup Fast Lists');
+    expect(
+      await popup.evaluate(() =>
+        globalThis.__popupFastListEvents
+          .filter((event) => event.phase === 'start')
+          .map((event) => event.action),
+      ),
+    ).toEqual(['getPageSummary']);
     await popup.close();
   });
 
@@ -1203,24 +1275,17 @@ test.describe('Popup list chip behavior', () => {
 
     const helper = await openHelperPage(extContext, extensionId);
 
-    // Simulate createListAndPin exactly as popup.js does:
-    // 1. Create list and get generatedId from response
     const createResp = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'saveListMeta', name: 'Brand New' }),
+      chrome.runtime.sendMessage({
+        action: 'createListAndPin',
+        name: 'Brand New',
+        url: 'https://example.com/',
+        title: 'Example',
+      }),
     );
     const newListId = createResp.listId;
     expect(newListId).toBeTruthy();
-
-    // 2. Pin current page using the returned ID
-    await helper.evaluate(
-      (id) =>
-        chrome.runtime.sendMessage({
-          action: 'toggleListPin',
-          listId: id,
-          url: 'https://example.com/',
-        }),
-      newListId,
-    );
+    expect(createResp.pinned).toBe(true);
 
     // Verify the list has the pin
     const newList = await helper.evaluate(
@@ -1868,7 +1933,7 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
-  test('closing a type-opened list picker before its lists load does not throw', async ({
+  test('closing a type-opened list picker does not throw', async ({
     extContext,
     extensionId,
     setupDir,
@@ -1923,25 +1988,10 @@ test.describe('Popup list chip behavior', () => {
     });
     const pageErrors = [];
     popup.on('pageerror', (error) => pageErrors.push(error.message));
-    await popup.evaluate(() => {
-      const original = chrome.runtime.sendMessage.bind(chrome.runtime);
-      let releasePopupLists;
-      window.__releasePopupListsForTest = () => releasePopupLists?.();
-      chrome.runtime.sendMessage = async (request, ...rest) => {
-        if (request?.action === 'getPopupLists') {
-          await new Promise((resolve) => {
-            releasePopupLists = resolve;
-          });
-        }
-        return original(request, ...rest);
-      };
-    });
-
     await popup.keyboard.type('r');
     await expect(popup.locator('#listPickerHost.list-picker')).toBeVisible();
     await popup.keyboard.press('Escape');
     await expect(popup.locator('#listPickerHost.list-picker')).toHaveCount(0);
-    await popup.evaluate(() => window.__releasePopupListsForTest());
     await popup.waitForTimeout(100);
 
     expect(pageErrors).toEqual([]);
@@ -2914,10 +2964,10 @@ test.describe('Popup list chip behavior', () => {
     });
     await popup.evaluate(() => {
       const original = chrome.runtime.sendMessage.bind(chrome.runtime);
-      window.__saveListMetaRequests = [];
+      window.__createListAndPinRequests = [];
       chrome.runtime.sendMessage = async (request, ...rest) => {
-        if (request?.action === 'saveListMeta') {
-          window.__saveListMetaRequests.push(request);
+        if (request?.action === 'createListAndPin') {
+          window.__createListAndPinRequests.push(request);
         }
         return original(request, ...rest);
       };
@@ -2943,7 +2993,7 @@ test.describe('Popup list chip behavior', () => {
       await getExtensionMessage(popup, 'extensionCreateList', ['阅读']),
     );
     expect(
-      await popup.evaluate(() => window.__saveListMetaRequests.length),
+      await popup.evaluate(() => window.__createListAndPinRequests.length),
     ).toBe(0);
 
     await popup.close();
@@ -2992,10 +3042,10 @@ test.describe('Popup list chip behavior', () => {
     });
     await popup.evaluate(() => {
       const original = chrome.runtime.sendMessage.bind(chrome.runtime);
-      window.__saveListMetaRequests = [];
+      window.__createListAndPinRequests = [];
       chrome.runtime.sendMessage = async (request, ...rest) => {
-        if (request?.action === 'saveListMeta') {
-          window.__saveListMetaRequests.push(request);
+        if (request?.action === 'createListAndPin') {
+          window.__createListAndPinRequests.push(request);
         }
         return original(request, ...rest);
       };
@@ -3015,7 +3065,7 @@ test.describe('Popup list chip behavior', () => {
 
     await expect(popup.locator('#listPickerHost.list-picker')).toHaveCount(0);
     expect(
-      await popup.evaluate(() => window.__saveListMetaRequests.length),
+      await popup.evaluate(() => window.__createListAndPinRequests.length),
     ).toBe(1);
 
     await popup.close();

@@ -35,7 +35,7 @@ async function pairSocket(port) {
   socket.send(
     JSON.stringify({
       type: 'pair_request',
-      protocolVersion: 1,
+      protocolVersion: 2,
       browserId: 'browser-install-1',
       browserName: 'Chrome',
       extensionId: 'abcdefghijklmnop',
@@ -61,7 +61,7 @@ describe.sequential('popup rpc integration', () => {
     }
   });
 
-  it('returns a single popup summary payload with page, notes, snapshots, lists, and attention', async () => {
+  it('returns one popup-ready payload with policy, display title, and page data', async () => {
     const dir = mkdtempSync(
       path.join(tmpdir(), 'browser-recall-popup-summary-'),
     );
@@ -152,6 +152,7 @@ describe.sequential('popup rpc integration', () => {
       JSON.stringify({
         type: 'get_page_summary',
         url,
+        title: 'Transient Loading Title',
       }),
     );
     const summary = await nextMessage(socket);
@@ -159,6 +160,11 @@ describe.sequential('popup rpc integration', () => {
       type: 'page_summary_result',
       success: true,
       url,
+      displayTitle: 'Popup Summary',
+      access: {
+        blacklisted: false,
+        hasVisitHistory: true,
+      },
       page: {
         slug,
         url,
@@ -185,18 +191,15 @@ describe.sequential('popup rpc integration', () => {
     ]);
     expect(summary.lists).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
+        {
           slug: 'reading-popup',
           name: 'Reading',
-          pins: expect.arrayContaining([
-            expect.objectContaining({
-              kind: 'page',
-              slug,
-            }),
-          ]),
-        }),
+          containsPage: true,
+          lastActivity: timestamp + 2,
+        },
       ]),
     );
+    expect(summary.lists[0]).not.toHaveProperty('pins');
 
     socket.close();
   });

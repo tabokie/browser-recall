@@ -148,10 +148,6 @@ function hasActivePopupUiMutation() {
   return popupUiMutationState.active || popupUiMutationState.silentActive;
 }
 
-function isPopupUiVisuallyMutating() {
-  return popupUiMutationState.active || popupUiMutationState.queued > 0;
-}
-
 function setPopupElementDisabled(element, disabled) {
   if (!element) return;
   if ('disabled' in element) {
@@ -216,10 +212,6 @@ function setPopupInteractionDisabled(disabled) {
 
 function updatePopupUiMutationState() {
   const pending = isPopupUiMutating();
-  document.body?.classList.toggle(
-    'popup-ui-mutating',
-    isPopupUiVisuallyMutating(),
-  );
   setPopupInteractionDisabled(pending);
   applyRecordingBarState();
 }
@@ -500,10 +492,6 @@ function isPrintableKeyEvent(event) {
     !event.metaKey &&
     !isImeCompositionKeyEvent(event)
   );
-}
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function formatTimestamp(ts) {
@@ -1126,79 +1114,12 @@ async function saveHighlightNoteWithoutLock({ item, note, textarea, slug }) {
 }
 
 // Lists — pin current page to lists
-async function loadLists() {
-  for (const waitMs of [0, 80, 200]) {
-    if (waitMs > 0) await delay(waitMs);
-    try {
-      const response = await chrome.runtime.sendMessage({
-        action: 'getPopupLists',
-      });
-      if (!response?.success) continue;
-      const lists = response.lists || [];
-      currentPage.summary = {
-        ...(currentPage.summary || {}),
-        lists,
-      };
-      return lists;
-    } catch (error) {
-      logDebug('[popup] getPopupLists failed:', error.message);
-    }
-  }
-
-  return currentPage.summary?.lists || [];
-}
-
-async function loadListPins(lists = null) {
-  lists = lists || (await loadLists());
-  const allPins = {};
-  for (const list of lists) {
-    if (list?.pins?.length > 0) allPins[list.slug] = list.pins;
-  }
-  return allPins;
-}
-
-function isPagePinned(allPins, listId, url) {
-  const pins = allPins[listId] || [];
-  const slug = generateSlugFromUrl(url);
-  return pins.some(
-    (pin) => (pin.kind === 'page' && pin.slug === slug) || pin.url === url,
-  );
-}
-
-function updatedPinsForCurrentPage(existingPins, pinned) {
-  const pins = Array.isArray(existingPins) ? [...existingPins] : [];
-  const slug = generateSlugFromUrl(currentPage.url);
-  const existingIndex = pins.findIndex(
-    (pin) =>
-      (pin.kind === 'page' && pin.slug === slug) || pin.url === currentPage.url,
-  );
-
-  if (pinned && existingIndex < 0) {
-    pins.push({
-      kind: 'page',
-      slug,
-      url: currentPage.url,
-      title: currentPage.title || currentPage.tab?.title || '',
-      pinnedAt: Date.now(),
-    });
-  } else if (!pinned && existingIndex >= 0) {
-    pins.splice(existingIndex, 1);
-  }
-  return pins;
-}
-
 function applyPinStateToLists(lists, listId, pinned) {
-  if (!Array.isArray(lists) || !currentPage.url) return;
+  if (!Array.isArray(lists)) return;
   const list = lists.find((candidate) => candidate.slug === listId);
   if (!list) return;
-  list.pins = updatedPinsForCurrentPage(list.pins, pinned);
-}
-
-function applyPinStateToPinMap(allPins, listId, pinned) {
-  if (!allPins || !currentPage.url) return;
-  const pins = updatedPinsForCurrentPage(allPins[listId], pinned);
-  if (pins.length > 0) allPins[listId] = pins;
-  else delete allPins[listId];
+  list.containsPage = pinned;
+  if (pinned) list.lastActivity = Date.now();
 }
 
 function applyLocalListPinState(listId, pinned) {
@@ -1230,16 +1151,7 @@ function syncListCountFromSummary() {
   const lists = Array.isArray(currentPage.summary?.lists)
     ? currentPage.summary.lists
     : [];
-  const nextCount = lists.reduce((count, list) => {
-    const pins = Array.isArray(list?.pins) ? list.pins : [];
-    const slug = generateSlugFromUrl(currentPage.url || '');
-    const pinned = pins.some(
-      (pin) =>
-        (pin.kind === 'page' && pin.slug === slug) ||
-        pin.url === currentPage.url,
-    );
-    return count + (pinned ? 1 : 0);
-  }, 0);
+  const nextCount = lists.filter((list) => list.containsPage).length;
   listCount.textContent = String(nextCount).padStart(2, '0');
 }
 
@@ -1272,28 +1184,21 @@ function handleListChipsClick(event) {
         closeListPicker();
         return;
       }
-      try {
-        const freshLists = await loadLists();
-        const freshPins = await loadListPins(freshLists);
-        openListPicker(freshLists, freshPins);
-      } catch (err) {
-        showErrorBubble(err.message);
-        openListPicker(currentPage.summary?.lists || [], {});
-      }
+      const lists = currentPage.summary?.lists || [];
+      openListPicker(lists);
     }).catch((err) => showErrorBubble(err.message));
   }
 }
 
 async function renderListChips(listOverride = null) {
   const container = document.getElementById('listChips');
-  const lists = listOverride || (await loadLists());
-  const allPins = await loadListPins(lists);
+  const lists = listOverride || currentPage.summary?.lists || [];
 
   // Partition into lists containing this page vs. others
   const containsPage = [];
   const others = [];
   for (const list of lists) {
-    if (isPagePinned(allPins, list.slug, currentPage.url)) {
+    if (list.containsPage) {
       containsPage.push(list);
     } else {
       others.push(list);
@@ -1306,12 +1211,7 @@ async function renderListChips(listOverride = null) {
 
   // Sort others by most recent activity
   const othersRanked = others.map((list) => {
-    const pins = allPins[list.slug] || [];
-    const maxPinnedAt = pins.reduce(
-      (max, p) => Math.max(max, p.pinnedAt || 0),
-      0,
-    );
-    return { list, lastActivity: maxPinnedAt || 0 };
+    return { list, lastActivity: list.lastActivity || 0 };
   });
   othersRanked.sort((a, b) => b.lastActivity - a.lastActivity);
 
@@ -1359,7 +1259,7 @@ async function renderListChips(listOverride = null) {
   if (canPatchInPlace) {
     existingChips.forEach((chip, index) => {
       const list = displayLists[index];
-      const pinned = isPagePinned(allPins, list.slug, currentPage.url);
+      const pinned = list.containsPage;
       chip.classList.toggle('selected', pinned);
       chip.dataset.listId = list.slug;
       chip.textContent = list.name;
@@ -1367,7 +1267,7 @@ async function renderListChips(listOverride = null) {
   } else {
     let html = displayLists
       .map((list) => {
-        const pinned = isPagePinned(allPins, list.slug, currentPage.url);
+        const pinned = list.containsPage;
         return `<span class="list-chip${pinned ? ' selected' : ''}" role="button" tabindex="0" data-list-id="${list.slug}">${escapeHtml(list.name)}</span>`;
       })
       .join('');
@@ -1405,10 +1305,6 @@ async function toggleListPin(listId) {
     applyLocalListPinState(listId, response.pinned);
     syncListChipToggle(listId, response.pinned);
   }
-  await refreshCurrentPageSummary({
-    renderSections: false,
-    renderLists: false,
-  });
   return response;
 }
 
@@ -1548,8 +1444,8 @@ function setListSearchInputCursorToEnd(input) {
   input.setSelectionRange(input.value.length, input.value.length);
 }
 
-function openListPicker(lists, allPins, options = {}) {
-  const { initialQuery = '', loading = false, inputElement = null } = options;
+function openListPicker(lists, options = {}) {
+  const { initialQuery = '', inputElement = null } = options;
   // Close if already open
   if (listPickerElement()) {
     closeListPicker();
@@ -1575,8 +1471,6 @@ function openListPicker(lists, allPins, options = {}) {
   const scrollThumb = document.getElementById('listPickerScrollThumb');
   if (initialQuery) input.value = initialQuery;
   let pickerLists = lists;
-  let pickerPins = allPins;
-  let isLoading = loading;
   let activePickerIndex = -1;
   let pickerScrollTop = 0;
 
@@ -1705,7 +1599,6 @@ function openListPicker(lists, allPins, options = {}) {
       ) {
         applyLocalListPinState(listId, response.pinned);
         applyPinStateToLists(pickerLists, listId, response.pinned);
-        applyPinStateToPinMap(pickerPins, listId, response.pinned);
       }
       const chipSynced =
         response?.pinned === undefined ||
@@ -1714,10 +1607,6 @@ function openListPicker(lists, allPins, options = {}) {
       if (!chipSynced || !pickerSynced) {
         await renderListChips(currentPage.summary?.lists || pickerLists);
       }
-      await refreshCurrentPageSummary({
-        renderSections: false,
-        renderLists: false,
-      });
       return true;
     } catch (err) {
       showErrorBubble(err.message);
@@ -1727,17 +1616,6 @@ function openListPicker(lists, allPins, options = {}) {
 
   function renderPickerRows() {
     if (!isCurrentPicker()) return;
-    if (isLoading) {
-      optionsEl.innerHTML = `<div style="padding: 8px 10px; font-size: 11px; color: #999; text-align: center;">${escapeHtml(tr('commonLoading', 'Loading...', undefined))}</div>`;
-      activePickerIndex = -1;
-      input.removeAttribute('aria-activedescendant');
-      pickerScrollTop = 0;
-      optionsEl.style.transform = '';
-      positionPickerForRenderedRows();
-      schedulePickerScrollThumbUpdate();
-      return;
-    }
-
     const query = input.value.trim().toLowerCase();
     const filtered = query
       ? pickerLists.filter((c) => c.name.toLowerCase().startsWith(query))
@@ -1745,7 +1623,7 @@ function openListPicker(lists, allPins, options = {}) {
 
     let rowsHtml = filtered
       .map((c) => {
-        const pinned = isPagePinned(pickerPins, c.slug, currentPage.url);
+        const pinned = c.containsPage;
         return `<div class="list-picker-option list-picker-row${pinned ? ' selected' : ''}" id="listPickerOption-list-${escapeHtml(c.slug)}" role="option" data-list-id="${c.slug}">
         <span class="list-picker-row-check">${pinned ? '&#10003;' : ''}</span>
         <span>${escapeHtml(c.name)}</span>
@@ -1922,16 +1800,7 @@ function openListPicker(lists, allPins, options = {}) {
     document.addEventListener('click', pickerOutsideClickHandler);
   }, 0);
 
-  return {
-    input,
-    setData(nextLists, nextPins) {
-      if (!isCurrentPicker()) return;
-      pickerLists = nextLists;
-      pickerPins = nextPins;
-      isLoading = false;
-      renderPickerRows();
-    },
-  };
+  return { input };
 }
 
 let listSearchShortcutOpening = false;
@@ -2031,6 +1900,10 @@ async function openListPickerFromTyping(
   inputElement = null,
 ) {
   if (isPopupUiMutating()) return;
+  if (!currentPage.summary) {
+    await popupInitialization.catch(() => null);
+    if (!currentPage.summary || popupShellState.surface !== 'dashboard') return;
+  }
   const existingInput = listPickerInput();
   if (existingInput) {
     if (initialQuery) {
@@ -2044,22 +1917,18 @@ async function openListPickerFromTyping(
 
   if (listSearchShortcutOpening) return;
   listSearchShortcutOpening = true;
-  const pickerController = openListPicker(
-    [],
-    {},
-    { loading: true, inputElement },
-  );
-  if (initialQuery && pickerController?.input && !inputElement) {
-    pickerController.input.value = initialQuery;
-    pickerController.input.dispatchEvent(new Event('input', { bubbles: true }));
-    setListSearchInputCursorToEnd(pickerController.input);
-  }
   try {
-    const lists = await loadLists();
-    const allPins = await loadListPins(lists);
-    pickerController?.setData(lists, allPins);
-  } catch (err) {
-    showErrorBubble(err.message);
+    const lists = currentPage.summary?.lists || [];
+    const pickerController = openListPicker(lists, { inputElement });
+    if (initialQuery && pickerController?.input && !inputElement) {
+      pickerController.input.value = initialQuery;
+      pickerController.input.dispatchEvent(
+        new Event('input', { bubbles: true }),
+      );
+      setListSearchInputCursorToEnd(pickerController.input);
+    }
+  } catch (error) {
+    showErrorBubble(error.message);
   } finally {
     listSearchShortcutOpening = false;
   }
@@ -2079,23 +1948,28 @@ function handleListSearchShortcut(event) {
 }
 
 async function createListAndPin(name) {
-  const lists = await loadLists();
+  const lists = currentPage.summary?.lists || [];
   if (lists.some((c) => c.name === name)) return;
 
-  // saveListMeta's effectOf adds to tree manifest — no manual append needed.
-  // Use the generatedId returned by the handler (replay engine generates its own ID).
   const resp = await chrome.runtime.sendMessage({
-    action: 'saveListMeta',
+    action: 'createListAndPin',
     name,
+    url: currentPage.url,
+    title: currentPage.title || currentPage.tab?.title || '',
   });
   const listId = resp?.listId;
-  if (!listId) {
-    logError('[popup] saveListMeta did not return listId');
-    return;
+  if (!resp?.success || !listId || resp.pinned !== true) {
+    throw new Error(resp?.error || 'Desktop did not create and pin the list');
   }
 
-  await toggleListPin(listId);
-  await renderListChips(await loadLists());
+  const list = {
+    slug: listId,
+    name,
+    containsPage: true,
+    lastActivity: Date.now(),
+  };
+  lists.push(list);
+  await renderListChips(lists);
 
   logDebug('[popup] Created list and pinned page:', name, listId);
 }
@@ -2324,26 +2198,9 @@ function restoreDashboardContent() {
 
 async function resolvePageIdentity(tab) {
   const effectiveUrl = tab._effectiveUrl || tab.url;
-  const title = await trimDisplayTitle(
-    tab._effectiveTitle || tab.title,
-    effectiveUrl,
-  );
+  const title = tab._effectiveTitle || tab.title || '<unknown>';
   const slug = tab._effectiveSlug || generateSlugFromUrl(effectiveUrl);
   return { slug, url: effectiveUrl, title };
-}
-
-async function trimDisplayTitle(title, url) {
-  const fallback = title || '<unknown>';
-  try {
-    const resp = await chrome.runtime.sendMessage({
-      action: 'trimTitle',
-      title: fallback,
-      url,
-    });
-    return resp?.title || fallback;
-  } catch {
-    return fallback;
-  }
 }
 
 function pageSummaryFallback(tab, slug, summary = {}) {
@@ -2370,20 +2227,31 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
     const summary = await chrome.runtime.sendMessage({
       action: 'getPageSummary',
       url: currentPage.url || tab.url,
+      title: currentPage.title || tab.title || '',
     });
     if (generation !== currentPage.generation) return false;
     logDebug('[popup] getPageSummary response:', summary);
 
     if (summary?.success) {
+      if (
+        typeof summary.displayTitle !== 'string' ||
+        typeof summary.access?.blacklisted !== 'boolean' ||
+        typeof summary.access?.hasVisitHistory !== 'boolean'
+      ) {
+        throw new Error('Desktop returned an incomplete popup summary');
+      }
+      if (summary.access.blacklisted && !summary.access.hasVisitHistory) {
+        currentPage.pageSummaryState = 'succeeded';
+        renderBlacklistDiagnostic(
+          tab,
+          summary.url || currentPage.url || tab.url,
+        );
+        return false;
+      }
       if (resetSections) resetDashboardSections();
       else clearPageDiagnosticSection();
       const page = summary.page || pageSummaryFallback(tab, slug, summary);
-      const title = page.user_title
-        ? page.user_title
-        : await trimDisplayTitle(
-            page.title || tab.title || '<unknown>',
-            page.url || currentPage.url || tab.url,
-          );
+      const title = page.user_title ? page.user_title : summary.displayTitle;
       if (generation !== currentPage.generation) return false;
       currentPage.summary = { ...summary, page };
       currentPage.entry = page || null;
@@ -2478,7 +2346,9 @@ async function refreshCurrentPageSummary(options = {}) {
   );
   if (!updated || generation !== currentPage.generation) return;
   const followUps = [renderRecordingBar()];
-  if (renderLists) followUps.unshift(renderListChips());
+  if (renderLists) {
+    followUps.unshift(renderListChips(currentPage.summary?.lists || []));
+  }
   await Promise.all(followUps);
 }
 
@@ -2614,7 +2484,7 @@ async function showDashboard(tab, options = {}) {
   const summaryLists = Array.isArray(currentPage.summary?.lists)
     ? currentPage.summary.lists
     : null;
-  await renderListChips(summaryLists || (await loadLists()));
+  await renderListChips(summaryLists || []);
   if (generation !== currentPage.generation) return;
   await finishDashboardRender(tab, generation);
   schedulePendingLiveListRefresh();
@@ -2725,28 +2595,6 @@ async function handlePrivateMode(tab) {
   currentPage.tab = tab;
   renderBannerOnly();
   revealPopup();
-  return true;
-}
-
-async function handleBlacklist(tab) {
-  const effectiveUrl = tab._effectiveUrl || tab.url;
-  const response = await chrome.runtime.sendMessage({
-    action: 'getPopupAccessState',
-    url: effectiveUrl,
-  });
-  if (response?.success === false) {
-    throw new Error(
-      response.error ||
-        tr(
-          'extensionDesktopPopupAccessFailed',
-          'Desktop popup access check failed',
-          undefined,
-        ),
-    );
-  }
-  if (!response?.blacklisted || response?.hasVisitHistory) return false;
-
-  renderBlacklistDiagnostic(tab, effectiveUrl);
   return true;
 }
 
@@ -2947,7 +2795,6 @@ async function loadConnectedDashboard(connector) {
   if (!tab) return;
   await resolveEffectiveUrl(tab);
   if (await handlePrivateMode(tab)) return;
-  if (await handleBlacklist(tab)) return;
   await showDashboard(tab);
 }
 
@@ -2986,7 +2833,8 @@ async function initPopup() {
 }
 ensureListSearchCapture();
 listSearchInput().focus({ preventScroll: true });
-initPopup().catch((err) => showFatalError(err.message));
+const popupInitialization = initPopup();
+popupInitialization.catch((err) => showFatalError(err.message));
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== 'local') return;

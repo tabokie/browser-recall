@@ -35,7 +35,6 @@ import {
   requestDesktopPageSummary,
   requestDesktopSettings,
   requestDesktopCommand,
-  requestDesktopPopupLists,
   requestDesktopSnapshotHtml,
   connectDesktopBridge,
 } from './connector/ws-client.js';
@@ -152,14 +151,9 @@ const badgeController = createBadgeController({
   readPageMarkers: async (url) => {
     const summary = await handleGetPageSummary({ url });
     if (!summary.success || !summary.page) return null;
-    const slug = generateSlugFromUrl(url);
     return {
       hasNotes: summary.notes.length > 0 || summary.snapshots.length > 0,
-      hasLists: summary.lists.some((list) =>
-        (list.pins || []).some(
-          (pin) => pin.kind === 'page' && pin.slug === slug,
-        ),
-      ),
+      hasLists: summary.lists.some((list) => list.containsPage),
     };
   },
   readRecordingPausedState: async () => {
@@ -608,17 +602,6 @@ async function ensureDefaultLists() {
   } catch (e) {
     logDebug('First-run default list creation failed:', e.message);
   }
-}
-
-// ─── Title Trimming ───────────────────────────────────────────────────
-
-async function trimTitle(rawTitle, url) {
-  const response = await runDesktopCommand('trimTitle', {
-    title: rawTitle,
-    url,
-  });
-  if (!response.success) throw new Error(response.error || 'Title trim failed');
-  return response.title || '';
 }
 
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
@@ -1189,7 +1172,10 @@ async function handleGetPageInfo(request) {
 
 async function handleGetPageSummary(request) {
   try {
-    const desktopResp = await requestDesktopPageSummary(request.url);
+    const desktopResp = await requestDesktopPageSummary(
+      request.url,
+      request.title,
+    );
     if (!desktopResp?.success) {
       return {
         success: false,
@@ -1198,9 +1184,21 @@ async function handleGetPageSummary(request) {
           `Desktop returned ${desktopResp?.type || 'an empty response'} without page summary data`,
       };
     }
+    if (
+      typeof desktopResp.displayTitle !== 'string' ||
+      typeof desktopResp.access?.blacklisted !== 'boolean' ||
+      typeof desktopResp.access?.hasVisitHistory !== 'boolean'
+    ) {
+      return {
+        success: false,
+        error: 'Desktop returned an incomplete popup summary projection',
+      };
+    }
     return {
       success: true,
       url: desktopResp.url || request.url,
+      displayTitle: desktopResp.displayTitle,
+      access: desktopResp.access,
       page: desktopResp.page || null,
       notes: desktopResp.notes || [],
       snapshots: desktopResp.snapshots || [],
@@ -1216,31 +1214,6 @@ async function handleGetPageSummary(request) {
           'extensionDesktopPageDataUnavailable',
           'Desktop page data unavailable.',
         ),
-    };
-  }
-}
-
-async function handleGetPopupLists() {
-  try {
-    const desktopResp = await requestDesktopPopupLists();
-    if (!desktopResp?.success) {
-      return {
-        success: false,
-        error:
-          desktopResp?.error ||
-          tr('extensionCouldNotLoadLists', 'Could not load lists.'),
-      };
-    }
-    return {
-      success: true,
-      lists: desktopResp.lists || [],
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error:
-        error.message ||
-        tr('extensionCouldNotLoadLists', 'Could not load lists.'),
     };
   }
 }
@@ -1375,18 +1348,6 @@ async function handleGetDeviceId() {
   return { success: true, deviceId };
 }
 
-async function handleGetPopupAccessState(request) {
-  const response = await runDesktopCommand('getPopupAccessState', {
-    url: request.url,
-  });
-  if (!response.success) return response;
-  return {
-    success: true,
-    blacklisted: Boolean(response.blacklisted),
-    hasVisitHistory: Boolean(response.hasVisitHistory),
-  };
-}
-
 function popupBootstrapToken() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -1516,10 +1477,6 @@ async function resolvePreparedPopupIdentity(tab) {
     } catch {}
   }
 
-  try {
-    effectiveTitle = await trimTitle(effectiveTitle, effectiveUrl);
-  } catch {}
-
   return {
     slug: effectiveSlug || generateSlugFromUrl(effectiveUrl),
     url: effectiveUrl,
@@ -1528,15 +1485,9 @@ async function resolvePreparedPopupIdentity(tab) {
 }
 
 async function preparePopupBootstrapForTab(tab) {
-  const connector = await handleGetDesktopConnectorState();
-  if (connector?.state !== 'connected' || !connector?.deviceId) {
-    return { mode: 'setup', connector };
-  }
-
   if (popupTabIsUnavailable(tab)) {
     return {
       mode: 'unavailable',
-      connector,
       message: tr('extensionNotAvailablePage', 'Not available for this page'),
     };
   }
@@ -1553,36 +1504,18 @@ async function preparePopupBootstrapForTab(tab) {
 
   const workspace = await getWorkspaceState();
   if (workspace?.mode === 'private') {
-    return { mode: 'private', connector, tab: preparedTab, identity };
+    return { mode: 'private', tab: preparedTab, identity };
   }
 
-  const access = await handleGetPopupAccessState({ url: identity.url });
-  if (access?.success === false) {
-    return {
-      mode: 'data-unavailable',
-      connector,
-      tab: preparedTab,
-      identity,
-      error:
-        access.error ||
-        tr(
-          'extensionDesktopPopupAccessFailed',
-          'Desktop popup access check failed',
-        ),
-      diagnostic: {
-        reason: 'popup-access-check-failed',
-        access,
-        connector,
-        url: identity.url,
-      },
-    };
-  }
-  if (access?.blacklisted && !access?.hasVisitHistory) {
-    return { mode: 'blacklisted', connector, tab: preparedTab, identity };
-  }
-
-  const summary = await handleGetPageSummary({ url: identity.url });
+  const summary = await handleGetPageSummary({
+    url: identity.url,
+    title: identity.title,
+  });
+  const connector = await getConnectorBridgeState();
   if (!summary?.success) {
+    if (connector?.state !== 'connected' || !connector?.deviceId) {
+      return { mode: 'setup', connector };
+    }
     return {
       mode: 'data-unavailable',
       connector,
@@ -1601,6 +1534,11 @@ async function preparePopupBootstrapForTab(tab) {
         url: identity.url,
       },
     };
+  }
+  identity.title = summary.displayTitle;
+  preparedTab._effectiveTitle = identity.title;
+  if (summary.access?.blacklisted && !summary.access?.hasVisitHistory) {
+    return { mode: 'blacklisted', connector, tab: preparedTab, identity };
   }
 
   return {
@@ -1884,6 +1822,12 @@ async function handleSaveListMeta(request) {
   return response;
 }
 
+async function handleCreateListAndPin(request) {
+  const response = await runDesktopCommand('createListAndPin', request);
+  if (!response.success) return response;
+  return response;
+}
+
 async function handleDeleteList(request) {
   const response = await runDesktopCommand('deleteList', request);
   if (!response.success) return response;
@@ -2008,14 +1952,6 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
         case 'getPageSummary':
           sendResponse(await handleGetPageSummary(request));
           break;
-        case 'getPopupLists':
-          sendResponse(await handleGetPopupLists());
-          break;
-        case 'trimTitle':
-          sendResponse({
-            title: await trimTitle(request.title || '', request.url || ''),
-          });
-          break;
         case 'captureCurrentPageFromPopup':
           sendResponse(await handleCaptureCurrentPageFromPopup());
           break;
@@ -2041,9 +1977,6 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
           break;
         case 'connectDesktopBridge':
           sendResponse(await handleConnectDesktopBridge());
-          break;
-        case 'getPopupAccessState':
-          sendResponse(await handleGetPopupAccessState(request));
           break;
         case 'consumePopupBootstrap':
           sendResponse(await handleConsumePopupBootstrap(request));
@@ -2093,6 +2026,9 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
           break;
         case 'saveListMeta':
           sendResponse(await handleSaveListMeta(request));
+          break;
+        case 'createListAndPin':
+          sendResponse(await handleCreateListAndPin(request));
           break;
         case 'deleteList':
           sendResponse(await handleDeleteList(request));

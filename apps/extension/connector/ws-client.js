@@ -1089,15 +1089,14 @@ export async function requestDesktopPageInfo(slug) {
   );
 }
 
-export async function requestDesktopPageSummary(url) {
+export async function requestDesktopPageSummary(url, title = null) {
   const canonicalUrl = canonicalizePageUrl(url);
-  return requestDesktopPayload(
-    {
-      type: 'get_page_summary',
-      url: canonicalUrl,
-    },
-    ['page_summary_result', 'error'],
-  );
+  const request = {
+    type: 'get_page_summary',
+    url: canonicalUrl,
+  };
+  if (typeof title === 'string' && title) request.title = title;
+  return requestDesktopPayload(request, ['page_summary_result', 'error']);
 }
 
 export async function requestDesktopSettings() {
@@ -1186,15 +1185,6 @@ export async function requestDesktopHistoryBatch(files) {
       files,
     },
     ['history_batch_result', 'error'],
-  );
-}
-
-export async function requestDesktopPopupLists() {
-  return requestDesktopPayload(
-    {
-      type: 'get_popup_lists',
-    },
-    ['popup_lists_result', 'error'],
   );
 }
 

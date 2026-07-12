@@ -36,6 +36,28 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+function compactPopupListFixtures(lists, pageSlug) {
+  return lists.map(({ slug, name, pins = [] }) => ({
+    slug,
+    name,
+    containsPage: pins.some(
+      (pin) => pin.kind === 'page' && pin.slug === pageSlug,
+    ),
+    lastActivity: pins.reduce(
+      (latest, pin) => Math.max(latest, pin.pinnedAt || 0),
+      0,
+    ),
+  }));
+}
+
+function completePopupSummary(tab, summary) {
+  return {
+    displayTitle: summary.page?.title || tab.title,
+    access: { blacklisted: false, hasVisitHistory: Boolean(summary.page) },
+    ...summary,
+  };
+}
+
 function listenerStore() {
   const listeners = [];
   return {
@@ -105,9 +127,37 @@ function installChromeMock({ tab, responses }) {
       onMessage: runtimeMessages,
       reload: vi.fn(),
       sendMessage: vi.fn(async (request) => {
+        if (
+          ['trimTitle', 'getPopupAccessState', 'getPopupLists'].includes(
+            request.action,
+          )
+        ) {
+          throw new Error(`Obsolete popup RPC invoked: ${request.action}`);
+        }
         const handler = responses[request.action];
         if (!handler) return { success: true };
-        return typeof handler === 'function' ? handler(request) : handler;
+        const response = await (typeof handler === 'function'
+          ? handler(request)
+          : handler);
+        if (request.action === 'getPageSummary' && response?.success) {
+          if (
+            typeof response.displayTitle !== 'string' ||
+            typeof response.access?.blacklisted !== 'boolean' ||
+            typeof response.access?.hasVisitHistory !== 'boolean'
+          ) {
+            throw new Error('Incomplete getPageSummary test fixture');
+          }
+          for (const list of response.lists || []) {
+            if (
+              typeof list.containsPage !== 'boolean' ||
+              typeof list.lastActivity !== 'number' ||
+              'pins' in list
+            ) {
+              throw new Error('Non-compact getPageSummary list fixture');
+            }
+          }
+        }
+        return response;
       }),
     },
     storage: {
@@ -159,6 +209,34 @@ describe('popup desktop state rendering', () => {
     delete globalThis.CustomEvent;
     delete globalThis.getComputedStyle;
     delete globalThis.browserRecallWebExtension;
+  });
+
+  it('distinguishes current-page membership from unrelated page pins', () => {
+    expect(
+      compactPopupListFixtures(
+        [
+          {
+            slug: 'reading',
+            name: 'Reading',
+            pins: [
+              {
+                kind: 'page',
+                slug: 'another-page',
+                pinnedAt: 1_720_000_000_000,
+              },
+            ],
+          },
+        ],
+        'current-page',
+      ),
+    ).toEqual([
+      {
+        slug: 'reading',
+        name: 'Reading',
+        containsPage: false,
+        lastActivity: 1_720_000_000_000,
+      },
+    ]);
   });
 
   it('does not render synthetic page details when desktop summary metadata fails', async () => {
@@ -220,6 +298,7 @@ describe('popup desktop state rendering', () => {
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
       action: 'getPageSummary',
       url: tab.url,
+      title: tab.title,
     });
     expect(
       chrome.runtime.sendMessage.mock.calls.some(
@@ -288,7 +367,8 @@ describe('popup desktop state rendering', () => {
     await waitFor(
       () =>
         document.getElementById('pageTitle').textContent ===
-        'Prepared Desktop Title',
+          'Prepared Desktop Title' &&
+        document.getElementById('dashboard').style.display === 'flex',
     );
 
     expect(document.getElementById('dashboard').style.display).toBe('flex');
@@ -333,6 +413,8 @@ describe('popup desktop state rendering', () => {
         getPageSummary: () =>
           recovered
             ? {
+                displayTitle: 'Recovered Desktop Title',
+                access: { blacklisted: false, hasVisitHistory: true },
                 success: true,
                 url: tab.url,
                 page: {
@@ -487,19 +569,21 @@ describe('popup desktop state rendering', () => {
       'none',
     );
 
-    pageSummary.resolve({
-      success: true,
-      url: tab.url,
-      page: {
-        slug: generateSlugFromUrl(tab.url),
+    pageSummary.resolve(
+      completePopupSummary(tab, {
+        success: true,
         url: tab.url,
-        title: tab.title,
-        visitDates: [],
-      },
-      notes: [],
-      snapshots: [],
-      lists: [],
-    });
+        page: {
+          slug: generateSlugFromUrl(tab.url),
+          url: tab.url,
+          title: tab.title,
+          visitDates: [],
+        },
+        notes: [],
+        snapshots: [],
+        lists: [],
+      }),
+    );
 
     await waitFor(
       () =>
@@ -539,6 +623,8 @@ describe('popup desktop state rendering', () => {
         trimTitle: (request) => ({ title: request.title }),
         readDesktopValue: { success: true, value: null },
         getPageSummary: {
+          displayTitle: tab.title,
+          access: { blacklisted: false, hasVisitHistory: true },
           success: true,
           url: tab.url,
           page: {
@@ -621,6 +707,8 @@ describe('popup desktop state rendering', () => {
         trimTitle: (request) => ({ title: request.title }),
         readDesktopValue: { success: true, value: null },
         getPageSummary: {
+          displayTitle: tab.title,
+          access: { blacklisted: false, hasVisitHistory: true },
           success: true,
           url: tab.url,
           page: {
@@ -631,13 +719,16 @@ describe('popup desktop state rendering', () => {
           },
           notes: [],
           snapshots: [],
-          lists: [
-            {
-              slug: 'reading',
-              name: 'Reading',
-              pins: [],
-            },
-          ],
+          lists: compactPopupListFixtures(
+            [
+              {
+                slug: 'reading',
+                name: 'Reading',
+                pins: [],
+              },
+            ],
+            pageSlug,
+          ),
         },
         getPopupLists: {
           success: true,
@@ -682,8 +773,7 @@ describe('popup desktop state rendering', () => {
       title: 'Locked Recording While Pinning',
     };
     const pageSlug = generateSlugFromUrl(tab.url);
-    const listRefresh = deferred();
-    let summaryCalls = 0;
+    const listCommit = deferred();
     let pauseCalls = 0;
     let pinned = false;
     const currentLists = () => [
@@ -713,25 +803,24 @@ describe('popup desktop state rendering', () => {
         },
         trimTitle: (request) => ({ title: request.title }),
         readDesktopValue: { success: true, value: null },
-        getPageSummary: () => {
-          summaryCalls++;
-          if (summaryCalls === 2) return listRefresh.promise;
-          return {
-            success: true,
+        getPageSummary: () => ({
+          displayTitle: tab.title,
+          access: { blacklisted: false, hasVisitHistory: true },
+          success: true,
+          url: tab.url,
+          page: {
+            slug: pageSlug,
             url: tab.url,
-            page: {
-              slug: pageSlug,
-              url: tab.url,
-              title: tab.title,
-              visitDates: [],
-            },
-            notes: [],
-            snapshots: [],
-            lists: currentLists(),
-          };
-        },
+            title: tab.title,
+            visitDates: [],
+          },
+          notes: [],
+          snapshots: [],
+          lists: compactPopupListFixtures(currentLists(), pageSlug),
+        }),
         getPopupLists: () => ({ success: true, lists: currentLists() }),
-        toggleListPin: () => {
+        toggleListPin: async () => {
+          await listCommit.promise;
           pinned = true;
           return { success: true, pinned: true };
         },
@@ -742,26 +831,14 @@ describe('popup desktop state rendering', () => {
 
     await waitFor(() => document.querySelector('.list-chip'));
     document.querySelector('.list-chip').click();
-    await waitFor(() => summaryCalls === 2);
 
     const recordingToggle = document.getElementById('recordingToggle');
+    await waitFor(() => recordingToggle.disabled);
     expect(recordingToggle.disabled).toBe(true);
     recordingToggle.click();
     expect(pauseCalls).toBe(0);
 
-    listRefresh.resolve({
-      success: true,
-      url: tab.url,
-      page: {
-        slug: pageSlug,
-        url: tab.url,
-        title: tab.title,
-        visitDates: [],
-      },
-      notes: [],
-      snapshots: [],
-      lists: currentLists(),
-    });
+    listCommit.resolve();
 
     await waitFor(() => recordingToggle.disabled === false);
     expect(pauseCalls).toBe(0);
@@ -790,6 +867,8 @@ describe('popup desktop state rendering', () => {
         trimTitle: (request) => ({ title: request.title }),
         readDesktopValue: { success: true, value: null },
         getPageSummary: {
+          displayTitle: tab.title,
+          access: { blacklisted: false, hasVisitHistory: true },
           success: true,
           url: tab.url,
           page: {
@@ -800,13 +879,16 @@ describe('popup desktop state rendering', () => {
           },
           notes: [],
           snapshots: [],
-          lists: [
-            {
-              slug: 'reading',
-              name: 'Reading',
-              pins: [],
-            },
-          ],
+          lists: compactPopupListFixtures(
+            [
+              {
+                slug: 'reading',
+                name: 'Reading',
+                pins: [],
+              },
+            ],
+            pageSlug,
+          ),
         },
         getPopupLists: {
           success: true,
@@ -834,7 +916,7 @@ describe('popup desktop state rendering', () => {
     textarea.value = 'Queued note';
     textarea.blur();
 
-    await waitFor(() => document.body.classList.contains('popup-ui-mutating'));
+    await waitFor(() => textarea.disabled);
     expect(textarea.disabled).toBe(true);
 
     document.querySelector('.list-chip').click();
@@ -842,7 +924,7 @@ describe('popup desktop state rendering', () => {
     expect(toggleCalls).toBe(0);
 
     noteSave.resolve({ success: true, noteSlug: 'note-queued' });
-    await waitFor(() => !document.body.classList.contains('popup-ui-mutating'));
+    await waitFor(() => !textarea.disabled);
     expect(toggleCalls).toBe(0);
   });
 
@@ -869,6 +951,8 @@ describe('popup desktop state rendering', () => {
         trimTitle: (request) => ({ title: request.title }),
         readDesktopValue: { success: true, value: null },
         getPageSummary: {
+          displayTitle: tab.title,
+          access: { blacklisted: false, hasVisitHistory: true },
           success: true,
           url: tab.url,
           page: {
@@ -928,6 +1012,8 @@ describe('popup desktop state rendering', () => {
         trimTitle: (request) => ({ title: request.title }),
         readDesktopValue: { success: true, value: null },
         getPageSummary: {
+          displayTitle: tab.title,
+          access: { blacklisted: false, hasVisitHistory: true },
           success: true,
           url: tab.url,
           page: {
@@ -976,8 +1062,7 @@ describe('popup desktop state rendering', () => {
       title: 'Delayed Note Save Lock',
     };
     const pageSlug = generateSlugFromUrl(tab.url);
-    const listRefresh = deferred();
-    let summaryCalls = 0;
+    const listCommit = deferred();
     let updateNoteCalls = 0;
     let pinned = false;
     const currentLists = () => [
@@ -989,25 +1074,26 @@ describe('popup desktop state rendering', () => {
           : [],
       },
     ];
-    const currentSummary = () => ({
-      success: true,
-      url: tab.url,
-      page: {
-        slug: pageSlug,
+    const currentSummary = () =>
+      completePopupSummary(tab, {
+        success: true,
         url: tab.url,
-        title: tab.title,
-        visitDates: [],
-      },
-      notes: [
-        {
-          slug: 'highlight-note',
-          excerpt: 'Marked passage',
-          note: 'Old note',
+        page: {
+          slug: pageSlug,
+          url: tab.url,
+          title: tab.title,
+          visitDates: [],
         },
-      ],
-      snapshots: [],
-      lists: currentLists(),
-    });
+        notes: [
+          {
+            slug: 'highlight-note',
+            excerpt: 'Marked passage',
+            note: 'Old note',
+          },
+        ],
+        snapshots: [],
+        lists: compactPopupListFixtures(currentLists(), pageSlug),
+      });
     installDom();
     installChromeMock({
       tab,
@@ -1021,13 +1107,10 @@ describe('popup desktop state rendering', () => {
         getReportedUrl: { success: true, url: tab.url },
         trimTitle: (request) => ({ title: request.title }),
         readDesktopValue: { success: true, value: null },
-        getPageSummary: () => {
-          summaryCalls++;
-          if (summaryCalls === 2) return listRefresh.promise;
-          return currentSummary();
-        },
+        getPageSummary: currentSummary,
         getPopupLists: () => ({ success: true, lists: currentLists() }),
-        toggleListPin: () => {
+        toggleListPin: async () => {
+          await listCommit.promise;
           pinned = true;
           return { success: true, pinned: true };
         },
@@ -1047,11 +1130,11 @@ describe('popup desktop state rendering', () => {
     textarea.dispatchEvent(new window.Event('input', { bubbles: true }));
 
     document.querySelector('.list-chip').click();
-    await waitFor(() => summaryCalls === 2);
+    await waitFor(() => document.getElementById('recordingToggle').disabled);
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(updateNoteCalls).toBe(0);
 
-    listRefresh.resolve(currentSummary());
+    listCommit.resolve();
     await waitFor(() => updateNoteCalls === 1);
   });
 
@@ -1108,19 +1191,21 @@ describe('popup desktop state rendering', () => {
       ),
     ).toEqual([[{ action: 'setRecordingPaused', paused: false }]]);
 
-    pageSummary.resolve({
-      success: true,
-      url: tab.url,
-      page: {
-        slug: generateSlugFromUrl(tab.url),
+    pageSummary.resolve(
+      completePopupSummary(tab, {
+        success: true,
         url: tab.url,
-        title: tab.title,
-        visitDates: [],
-      },
-      notes: [],
-      snapshots: [],
-      lists: [],
-    });
+        page: {
+          slug: generateSlugFromUrl(tab.url),
+          url: tab.url,
+          title: tab.title,
+          visitDates: [],
+        },
+        notes: [],
+        snapshots: [],
+        lists: [],
+      }),
+    );
 
     await waitFor(
       () =>
@@ -1138,7 +1223,7 @@ describe('popup desktop state rendering', () => {
     };
     const resumeSummary = deferred();
     let summaryCalls = 0;
-    const summaryPayload = {
+    const summaryPayload = completePopupSummary(tab, {
       success: true,
       url: tab.url,
       page: {
@@ -1150,7 +1235,7 @@ describe('popup desktop state rendering', () => {
       notes: [],
       snapshots: [],
       lists: [],
-    };
+    });
     installDom();
     const { sessionStore, runtimeMessages } = installChromeMock({
       tab,
@@ -1336,10 +1421,15 @@ describe('popup desktop state rendering', () => {
           hasToken: true,
         },
         getReportedUrl: { success: true, url: tab.url },
-        getPopupAccessState: {
+        getPageSummary: {
           success: true,
-          blacklisted: true,
-          hasVisitHistory: false,
+          url: tab.url,
+          displayTitle: tab.title,
+          access: { blacklisted: true, hasVisitHistory: false },
+          page: null,
+          notes: [],
+          snapshots: [],
+          lists: [],
         },
       },
     });
@@ -1383,11 +1473,6 @@ describe('popup desktop state rendering', () => {
           hasToken: true,
         },
         getReportedUrl: { success: true, url: tab.url },
-        getPopupAccessState: {
-          success: true,
-          blacklisted: true,
-          hasVisitHistory: false,
-        },
         recordPageActivity: { success: true },
         captureCurrentPageFromPopup: {
           success: false,
@@ -1396,6 +1481,8 @@ describe('popup desktop state rendering', () => {
         trimTitle: (request) => ({ title: request.title }),
         readDesktopValue: { success: true, value: null },
         getPageSummary: {
+          displayTitle: tab.title,
+          access: { blacklisted: true, hasVisitHistory: false },
           success: true,
           url: tab.url,
           page: {
@@ -1494,6 +1581,8 @@ describe('popup desktop state rendering', () => {
         trimTitle: { title: tab.title },
         readDesktopValue: { success: true, value: null },
         getPageSummary: {
+          displayTitle: tab.title,
+          access: { blacklisted: false, hasVisitHistory: true },
           success: true,
           url: tab.url,
           page: null,
@@ -1636,18 +1725,23 @@ describe('popup desktop state rendering', () => {
       'none',
     );
 
-    pageSummary.resolve({
-      success: true,
-      page: {
-        slug: 'slow-popup-summary',
-        url: tab.url,
-        title: 'Desktop Title',
-        visitDates: [],
-      },
-      notes: [],
-      snapshots: [],
-      lists: [{ slug: 'reading', name: 'Reading', pins: [] }],
-    });
+    pageSummary.resolve(
+      completePopupSummary(tab, {
+        success: true,
+        page: {
+          slug: 'slow-popup-summary',
+          url: tab.url,
+          title: 'Desktop Title',
+          visitDates: [],
+        },
+        notes: [],
+        snapshots: [],
+        lists: compactPopupListFixtures(
+          [{ slug: 'reading', name: 'Reading', pins: [] }],
+          generateSlugFromUrl(tab.url),
+        ),
+      }),
+    );
 
     await waitFor(
       () =>
@@ -1689,6 +1783,8 @@ describe('popup desktop state rendering', () => {
         trimTitle: (request) => ({ title: request.title }),
         readDesktopValue: { success: true, value: null },
         getPageSummary: {
+          displayTitle: tab.title,
+          access: { blacklisted: false, hasVisitHistory: true },
           success: true,
           url: tab.url,
           page: {
@@ -1699,13 +1795,16 @@ describe('popup desktop state rendering', () => {
           },
           notes: [],
           snapshots: [],
-          lists: [
-            {
-              slug: 'summary-list',
-              name: 'Summary List',
-              pins: [{ kind: 'page', slug: pageSlug, pinnedAt: Date.now() }],
-            },
-          ],
+          lists: compactPopupListFixtures(
+            [
+              {
+                slug: 'summary-list',
+                name: 'Summary List',
+                pins: [{ kind: 'page', slug: pageSlug, pinnedAt: Date.now() }],
+              },
+            ],
+            pageSlug,
+          ),
         },
         getPopupLists: () => {
           popupListCalls++;
@@ -1805,6 +1904,8 @@ describe('popup desktop state rendering', () => {
         trimTitle: { title: tab.title },
         readDesktopValue: { success: true, value: null },
         getPageSummary: {
+          displayTitle: tab.title,
+          access: { blacklisted: false, hasVisitHistory: true },
           success: true,
           url: tab.url,
           page: {
@@ -1831,7 +1932,11 @@ describe('popup desktop state rendering', () => {
     );
     document.getElementById('captureBtn').click();
 
-    await waitFor(() => chrome.tabs.sendMessage.mock.calls.length > 0);
+    await waitFor(() =>
+      chrome.tabs.sendMessage.mock.calls.some(
+        ([, request]) => request.action === 'showErrorNotification',
+      ),
+    );
     expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
       tab.id,
       expect.objectContaining({
@@ -1866,6 +1971,8 @@ describe('popup desktop state rendering', () => {
         getPageSummary: () => ({
           success: true,
           url: tab.url,
+          displayTitle: 'Trimmed Title',
+          access: { blacklisted: false, hasVisitHistory: true },
           page: {
             slug: 'trimmed-title-after-pin',
             url: tab.url,
@@ -1874,21 +1981,24 @@ describe('popup desktop state rendering', () => {
           },
           notes: [],
           snapshots: [],
-          lists: [
-            {
-              slug: 'reading',
-              name: 'Reading',
-              pins: pinned
-                ? [
-                    {
-                      kind: 'page',
-                      slug: generateSlugFromUrl(tab.url),
-                      pinnedAt: Date.now(),
-                    },
-                  ]
-                : [],
-            },
-          ],
+          lists: compactPopupListFixtures(
+            [
+              {
+                slug: 'reading',
+                name: 'Reading',
+                pins: pinned
+                  ? [
+                      {
+                        kind: 'page',
+                        slug: generateSlugFromUrl(tab.url),
+                        pinnedAt: Date.now(),
+                      },
+                    ]
+                  : [],
+              },
+            ],
+            generateSlugFromUrl(tab.url),
+          ),
         }),
         getPopupLists: () => ({
           success: true,
@@ -1929,7 +2039,7 @@ describe('popup desktop state rendering', () => {
     );
   });
 
-  it('refreshes visible chips after toggling a list from the picker even if summary refresh stalls', async () => {
+  it('updates visible chips from the picker command response without rereading the summary', async () => {
     const tab = {
       id: 52,
       url: 'https://example.com/picker-chip-refresh',
@@ -1938,7 +2048,6 @@ describe('popup desktop state rendering', () => {
     const pageSlug = generateSlugFromUrl(tab.url);
     let pinned = false;
     let summaryCalls = 0;
-    const stalledSummary = deferred();
     const currentLists = () => [
       {
         slug: 'reading',
@@ -1970,8 +2079,9 @@ describe('popup desktop state rendering', () => {
         readDesktopValue: { success: true, value: null },
         getPageSummary: () => {
           summaryCalls++;
-          if (summaryCalls === 2) return stalledSummary.promise;
           return {
+            displayTitle: tab.title,
+            access: { blacklisted: false, hasVisitHistory: true },
             success: true,
             url: tab.url,
             page: {
@@ -1982,7 +2092,7 @@ describe('popup desktop state rendering', () => {
             },
             notes: [],
             snapshots: [],
-            lists: currentLists(),
+            lists: compactPopupListFixtures(currentLists(), pageSlug),
           };
         },
         getPopupLists: () => ({ success: true, lists: currentLists() }),
@@ -1999,16 +2109,16 @@ describe('popup desktop state rendering', () => {
     document.getElementById('listAddBtn').click();
     await waitFor(() => document.querySelector('.list-picker-row'));
     document.querySelector('.list-picker-row').click();
-    await waitFor(() => summaryCalls === 2);
 
     await waitFor(() => document.querySelector('.list-chip.selected'));
     await waitFor(() => document.querySelector('.list-picker-row.selected'));
+    expect(summaryCalls).toBe(1);
     expect(document.getElementById('listChips').textContent).toContain(
       'Reading',
     );
   });
 
-  it('refreshes hidden chips after toggling a filtered picker row even if summary refresh stalls', async () => {
+  it('updates hidden chips from the picker command response without rereading the summary', async () => {
     const tab = {
       id: 56,
       url: 'https://example.com/picker-hidden-chip-refresh',
@@ -2017,7 +2127,6 @@ describe('popup desktop state rendering', () => {
     const pageSlug = generateSlugFromUrl(tab.url);
     let pinned = false;
     let summaryCalls = 0;
-    const stalledSummary = deferred();
     const currentLists = () => {
       const lists = [];
       for (let index = 0; index < 10; index += 1) {
@@ -2064,8 +2173,9 @@ describe('popup desktop state rendering', () => {
         readDesktopValue: { success: true, value: null },
         getPageSummary: () => {
           summaryCalls++;
-          if (summaryCalls === 2) return stalledSummary.promise;
           return {
+            displayTitle: tab.title,
+            access: { blacklisted: false, hasVisitHistory: true },
             success: true,
             url: tab.url,
             page: {
@@ -2076,7 +2186,7 @@ describe('popup desktop state rendering', () => {
             },
             notes: [],
             snapshots: [],
-            lists: currentLists(),
+            lists: compactPopupListFixtures(currentLists(), pageSlug),
           };
         },
         getPopupLists: () => ({ success: true, lists: currentLists() }),
@@ -2100,11 +2210,11 @@ describe('popup desktop state rendering', () => {
     input.dispatchEvent(new window.Event('input', { bubbles: true }));
     await waitFor(() => document.querySelector('.list-picker-row'));
     document.querySelector('.list-picker-row').click();
-    await waitFor(() => summaryCalls === 2);
 
     await waitFor(() =>
       document.querySelector('#listChips .list-chip[data-list-id="reading"]'),
     );
+    expect(summaryCalls).toBe(1);
     expect(document.getElementById('listCount').textContent).toBe('11');
   });
 
@@ -2159,6 +2269,8 @@ describe('popup desktop state rendering', () => {
         trimTitle: (request) => ({ title: request.title }),
         readDesktopValue: { success: true, value: null },
         getPageSummary: () => ({
+          displayTitle: tab.title,
+          access: { blacklisted: false, hasVisitHistory: true },
           success: true,
           url: tab.url,
           page: {
@@ -2169,7 +2281,7 @@ describe('popup desktop state rendering', () => {
           },
           notes: [],
           snapshots: [],
-          lists: currentLists(),
+          lists: compactPopupListFixtures(currentLists(), pageSlug),
         }),
         getPopupLists: () => ({ success: true, lists: currentLists() }),
         toggleListPin: () => ({ success: true, pinned: false }),
@@ -2238,6 +2350,8 @@ describe('popup desktop state rendering', () => {
         trimTitle: (request) => ({ title: request.title }),
         readDesktopValue: { success: true, value: null },
         getPageSummary: () => ({
+          displayTitle: tab.title,
+          access: { blacklisted: false, hasVisitHistory: true },
           success: true,
           url: tab.url,
           page: {
@@ -2248,7 +2362,7 @@ describe('popup desktop state rendering', () => {
           },
           notes: [],
           snapshots: [],
-          lists: currentLists(),
+          lists: compactPopupListFixtures(currentLists(), pageSlug),
         }),
         getPopupLists: () => ({ success: true, lists: currentLists() }),
         toggleListPin: () => {
@@ -2313,6 +2427,8 @@ describe('popup desktop state rendering', () => {
         trimTitle: (request) => ({ title: request.title }),
         readDesktopValue: { success: true, value: null },
         getPageSummary: () => ({
+          displayTitle: tab.title,
+          access: { blacklisted: false, hasVisitHistory: true },
           success: true,
           url: tab.url,
           page: {
@@ -2323,7 +2439,7 @@ describe('popup desktop state rendering', () => {
           },
           notes: [],
           snapshots: [],
-          lists: currentLists(),
+          lists: compactPopupListFixtures(currentLists(), pageSlug),
         }),
         getPopupLists: () => ({ success: true, lists: currentLists() }),
         toggleListPin: () => {

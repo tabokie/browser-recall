@@ -54,7 +54,7 @@ async function pairOnce(port) {
   socket.send(
     JSON.stringify({
       type: 'pair_request',
-      protocolVersion: 1,
+      protocolVersion: 2,
       browserId: 'browser-install-1',
       browserName: 'Chrome',
       extensionId: 'abcdefghijklmnop',
@@ -120,7 +120,7 @@ describe.sequential('phase 1 daemon pairing integration', () => {
     socket.send(
       JSON.stringify({
         type: 'pair_request',
-        protocolVersion: 1,
+        protocolVersion: 2,
         browserId: 'browser-install-1',
         browserName: 'Chrome',
         extensionId: 'abcdefghijklmnop',
@@ -164,7 +164,7 @@ describe.sequential('phase 1 daemon pairing integration', () => {
       authSocket.once('error', reject);
     });
     authSocket.send(
-      JSON.stringify({ type: 'auth', protocolVersion: 1, token }),
+      JSON.stringify({ type: 'auth', protocolVersion: 2, token }),
     );
     const response = await nextMessage(authSocket);
     expect(response).toEqual({ type: 'auth_fail', reason: 'token_not_found' });

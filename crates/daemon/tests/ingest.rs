@@ -54,7 +54,7 @@ async fn authenticated_socket(port: u16, token: &str) -> TestSocket {
     socket
         .send(Message::Text(
             serde_json::to_string(&ConnectorMessage::Auth {
-                protocol_version: Some(1),
+                protocol_version: Some(2),
                 token: token.into(),
             })
             .expect("auth json"),
@@ -66,7 +66,7 @@ async fn authenticated_socket(port: u16, token: &str) -> TestSocket {
     assert!(matches!(
         auth,
         DaemonMessage::AuthOk {
-            protocol_version: 1
+            protocol_version: 2
         }
     ));
     socket
@@ -845,7 +845,7 @@ async fn websocket_auth_control_and_error_matrix_keeps_connections_predictable()
     send_connector(
         &mut bad_auth,
         ConnectorMessage::Auth {
-            protocol_version: Some(1),
+            protocol_version: Some(2),
             token: "missing-token".to_string(),
         },
     )
@@ -894,7 +894,7 @@ async fn websocket_pairing_denial_is_explicit_and_closes_request() {
     send_connector(
         &mut socket,
         ConnectorMessage::PairRequest {
-            protocol_version: Some(1),
+            protocol_version: Some(2),
             browser_id: "denied-browser".to_string(),
             browser_name: "Chrome".to_string(),
             extension_id: "abcdefghijklmnop".to_string(),
@@ -949,8 +949,7 @@ async fn websocket_unauthenticated_matrix_rejects_privileged_messages_without_cl
         json!({ "type": "get_snapshot_html", "slug": "missing", "ts": 1 }),
         json!({ "type": "get_entity", "key": "page:missing" }),
         json!({ "type": "permanent_delete", "keys": ["note:missing"] }),
-        json!({ "type": "get_popup_lists" }),
-        json!({ "type": "run_command", "action": "trimTitle", "request": {} }),
+        json!({ "type": "run_command", "action": "createList", "request": { "name": "Unauthenticated" } }),
         json!({ "type": "search_notes", "query": "x" }),
         json!({ "type": "search_snapshots", "query": "x" }),
         json!({
@@ -1093,29 +1092,24 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
     send_raw(
         &mut socket,
         json!({
-            "type": "run_command",
-            "action": "trimTitle",
-            "request": {
-                "url": "https://docs.example/page",
-                "title": "  API Guide [Draft] (Internal) | Browser Recall  "
-            }
+            "type": "get_page_summary",
+            "url": "https://docs.example/page",
+            "title": "  API Guide [Draft] (Internal) | Browser Recall  "
         }),
     )
     .await;
     match next_daemon(&mut socket).await {
-        DaemonMessage::CommandResult {
+        DaemonMessage::PageSummaryResult {
             success,
-            response: Some(response),
+            display_title,
             error,
+            ..
         } => {
             assert!(success);
             assert!(error.is_none());
-            assert_eq!(
-                response.get("title").and_then(Value::as_str),
-                Some("API Guide")
-            );
+            assert_eq!(display_title, "API Guide");
         }
-        other => panic!("expected trim title response, got {other:?}"),
+        other => panic!("expected popup summary response, got {other:?}"),
     }
 
     send_raw(
@@ -1307,7 +1301,7 @@ async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
         json!({ "type": "replay_remote_entries", "deviceId": "peer", "entries": [] }),
         json!({ "type": "set_device_id", "deviceId": "paused-device" }),
         json!({ "type": "permanent_delete", "keys": ["note:paused"] }),
-        json!({ "type": "run_command", "action": "trimTitle", "request": {} }),
+        json!({ "type": "run_command", "action": "createList", "request": { "name": "Paused" } }),
         json!({
             "type": "event",
             "entry": {
@@ -1561,6 +1555,7 @@ async fn websocket_read_error_and_secondary_command_matrix_is_structured() {
         &mut socket,
         ConnectorMessage::GetPageSummary {
             url: "not a url".to_string(),
+            title: None,
         },
     )
     .await;
@@ -2081,7 +2076,7 @@ async fn search_messages_return_note_and_snapshot_hits() {
 }
 
 #[tokio::test]
-async fn popup_read_messages_return_page_info_and_lists() {
+async fn popup_summary_returns_page_info_and_compact_lists() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());
     let handle = start_server(test_control_server_options(config_store.clone()))
@@ -2246,24 +2241,31 @@ async fn popup_read_messages_return_page_info_and_lists() {
         other => panic!("expected entity result, got {other:?}"),
     }
 
-    send_raw(&mut socket, json!({ "type": "get_popup_lists" })).await;
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "get_page_summary",
+            "url": "https://example.com/popup"
+        }),
+    )
+    .await;
     let popup_lists = next_daemon(&mut socket).await;
     match popup_lists {
-        DaemonMessage::PopupListsResult {
+        DaemonMessage::PageSummaryResult {
             success,
             lists,
             error,
+            ..
         } => {
             assert!(success);
             assert!(error.is_none());
             assert_eq!(lists.len(), 1);
             assert_eq!(lists[0].slug, "reading");
             assert_eq!(lists[0].name, "Reading");
-            assert_eq!(lists[0].pins.len(), 1);
-            assert_eq!(lists[0].pins[0].kind, "page");
-            assert!(!lists[0].pins[0].slug.is_empty());
+            assert!(lists[0].contains_page);
+            assert!(lists[0].last_activity > 0);
         }
-        other => panic!("expected popup lists result, got {other:?}"),
+        other => panic!("expected popup page summary, got {other:?}"),
     }
 
     send_raw(&mut socket, json!({ "type": "get_settings" })).await;
@@ -2567,29 +2569,24 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
     send_raw(
         &mut socket,
         json!({
-            "type": "run_command",
-            "action": "trimTitle",
-            "request": {
-                "url": "https://example.com/matrix",
-                "title": "  Matrix   Page  "
-            }
+            "type": "get_page_summary",
+            "url": "https://example.com/matrix",
+            "title": "  Matrix   Page  "
         }),
     )
     .await;
     match next_daemon(&mut socket).await {
-        DaemonMessage::CommandResult {
+        DaemonMessage::PageSummaryResult {
             success,
-            response: Some(response),
+            display_title,
             error,
+            ..
         } => {
             assert!(success);
             assert!(error.is_none());
-            assert_eq!(
-                response.get("title").and_then(Value::as_str),
-                Some("Matrix Page")
-            );
+            assert_eq!(display_title, "Matrix Page");
         }
-        other => panic!("expected trimTitle result, got {other:?}"),
+        other => panic!("expected popup summary result, got {other:?}"),
     }
 
     send_raw(
@@ -3022,6 +3019,7 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         ConnectorMessage::GetPageSummary {
             url: "https://example.com/matrix".to_string(),
+            title: None,
         },
     )
     .await;
@@ -3168,7 +3166,7 @@ async fn run_command_bootstraps_default_lists_in_desktop() {
 }
 
 #[tokio::test]
-async fn run_command_classifies_popup_blacklist_with_desktop_policy() {
+async fn page_summary_classifies_popup_blacklist_with_desktop_policy() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());
     let handle = start_server(test_server_options(config_store.clone()))
@@ -3179,30 +3177,25 @@ async fn run_command_classifies_popup_blacklist_with_desktop_policy() {
     send_raw(
         &mut socket,
         json!({
-            "type": "run_command",
-            "action": "getPopupAccessState",
-            "request": { "url": "chrome://settings" }
+            "type": "get_page_summary",
+            "url": "chrome://settings",
+            "title": "Settings"
         }),
     )
     .await;
     match next_daemon(&mut socket).await {
-        DaemonMessage::CommandResult {
+        DaemonMessage::PageSummaryResult {
             success,
-            response: Some(response),
+            access,
             error,
+            ..
         } => {
             assert!(success);
             assert!(error.is_none());
-            assert_eq!(
-                response.get("blacklisted").and_then(Value::as_bool),
-                Some(true)
-            );
-            assert_eq!(
-                response.get("hasVisitHistory").and_then(Value::as_bool),
-                Some(false)
-            );
+            assert!(access.blacklisted);
+            assert!(!access.has_visit_history);
         }
-        other => panic!("expected command result, got {other:?}"),
+        other => panic!("expected popup summary result, got {other:?}"),
     }
 
     send_raw(
@@ -3227,37 +3220,32 @@ async fn run_command_classifies_popup_blacklist_with_desktop_policy() {
     send_raw(
         &mut socket,
         json!({
-            "type": "run_command",
-            "action": "getPopupAccessState",
-            "request": { "url": "chrome://settings" }
+            "type": "get_page_summary",
+            "url": "chrome://settings",
+            "title": "Settings"
         }),
     )
     .await;
     match next_daemon(&mut socket).await {
-        DaemonMessage::CommandResult {
+        DaemonMessage::PageSummaryResult {
             success,
-            response: Some(response),
+            access,
             error,
+            ..
         } => {
             assert!(success);
             assert!(error.is_none());
-            assert_eq!(
-                response.get("blacklisted").and_then(Value::as_bool),
-                Some(false)
-            );
-            assert_eq!(
-                response.get("hasVisitHistory").and_then(Value::as_bool),
-                Some(true)
-            );
+            assert!(!access.blacklisted);
+            assert!(access.has_visit_history);
         }
-        other => panic!("expected command result, got {other:?}"),
+        other => panic!("expected popup summary result, got {other:?}"),
     }
 
     handle.shutdown().await;
 }
 
 #[tokio::test]
-async fn popup_lists_use_shared_storage_cache_after_desktop_side_write() {
+async fn popup_summary_lists_use_shared_storage_cache_after_desktop_side_write() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());
     let handle = start_server(test_server_options(config_store.clone()))
@@ -3277,10 +3265,17 @@ async fn popup_lists_use_shared_storage_cache_after_desktop_side_write() {
     )
     .await;
 
-    send_raw(&mut socket, json!({ "type": "get_popup_lists" })).await;
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "get_page_summary",
+            "url": "https://example.com/popup-list-cache"
+        }),
+    )
+    .await;
     let warmed = next_daemon(&mut socket).await;
     match warmed {
-        DaemonMessage::PopupListsResult { lists, .. } => {
+        DaemonMessage::PageSummaryResult { lists, .. } => {
             assert_eq!(
                 lists
                     .iter()
@@ -3289,7 +3284,7 @@ async fn popup_lists_use_shared_storage_cache_after_desktop_side_write() {
                 vec!["Existing"]
             );
         }
-        other => panic!("expected popup lists result, got {other:?}"),
+        other => panic!("expected popup page summary, got {other:?}"),
     }
 
     handle
@@ -3298,17 +3293,24 @@ async fn popup_lists_use_shared_storage_cache_after_desktop_side_write() {
         .await
         .expect("desktop-side list create through daemon write authority");
 
-    send_raw(&mut socket, json!({ "type": "get_popup_lists" })).await;
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "get_page_summary",
+            "url": "https://example.com/popup-list-cache"
+        }),
+    )
+    .await;
     let refreshed = next_daemon(&mut socket).await;
     match refreshed {
-        DaemonMessage::PopupListsResult { lists, .. } => {
+        DaemonMessage::PageSummaryResult { lists, .. } => {
             let names = lists
                 .iter()
                 .map(|list| list.name.as_str())
                 .collect::<Vec<_>>();
             assert_eq!(names, vec!["Desktop Added", "Existing"]);
         }
-        other => panic!("expected popup lists result, got {other:?}"),
+        other => panic!("expected popup page summary, got {other:?}"),
     }
 
     handle.shutdown().await;

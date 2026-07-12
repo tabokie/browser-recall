@@ -128,20 +128,12 @@ pub struct RuleProjection {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct ListSummaryProjection {
+#[serde(rename_all = "camelCase")]
+pub struct PopupListProjection {
     pub slug: String,
     pub name: String,
-    pub pins: Vec<PinSummaryProjection>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct PinSummaryProjection {
-    pub kind: String,
-    pub slug: String,
-    pub pinned_at: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
+    pub contains_page: bool,
+    pub last_activity: i64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -340,7 +332,7 @@ impl ReadProjections {
         })
     }
 
-    pub async fn list_summaries(&self) -> Result<Vec<ListSummaryProjection>, String> {
+    pub async fn popup_lists(&self, page_slug: &str) -> Result<Vec<PopupListProjection>, String> {
         let tree = self.list_tree().await?;
         let mut ids = Vec::new();
         collect_projected_list_ids(&tree.order, &mut ids);
@@ -353,22 +345,18 @@ impl ReadProjections {
                 .map_err(|error| error.to_string())?
                 .filter(|list| !list.deleted)
             {
-                lists.push(ListSummaryProjection {
+                let mut contains_page = false;
+                let mut last_activity = 0;
+                for pin in list.pins {
+                    let (kind, slug) = parse_pin_target(&pin.id)?;
+                    contains_page |= kind == "page" && slug == page_slug;
+                    last_activity = last_activity.max(pin.pinned_at);
+                }
+                lists.push(PopupListProjection {
                     slug: list.slug,
                     name: list.name,
-                    pins: list
-                        .pins
-                        .into_iter()
-                        .map(|pin| {
-                            let (kind, slug) = parse_pin_target(&pin.id)?;
-                            Ok(PinSummaryProjection {
-                                kind: kind.to_string(),
-                                slug: slug.to_string(),
-                                pinned_at: pin.pinned_at,
-                                source: pin.source,
-                            })
-                        })
-                        .collect::<Result<Vec<_>, String>>()?,
+                    contains_page,
+                    last_activity,
                 });
             }
         }

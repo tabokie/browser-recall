@@ -1,0 +1,10 @@
+- Take a look at extension popup UI, I think it opens a little slow, and it responds a little slow to adding list too. Can we do something about it to make the UI behaves as if there's no remote invocation latency? Let's discuss options and don't implement right away.
+Additionally In the last commit, there seems to be a regression. In 6fd4684b, we tried to fix a bug where the popup UI blinks to re-render when current page is added to a new list. But in the latest version, the blink reappears. I want to know why the tests didn't catch the regression, and why the recent commit broke it. Let's discuss the dynamics before trying to fix this particular issue.
+- 1. Remove the dimming for any type of mutation.
+2. Make sure the test around list membership is robust.
+3. Improve the popup opening and operation responsiveness either by (a) making it doing less round-trip (one request) or (b) doing requests in parallel or (c) prefetch data and cache data. Keep the behavior that rendering waits for all data ready as is. Prefer the fix to be simple and elegant and do not violate architectural direction already set.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them all
+- Please review my uncommitted changes
+- Fix it
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.6 Sol

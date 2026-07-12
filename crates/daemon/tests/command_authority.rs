@@ -199,6 +199,54 @@ async fn page_list_and_snapshot_commands_report_their_committed_meaning() {
 }
 
 #[tokio::test]
+async fn create_list_and_pin_commits_one_semantic_command() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("storage layout");
+    let authority = CommandAuthority::new(storage.clone(), "device-a".to_string());
+    let url = "https://example.com/create-and-pin";
+    let page_slug = generate_slug_from_url(url).expect("page slug");
+
+    let outcome = authority
+        .execute(
+            "createListAndPin",
+            json!({
+                "name": "Created and pinned",
+                "url": url,
+                "title": "Create and Pin"
+            }),
+        )
+        .await
+        .expect("create list and pin");
+
+    assert_eq!(outcome.response["success"].as_bool(), Some(true));
+    assert_eq!(outcome.response["pinned"].as_bool(), Some(true));
+    let list_id = outcome.response["listId"].as_str().expect("list id");
+    assert_eq!(
+        outcome
+            .mutations
+            .iter()
+            .map(|mutation| mutation.mutation_type.as_str())
+            .collect::<Vec<_>>(),
+        vec!["lists", "pins"]
+    );
+    assert_eq!(outcome.mutations[1].list_id.as_deref(), Some(list_id));
+    assert_eq!(outcome.mutations[1].url.as_deref(), Some(url));
+
+    let list = storage
+        .load_list(list_id)
+        .await
+        .expect("load list")
+        .expect("created list");
+    assert_eq!(list.name, "Created and pinned");
+    assert_eq!(list.pins.len(), 1);
+    assert_eq!(list.pins[0].id, format!("page:{page_slug}"));
+}
+
+#[tokio::test]
 async fn note_pin_toggle_does_not_require_a_page_url() {
     let dir = tempdir().expect("tempdir");
     let storage = Storage::new(dir.path());
@@ -272,6 +320,7 @@ async fn command_validation_and_ownership_are_explicit() {
     assert_eq!(unsupported, "unsupported daemon command: reportVisit");
 
     assert!(CommandAuthority::supports("toggleListPin"));
+    assert!(CommandAuthority::supports("createListAndPin"));
     assert!(!CommandAuthority::supports("openExternalUrl"));
     assert!(!CommandAuthority::supports("reportVisit"));
 }
