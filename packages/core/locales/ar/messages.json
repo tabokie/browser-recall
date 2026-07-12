@@ -1321,7 +1321,7 @@
     "description": "Localized UI text."
   },
   "desktopManualSetupHtml": {
-    "message": "<li>أنشئ مستودعًا <strong>خاصًا</strong> على <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> (مثل <code>portal-sync</code>) واتركه فارغًا.</li><li>افتح صفحة <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">الرموز المميزة ذات الأذونات الدقيقة</a> وأنشئ رمزًا:<ul><li>اضبط انتهاء الصلاحية على <strong>بلا انتهاء صلاحية</strong></li><li>ضمن «الوصول إلى المستودع»، اختر <strong>المستودعات المحددة فقط</strong> وحدد مستودع المزامنة</li><li>ضمن «الأذونات»، أضف <strong>المحتويات</strong> واضبطها على <strong>القراءة والكتابة</strong></li></ul></li><li>الصق عنوان المستودع والرمز المميز أعلاه.</li>",
+    "message": "<li>أنشئ مستودعًا <strong>خاصًا</strong> على <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> (مثل <code>browser-recall-sync</code>) واتركه فارغًا.</li><li>افتح صفحة <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">الرموز المميزة ذات الأذونات الدقيقة</a> وأنشئ رمزًا:<ul><li>اضبط انتهاء الصلاحية على <strong>بلا انتهاء صلاحية</strong></li><li>ضمن «الوصول إلى المستودع»، اختر <strong>المستودعات المحددة فقط</strong> وحدد مستودع المزامنة</li><li>ضمن «الأذونات»، أضف <strong>المحتويات</strong> واضبطها على <strong>القراءة والكتابة</strong></li></ul></li><li>الصق عنوان المستودع والرمز المميز أعلاه.</li>",
     "description": "Localized UI text."
   },
   "desktopManualSetupInstructions": {

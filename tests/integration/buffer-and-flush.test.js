@@ -529,7 +529,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       return state.state === 'connected' && state.pendingCommands === 0;
     });
 
-    const dataRoot = path.join(dir, 'portal-data');
+    const dataRoot = path.join(dir, 'browser-data');
     const settingsRaw = readFileSync(
       path.join(dataRoot, 'views', 'manifest', 'settings.json'),
       'utf8',
@@ -622,7 +622,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       return state.state === 'connected' && state.pendingCommands === 0;
     });
 
-    const dataRoot = path.join(dir, 'portal-data');
+    const dataRoot = path.join(dir, 'browser-data');
     const noteFiles = await readdir(path.join(dataRoot, 'objects', 'notes'));
     const noteRaw = readFileSync(
       path.join(dataRoot, 'objects', 'notes', noteFiles[0]),
@@ -702,7 +702,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(store.desktopPendingCommands).toBe(0);
     expect(store.desktopCommandBuffer || []).toEqual([]);
 
-    const dataRoot = path.join(dir, 'portal-data');
+    const dataRoot = path.join(dir, 'browser-data');
     const snapshotFiles = await listFilesRecursive(
       path.join(dataRoot, 'objects', 'snapshots'),
     );
@@ -768,7 +768,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       return state.state === 'connected' && state.pendingCommands === 0;
     });
 
-    const dataRoot = path.join(dir, 'portal-data');
+    const dataRoot = path.join(dir, 'browser-data');
     const settingsRaw = readFileSync(
       path.join(dataRoot, 'views', 'manifest', 'settings.json'),
       'utf8',
@@ -1157,7 +1157,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     });
 
     expect(store.connectorState).toBe('connected');
-    expect(store.connectorDataFolder).toContain('portal-data');
+    expect(store.connectorDataFolder).toContain('browser-data');
   }, 30_000);
 
   it('persists diagnostics when no desktop port is reachable', async () => {
@@ -1538,7 +1538,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(state.state).toBe('connected');
     expect(BrowserLikeWebSocket.instances).toHaveLength(socketCount);
     expect(store.connectorState).toBe('connected');
-    expect(store.connectorDataFolder).toContain('portal-data');
+    expect(store.connectorDataFolder).toContain('browser-data');
   }, 30_000);
 
   it('rebroadcasts daemon change messages as extension mutations', async () => {

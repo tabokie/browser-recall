@@ -180,14 +180,16 @@ test.describe('Context menu highlight', () => {
       { url: pageUrl, text: 'important excerpt' },
     );
 
-    await page.waitForSelector('#portal-highlights-panel', { timeout: 5000 });
+    await page.waitForSelector('#browser-recall-highlights-panel', {
+      timeout: 5000,
+    });
     const panelText = await page.evaluate(() => {
-      const panel = document.getElementById('portal-highlights-panel');
+      const panel = document.getElementById('browser-recall-highlights-panel');
       return panel?.shadowRoot?.textContent || '';
     });
     expect(panelText).toContain('important excerpt');
     const panelBorderRun = await longestLeftBorderRun(
-      page.locator('#portal-highlights-panel'),
+      page.locator('#browser-recall-highlights-panel'),
     );
     expect(panelBorderRun).toBeGreaterThanOrEqual(2);
     await page.close();
@@ -259,9 +261,11 @@ test.describe('Context menu highlight', () => {
       { url: pageUrl },
     );
 
-    await page.waitForSelector('#portal-highlights-panel', { timeout: 5000 });
+    await page.waitForSelector('#browser-recall-highlights-panel', {
+      timeout: 5000,
+    });
     const panelDetails = await page.evaluate(() => {
-      const panel = document.getElementById('portal-highlights-panel');
+      const panel = document.getElementById('browser-recall-highlights-panel');
       const items = [
         ...(panel?.shadowRoot?.querySelectorAll('.highlight-item') || []),
       ];

@@ -231,9 +231,9 @@ test('packaged extension renders a real Japanese popup workflow', async ({
     });
     const pdfPage = await context.newPage();
     await pdfPage.goto(localServer.url('/localized-extension.pdf'));
-    await expect(pdfPage.locator('#portal-highlights-panel .hint')).toHaveText(
-      'テキストを選択し、右クリックしてハイライト',
-    );
+    await expect(
+      pdfPage.locator('#browser-recall-highlights-panel .hint'),
+    ).toHaveText('テキストを選択し、右クリックしてハイライト');
   } finally {
     await browser?.close().catch(() => {});
     await stopBrowserProcess(browserProcess);

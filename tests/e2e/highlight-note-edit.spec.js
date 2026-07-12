@@ -55,20 +55,26 @@ test.describe('Highlight note edit', () => {
     await page.waitForLoadState('domcontentloaded');
 
     // Wait for highlight to be applied by content script
-    await page.waitForSelector('mark.portal-highlight', { timeout: 5000 });
+    await page.waitForSelector('mark.browser-recall-highlight', {
+      timeout: 5000,
+    });
 
     // Verify initial noteSlug is set on the mark
     const initialNoteSlug = await page.evaluate(
-      () => document.querySelector('mark.portal-highlight')?.dataset.noteSlug,
+      () =>
+        document.querySelector('mark.browser-recall-highlight')?.dataset
+          .noteSlug,
     );
     expect(initialNoteSlug).toBe(noteSlug);
 
     // Click the highlight mark to open the edit overlay
-    await page.click('mark.portal-highlight');
-    await page.waitForSelector('#portal-highlight-overlay', { timeout: 3000 });
+    await page.click('mark.browser-recall-highlight');
+    await page.waitForSelector('#browser-recall-highlight-overlay', {
+      timeout: 3000,
+    });
 
     const overlayBorderRun = await longestLeftBorderRun(
-      page.locator('#portal-highlight-overlay'),
+      page.locator('#browser-recall-highlight-overlay'),
     );
     expect(overlayBorderRun).toBeGreaterThanOrEqual(2);
 
@@ -77,7 +83,7 @@ test.describe('Highlight note edit', () => {
 
     // Press Escape to save and close
     await page.keyboard.press('Escape');
-    await page.waitForSelector('#portal-highlight-overlay', {
+    await page.waitForSelector('#browser-recall-highlight-overlay', {
       state: 'detached',
       timeout: 3000,
     });
@@ -99,13 +105,17 @@ test.describe('Highlight note edit', () => {
       .toBe('my important note');
 
     // Click the highlight again to re-open the overlay
-    await page.click('mark.portal-highlight');
-    await page.waitForSelector('#portal-highlight-overlay', { timeout: 3000 });
+    await page.click('mark.browser-recall-highlight');
+    await page.waitForSelector('#browser-recall-highlight-overlay', {
+      timeout: 3000,
+    });
 
     // The note text should be visible — verify via the mark's noteSlug
     // has been updated to the new slug (updateNote creates a replacement note)
     const updatedNoteSlug = await page.evaluate(
-      () => document.querySelector('mark.portal-highlight')?.dataset.noteSlug,
+      () =>
+        document.querySelector('mark.browser-recall-highlight')?.dataset
+          .noteSlug,
     );
     // The noteSlug should have CHANGED (replace_note creates a new slug)
     expect(updatedNoteSlug).toBeTruthy();
@@ -170,13 +180,17 @@ test.describe('Highlight note edit', () => {
     await page.setViewportSize({ width: 360, height: 300 });
     await page.goto(pageUrl);
     await page.waitForLoadState('domcontentloaded');
-    await page.waitForSelector('mark.portal-highlight', { timeout: 5000 });
-    await page.click('mark.portal-highlight');
-    await page.waitForSelector('#portal-highlight-overlay', { timeout: 3000 });
+    await page.waitForSelector('mark.browser-recall-highlight', {
+      timeout: 5000,
+    });
+    await page.click('mark.browser-recall-highlight');
+    await page.waitForSelector('#browser-recall-highlight-overlay', {
+      timeout: 3000,
+    });
 
     const box = await page.evaluate(() => {
       const rect = document
-        .getElementById('portal-highlight-overlay')
+        .getElementById('browser-recall-highlight-overlay')
         .getBoundingClientRect();
       return {
         left: rect.left,
@@ -241,12 +255,14 @@ test.describe('Highlight note edit', () => {
     await page.waitForLoadState('domcontentloaded');
 
     // Wait for highlight to be applied by reapplyHighlights
-    const mark = page.locator('mark.portal-highlight');
+    const mark = page.locator('mark.browser-recall-highlight');
     await expect(mark).toBeVisible({ timeout: 5000 });
 
     // Click the mark
     await mark.click();
-    await page.waitForSelector('#portal-highlight-overlay', { timeout: 3000 });
+    await page.waitForSelector('#browser-recall-highlight-overlay', {
+      timeout: 3000,
+    });
 
     // The overlay uses closed shadow DOM — we can't directly read the textarea.
     // But we can verify via background that the note data is accessible
@@ -260,7 +276,9 @@ test.describe('Highlight note edit', () => {
 
     // Verify noteSlug on mark matches the note slug
     const markSlug = await page.evaluate(
-      () => document.querySelector('mark.portal-highlight')?.dataset.noteSlug,
+      () =>
+        document.querySelector('mark.browser-recall-highlight')?.dataset
+          .noteSlug,
     );
     expect(markSlug).toBe(noteSlug);
 
@@ -330,7 +348,7 @@ test.describe('Highlight note edit', () => {
     await page.goto(pageUrl);
     await page.waitForLoadState('domcontentloaded');
 
-    const marks = page.locator('mark.portal-highlight');
+    const marks = page.locator('mark.browser-recall-highlight');
     await expect(marks).toHaveCount(5, { timeout: 5000 });
 
     const markDetails = await marks.evaluateAll((nodes) =>
@@ -369,7 +387,7 @@ test.describe('Highlight note edit', () => {
     await expect
       .poll(() =>
         page.evaluate(() =>
-          [...document.querySelectorAll('mark.portal-highlight')].map(
+          [...document.querySelectorAll('mark.browser-recall-highlight')].map(
             (mark) => mark.dataset.noteSlug,
           ),
         ),
@@ -427,17 +445,20 @@ test.describe('Highlight note edit', () => {
     const page = await extContext.newPage();
     await page.goto(pageUrl);
     await page.waitForLoadState('domcontentloaded');
-    await page.waitForSelector('#portal-highlights-panel', { timeout: 5000 });
+    await page.waitForSelector('#browser-recall-highlights-panel', {
+      timeout: 5000,
+    });
 
     const panelState = await page.evaluate(() => {
       const panel = document
-        .getElementById('portal-highlights-panel')
+        .getElementById('browser-recall-highlights-panel')
         ?.shadowRoot?.querySelector('.panel');
       if (!panel) return null;
       panel.scrollTop = panel.scrollHeight;
       return {
         scrollTop: panel.scrollTop,
-        markCount: panel.querySelectorAll('mark.portal-highlight').length,
+        markCount: panel.querySelectorAll('mark.browser-recall-highlight')
+          .length,
         text: panel.textContent || '',
       };
     });
@@ -464,7 +485,7 @@ test.describe('Highlight note edit', () => {
       .poll(() =>
         page.evaluate(() => {
           const panel = document
-            .getElementById('portal-highlights-panel')
+            .getElementById('browser-recall-highlights-panel')
             ?.shadowRoot?.querySelector('.panel');
           return panel?.scrollTop ?? -1;
         }),
@@ -529,7 +550,7 @@ test.describe('Highlight note edit', () => {
       return chrome.tabs.sendMessage(tab.id, { action: 'highlightSelection' });
     }, pageUrl);
     expect(highlightResp.success).toBe(true);
-    await expect(page.locator('mark.portal-highlight')).toHaveCount(3);
+    await expect(page.locator('mark.browser-recall-highlight')).toHaveCount(3);
 
     const notesResp = await helper.evaluate(
       (pageSlug) =>
@@ -602,7 +623,7 @@ test.describe('Highlight note edit', () => {
       return chrome.tabs.sendMessage(tab.id, { action: 'highlightSelection' });
     }, pageUrl);
     expect(highlightResp.success).toBe(true);
-    await expect(page.locator('mark.portal-highlight')).toHaveCount(1);
+    await expect(page.locator('mark.browser-recall-highlight')).toHaveCount(1);
 
     const notesResp = await helper.evaluate(
       (pageSlug) =>
@@ -682,32 +703,31 @@ test.describe('Highlight note edit', () => {
     await page.goto(pageUrl);
     await page.waitForLoadState('domcontentloaded');
 
-    await expect(page.locator('mark.portal-highlight')).toHaveCount(4, {
+    await expect(page.locator('mark.browser-recall-highlight')).toHaveCount(4, {
       timeout: 5000,
     });
     await expect(
-      page.locator('mark.portal-highlight', {
+      page.locator('mark.browser-recall-highlight', {
         hasText: 'staticshock 1 hour ago | next [–]',
       }),
     ).toBeVisible();
     await expect(
-      page.locator('mark.portal-highlight', {
+      page.locator('mark.browser-recall-highlight', {
         hasText:
           'Software development is search through the space of useful/interesting automations.',
       }),
     ).toBeVisible();
-    await expect(page.locator('mark.portal-highlight').first()).toHaveAttribute(
-      'data-note-slug',
-      noteSlug,
-    );
+    await expect(
+      page.locator('mark.browser-recall-highlight').first(),
+    ).toHaveAttribute('data-note-slug', noteSlug);
 
     await page.reload();
     await page.waitForLoadState('domcontentloaded');
-    await expect(page.locator('mark.portal-highlight')).toHaveCount(4, {
+    await expect(page.locator('mark.browser-recall-highlight')).toHaveCount(4, {
       timeout: 5000,
     });
     await expect(
-      page.locator('mark.portal-highlight', {
+      page.locator('mark.browser-recall-highlight', {
         hasText:
           'Software development is search through the space of useful/interesting automations.',
       }),
@@ -777,16 +797,16 @@ test.describe('Highlight note edit', () => {
     await page.goto(pageUrl);
     await page.waitForLoadState('domcontentloaded');
 
-    await expect(page.locator('mark.portal-highlight')).toHaveCount(4, {
+    await expect(page.locator('mark.browser-recall-highlight')).toHaveCount(4, {
       timeout: 5000,
     });
     await expect(
-      page.locator('mark.portal-highlight', {
+      page.locator('mark.browser-recall-highlight', {
         hasText: 'staticshock 1 day ago | next [–]',
       }),
     ).toBeVisible();
     await expect(
-      page.locator('mark.portal-highlight', {
+      page.locator('mark.browser-recall-highlight', {
         hasText: 'Everything is search.',
       }),
     ).toBeVisible();
@@ -838,7 +858,7 @@ test.describe('Highlight note edit', () => {
     await page.goto(pageUrl);
     await page.waitForLoadState('domcontentloaded');
 
-    const articleMark = page.locator('p#block49 mark.portal-highlight');
+    const articleMark = page.locator('p#block49 mark.browser-recall-highlight');
     await expect(articleMark).toHaveCount(1, {
       timeout: 5000,
     });
@@ -910,7 +930,9 @@ test.describe('Highlight note edit', () => {
       timeout: 5000,
     });
 
-    const articleMark = page.locator('#article-root mark.portal-highlight');
+    const articleMark = page.locator(
+      '#article-root mark.browser-recall-highlight',
+    );
     await expect(articleMark).toHaveCount(1, {
       timeout: 5000,
     });
@@ -973,7 +995,7 @@ test.describe('Highlight note edit', () => {
     await page.goto(pageUrl);
     await page.waitForLoadState('domcontentloaded');
 
-    await expect(page.locator('mark.portal-highlight')).toHaveCount(3, {
+    await expect(page.locator('mark.browser-recall-highlight')).toHaveCount(3, {
       timeout: 5000,
     });
     const helper = await openHelperPage(extContext, extensionId);
@@ -984,9 +1006,9 @@ test.describe('Highlight note edit', () => {
         noteSlug: 'note-delete-grouped-reapply-test',
       });
     }, pageUrl);
-    await expect(page.locator('mark.portal-highlight')).toHaveCount(0);
+    await expect(page.locator('mark.browser-recall-highlight')).toHaveCount(0);
     await page.waitForTimeout(300);
-    await expect(page.locator('mark.portal-highlight')).toHaveCount(0);
+    await expect(page.locator('mark.browser-recall-highlight')).toHaveCount(0);
 
     await helper.close();
     await page.close();
@@ -1045,15 +1067,19 @@ test.describe('Highlight note edit', () => {
     }, pageUrl);
 
     // Wait for mark to appear
-    await page.waitForSelector('mark.portal-highlight', { timeout: 5000 });
+    await page.waitForSelector('mark.browser-recall-highlight', {
+      timeout: 5000,
+    });
     // Wait for overlay to appear
-    await page.waitForSelector('#portal-highlight-overlay', { timeout: 3000 });
+    await page.waitForSelector('#browser-recall-highlight-overlay', {
+      timeout: 3000,
+    });
 
     // Type a note
     await page.keyboard.type('important insight');
     // Close with Escape — saveAndClose now awaits updateNote before removing overlay
     await page.keyboard.press('Escape');
-    await page.waitForSelector('#portal-highlight-overlay', {
+    await page.waitForSelector('#browser-recall-highlight-overlay', {
       state: 'detached',
       timeout: 5000,
     });
@@ -1071,14 +1097,18 @@ test.describe('Highlight note edit', () => {
 
     // Get the current noteSlug on the mark
     const markNoteSlug = await page.evaluate(
-      () => document.querySelector('mark.portal-highlight')?.dataset.noteSlug,
+      () =>
+        document.querySelector('mark.browser-recall-highlight')?.dataset
+          .noteSlug,
     );
     // It should match the note we just verified
     expect(markNoteSlug).toBe(notesResp.notes[0].slug);
 
     // Click the highlight mark again
-    await page.click('mark.portal-highlight');
-    await page.waitForSelector('#portal-highlight-overlay', { timeout: 3000 });
+    await page.click('mark.browser-recall-highlight');
+    await page.waitForSelector('#browser-recall-highlight-overlay', {
+      timeout: 3000,
+    });
 
     // Verify the overlay has note text — use shadow DOM pierce
     // The overlay uses closed shadow DOM, so we check via the mark's noteSlug

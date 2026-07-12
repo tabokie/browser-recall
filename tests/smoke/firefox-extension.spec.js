@@ -246,6 +246,9 @@ function createFirefoxWebExtensionApi({
     },
     contextMenus: {
       onClicked: createEvent(),
+      async removeAll() {
+        contextMenuItems.clear();
+      },
       async create(item) {
         contextMenuItems.set(item.id, { ...item });
         return item.id;
@@ -456,6 +459,10 @@ function createOrionCallbackWebExtensionApi({
     },
     contextMenus: {
       onClicked: createEvent(),
+      removeAll(callback) {
+        contextMenuItems.clear();
+        callbackWithLastError(null, callback);
+      },
       create(item, callback) {
         contextMenuItems.set(item.id, { ...item });
         callbackWithLastError(null, callback);
@@ -911,6 +918,11 @@ test.describe('Firefox extension smoke', () => {
           optionsOpenCount += 1;
         },
       });
+      api.contextMenuItems.set('stale-highlight-command', {
+        id: 'stale-highlight-command',
+        title: 'Stale Highlight Command',
+        contexts: ['selection'],
+      });
       const timers = new Set();
       const nativeSetTimeout = globalThis.setTimeout;
       const unrefSetTimeout = (callback, ms, ...args) => {
@@ -936,15 +948,18 @@ test.describe('Firefox extension smoke', () => {
 
           await api.events.runtimeInstalled.dispatch({ reason: 'update' });
           expect(optionsOpenCount).toBe(0);
-          expect(api.contextMenuItems.get('portal-highlight')?.title).toBe(
-            'Highlight Selected',
-          );
+          expect(
+            api.contextMenuItems.get('browser-recall-highlight')?.title,
+          ).toBe('Highlight Selected');
+          expect([...api.contextMenuItems.keys()]).toEqual([
+            'browser-recall-highlight',
+          ]);
 
           highlightTitle = '選択したテキストをハイライト';
           await api.events.runtimeStartup.dispatch();
-          expect(api.contextMenuItems.get('portal-highlight')?.title).toBe(
-            '選択したテキストをハイライト',
-          );
+          expect(
+            api.contextMenuItems.get('browser-recall-highlight')?.title,
+          ).toBe('選択したテキストをハイライト');
 
           await api.events.runtimeInstalled.dispatch({ reason: 'install' });
           await waitFor(
@@ -991,9 +1006,9 @@ test.describe('Firefox extension smoke', () => {
         async () => {
           await import(pathToFileURL(path.join(outDir, 'background.js')).href);
           await api.runtime.onInstalled.dispatch({ reason: 'update' });
-          expect(api.contextMenuItems.get('portal-highlight')?.title).toBe(
-            'Highlight Selected',
-          );
+          expect(
+            api.contextMenuItems.get('browser-recall-highlight')?.title,
+          ).toBe('Highlight Selected');
         },
       );
 

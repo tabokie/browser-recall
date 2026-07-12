@@ -1321,7 +1321,7 @@
     "description": "Localized UI text."
   },
   "desktopManualSetupHtml": {
-    "message": "<li>Buat repositori <strong>privat</strong> di <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> (misalnya <code>portal-sync</code>) dan biarkan kosong.</li><li>Buka halaman <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">token dengan izin terperinci</a> lalu buat token:<ul><li>Atur masa berlaku ke <strong>Tanpa kedaluwarsa</strong></li><li>Di bagian “Akses repositori”, pilih <strong>Hanya repositori terpilih</strong> lalu pilih repositori sinkronisasi</li><li>Di bagian “Izin”, tambahkan <strong>Konten</strong> dan atur ke <strong>Baca dan tulis</strong></li></ul></li><li>Tempel alamat repositori dan token di atas.</li>",
+    "message": "<li>Buat repositori <strong>privat</strong> di <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> (misalnya <code>browser-recall-sync</code>) dan biarkan kosong.</li><li>Buka halaman <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">token dengan izin terperinci</a> lalu buat token:<ul><li>Atur masa berlaku ke <strong>Tanpa kedaluwarsa</strong></li><li>Di bagian “Akses repositori”, pilih <strong>Hanya repositori terpilih</strong> lalu pilih repositori sinkronisasi</li><li>Di bagian “Izin”, tambahkan <strong>Konten</strong> dan atur ke <strong>Baca dan tulis</strong></li></ul></li><li>Tempel alamat repositori dan token di atas.</li>",
     "description": "Localized UI text."
   },
   "desktopManualSetupInstructions": {

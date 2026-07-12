@@ -48,7 +48,7 @@ GitHub PAT is stored in plain text in `manifest/settings.json` on disk. Must fix
 ```
 Sync
   [x] Enable sync
-  Repository URL: [https://github.com/user/portal-sync]
+  Repository URL: [https://github.com/user/browser-recall-sync]
   
   Authentication:
     [Connect with GitHub]  (primary button)

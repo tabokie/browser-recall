@@ -65,10 +65,10 @@ pub struct DaemonConfig {
 }
 
 impl DaemonConfig {
-    pub fn new_default(data_dir: PathBuf) -> Self {
+    pub fn new_unconfigured() -> Self {
         Self {
             device_id: default_device_id(),
-            data_dir,
+            data_dir: PathBuf::new(),
             last_port: None,
             launch_at_login: true,
             log_level: default_log_level(),
@@ -80,6 +80,34 @@ impl DaemonConfig {
             sync_paused_devices: Vec::new(),
             sync_devices: BTreeMap::new(),
         }
+    }
+
+    pub fn new_configured(data_dir: PathBuf) -> Result<Self, &'static str> {
+        let mut config = Self::new_unconfigured();
+        config.select_data_directory(data_dir)?;
+        config.complete_setup()?;
+        Ok(config)
+    }
+
+    pub fn select_data_directory(&mut self, data_dir: PathBuf) -> Result<(), &'static str> {
+        if data_dir.as_os_str().is_empty() {
+            return Err("data directory is not configured");
+        }
+        self.data_dir = data_dir;
+        self.setup_complete = false;
+        Ok(())
+    }
+
+    pub fn complete_setup(&mut self) -> Result<(), &'static str> {
+        if self.data_dir.as_os_str().is_empty() {
+            return Err("data directory is not configured");
+        }
+        self.setup_complete = true;
+        Ok(())
+    }
+
+    pub fn is_configured(&self) -> bool {
+        self.setup_complete && !self.data_dir.as_os_str().is_empty()
     }
 }
 
@@ -107,10 +135,6 @@ impl ConfigStore {
         self.config_path().exists()
     }
 
-    pub fn default_data_dir(&self) -> PathBuf {
-        self.root_dir.join("portal-data")
-    }
-
     pub fn load(&self) -> std::io::Result<Option<DaemonConfig>> {
         fs::create_dir_all(&self.root_dir)?;
         let path = self.config_path();
@@ -127,7 +151,7 @@ impl ConfigStore {
         if let Some(config) = self.load()? {
             Ok(config)
         } else {
-            let config = DaemonConfig::new_default(self.default_data_dir());
+            let config = DaemonConfig::new_unconfigured();
             self.save(&config)?;
             Ok(config)
         }
@@ -321,10 +345,11 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn new_default_uses_os_derived_device_id() {
-        let config = DaemonConfig::new_default(tempdir().expect("tempdir").path().join("data"));
+    fn new_unconfigured_uses_os_derived_device_id() {
+        let config = DaemonConfig::new_unconfigured();
         assert_eq!(config.device_id, default_device_id());
         assert!(!config.device_id.is_empty());
+        assert!(!config.is_configured());
     }
 
     #[test]
@@ -374,11 +399,11 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let store = ConfigStore::new(dir.path());
         assert_eq!(store.root_dir(), dir.path());
-        assert_eq!(store.default_data_dir(), dir.path().join("portal-data"));
         assert!(!store.exists());
         assert!(store.load().expect("load missing").is_none());
 
-        let mut config = DaemonConfig::new_default(store.default_data_dir());
+        let mut config = store.load_or_create().expect("create default config");
+        assert!(config.data_dir.as_os_str().is_empty());
         config.sync_github_token = Some(Token("secret".to_string()));
         store.save(&config).expect("save config");
         assert!(store.exists());

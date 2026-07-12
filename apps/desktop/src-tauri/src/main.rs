@@ -768,7 +768,7 @@ async fn start_shell_server(app: &AppHandle) -> Result<ServerSnapshot, String> {
     let config = config_store
         .load_or_create()
         .map_err(|error| error.to_string())?;
-    if !config.setup_complete {
+    if !config.is_configured() {
         return Err("Browser Recall setup is not complete".to_string());
     }
 
@@ -1063,8 +1063,9 @@ fn choose_desktop_data_folder(app: &AppHandle) -> Result<Value, String> {
     let mut config = config_store
         .load_or_create()
         .map_err(|error| error.to_string())?;
-    config.data_dir = data_dir.clone();
-    config.setup_complete = false;
+    config
+        .select_data_directory(data_dir.clone())
+        .map_err(str::to_string)?;
     config_store
         .save(&config)
         .map_err(|error| error.to_string())?;
@@ -1086,9 +1087,9 @@ async fn complete_desktop_setup(app: &AppHandle, request: &Value) -> Result<Valu
     let mut config = config_store
         .load_or_create()
         .map_err(|error| error.to_string())?;
-    if config.data_dir.as_os_str().is_empty() {
-        return Err("Choose a data folder before starting Browser Recall.".to_string());
-    }
+    config
+        .complete_setup()
+        .map_err(|_| "Choose a data folder before starting Browser Recall.".to_string())?;
     let launch_at_login = request
         .get("launchAtLogin")
         .and_then(Value::as_bool)
@@ -1097,7 +1098,6 @@ async fn complete_desktop_setup(app: &AppHandle, request: &Value) -> Result<Valu
         return Err("Launch at login is unavailable on this OS".to_string());
     }
 
-    config.setup_complete = true;
     config.launch_at_login = launch_at_login;
     login_item::sync_login_item(launch_at_login).map_err(|error| error.to_string())?;
     config_store
@@ -1780,7 +1780,7 @@ fn main() {
             );
 
             let (server_handle, initial_snapshot, watcher_bundle) =
-                if bootstrap.config.setup_complete {
+                if bootstrap.config.is_configured() {
                     let server = tauri::async_runtime::block_on(start_server(
                         ServerStartOptions::phase1_defaults(
                             bootstrap.config_store.clone(),
@@ -1811,7 +1811,7 @@ fn main() {
                     login_item_supported: login_item::is_supported(),
                     launch_at_login: bootstrap.config.launch_at_login,
                     debug_logging: bootstrap.config.log_level == "debug",
-                    setup_complete: bootstrap.config.setup_complete,
+                    setup_complete: bootstrap.config.is_configured(),
                     route: None,
                     error: None,
                 }),
@@ -1842,7 +1842,7 @@ fn main() {
                 }
             }));
             configure_deep_links(app.handle());
-            if bootstrap.config.setup_complete {
+            if bootstrap.config.is_configured() {
                 app.state::<DesktopState>().sync.request_worker();
             }
             show_main_window(app.handle());

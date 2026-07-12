@@ -46,7 +46,14 @@ export function launchTestDaemon(configDir, { ports, approveMode = 'allow' }) {
   }
   return spawn(
     BINARY_PATH,
-    ['--config-dir', configDir, '--approve-mode', approveMode],
+    [
+      '--config-dir',
+      configDir,
+      '--data-dir',
+      path.join(configDir, 'browser-data'),
+      '--approve-mode',
+      approveMode,
+    ],
     {
       cwd: ROOT,
       env: { ...process.env, BROWSER_RECALL_PORTS: ports.join(',') },

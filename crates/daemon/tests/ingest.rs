@@ -24,10 +24,58 @@ fn test_control_server_options(config_store: ConfigStore) -> ServerStartOptions 
 }
 
 fn denied_pairing_server_options(config_store: ConfigStore) -> ServerStartOptions {
-    let mut options =
-        ServerStartOptions::phase1_defaults(config_store, static_approver(PairingDecision::Deny));
-    options.port_candidates = vec![0];
+    let mut options = test_server_options(config_store);
+    options.approver = static_approver(PairingDecision::Deny);
     options
+}
+
+#[tokio::test]
+async fn server_rejects_an_unconfigured_data_directory() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let options = ServerStartOptions::phase1_defaults(
+        config_store.clone(),
+        static_approver(PairingDecision::Approve),
+    );
+
+    let error = match start_server(options).await {
+        Ok(handle) => {
+            handle.shutdown().await;
+            panic!("unconfigured server unexpectedly started");
+        }
+        Err(error) => error,
+    };
+    assert_eq!(error.to_string(), "data directory is not configured");
+    assert!(config_store
+        .load_or_create()
+        .expect("load generated config")
+        .data_dir
+        .as_os_str()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn server_rejects_a_selected_data_directory_before_setup_completes() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let mut config = config_store.load_or_create().expect("create config");
+    config
+        .select_data_directory(dir.path().join("browser-data"))
+        .expect("select data directory");
+    config_store.save(&config).expect("save selected folder");
+
+    let options = ServerStartOptions::phase1_defaults(
+        config_store,
+        static_approver(PairingDecision::Approve),
+    );
+    let error = match start_server(options).await {
+        Ok(handle) => {
+            handle.shutdown().await;
+            panic!("incomplete setup unexpectedly started");
+        }
+        Err(error) => error,
+    };
+    assert_eq!(error.to_string(), "data directory is not configured");
 }
 
 fn approved_connector(browser_id: &str, token: &str) -> ApprovedConnector {

@@ -92,6 +92,16 @@ pub(crate) async fn paired_socket(
 }
 
 pub(crate) fn test_server_options(config_store: ConfigStore) -> ServerStartOptions {
+    let mut config = config_store.load_or_create().expect("load test config");
+    if !config.is_configured() {
+        config
+            .select_data_directory(config_store.root_dir().join("browser-data"))
+            .expect("select test data directory");
+        config
+            .complete_setup()
+            .expect("configure test data directory");
+        config_store.save(&config).expect("save test config");
+    }
     let mut options = ServerStartOptions::phase1_defaults(
         config_store,
         static_approver(PairingDecision::Approve),

@@ -259,7 +259,9 @@ function printDiff(before, after) {
 // --- Main ---
 
 const daemon = await startDaemon();
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-manual-'));
+const userDataDir = fs.mkdtempSync(
+  path.join(os.tmpdir(), 'browser-recall-manual-'),
+);
 console.log(`Temp profile: ${userDataDir}`);
 
 let ctx, extensionId;

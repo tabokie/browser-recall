@@ -4,7 +4,7 @@
 
 ## Goal
 
-Make events flow extension → daemon → `~/portal-data`. The daemon owns FS, replay, and entity persistence. The extension stops using File System Access entirely. **No UI port yet** — verify via filesystem inspection and a small status endpoint.
+Make events flow extension → daemon → `~/browser-data`. The daemon owns FS, replay, and entity persistence. The extension stops using File System Access entirely. **No UI port yet** — verify via filesystem inspection and a small status endpoint.
 
 This phase ports `effectOf` to Rust, ports its tests, builds the Rust filesystem layer, and rewires the extension as a thin event-streaming connector with `chrome.storage.local` buffering.
 
@@ -83,9 +83,9 @@ Replace the offscreen + FS-Access path with the WebSocket path:
 
 ## Migration
 
-**Scope**: the connector extension has no published-user population. Adopt-in-place primarily serves the developer's own `~/portal-data` folder and any pre-1.0 beta testers. Don't over-engineer the migration UX — it's a developer-grade convenience, not a product flow.
+**Scope**: the connector extension has no published-user population. Adopt-in-place primarily serves the developer's own `~/browser-data` folder and any pre-1.0 beta testers. Don't over-engineer the migration UX — it's a developer-grade convenience, not a product flow.
 
-- On first daemon launch in this phase, scan for `~/portal-data`. If present and recognized, offer it as the default in the data-folder picker.
+- On first daemon launch in this phase, the user explicitly chooses the data folder; no path is selected implicitly.
 - Read existing `data/logs/<device>/CURRENT` to preserve device ID — same device, no ghost peers in sync.
 - No schema migration needed. The on-disk shape is already what the daemon expects.
 
@@ -190,11 +190,11 @@ Use `tracing` + `tracing-appender` (already added in Phase 1). Ensure:
 - **`crates/daemon/tests/drain.rs`** — feed a sequence of entries, assert disk state matches expected.
 - **`tests/integration/event-flow.test.js`** — Node WebSocket client (no browser) sends a stream of canonical events; assert daemon writes the correct files. Covers the full pipeline end-to-end without a browser.
 - **`tests/integration/buffer-and-flush.test.js`** — kill the daemon, queue events in extension, restart daemon, assert events drain in order and entity state is correct.
-- Smoke test in a real Chrome with the connector enabled: visit some pages, observe `~/portal-data/data/logs/.../*.jsonl` and `~/portal-data/pages/*.json` populating.
+- Smoke test in a real Chrome with the connector enabled: visit some pages, observe `~/browser-data/data/logs/.../*.jsonl` and `~/browser-data/pages/*.json` populating.
 
 ## End state
 
-- Real browsing in real Chrome with the connector extension produces real files in `~/portal-data` via the new path.
+- Real browsing in real Chrome with the connector extension produces real files in `~/browser-data` via the new path.
 - Brave-on-mac repro: same flow, no `fs_permission` error, no offscreen lifecycle to break.
 - The daemon survives killing and restarting the browser; reconnection drains the buffer cleanly.
 - All Rust replay tests pass. Coverage matches the legacy JS suite.
@@ -206,4 +206,4 @@ Use `tracing` + `tracing-appender` (already added in Phase 1). Ensure:
 - **Schema drift between JS connector and Rust daemon.** Mitigated by `packages/protocol/` conformance tests run on both sides.
 - **Buffer ordering across reconnect.** Drain must be strictly FIFO. Test this explicitly under contention.
 - **Snapshot size.** A few-MB HTML capture in `chrome.storage.local` chews through the 10MB quota fast. Confirm the 5-snapshot ceiling holds in practice; lower it if needed.
-- **Dev-folder migration on the daemon's side.** The owner of this phase needs to test against their own real `~/portal-data` to confirm adopt-in-place works without surprises.
+- **Dev-folder migration on the daemon's side.** The owner of this phase needs to test against their own real `~/browser-data` to confirm adopt-in-place works without surprises.

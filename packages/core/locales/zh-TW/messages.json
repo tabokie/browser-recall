@@ -1321,7 +1321,7 @@
     "description": "Localized UI text."
   },
   "desktopManualSetupHtml": {
-    "message": "<li>在 <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> 建立一個<strong>私人</strong>儲存庫（例如 <code>portal-sync</code>），並保持空白。</li><li>前往<a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">細粒度權杖</a>頁面建立權杖：<ul><li>將到期日設為<strong>永不過期</strong></li><li>在「儲存庫存取權」中選擇<strong>僅選取儲存庫</strong>，再選擇同步儲存庫</li><li>在「權限」中新增<strong>內容</strong>，並設為<strong>讀取及寫入</strong></li></ul></li><li>在上方貼上儲存庫位址和權杖。</li>",
+    "message": "<li>在 <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> 建立一個<strong>私人</strong>儲存庫（例如 <code>browser-recall-sync</code>），並保持空白。</li><li>前往<a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">細粒度權杖</a>頁面建立權杖：<ul><li>將到期日設為<strong>永不過期</strong></li><li>在「儲存庫存取權」中選擇<strong>僅選取儲存庫</strong>，再選擇同步儲存庫</li><li>在「權限」中新增<strong>內容</strong>，並設為<strong>讀取及寫入</strong></li></ul></li><li>在上方貼上儲存庫位址和權杖。</li>",
     "description": "Localized UI text."
   },
   "desktopManualSetupInstructions": {

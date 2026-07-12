@@ -1321,7 +1321,7 @@
     "description": "Localized UI text."
   },
   "desktopManualSetupHtml": {
-    "message": "<li>Создайте <strong>приватный</strong> репозиторий на <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> (например, <code>portal-sync</code>) и оставьте его пустым.</li><li>Откройте страницу <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">токенов с точной настройкой прав</a> и создайте токен:<ul><li>Установите срок действия <strong>Без срока действия</strong></li><li>В разделе «Доступ к репозиториям» выберите <strong>Только выбранные репозитории</strong> и укажите репозиторий синхронизации</li><li>В разделе «Разрешения» добавьте <strong>Содержимое</strong> и выберите <strong>Чтение и запись</strong></li></ul></li><li>Вставьте выше адрес репозитория и токен.</li>",
+    "message": "<li>Создайте <strong>приватный</strong> репозиторий на <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> (например, <code>browser-recall-sync</code>) и оставьте его пустым.</li><li>Откройте страницу <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">токенов с точной настройкой прав</a> и создайте токен:<ul><li>Установите срок действия <strong>Без срока действия</strong></li><li>В разделе «Доступ к репозиториям» выберите <strong>Только выбранные репозитории</strong> и укажите репозиторий синхронизации</li><li>В разделе «Разрешения» добавьте <strong>Содержимое</strong> и выберите <strong>Чтение и запись</strong></li></ul></li><li>Вставьте выше адрес репозитория и токен.</li>",
     "description": "Localized UI text."
   },
   "desktopManualSetupInstructions": {

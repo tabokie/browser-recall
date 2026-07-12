@@ -1354,7 +1354,7 @@
     "description": "Localized UI text."
   },
   "desktopManualSetupHtml": {
-    "message": "<li> Create a <strong>private</strong> repository on <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> (e.g. <code>portal-sync</code>). Leave it empty. </li> <li> Go to <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">Fine-grained tokens</a> and create a token: <ul> <li> Set expiration to <strong>No expiration</strong> </li> <li> Under \"Repository access\", choose <strong>Only select repositories</strong> and pick your sync repo </li> <li> Under \"Permissions\", add <strong>Contents</strong> and set to <strong>Read and write</strong> </li> </ul> </li> <li>Paste the repository address and token above.</li>",
+    "message": "<li> Create a <strong>private</strong> repository on <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> (e.g. <code>browser-recall-sync</code>). Leave it empty. </li> <li> Go to <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">Fine-grained tokens</a> and create a token: <ul> <li> Set expiration to <strong>No expiration</strong> </li> <li> Under \"Repository access\", choose <strong>Only select repositories</strong> and pick your sync repo </li> <li> Under \"Permissions\", add <strong>Contents</strong> and set to <strong>Read and write</strong> </li> </ul> </li> <li>Paste the repository address and token above.</li>",
     "description": "Localized UI text."
   },
   "desktopManualSetupInstructions": {

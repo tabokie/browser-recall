@@ -262,12 +262,12 @@ function initContentScript() {
   }
 
   function getEmbeddedPageSlug() {
-    const meta = document.querySelector('meta[name="x-portal-slug"]');
+    const meta = document.querySelector('meta[name="x-browser-recall-slug"]');
     return meta?.content || null;
   }
 
   function getEmbeddedPageUrl() {
-    const meta = document.querySelector('meta[name="x-portal-url"]');
+    const meta = document.querySelector('meta[name="x-browser-recall-url"]');
     return meta?.content || null;
   }
 
@@ -342,11 +342,11 @@ function initContentScript() {
     existingNote,
     onClose,
   }) {
-    const prev = document.getElementById('portal-highlight-overlay');
+    const prev = document.getElementById('browser-recall-highlight-overlay');
     if (prev) prev.remove();
 
     const host = document.createElement('div');
-    host.id = 'portal-highlight-overlay';
+    host.id = 'browser-recall-highlight-overlay';
     host.style.cssText = positionStyle + ' z-index: 2147483647;';
 
     const shadow = host.attachShadow({ mode: 'closed' });
@@ -605,7 +605,7 @@ function initContentScript() {
   function attachMarkClickHandler(mark) {
     mark.addEventListener('click', (event) => {
       event.stopPropagation();
-      document.getElementById('portal-highlight-overlay')?.remove();
+      document.getElementById('browser-recall-highlight-overlay')?.remove();
 
       const noteSlug = mark.dataset.noteSlug;
       const text = mark.dataset.highlightText || mark.textContent;
@@ -1019,13 +1019,13 @@ function initContentScript() {
   // ─── Highlights Panel (for pages where visual marks can't render) ─────
 
   function showHighlightsPanel(notes, pageSlug, { hint } = {}) {
-    const existing = document.getElementById('portal-highlights-panel');
+    const existing = document.getElementById('browser-recall-highlights-panel');
     const excerptNotes = notes.filter((n) => n.excerpt !== null);
     if (excerptNotes.length === 0 && !hint) return;
 
     const host = existing || document.createElement('div');
     if (!existing) {
-      host.id = 'portal-highlights-panel';
+      host.id = 'browser-recall-highlights-panel';
       host.style.cssText =
         'position: fixed; z-index: 2147483647; top: 16px; right: 16px;';
       document.body.appendChild(host);
@@ -1118,7 +1118,7 @@ function initContentScript() {
                 // Update matching mark(s) in the page so re-click uses the new slug
                 document
                   .querySelectorAll(
-                    `mark.portal-highlight[data-note-slug="${oldSlug}"]`,
+                    `mark.browser-recall-highlight[data-note-slug="${oldSlug}"]`,
                   )
                   .forEach((m) => {
                     m.dataset.noteSlug = resp.noteSlug;
@@ -1427,7 +1427,7 @@ function initContentScript() {
       // Debounce to avoid pile-up from rapid mutations.
       const pdfObserver = new MutationObserver(() => {
         if (
-          !document.getElementById('portal-highlights-panel') &&
+          !document.getElementById('browser-recall-highlights-panel') &&
           !_panelDismissed
         ) {
           if (pdfRetryTimer) return;

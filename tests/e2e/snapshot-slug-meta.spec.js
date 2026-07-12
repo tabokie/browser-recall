@@ -150,10 +150,10 @@ test.describe('Snapshot slug meta tag', () => {
     await page.close();
   });
 
-  // Content script resolves slug from x-portal-slug meta tag and reapplies highlights.
+  // Content script resolves slug from x-browser-recall-slug meta tag and reapplies highlights.
   // Simulates the snapshot viewer scenario: the page URL doesn't match the original,
   // but the embedded meta tag tells content.js which page entity to load notes from.
-  test('highlights reapplied on page with x-portal-slug meta tag', async ({
+  test('highlights reapplied on page with x-browser-recall-slug meta tag', async ({
     extContext,
     extensionId,
     setupDir,
@@ -168,7 +168,7 @@ test.describe('Snapshot slug meta tag', () => {
     // Serve a page that has the meta tag (simulating a snapshot blob) and matching text
     localServer.addPage('/snapshot-view', {
       title: 'Snapshot View',
-      body: `<meta name="x-portal-slug" content="${slug}"><p>This is an ${highlightText} in the document.</p>`,
+      body: `<meta name="x-browser-recall-slug" content="${slug}"><p>This is an ${highlightText} in the document.</p>`,
     });
 
     // Seed: page entity with a note child, and the note entity with an excerpt
@@ -227,7 +227,7 @@ test.describe('Snapshot slug meta tag', () => {
 
     localServer.addPage('/snapshot-popup-view', {
       title: 'Stored Snapshot',
-      body: `<meta name="x-portal-slug" content="${slug}"><p>This page contains a ${highlightText}.</p>`,
+      body: `<meta name="x-browser-recall-slug" content="${slug}"><p>This page contains a ${highlightText}.</p>`,
     });
 
     await resetAndSeed(extContext, extensionId, [
@@ -395,7 +395,7 @@ test.describe('Snapshot slug meta tag', () => {
     await expect(frame.locator('mark')).toHaveText(highlightText);
     await frame.locator('mark').click();
     const viewerOverlayBorderRun = await longestLeftBorderRun(
-      frame.locator('#portal-highlight-overlay'),
+      frame.locator('#browser-recall-highlight-overlay'),
     );
     expect(viewerOverlayBorderRun).toBeGreaterThanOrEqual(2);
     await viewer.keyboard.press('Escape');
@@ -591,7 +591,7 @@ test.describe('Snapshot slug meta tag', () => {
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'html'),
-        content: `<!doctype html><html><head><title>Snapshot Highlight UI Exclusion</title></head><body><aside id="portal-highlights-panel">${highlightText}</aside><main><p>${highlightText}</p></main></body></html>`,
+        content: `<!doctype html><html><head><title>Snapshot Highlight UI Exclusion</title></head><body><aside id="browser-recall-highlights-panel">${highlightText}</aside><main><p>${highlightText}</p></main></body></html>`,
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'md'),
@@ -605,18 +605,20 @@ test.describe('Snapshot slug meta tag', () => {
     );
     const frame = viewer.frameLocator('iframe');
 
-    await expect(frame.locator('mark.portal-highlight')).toHaveCount(1);
+    await expect(frame.locator('mark.browser-recall-highlight')).toHaveCount(1);
     await expect(
-      frame.locator('#portal-highlights-panel mark.portal-highlight'),
+      frame.locator(
+        '#browser-recall-highlights-panel mark.browser-recall-highlight',
+      ),
     ).toHaveCount(0);
-    await expect(frame.locator('main mark.portal-highlight')).toHaveText(
-      highlightText,
-    );
+    await expect(
+      frame.locator('main mark.browser-recall-highlight'),
+    ).toHaveText(highlightText);
 
     await viewer.close();
   });
 
-  // captureSnapshot strips portal highlight marks from captured HTML
+  // captureSnapshot strips browser-recall highlight marks from captured HTML
   test('captureSnapshot strips highlight marks from HTML', async ({
     extContext,
     extensionId,
@@ -625,7 +627,7 @@ test.describe('Snapshot slug meta tag', () => {
   }) => {
     localServer.addPage('/with-highlights', {
       title: 'Highlighted Page',
-      body: '<p>Some <mark class="portal-highlight" style="background:#fff3b0" data-highlight-text="important">important</mark> text here.</p>',
+      body: '<p>Some <mark class="browser-recall-highlight" style="background:#fff3b0" data-highlight-text="important">important</mark> text here.</p>',
     });
     const pageUrl = localServer.url('/with-highlights');
     const slug = getSlugForUrl(pageUrl);
@@ -660,8 +662,8 @@ test.describe('Snapshot slug meta tag', () => {
       urlResp.url.replace(/^data:text\/html;charset=utf-8,/, ''),
     );
 
-    // Should not contain portal highlight marks, but text should be preserved
-    expect(html).not.toContain('portal-highlight');
+    // Should not contain browser-recall highlight marks, but text should be preserved
+    expect(html).not.toContain('browser-recall-highlight');
     expect(html).not.toMatch(/<mark\b[^>]*>\s*important\s*<\/mark>/i);
     expect(html).toContain('important');
 
@@ -669,8 +671,8 @@ test.describe('Snapshot slug meta tag', () => {
     await page.close();
   });
 
-  // captureSnapshot embeds x-portal-slug meta tag in stored HTML
-  test('captureSnapshot embeds x-portal-slug meta tag in HTML', async ({
+  // captureSnapshot embeds x-browser-recall-slug meta tag in stored HTML
+  test('captureSnapshot embeds x-browser-recall-slug meta tag in HTML', async ({
     extContext,
     extensionId,
     setupDir,
@@ -716,7 +718,9 @@ test.describe('Snapshot slug meta tag', () => {
     const html = decodeURIComponent(
       urlResp.url.replace(/^data:text\/html;charset=utf-8,/, ''),
     );
-    expect(html).toContain(`<meta name="x-portal-slug" content="${slug}">`);
+    expect(html).toContain(
+      `<meta name="x-browser-recall-slug" content="${slug}">`,
+    );
 
     await helper.close();
     await page.close();

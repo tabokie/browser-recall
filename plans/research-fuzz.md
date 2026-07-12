@@ -1,6 +1,6 @@
 # Fuzzy Search Research
 
-Benchmarked on ~/portal-data: 1001 pages, 227 snapshots (2 MB markdown), 37 notes.
+Benchmarked on ~/browser-data: 1001 pages, 227 snapshots (2 MB markdown), 37 notes.
 
 ## Library Comparison (1001 docs, url+title fields)
 
@@ -42,7 +42,7 @@ Benchmarked on ~/portal-data: 1001 pages, 227 snapshots (2 MB markdown), 37 note
 | `chrome.storage.session` | 10 MB | IPC ~1ms | SW restart: yes, browser: no | MiniSearch 378 KB fits easily |
 | `chrome.storage.local` | 10 MB | LevelDB disk | browser restart: yes | Shared with logBuffer, tight |
 | IndexedDB (offscreen) | ~hundreds MB | async disk | browser restart: yes | Best capacity, offscreen only |
-| OPFS/filesystem (offscreen) | unlimited | async disk | browser restart: yes | Alongside ~/portal-data |
+| OPFS/filesystem (offscreen) | unlimited | async disk | browser restart: yes | Alongside ~/browser-data |
 
 ## Recommendation
 

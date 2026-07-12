@@ -92,7 +92,7 @@ Things to call out explicitly in the release post:
 
 Rewrite to reflect the split architecture:
 
-- **Data location**: lives in the folder the user picked in onboarding (default `~/portal-data` or `~/Documents/Browser Recall`). Never leaves the device unless sync is configured.
+- **Data location**: lives in the folder the user explicitly picked in onboarding. Never leaves the device unless sync is configured.
 - **Network behavior**: connector extension makes exactly one kind of outbound connection — WebSocket to `127.0.0.1` on the daemon's port. Daemon makes outbound connections only for sync (GitHub API when enabled) and auto-update manifest fetch.
 - **Threat model**:
   - Network eavesdropping: loopback traffic doesn't leave the machine; not the threat.
@@ -124,7 +124,7 @@ Add a section on the new development workflow:
 - [ ] Auto-updater: install old build, push new tag, verify update is offered and applies.
 - [ ] Connector extension submitted to CWS.
 - [ ] Brave-on-mac E2E passes locally and on CI.
-- [ ] `~/portal-data` adopt-in-place verified by the dev's own data folder.
+- [ ] `~/browser-data` adopt-in-place verified by the dev's own data folder.
 - [ ] PRIVACY.md, STORE_LISTING.md, README.md, DEVELOPMENT.md updated for the new architecture.
 - [ ] Release post drafted.
 

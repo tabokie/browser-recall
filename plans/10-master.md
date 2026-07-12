@@ -2,7 +2,7 @@
 
 ## Context
 
-Preparing the extension (currently "Portal - Knowledge Management") for public Chrome Web Store launch as "browser-recall" v1.0. The core architecture is solid — event-sourced replay, entity storage, WASM search, sync, 697 tests. The gaps are in the product wrapper: error resilience, debug logging, dark mode, onboarding, and store materials.
+Preparing the extension (currently "Browser Recall - Knowledge Management") for public Chrome Web Store launch as "browser-recall" v1.0. The core architecture is solid — event-sourced replay, entity storage, WASM search, sync, 697 tests. The gaps are in the product wrapper: error resilience, debug logging, dark mode, onboarding, and store materials.
 
 All design decisions were resolved through a grilling session (Q1-Q22 in this conversation).
 

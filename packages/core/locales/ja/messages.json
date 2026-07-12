@@ -1321,7 +1321,7 @@
     "description": "Localized UI text."
   },
   "desktopManualSetupHtml": {
-    "message": "<li><a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> に<strong>非公開</strong>リポジトリ（例: <code>portal-sync</code>）を作成し、空のままにします。</li><li><a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">Fine-grained token</a> を開いてトークンを作成します。<ul><li>有効期限を<strong>無期限</strong>に設定します</li><li>「Repository access」で <strong>Only select repositories</strong> を選び、同期用リポジトリを指定します</li><li>「Permissions」で <strong>Contents</strong> を追加し、<strong>Read and write</strong> に設定します</li></ul></li><li>上の欄にリポジトリのアドレスとトークンを貼り付けます。</li>",
+    "message": "<li><a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> に<strong>非公開</strong>リポジトリ（例: <code>browser-recall-sync</code>）を作成し、空のままにします。</li><li><a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">Fine-grained token</a> を開いてトークンを作成します。<ul><li>有効期限を<strong>無期限</strong>に設定します</li><li>「Repository access」で <strong>Only select repositories</strong> を選び、同期用リポジトリを指定します</li><li>「Permissions」で <strong>Contents</strong> を追加し、<strong>Read and write</strong> に設定します</li></ul></li><li>上の欄にリポジトリのアドレスとトークンを貼り付けます。</li>",
     "description": "Localized UI text."
   },
   "desktopManualSetupInstructions": {

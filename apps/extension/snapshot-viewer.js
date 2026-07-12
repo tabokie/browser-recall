@@ -165,7 +165,7 @@ frame.addEventListener('load', async () => {
 function attachMarkClickHandler(doc, mark, highlightLifecycle) {
   mark.addEventListener('click', (event) => {
     event.stopPropagation();
-    doc.getElementById('portal-highlight-overlay')?.remove();
+    doc.getElementById('browser-recall-highlight-overlay')?.remove();
 
     const noteSlug = mark.dataset.noteSlug;
     const text = mark.dataset.highlightText || mark.textContent;
@@ -250,12 +250,12 @@ function showHighlightEditOverlay(
   existingNote,
   highlightLifecycle,
 ) {
-  doc.getElementById('portal-highlight-overlay')?.remove();
+  doc.getElementById('browser-recall-highlight-overlay')?.remove();
 
   const rect = mark.getBoundingClientRect();
   const win = doc.defaultView;
   const host = doc.createElement('div');
-  host.id = 'portal-highlight-overlay';
+  host.id = 'browser-recall-highlight-overlay';
   host.style.cssText =
     'position: absolute; z-index: 2147483647; visibility: hidden;';
 

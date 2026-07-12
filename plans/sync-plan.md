@@ -22,7 +22,7 @@
 | List reference in events | `name` + `listOwner` (compound key in manifest) | `listOwner` always present on list events (sync mode). `parents` dropped. `manifest:name-to-id` keys: `listOwner/name → id`. Self-descriptive in logs. |
 | List name uniqueness | Device-level unique names | Each device enforces unique list names. `(listName, listOwner)` is the identity. |
 | Note immutability | **DONE.** Notes are immutable — edits create new entity via `replace_note` | No file conflicts on sync. Full change history preserved in logs. |
-| No backward compat | Migrate data, don't add fallback code | Extension is in development. Migrate `~/portal-data` to new formats directly. |
+| No backward compat | Migrate data, don't add fallback code | Extension is in development. Migrate `~/browser-data` to new formats directly. |
 
 ## 2. Architecture
 
@@ -44,7 +44,7 @@ Notes are already unique by slug. No naming conflicts across devices. Snapshots 
 One shared repo. Each device owns a branch named after its device ID:
 
 ```
-repo (e.g. github.com/user/portal-sync)
+repo (e.g. github.com/user/browser-recall-sync)
   branch: a1b2c3d4              ← device A pushes here
     data/logs/2026-03-15-a1b2c3d4.jsonl
     data/logs/2026-03-16-a1b2c3d4.jsonl
@@ -64,7 +64,7 @@ repo (e.g. github.com/user/portal-sync)
 Each push creates a fresh orphan commit containing only files within the retention window (default: 7 days for logs). Force-push replaces the branch.
 
 ```
-Local ~/portal-data/data/                   Git branch a1b2c3d4:
+Local ~/browser-data/data/                   Git branch a1b2c3d4:
   logs/2026-03-01-a1b2c3d4.jsonl (old)       (not pushed — outside window)
   logs/2026-03-10-a1b2c3d4.jsonl (old)       (not pushed — outside window)
   logs/2026-03-15-a1b2c3d4.jsonl          →  logs/2026-03-15-a1b2c3d4.jsonl
@@ -520,7 +520,7 @@ Legacy log files (`YYYY-MM-DD.jsonl` without device suffix) are treated as local
 
 ## 7. Data Migration
 
-Migration runs when user enables sync, via `scripts/migrate-sync-enable.mjs`. Per the project's data migration policy: migrate `~/portal-data` on disk, no fallback code in extension.
+Migration runs when user enables sync, via `scripts/migrate-sync-enable.mjs`. Per the project's data migration policy: migrate `~/browser-data` on disk, no fallback code in extension.
 
 ### 7.1 Migration script (`scripts/migrate-sync-enable.mjs`)
 

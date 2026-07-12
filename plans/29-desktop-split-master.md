@@ -28,7 +28,7 @@ The extension is a **thin connector**. All entity logic, all filesystem I/O, all
 | 7 | One device per machine; `source` field on events tags origin browser/profile | Sync stays clean (1 peer per machine); browser provenance becomes a UI filter, not a directory split. |
 | 8 | Event-log streaming over the wire; RPC only for popup reads | Wire format mirrors disk format (JSONL); `effectOf` lives only on the daemon. |
 | 9 | Port UI verbatim with a `chrome.*` shim layer | Existing UI is an asset, not a liability. Don't combine architecture port + UI rewrite. |
-| 10 | Adopt-in-place migration of the existing `~/portal-data` folder | Schema is unchanged; daemon takes over the folder, keeps device ID, keeps sync state. (No published users — only dev folders to consider.) |
+| 10 | Adopt-in-place migration of the existing `~/browser-data` folder | Schema is unchanged; daemon takes over the folder, keeps device ID, keeps sync state. (No published users — only dev folders to consider.) |
 | 11 | Sync runs in daemon; keep GitHub; drop WebDAV; drop filesystem-sync transport (document Syncthing pattern instead) | Cuts maintenance surface; daemon's always-on enables push-on-flush + 5-min pull. No LAN P2P in v1. |
 | 12 | Monorepo with `apps/`, `packages/`, `crates/` | Protocol changes ship in one PR; one issue tracker; one CI. |
 | 13 | macOS + Windows signed builds; Tauri updater; direct download primary; no Mac App Store | Sandbox rules forbid required behaviors. Direct download + Homebrew Cask + Winget covers the audience. |
@@ -54,7 +54,7 @@ The extension is a **thin connector**. All entity logic, all filesystem I/O, all
 |---|---|---|---|
 | 0 | [30-desktop-phase-0-repo-reshape.md](./30-desktop-phase-0-repo-reshape.md) | 1-2 days | Files moved into workspace layout; tests still pass against existing extension. |
 | 1 | [31-desktop-phase-1-shell-protocol.md](./31-desktop-phase-1-shell-protocol.md) | ~1 week | Tauri shell + tray + login item; WebSocket pairing works; connector stub holds connection. |
-| 2 | [32-desktop-phase-2-replay-port.md](./32-desktop-phase-2-replay-port.md) | ~3 weeks | `effectOf` ported to Rust; events flow extension → daemon → `~/portal-data`. No UI yet. |
+| 2 | [32-desktop-phase-2-replay-port.md](./32-desktop-phase-2-replay-port.md) | ~3 weeks | `effectOf` ported to Rust; events flow extension → daemon → `~/browser-data`. No UI yet. |
 | 3 | [33-desktop-phase-3-ui-port.md](./33-desktop-phase-3-ui-port.md) | ~3-4 weeks | Full feature parity. Main UI in Tauri webview; popup uses WebSocket RPC; sync moved. |
 | 4 | [34-desktop-phase-4-distribution.md](./34-desktop-phase-4-distribution.md) | ~1-2 weeks | Signed builds for mac + win; auto-updater wired; CWS listing for connector; v1.0.0 ships. |
 
@@ -62,7 +62,7 @@ The extension is a **thin connector**. All entity logic, all filesystem I/O, all
 
 ## Discipline rule
 
-Each phase ends in a runnable, testable state. No "we'll wire it up later" cliffs. If Phase 2 ends and you can't watch a real browser visit land in `~/portal-data` via the new path, Phase 2 isn't done.
+Each phase ends in a runnable, testable state. No "we'll wire it up later" cliffs. If Phase 2 ends and you can't watch a real browser visit land in `~/browser-data` via the new path, Phase 2 isn't done.
 
 ## Additional decisions (resolved before phases begin)
 

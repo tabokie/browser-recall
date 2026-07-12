@@ -276,22 +276,29 @@ test.describe('extension same-tab navigation regressions', () => {
     await page.goto(firstUrl);
     await waitForContentScript(helper, page, firstUrl);
 
-    await expect(page.locator('#alpha mark.portal-highlight')).toHaveCount(1, {
+    await expect(
+      page.locator('#alpha mark.browser-recall-highlight'),
+    ).toHaveCount(1, {
       timeout: 5000,
     });
-    await expect(page.locator('#beta mark.portal-highlight')).toHaveCount(0);
+    await expect(
+      page.locator('#beta mark.browser-recall-highlight'),
+    ).toHaveCount(0);
 
     await page.click('#go');
     await expect(page).toHaveURL(secondUrl);
 
-    await expect(page.locator('#alpha mark.portal-highlight')).toHaveCount(0);
-    await expect(page.locator('#beta mark.portal-highlight')).toHaveCount(1, {
+    await expect(
+      page.locator('#alpha mark.browser-recall-highlight'),
+    ).toHaveCount(0);
+    await expect(
+      page.locator('#beta mark.browser-recall-highlight'),
+    ).toHaveCount(1, {
       timeout: 5000,
     });
-    await expect(page.locator('#beta mark.portal-highlight')).toHaveAttribute(
-      'data-note-slug',
-      secondNoteSlug,
-    );
+    await expect(
+      page.locator('#beta mark.browser-recall-highlight'),
+    ).toHaveAttribute('data-note-slug', secondNoteSlug);
 
     await page.close();
     await helper.close();
@@ -355,13 +362,15 @@ test.describe('extension same-tab navigation regressions', () => {
     await page.goto(pageUrl);
     await waitForContentScript(helper, page, pageUrl);
 
-    await expect(page.locator('#alpha mark.portal-highlight')).toHaveCount(1, {
+    await expect(
+      page.locator('#alpha mark.browser-recall-highlight'),
+    ).toHaveCount(1, {
       timeout: 5000,
     });
 
     await page.click('#go');
     await expect(page).toHaveURL(pdfUrl);
-    await expect(page.locator('mark.portal-highlight')).toHaveCount(0);
+    await expect(page.locator('mark.browser-recall-highlight')).toHaveCount(0);
 
     await page.close();
     await helper.close();
@@ -476,7 +485,7 @@ test.describe('extension same-tab navigation regressions', () => {
     await page.click('#go');
     await expect(page).toHaveURL(thirdUrl);
     await page.waitForTimeout(500);
-    await expect(page.locator('mark.portal-highlight')).toHaveCount(0);
+    await expect(page.locator('mark.browser-recall-highlight')).toHaveCount(0);
 
     await page.close();
     await helper.close();
@@ -752,7 +761,7 @@ test.describe('extension same-tab navigation regressions', () => {
     }, url);
 
     await expect(page.getByLabel(reloadMessage, { exact: true })).toBeVisible();
-    await expect(page.locator('mark.portal-highlight')).toHaveCount(0);
+    await expect(page.locator('mark.browser-recall-highlight')).toHaveCount(0);
 
     await page.close();
     await helper.close();
@@ -801,7 +810,9 @@ test.describe('extension same-tab navigation regressions', () => {
     }, url);
 
     await expect(page.getByLabel(reloadMessage, { exact: true })).toBeVisible();
-    await expect(page.locator('#portal-highlight-overlay')).toHaveCount(0);
+    await expect(page.locator('#browser-recall-highlight-overlay')).toHaveCount(
+      0,
+    );
 
     await page.close();
     await helper.close();

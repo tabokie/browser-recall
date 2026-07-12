@@ -18,17 +18,12 @@ pub fn bootstrap<R: Runtime>(app: &AppHandle<R>) -> Result<DesktopBootstrap, Box
     let log_dir = desktop_log_dir(app)?;
     let mut config = config_store.load_or_create()?;
 
-    if !config.setup_complete && config.data_dir == config_store.default_data_dir() {
-        config.data_dir = PathBuf::new();
-        config_store.save(&config)?;
-    }
-
     if !login_item::is_supported() && config.launch_at_login {
         config.launch_at_login = false;
         config_store.save(&config)?;
     }
 
-    if config.setup_complete {
+    if config.is_configured() {
         fs::create_dir_all(&config.data_dir)?;
         if config.launch_at_login {
             login_item::sync_login_item(true)?;

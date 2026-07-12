@@ -13,6 +13,7 @@ export async function startDaemon() {
     path.join(os.tmpdir(), 'browser-recall-daemon-test-'),
   );
   const command = process.platform === 'win32' ? 'cargo.exe' : 'cargo';
+  const dataDir = path.join(configDir, 'browser-data');
   const child = spawn(
     command,
     [
@@ -23,6 +24,8 @@ export async function startDaemon() {
       '--',
       '--config-dir',
       configDir,
+      '--data-dir',
+      dataDir,
       '--test-control',
     ],
     {
@@ -97,7 +100,7 @@ export async function startDaemon() {
   return {
     child,
     configDir,
-    dataDir: path.join(configDir, 'portal-data'),
+    dataDir,
     port,
     stop,
   };

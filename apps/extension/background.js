@@ -721,15 +721,12 @@ function callContextMenuMethod(methodName, ...args) {
 
 async function ensureLocalizedHighlightContextMenu() {
   const item = {
-    id: 'portal-highlight',
+    id: 'browser-recall-highlight',
     title: tr('extensionHighlightSelected', 'Highlight Selected'),
     contexts: ['selection'],
   };
-  try {
-    await callContextMenuMethod('update', item.id, { title: item.title });
-  } catch {
-    await callContextMenuMethod('create', item);
-  }
+  await callContextMenuMethod('removeAll');
+  await callContextMenuMethod('create', item);
 }
 
 chrome.runtime.onInstalled.addListener(async (details = {}) => {
@@ -796,15 +793,18 @@ function prepareSnapshotHtml(html, slug, url = null) {
   if (!html) return html;
   let cleaned = html
     .replace(
-      /<mark\b(?=[^>]*\bclass=(["'])[^"']*\bportal-highlight\b[^"']*\1)[^>]*>([\s\S]*?)<\/mark>/gi,
+      /<mark\b(?=[^>]*\bclass=(["'])[^"']*\bbrowser-recall-highlight\b[^"']*\1)[^>]*>([\s\S]*?)<\/mark>/gi,
       '$2',
     )
     .replace(
-      /\sclass=(["'])([^"']*\bportal-highlight\b[^"']*)\1/gi,
+      /\sclass=(["'])([^"']*\bbrowser-recall-highlight\b[^"']*)\1/gi,
       (_, quote, classes) => {
         const remaining = classes
           .split(/\s+/)
-          .filter((className) => className && className !== 'portal-highlight')
+          .filter(
+            (className) =>
+              className && className !== 'browser-recall-highlight',
+          )
           .join(' ');
         return remaining ? ` class=${quote}${remaining}${quote}` : '';
       },
@@ -812,13 +812,13 @@ function prepareSnapshotHtml(html, slug, url = null) {
     .replace(/\sdata-highlight-(?:text|timestamp)=(["']).*?\1/gi, '')
     .replace(/\sdata-note-slug=(["']).*?\1/gi, '');
 
-  if (!slug || /<meta\s+name=(["'])x-portal-slug\1/i.test(cleaned)) {
+  if (!slug || /<meta\s+name=(["'])x-browser-recall-slug\1/i.test(cleaned)) {
     return cleaned;
   }
   const meta = [
-    `<meta name="x-portal-slug" content="${escapeHtmlAttribute(slug)}">`,
+    `<meta name="x-browser-recall-slug" content="${escapeHtmlAttribute(slug)}">`,
     url
-      ? `<meta name="x-portal-url" content="${escapeHtmlAttribute(url)}">`
+      ? `<meta name="x-browser-recall-url" content="${escapeHtmlAttribute(url)}">`
       : '',
   ].join('');
   if (/<head\b[^>]*>/i.test(cleaned)) {
@@ -984,7 +984,7 @@ async function handleContextMenuHighlight(url, title, selectionText, tabId) {
 }
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  if (info.menuItemId !== 'portal-highlight') return;
+  if (info.menuItemId !== 'browser-recall-highlight') return;
   if (!info.selectionText) return;
 
   // The callback's tab object has wrong URL/id for PDF viewer tabs.

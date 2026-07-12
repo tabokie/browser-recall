@@ -1321,7 +1321,7 @@
     "description": "Localized UI text."
   },
   "desktopManualSetupHtml": {
-    "message": "<li><a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> पर एक <strong>निजी</strong> रिपॉजिटरी (जैसे <code>portal-sync</code>) बनाएँ और उसे खाली छोड़ दें।</li><li><a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">सूक्ष्म अनुमतियों वाले टोकन</a> पृष्ठ पर जाकर टोकन बनाएँ:<ul><li>समाप्ति को <strong>कोई समाप्ति नहीं</strong> पर सेट करें</li><li>“रिपॉजिटरी एक्सेस” में <strong>केवल चुनी गई रिपॉजिटरी</strong> चुनें और अपनी सिंक रिपॉजिटरी चुनें</li><li>“अनुमतियाँ” में <strong>सामग्री</strong> जोड़ें और इसे <strong>पढ़ें और लिखें</strong> पर सेट करें</li></ul></li><li>ऊपर रिपॉजिटरी का पता और टोकन चिपकाएँ।</li>",
+    "message": "<li><a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> पर एक <strong>निजी</strong> रिपॉजिटरी (जैसे <code>browser-recall-sync</code>) बनाएँ और उसे खाली छोड़ दें।</li><li><a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">सूक्ष्म अनुमतियों वाले टोकन</a> पृष्ठ पर जाकर टोकन बनाएँ:<ul><li>समाप्ति को <strong>कोई समाप्ति नहीं</strong> पर सेट करें</li><li>“रिपॉजिटरी एक्सेस” में <strong>केवल चुनी गई रिपॉजिटरी</strong> चुनें और अपनी सिंक रिपॉजिटरी चुनें</li><li>“अनुमतियाँ” में <strong>सामग्री</strong> जोड़ें और इसे <strong>पढ़ें और लिखें</strong> पर सेट करें</li></ul></li><li>ऊपर रिपॉजिटरी का पता और टोकन चिपकाएँ।</li>",
     "description": "Localized UI text."
   },
   "desktopManualSetupInstructions": {

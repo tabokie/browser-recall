@@ -4,9 +4,9 @@
 
 Browser Recall is a personal knowledge system that captures everything you do in the browser — intent, data, and attention — and makes it searchable. It is a memory extension, not a bookmarking tool.
 
-## Portals
+## Source Interactions
 
-Portals are where we interact with external data sources: browsing webpages, chatting with LLMs, reading documents. There are three types of information embedded in an interaction:
+Source interactions are how we engage with external data: browsing webpages, chatting with LLMs, and reading documents. There are three types of information embedded in an interaction:
 
 - **User Intent** — search keywords, prompts, navigation decisions
 - **External Data** — the content itself
@@ -20,13 +20,13 @@ Beyond being an external memory, the history of interactions (timeline and linea
 - Deduce cognitive preference or bias, valuable for information discovery.
 - Categorize information based on context (activity patterns — work, research, leisure), not content.
 
-Some portals support lineage tracking natively (hyperlinks). For those that don't, we use temporal proximity as a heuristic.
+Some sources support lineage tracking natively (hyperlinks). For those that don't, we use temporal proximity as a heuristic.
 
 ## Notes and Ideas
 
-Notes and ideas are a special type of data with no explicit intent or attention — they *are* the intent/attention incarnated. They are recorded in the same timeline as portal interactions, making them first-class citizens alongside browsing history.
+Notes and ideas are a special type of data with no explicit intent or attention — they *are* the intent/attention incarnated. They are recorded in the same timeline as source interactions, making them first-class citizens alongside browsing history.
 
-Compared to portals, notes have special opportunities: they capture the user's synthesis of information, which is often more valuable than the raw source material. Notes are immutable — editing creates a new entity via `replace_note`, preserving the full change history in the JSONL log.
+Compared to source interactions, notes have special opportunities: they capture the user's synthesis of information, which is often more valuable than the raw source material. Notes are immutable — editing creates a new entity via `replace_note`, preserving the full change history in the JSONL log.
 
 ## Search Over Graphs
 

@@ -97,7 +97,7 @@ For subsequent connections (cached token):
 
 ## Lifecycle
 
-- **First daemon launch:** prompt for data folder location (default `~/portal-data` if exists, else `~/Documents/Browser Recall`). Prompt for login-item enrollment. Both consents explicit.
+- **First daemon launch:** prompt for data folder location without an implicit default. Prompt for login-item enrollment. Both consents explicit.
 - **Steady state:** daemon runs in tray. Closing main window hides to tray, doesn't quit. Quit only from tray menu.
 - **Crash policy:** panics in async tasks log via `tracing` and the task is dropped. Repeated panics in core tasks (drain, sync) trigger `ServiceState::Paused` so the user sees the failure rather than a silent broken daemon.
 

@@ -38,14 +38,14 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `apps/desktop/ui/extension-api-shim.js` | Tauri-backed `chrome.*` compatibility layer for the ported UI |
 | `apps/desktop/ui/bookmark-parser.js` | Desktop bookmark import parser |
 | `apps/desktop/src-tauri/src/main.rs` | Tauri entry point, invoke bridge, daemon write routing, desktop events, window/deep-link handling |
-| `apps/desktop/src-tauri/src/config.rs` | Desktop config loading/persistence helpers |
+| `apps/desktop/src-tauri/src/config.rs` | Desktop config loading/persistence helpers; fresh setup keeps the data directory empty until onboarding selects one |
 | `apps/desktop/src-tauri/src/login_item.rs` | Login-item integration for desktop startup behavior |
 | `apps/desktop/src-tauri/src/search.rs` | Desktop-side search adapters/helpers |
 | `apps/extension/background.js` | Thin connector runtime: prepared toolbar popup launch, popup RPC, buffering, pairing, snapshot/capture forwarding |
 | `apps/extension/icon-paths.js` | Packaged default, stop-recording, and special-state toolbar icon paths |
 | `apps/extension/background-test-control.js` | Test-only background RPC handlers staged by `tests/fixtures/test-extension.mjs` |
 | `apps/extension/content.js` | Visit/attention capture and browser-message adapter for the shared highlight lifecycle |
-| `packages/core/highlight-lifecycle.js` | Narrow shared selection, scoped matching, mark ownership, missing-mark hydration repair, and disposal module for live pages and snapshots |
+| `packages/core/highlight-lifecycle.js` | Narrow shared selection, scoped matching, `browser-recall-` mark ownership, missing-mark hydration repair, and disposal module for live pages and snapshots |
 | `apps/extension/popup.js` | Current-tab popup UI |
 | `apps/extension/extension-surface.css` | Shared light paper styling for extension pages |
 | `apps/extension/extension-surface.js` | Shared shadow-DOM styling and overlay placement helpers for extension content surfaces |
@@ -57,6 +57,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `apps/extension/options-stub.html` | Stub page that points users to the desktop app |
 | `crates/daemon/src/command_authority.rs` | Shared Tauri/WebSocket semantic mutation classification, strict response validation, typed execution results, and committed mutation meaning |
 | `crates/daemon/src/commands.rs` | Replay-backed command and read implementations used behind daemon interfaces |
+| `crates/daemon/src/config.rs` | Daemon configuration persistence and explicit unconfigured → folder-selected → setup-complete transitions; no default data path |
 | `crates/daemon/src/read_projections.rs` | Workflow-shaped semantic page, list, search-enrichment, recycle-bin, popup, and settings DTOs with coordinated joins and visibility policy |
 | `crates/daemon/src/runtime.rs` | Authoritative replay transactions: serialized overlay evolution, canonical local log append, projection publication, replay progress, ordered checkpoint submission, downloaded sync-file installation, recovery, and destructive flush coordination |
 | `crates/daemon/src/storage.rs` | Data-root storage, sharded object/view paths, coordinated cache reads, current projection cache, log append, and flushable ordered checkpoint worker |
@@ -104,7 +105,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 
 ### Capture Path
 
-- `apps/extension/content.js` captures visit/attention signals and adapts browser messages and daemon note reads to `packages/core/highlight-lifecycle.js`. The shared module owns structured selection, scoped reapply, mark groups, hydration retries, and route disposal for live pages and the snapshot viewer. Staged builds generate and load both `browser-recall-page-identity.js` and `browser-recall-highlight-lifecycle.js` before classic `content.js`, so module and content-script callers execute the same implementations.
+- `apps/extension/content.js` captures visit/attention signals and adapts browser messages and daemon note reads to `packages/core/highlight-lifecycle.js`. The shared module owns structured selection, scoped reapply, mark groups, hydration retries, and route disposal for live pages and the snapshot viewer. Snapshot identity uses only `x-browser-recall-slug` and `x-browser-recall-url` metadata. Staged builds generate and load both `browser-recall-page-identity.js` and `browser-recall-highlight-lifecycle.js` before classic `content.js`, so module and content-script callers execute the same implementations.
 - `apps/extension/savepage-bridge.js` performs snapshot capture through one identified per-tab session that owns capture settings, lifecycle timers, and explicit resource-failure warnings.
 - `apps/extension/background.js` buffers and forwards capture events to the daemon, and injects a page reload warning when shortcut/context-menu actions cannot reach a stale content script.
 - `apps/extension/popup.js` surfaces popup-initiated capture failures through page notifications with popup-bubble fallback.

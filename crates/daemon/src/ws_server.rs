@@ -46,6 +46,7 @@ pub enum WsServerError {
     Io(std::io::Error),
     Json(serde_json::Error),
     NoPortsAvailable,
+    Configuration(String),
     Handshake(String),
     Ingest(String),
 }
@@ -56,6 +57,7 @@ impl fmt::Display for WsServerError {
             Self::Io(error) => write!(f, "{error}"),
             Self::Json(error) => write!(f, "{error}"),
             Self::NoPortsAvailable => f.write_str("no ports available"),
+            Self::Configuration(reason) => write!(f, "{reason}"),
             Self::Handshake(reason) => write!(f, "{reason}"),
             Self::Ingest(reason) => write!(f, "{reason}"),
         }
@@ -266,6 +268,11 @@ impl ServerStartOptions {
 
 pub async fn start_server(options: ServerStartOptions) -> Result<ServerHandle, WsServerError> {
     let mut config = options.config_store.load_or_create()?;
+    if !config.is_configured() {
+        return Err(WsServerError::Configuration(
+            "data directory is not configured".to_string(),
+        ));
+    }
     let storage = Storage::new(config.data_dir.clone());
     storage.ensure_layout(&config.device_id).await?;
     commands::recover_checkpoint_tail(&storage)

@@ -1321,7 +1321,7 @@
     "description": "Localized UI text."
   },
   "desktopManualSetupHtml": {
-    "message": "<li>在 <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> 创建一个<strong>私有</strong>仓库（例如 <code>portal-sync</code>）。保持仓库为空。</li><li>前往 <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">细粒度令牌</a>并创建令牌：<ul><li>将过期时间设为<strong>永不过期</strong></li><li>在“Repository access”中选择<strong>Only select repositories</strong>，并选择你的同步仓库</li><li>在“Permissions”中添加 <strong>Contents</strong>，并设为 <strong>Read and write</strong></li></ul></li><li>在上方粘贴仓库地址和令牌。</li>",
+    "message": "<li>在 <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> 创建一个<strong>私有</strong>仓库（例如 <code>browser-recall-sync</code>）。保持仓库为空。</li><li>前往 <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">细粒度令牌</a>并创建令牌：<ul><li>将过期时间设为<strong>永不过期</strong></li><li>在“Repository access”中选择<strong>Only select repositories</strong>，并选择你的同步仓库</li><li>在“Permissions”中添加 <strong>Contents</strong>，并设为 <strong>Read and write</strong></li></ul></li><li>在上方粘贴仓库地址和令牌。</li>",
     "description": "Localized UI text."
   },
   "desktopManualSetupInstructions": {

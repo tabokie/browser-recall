@@ -9,7 +9,8 @@ use tokio::sync::Notify;
 fn sync_controller_tracks_devices_and_persists_pause_state() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());
-    let mut config = DaemonConfig::new_default(dir.path().join("data"));
+    let mut config =
+        DaemonConfig::new_configured(dir.path().join("data")).expect("configured data directory");
     config.device_id = "device-a".to_string();
     config.sync_devices = BTreeMap::from([(
         "device-b".to_string(),
@@ -57,7 +58,8 @@ fn sync_controller_tracks_devices_and_persists_pause_state() {
 fn sync_controller_clears_auth_without_touching_device_records() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());
-    let mut config = DaemonConfig::new_default(dir.path().join("data"));
+    let mut config =
+        DaemonConfig::new_configured(dir.path().join("data")).expect("configured data directory");
     config.device_id = "device-a".to_string();
     config.sync_github_token = Some(Token("secret".to_string()));
     config.sync_github_user = Some("octocat".to_string());

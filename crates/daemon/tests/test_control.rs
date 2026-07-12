@@ -1,4 +1,5 @@
-use browser_recall_daemon::pairing::{static_approver, PairingDecision};
+mod support;
+
 use browser_recall_daemon::protocol::{ConnectorMessage, DaemonMessage, TestSeedFilePayload};
 use browser_recall_daemon::ws_server::{start_server, ServerStartOptions};
 use browser_recall_daemon::ConfigStore;
@@ -7,6 +8,8 @@ use tempfile::tempdir;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::Message;
+
+use support::test_server_options;
 
 async fn next_text_message(
     socket: &mut tokio_tungstenite::WebSocketStream<
@@ -23,11 +26,7 @@ async fn next_text_message(
 }
 
 fn test_control_server_options(config_store: ConfigStore) -> ServerStartOptions {
-    let mut options = ServerStartOptions::phase1_defaults(
-        config_store,
-        static_approver(PairingDecision::Approve),
-    );
-    options.port_candidates = vec![0];
+    let mut options = test_server_options(config_store);
     options.test_control_enabled = true;
     options
 }

@@ -1321,7 +1321,7 @@
     "description": "Localized UI text."
   },
   "desktopManualSetupHtml": {
-    "message": "<li>Crie um repositório <strong>privado</strong> no <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> (por exemplo, <code>portal-sync</code>) e deixe-o vazio.</li><li>Abra os <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">tokens de acesso detalhado</a> e crie um token:<ul><li>Defina a expiração como <strong>Sem expiração</strong></li><li>Em «Acesso ao repositório», escolha <strong>Apenas repositórios selecionados</strong> e selecione o repositório de sincronização</li><li>Em «Permissões», adicione <strong>Conteúdo</strong> e defina como <strong>Leitura e escrita</strong></li></ul></li><li>Cole acima o endereço do repositório e o token.</li>",
+    "message": "<li>Crie um repositório <strong>privado</strong> no <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> (por exemplo, <code>browser-recall-sync</code>) e deixe-o vazio.</li><li>Abra os <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">tokens de acesso detalhado</a> e crie um token:<ul><li>Defina a expiração como <strong>Sem expiração</strong></li><li>Em «Acesso ao repositório», escolha <strong>Apenas repositórios selecionados</strong> e selecione o repositório de sincronização</li><li>Em «Permissões», adicione <strong>Conteúdo</strong> e defina como <strong>Leitura e escrita</strong></li></ul></li><li>Cole acima o endereço do repositório e o token.</li>",
     "description": "Localized UI text."
   },
   "desktopManualSetupInstructions": {

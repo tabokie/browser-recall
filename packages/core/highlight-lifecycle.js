@@ -21,12 +21,12 @@ export function createHighlightLifecycle(options) {
 
   const NodeType = doc.defaultView?.Node || globalThis.Node;
   const NodeFilterType = doc.defaultView?.NodeFilter || globalThis.NodeFilter;
-  const markSelector = 'mark.portal-highlight';
+  const markSelector = 'mark.browser-recall-highlight';
   const excludedSelector =
-    '#portal-highlight-overlay, #portal-highlights-panel, mark.portal-highlight';
+    '#browser-recall-highlight-overlay, #browser-recall-highlights-panel, mark.browser-recall-highlight';
   const excludedHostIds = new Set([
-    'portal-highlight-overlay',
-    'portal-highlights-panel',
+    'browser-recall-highlight-overlay',
+    'browser-recall-highlights-panel',
   ]);
   const blockTags = new Set([
     'ADDRESS',
@@ -217,7 +217,7 @@ export function createHighlightLifecycle(options) {
   function markRange(range, text, { timestamp, noteSlug } = {}) {
     if (!range || !text) return null;
     const mark = doc.createElement('mark');
-    mark.className = 'portal-highlight';
+    mark.className = 'browser-recall-highlight';
     mark.style.cssText =
       'background: #fff3b0; border-bottom: 2px solid #f0c000; cursor: pointer;';
     mark.dataset.highlightText = text;

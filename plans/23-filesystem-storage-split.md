@@ -31,7 +31,7 @@ export class FileSystemSyncStorage {
   constructor(mainStorage) {
     this.mainStorage = mainStorage; // for collectSyncFiles/writeSyncFiles/loadRemoteLogEntries
     this.syncDirectoryHandle = null;
-    this.dbName = 'PortalFS';
+    this.dbName = 'BrowserRecallFS';
     this.storeName = 'handles';
   }
 

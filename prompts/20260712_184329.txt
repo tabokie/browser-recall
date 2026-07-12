@@ -1,0 +1,9 @@
+- Remove the keyword "portal" from the codebase, it was an old naming that is now obsolete. It may affect persisted file format and for that we need to migrate existing data (at ~/browser-data) but do not add any backward compat code.
+- "Default data directories now use browser-data." Why is that? I didn't ask you to change default settings, I asked you to migrate existing data if needed.
+- We shouldn't use portal-data as default, and I'm not aware that we have a default path when installing browser-recall? Could you point me to where the default path is used?
+- Good direction, go ahead
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- For the first issue, it is anticipated because I didn't reload the extension in time, you can fix the snapshot file directly and don't worry about it. After that, fix all other issues.
+- Please review my uncommitted changes
+- Fix it
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.6 Sol

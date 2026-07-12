@@ -42,15 +42,19 @@ describe('highlight lifecycle architecture invariants', () => {
 
     await lifecycle.reapply();
 
-    expect(document.querySelectorAll('mark.portal-highlight')).toHaveLength(1);
+    expect(
+      document.querySelectorAll('mark.browser-recall-highlight'),
+    ).toHaveLength(1);
     expect(observerCount).toBe(1);
     notifyMutation();
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(document.querySelectorAll('mark.portal-highlight')).toHaveLength(1);
+    expect(
+      document.querySelectorAll('mark.browser-recall-highlight'),
+    ).toHaveLength(1);
   });
 
   it('never indexes Browser Recall panel light DOM or shadow DOM', () => {
-    document.body.innerHTML = `<aside id="portal-highlights-panel">saved excerpt</aside><main><p>saved excerpt</p></main>`;
+    document.body.innerHTML = `<aside id="browser-recall-highlights-panel">saved excerpt</aside><main><p>saved excerpt</p></main>`;
 
     const marks = lifecycle.applySaved([
       {
@@ -61,7 +65,9 @@ describe('highlight lifecycle architecture invariants', () => {
     ]);
 
     expect(marks).toEqual([]);
-    expect(document.querySelector('#portal-highlights-panel mark')).toBeNull();
+    expect(
+      document.querySelector('#browser-recall-highlights-panel mark'),
+    ).toBeNull();
     expect(document.querySelector('main mark')?.textContent).toBe(
       'saved excerpt',
     );
@@ -69,8 +75,8 @@ describe('highlight lifecycle architecture invariants', () => {
     lifecycle.remove({ all: true });
     document.body.innerHTML = '<main><p>saved excerpt</p></main>';
     const browserRecallHosts = [
-      'portal-highlights-panel',
-      'portal-highlight-overlay',
+      'browser-recall-highlights-panel',
+      'browser-recall-highlight-overlay',
     ].map((id) => {
       const host = document.createElement('aside');
       host.id = id;

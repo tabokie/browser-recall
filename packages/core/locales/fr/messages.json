@@ -1321,7 +1321,7 @@
     "description": "Localized UI text."
   },
   "desktopManualSetupHtml": {
-    "message": "<li>Créez un dépôt <strong>privé</strong> sur <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> (par exemple <code>portal-sync</code>) et laissez-le vide.</li><li>Ouvrez les <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">jetons à accès précis</a> et créez un jeton :<ul><li>Réglez l’expiration sur <strong>Aucune expiration</strong></li><li>Sous « Accès au dépôt », choisissez <strong>Uniquement les dépôts sélectionnés</strong>, puis sélectionnez votre dépôt de synchronisation</li><li>Sous « Autorisations », ajoutez <strong>Contenu</strong> et choisissez <strong>Lecture et écriture</strong></li></ul></li><li>Collez ci-dessus l’adresse du dépôt et le jeton.</li>",
+    "message": "<li>Créez un dépôt <strong>privé</strong> sur <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> (par exemple <code>browser-recall-sync</code>) et laissez-le vide.</li><li>Ouvrez les <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">jetons à accès précis</a> et créez un jeton :<ul><li>Réglez l’expiration sur <strong>Aucune expiration</strong></li><li>Sous « Accès au dépôt », choisissez <strong>Uniquement les dépôts sélectionnés</strong>, puis sélectionnez votre dépôt de synchronisation</li><li>Sous « Autorisations », ajoutez <strong>Contenu</strong> et choisissez <strong>Lecture et écriture</strong></li></ul></li><li>Collez ci-dessus l’adresse du dépôt et le jeton.</li>",
     "description": "Localized UI text."
   },
   "desktopManualSetupInstructions": {
