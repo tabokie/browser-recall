@@ -1,6 +1,204 @@
 import crypto from 'crypto';
 import { generateSlugFromUrl } from '../../packages/core/page-identity.js';
 
+const DEFAULT_SETTINGS = Object.freeze({
+  theme: 'system',
+  colorScheme: 'amber',
+  localeOverride: 'system',
+  historyFileBatch: 10,
+  captureSnapshotVideo: false,
+  blacklistEnabled: true,
+  urlBlacklist: ['chrome://', 'edge://', 'about:'],
+  titleCleanupEnabled: false,
+  titleTrimRules: [],
+  syncEnabled: false,
+  syncMethod: 'github',
+  syncRepoUrl: '',
+  syncRetentionDays: 7,
+});
+
+export function settingsCheckpoint(overrides = {}) {
+  const unknownKeys = Object.keys(overrides).filter(
+    (key) => !Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, key),
+  );
+  if (unknownKeys.length > 0) {
+    throw new Error(
+      `Settings fixture contains unknown keys: ${unknownKeys.join(', ')}`,
+    );
+  }
+  return {
+    path: 'views/manifest/settings.json',
+    data: { timestamps: {}, ...DEFAULT_SETTINGS, ...overrides },
+  };
+}
+
+function assertFixtureKeys(entityName, values, allowedKeys) {
+  const unknownKeys = Object.keys(values).filter(
+    (key) => !allowedKeys.includes(key),
+  );
+  if (unknownKeys.length > 0) {
+    throw new Error(
+      `${entityName} fixture contains unknown keys: ${unknownKeys.join(', ')}`,
+    );
+  }
+}
+
+const PAGE_ENTITY_KEYS = Object.freeze([
+  'slug',
+  'parentIds',
+  'childIds',
+  'timestamps',
+  'url',
+  'title',
+  'createdAt',
+  'visitDates',
+  'scrollDepth',
+  'timeOnPage',
+  'user_title',
+  'likes',
+]);
+
+function fixtureTimestamps(deviceTimestamp) {
+  if (deviceTimestamp === undefined) return {};
+  if (!Number.isFinite(deviceTimestamp)) {
+    throw new Error('Fixture deviceTimestamp must be a finite number');
+  }
+  return { 'test-device': deviceTimestamp };
+}
+
+export function pageEntityFixture({
+  slug,
+  url,
+  title,
+  deviceTimestamp,
+  ...state
+}) {
+  const values = { slug, url, title, ...state };
+  assertFixtureKeys('Page entity', values, PAGE_ENTITY_KEYS);
+  if (typeof slug !== 'string' || slug.length === 0) {
+    throw new Error('Page entity fixture requires a non-empty slug');
+  }
+  if (typeof url !== 'string' || url.length === 0) {
+    throw new Error('Page entity fixture requires a non-empty url');
+  }
+  if (typeof title !== 'string') {
+    throw new Error('Page entity fixture requires a title string');
+  }
+  return {
+    slug,
+    parentIds: [],
+    childIds: [],
+    timestamps: fixtureTimestamps(deviceTimestamp),
+    url,
+    title,
+    createdAt: null,
+    visitDates: [],
+    scrollDepth: null,
+    timeOnPage: null,
+    user_title: null,
+    likes: null,
+    ...state,
+  };
+}
+
+const NOTE_ENTITY_KEYS = Object.freeze([
+  'slug',
+  'excerpt',
+  'note',
+  'cssPath',
+  'url',
+  'deleted',
+  'deletedTs',
+  'deletionReason',
+  'replacedBy',
+]);
+
+export function noteEntityFixture({ slug, url, ...state }) {
+  const values = { slug, url, ...state };
+  assertFixtureKeys('Note entity', values, NOTE_ENTITY_KEYS);
+  if (typeof slug !== 'string' || slug.length === 0) {
+    throw new Error('Note entity fixture requires a non-empty slug');
+  }
+  if (typeof url !== 'string' || url.length === 0) {
+    throw new Error('Note entity fixture requires a non-empty url');
+  }
+  return {
+    slug,
+    excerpt: null,
+    note: null,
+    cssPath: null,
+    url,
+    deleted: false,
+    deletedTs: null,
+    deletionReason: null,
+    replacedBy: null,
+    ...state,
+  };
+}
+
+const LIST_ENTITY_KEYS = Object.freeze([
+  'slug',
+  'name',
+  'owner',
+  'pins',
+  'rules',
+  'timestamps',
+  'deleted',
+  'deletedTs',
+]);
+
+export function listEntityFixture({ slug, name, deviceTimestamp, ...state }) {
+  const values = { slug, name, ...state };
+  assertFixtureKeys('List entity', values, LIST_ENTITY_KEYS);
+  if (typeof slug !== 'string' || slug.length === 0) {
+    throw new Error('List entity fixture requires a non-empty slug');
+  }
+  if (typeof name !== 'string') {
+    throw new Error('List entity fixture requires a name string');
+  }
+  return {
+    slug,
+    name,
+    owner: null,
+    pins: [],
+    rules: [],
+    timestamps: fixtureTimestamps(deviceTimestamp),
+    deleted: false,
+    deletedTs: null,
+    ...state,
+  };
+}
+
+export function listOrderFixture({ tree, deviceTimestamp, timestamps }) {
+  if (!Array.isArray(tree)) {
+    throw new Error('List order fixture requires a tree array');
+  }
+  if (timestamps !== undefined && deviceTimestamp !== undefined) {
+    throw new Error(
+      'List order fixture cannot specify both timestamps and deviceTimestamp',
+    );
+  }
+  return {
+    timestamps: timestamps ?? fixtureTimestamps(deviceTimestamp),
+    tree,
+  };
+}
+
+export function listNameToIdFixture({ paths, deviceTimestamp, timestamps }) {
+  if (!paths || Array.isArray(paths) || typeof paths !== 'object') {
+    throw new Error('List name-to-id fixture requires a paths object');
+  }
+  if (timestamps !== undefined && deviceTimestamp !== undefined) {
+    throw new Error(
+      'List name-to-id fixture cannot specify both timestamps and deviceTimestamp',
+    );
+  }
+  return {
+    timestamps: timestamps ?? fixtureTimestamps(deviceTimestamp),
+    paths,
+  };
+}
+
 function timer(label) {
   const t0 = performance.now();
   return () =>

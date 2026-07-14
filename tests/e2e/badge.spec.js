@@ -1,9 +1,15 @@
 import { test, expect } from './fixtures.js';
 import {
   resetAndSeed,
+  settingsCheckpoint,
   openHelperPage,
   getSlugForUrl,
   pageCheckpointPath,
+  pageEntityFixture,
+  noteEntityFixture,
+  listEntityFixture,
+  listOrderFixture,
+  listNameToIdFixture,
 } from './helpers.js';
 
 async function getBadgeForUrl(helper, url) {
@@ -33,9 +39,23 @@ async function getActionIconForUrl(helper, url) {
 }
 
 async function openPopupForUrl(extContext, extensionId, { url, title }) {
+  const helper = await openHelperPage(extContext, extensionId);
+  const tabId = await helper.evaluate(async (pageUrl) => {
+    const tabs = await chrome.tabs.query({ url: pageUrl });
+    if (tabs.length !== 1 || !Number.isFinite(tabs[0].id)) {
+      throw new Error(`Expected one source tab for ${pageUrl}`);
+    }
+    return tabs[0].id;
+  }, url);
+  await helper.close();
   const popup = await extContext.newPage();
+  const diagnostics = [];
+  popup.on('pageerror', (error) => diagnostics.push(error.message));
+  popup.on('console', (message) => {
+    if (message.type() === 'error') diagnostics.push(message.text());
+  });
   await popup.addInitScript(
-    ({ url, title }) => {
+    ({ tabId, url, title }) => {
       const patchTabsQuery = () => {
         if (!globalThis.chrome?.tabs?.query) {
           setTimeout(patchTabsQuery, 0);
@@ -44,18 +64,25 @@ async function openPopupForUrl(extContext, extensionId, { url, title }) {
         const originalQuery = chrome.tabs.query.bind(chrome.tabs);
         chrome.tabs.query = async (queryInfo) => {
           if (queryInfo?.active && queryInfo?.currentWindow) {
-            return [{ id: 10001, url, title }];
+            return [{ id: tabId, url, title }];
           }
           return originalQuery(queryInfo);
         };
       };
       patchTabsQuery();
     },
-    { url, title },
+    { tabId, url, title },
   );
   await popup.goto(`chrome-extension://${extensionId}/popup.html`);
   await expect(popup.locator('#dashboard')).toBeVisible();
-  await expect(popup.locator('#pageTitle')).not.toHaveText('—');
+  try {
+    await expect(popup.locator('#pageUrl')).toHaveText(url);
+  } catch (error) {
+    throw new Error(
+      `Popup did not load ${url}: ${JSON.stringify({ diagnostics, body: await popup.locator('body').innerText() })}`,
+      { cause: error },
+    );
+  }
   return popup;
 }
 
@@ -76,24 +103,24 @@ test.describe('Extension badge', () => {
     await resetAndSeed(extContext, extensionId, [
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Noted Page',
           childIds: ['note:test-note'],
           parentIds: [],
           timestamps: { dev1: 1 },
-        },
+        }),
       },
       {
         path: 'objects/notes/test-note.json',
-        data: {
+        data: noteEntityFixture({
           slug: 'test-note',
           excerpt: ['hi'],
           note: 'hi',
           cssPath: [''],
           url,
-        },
+        }),
       },
     ]);
 
@@ -138,9 +165,7 @@ test.describe('Extension badge', () => {
     const url = localServer.url('/snapshot-capture-badge');
     const slug = getSlugForUrl(url);
 
-    await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
-    ]);
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
 
     const page = await extContext.newPage();
     await page.goto(url);
@@ -197,14 +222,14 @@ test.describe('Extension badge', () => {
     await resetAndSeed(extContext, extensionId, [
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Listed Page',
           childIds: [],
           parentIds: ['list:my-list'],
           timestamps: { dev1: 1 },
-        },
+        }),
       },
     ]);
 
@@ -244,14 +269,14 @@ test.describe('Extension badge', () => {
     await resetAndSeed(extContext, extensionId, [
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Listed After Report',
           childIds: [],
           parentIds: ['list:my-list'],
           timestamps: { dev1: 1 },
-        },
+        }),
       },
     ]);
 
@@ -304,14 +329,14 @@ test.describe('Extension badge', () => {
     await resetAndSeed(extContext, extensionId, [
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Both Page',
           childIds: ['snapshot:test-snap-123'],
           parentIds: ['list:my-list'],
           timestamps: { dev1: 1 },
-        },
+        }),
       },
     ]);
 
@@ -352,14 +377,14 @@ test.describe('Extension badge', () => {
     await resetAndSeed(extContext, extensionId, [
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Snap Delete Test',
           childIds: [`snapshot:${slug}-${snapTs}`],
           parentIds: [],
           timestamps: { dev1: 1 },
-        },
+        }),
       },
     ]);
 
@@ -424,24 +449,34 @@ test.describe('Extension badge', () => {
     await resetAndSeed(extContext, extensionId, [
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Note Delete Test',
           childIds: [`note:${noteSlug}`],
           parentIds: [],
           timestamps: { dev1: 1 },
-        },
+          createdAt: 1,
+          visitDates: [],
+          scrollDepth: null,
+          timeOnPage: null,
+          user_title: null,
+          likes: null,
+        }),
       },
       {
         path: `objects/notes/${noteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug,
           excerpt: ['Only note'],
           note: 'delete me',
           cssPath: [''],
           url,
-        },
+          deleted: false,
+          deletedTs: null,
+          deletionReason: null,
+          replacedBy: null,
+        }),
       },
     ]);
 
@@ -462,7 +497,7 @@ test.describe('Extension badge', () => {
         }),
       noteSlug,
     );
-    expect(deleteResp.success).toBe(true);
+    expect(deleteResp).toMatchObject({ success: true });
 
     await expect
       .poll(() => getBadgeForUrl(helper, url))
@@ -490,40 +525,49 @@ test.describe('Extension badge', () => {
     await resetAndSeed(extContext, extensionId, [
       {
         path: 'views/manifest/list-order.json',
-        data: {
-          timestamp: Date.now(),
-          tree: [{ id: 'list:delete-badge-list' }],
-        },
+        data: listOrderFixture({
+          timestamps: {},
+          tree: [{ id: 'list:delete-badge-list', children: [] }],
+        }),
       },
       {
         path: 'views/lists/delete-badge-list.json',
-        data: {
+        data: listEntityFixture({
           slug: 'delete-badge-list',
           name: 'Delete Badge List',
           owner: 'test-device',
-          timestamp: Date.now(),
-          pins: [{ id: `page:${slug}`, pinnedAt: Date.now() }],
-        },
+          pins: [{ id: `page:${slug}`, pinnedAt: Date.now(), source: null }],
+          rules: [],
+          timestamps: {},
+          deleted: false,
+          deletedTs: null,
+        }),
       },
       {
         path: 'views/manifest/list-name-to-id.json',
-        data: {
-          timestamp: Date.now(),
+        data: listNameToIdFixture({
+          timestamps: {},
           paths: {
             'test-device/Delete Badge List': 'delete-badge-list',
           },
-        },
+        }),
       },
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'List Delete Badge Test',
           childIds: [],
           parentIds: ['list:delete-badge-list'],
           timestamps: { dev1: 1 },
-        },
+          createdAt: 1,
+          visitDates: [],
+          scrollDepth: null,
+          timeOnPage: null,
+          user_title: null,
+          likes: null,
+        }),
       },
     ]);
 
@@ -617,37 +661,51 @@ test.describe('Extension badge', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'PDF Notes Test',
           childIds: [`note:${noteSlug1}`, `note:${noteSlug2}`],
           parentIds: [],
           timestamps: { 'test-device': now },
-        },
+          createdAt: now,
+          visitDates: [],
+          scrollDepth: null,
+          timeOnPage: null,
+          user_title: null,
+          likes: null,
+        }),
       },
       {
         path: `objects/notes/${noteSlug1}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug1,
           excerpt: ['First highlight'],
           note: 'note 1',
           cssPath: [''],
           url,
-        },
+          deleted: false,
+          deletedTs: null,
+          deletionReason: null,
+          replacedBy: null,
+        }),
       },
       {
         path: `objects/notes/${noteSlug2}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug2,
           excerpt: ['Second highlight'],
           note: 'note 2',
           cssPath: [''],
           url,
-        },
+          deleted: false,
+          deletedTs: null,
+          deletionReason: null,
+          replacedBy: null,
+        }),
       },
       {
         path: `logs/test-device/2026-03-01.jsonl`,
@@ -657,6 +715,7 @@ test.describe('Extension badge', () => {
             action: 'visit_page',
             url,
             title: 'PDF Notes Test',
+            referrerUrl: null,
           },
         ],
       },
@@ -714,32 +773,48 @@ test.describe('Extension badge', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Slug Match',
           childIds: [`note:${noteSlug}`],
           parentIds: [],
           timestamps: { 'test-device': now },
-        },
+          createdAt: now,
+          visitDates: [],
+          scrollDepth: null,
+          timeOnPage: null,
+          user_title: null,
+          likes: null,
+        }),
       },
       {
         path: `objects/notes/${noteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug,
           excerpt: ['test excerpt'],
           note: 'test',
           cssPath: [''],
           url,
-        },
+          deleted: false,
+          deletedTs: null,
+          deletionReason: null,
+          replacedBy: null,
+        }),
       },
       {
         path: `logs/test-device/2026-03-01.jsonl`,
         lines: [
-          { timestamp: now, action: 'visit_page', url, title: 'Slug Match' },
+          {
+            timestamp: now,
+            action: 'visit_page',
+            url,
+            title: 'Slug Match',
+            referrerUrl: null,
+          },
         ],
       },
     ]);

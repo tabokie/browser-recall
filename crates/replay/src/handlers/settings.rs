@@ -4,8 +4,8 @@ use serde_json::Value;
 
 use crate::{
     entities::{Entity, SettingsEntity},
-    load_settings, touch_timestamp_map, Context, EntityEffect, EntityMap, ReplayError,
-    PERSISTENT_SETTINGS_KEYS, SETTINGS_KEY,
+    load_settings, settings, touch_timestamp_map, Context, EntityEffect, EntityMap, ReplayError,
+    SETTINGS_KEY,
 };
 
 pub(crate) async fn handle_update_setting<L, Fut>(
@@ -19,9 +19,7 @@ where
     L: Fn(&str) -> Fut,
     Fut: Future<Output = Option<Entity>>,
 {
-    if !PERSISTENT_SETTINGS_KEYS.contains(&key) {
-        return Ok(EntityMap::new());
-    }
+    settings::validate_value(key, &value).map_err(ReplayError::InvalidEntry)?;
 
     let mut settings = load_settings(load, SETTINGS_KEY)
         .await

@@ -1,7 +1,7 @@
 mod support;
 
 use browser_recall_daemon::pairing::{static_approver, PairingDecision};
-use browser_recall_daemon::protocol::{ConnectorMessage, DaemonMessage};
+use browser_recall_daemon::protocol::{ConnectorMessage, DaemonMessage, TestControlMessage};
 use browser_recall_daemon::ws_server::start_server;
 use browser_recall_daemon::{ApprovedConnector, ConfigStore, ServerStartOptions, Token};
 use browser_recall_replay::generate_slug_from_url;
@@ -21,6 +21,10 @@ fn test_control_server_options(config_store: ConfigStore) -> ServerStartOptions 
     let mut options = test_server_options(config_store);
     options.test_control_enabled = true;
     options
+}
+
+fn test_control(request: TestControlMessage) -> ConnectorMessage {
+    ConnectorMessage::TestControl { request }
 }
 
 fn denied_pairing_server_options(config_store: ConfigStore) -> ServerStartOptions {
@@ -152,6 +156,10 @@ async fn send_raw(socket: &mut TestSocket, value: Value) {
         .expect("send message");
 }
 
+fn test_control_json(request: Value) -> Value {
+    json!({ "type": "test_control", "request": request })
+}
+
 async fn next_daemon(socket: &mut TestSocket) -> DaemonMessage {
     loop {
         let message: DaemonMessage =
@@ -163,7 +171,11 @@ async fn next_daemon(socket: &mut TestSocket) -> DaemonMessage {
 }
 
 async fn get_entity(socket: &mut TestSocket, key: &str) -> Option<Value> {
-    send_raw(socket, json!({ "type": "get_entity", "key": key })).await;
+    send_raw(
+        socket,
+        test_control_json(json!({ "type": "get_entity", "key": key })),
+    )
+    .await;
     match next_daemon(socket).await {
         DaemonMessage::EntityResult {
             success,
@@ -203,12 +215,12 @@ async fn expect_change(socket: &mut TestSocket) -> DaemonMessage {
 async fn send_event(socket: &mut TestSocket, entry: Value) {
     send_connector(
         socket,
-        ConnectorMessage::Event {
+        test_control(TestControlMessage::Event {
             entry,
             source: "extension".to_string(),
-            buffer_depth: None,
-            buffer_bytes: None,
-        },
+            buffer_depth: 0,
+            buffer_bytes: 0,
+        }),
     )
     .await;
 }
@@ -236,19 +248,19 @@ async fn send_note_and_ack(
 ) {
     send_connector(
         socket,
-        ConnectorMessage::Note {
+        test_control(TestControlMessage::Note {
             slug: slug.to_string(),
             excerpt: Some(serde_json::json!(["Hello"])),
             note: note.to_string(),
-            css_path: None,
+            css_path: Some(serde_json::json!([""])),
             old_slug: old_slug.map(str::to_string),
             url: url.to_string(),
             title: Some("Notes Page".to_string()),
             ts,
             source: "extension".to_string(),
-            buffer_depth: None,
-            buffer_bytes: None,
-        },
+            buffer_depth: 0,
+            buffer_bytes: 0,
+        }),
     )
     .await;
     expect_ack(socket).await;
@@ -265,8 +277,8 @@ async fn send_snapshot_and_ack(socket: &mut TestSocket, slug: &str, url: &str, t
             markdown: Some("banana snapshot".to_string()),
             html: "<html><body>snapshot</body></html>".to_string(),
             source: "extension".to_string(),
-            buffer_depth: None,
-            buffer_bytes: None,
+            buffer_depth: 0,
+            buffer_bytes: 0,
         },
     )
     .await;
@@ -372,6 +384,7 @@ async fn event_ingest_persists_page_and_reports_status() {
             "action": "visit_page",
             "url": "https://example.com/page",
             "title": "Example",
+            "referrerUrl": null,
         }),
     )
     .await;
@@ -400,10 +413,16 @@ async fn event_ingest_persists_page_and_reports_status() {
     let page_path = page_path(&data_dir, &slug);
     wait_for_absent(&page_path).await;
     let logs = read_log_files(&log_dir(&data_dir, &device_id)).await;
-    assert_eq!(logs.len(), 1);
-    assert!(logs[0].contains("\"action\":\"visit_page\""));
-    assert!(!logs[0].contains("bodyPreview"));
-    assert!(!logs[0].contains("checkpoint"));
+    let entries = log_entries(&logs);
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|entry| entry.get("action").and_then(Value::as_str) == Some("visit_page"))
+            .count(),
+        1
+    );
+    assert!(logs.iter().all(|log| !log.contains("bodyPreview")));
+    assert!(logs.iter().all(|log| !log.contains("checkpoint")));
 
     handle.shutdown().await;
 }
@@ -535,7 +554,7 @@ async fn event_ingest_rejects_missing_source_metadata() {
     let (mut socket, data_dir, _device_id) = paired_socket(handle.port(), &config_store).await;
     send_raw(
         &mut socket,
-        json!({
+        test_control_json(json!({
             "type": "event",
             "entry": {
                 "timestamp": 1_710_000_000_000i64,
@@ -543,7 +562,7 @@ async fn event_ingest_rejects_missing_source_metadata() {
                 "url": "https://example.com/bad",
                 "title": "Bad",
             }
-        }),
+        })),
     )
     .await;
 
@@ -581,17 +600,18 @@ async fn connector_source_errors_are_protocol_errors_not_socket_disconnects() {
 
     send_connector(
         &mut socket,
-        ConnectorMessage::Event {
+        test_control(TestControlMessage::Event {
             entry: json!({
                 "timestamp": 1_710_000_000_000i64,
                 "action": "visit_page",
                 "url": "https://example.com/bad-source",
                 "title": "Bad Source",
+                "referrerUrl": null,
             }),
             source: "content-script".to_string(),
-            buffer_depth: Some(3),
-            buffer_bytes: Some(99),
-        },
+            buffer_depth: 3,
+            buffer_bytes: 99,
+        }),
     )
     .await;
     match next_daemon(&mut socket).await {
@@ -609,19 +629,19 @@ async fn connector_source_errors_are_protocol_errors_not_socket_disconnects() {
 
     send_connector(
         &mut socket,
-        ConnectorMessage::Note {
+        test_control(TestControlMessage::Note {
             slug: "bad-source-note".to_string(),
             excerpt: Some(serde_json::json!(["bad source"])),
             note: "should not persist".to_string(),
-            css_path: None,
+            css_path: Some(serde_json::json!([""])),
             old_slug: None,
             url: "https://example.com/bad-source".to_string(),
             title: Some("Bad Source".to_string()),
             ts: 1_710_000_000_100i64,
             source: "popup-cache".to_string(),
-            buffer_depth: None,
-            buffer_bytes: None,
-        },
+            buffer_depth: 0,
+            buffer_bytes: 0,
+        }),
     )
     .await;
     match next_daemon(&mut socket).await {
@@ -647,8 +667,8 @@ async fn connector_source_errors_are_protocol_errors_not_socket_disconnects() {
             markdown: Some("should not persist".to_string()),
             html: "<html><body>should not persist</body></html>".to_string(),
             source: "snapshot-cache".to_string(),
-            buffer_depth: None,
-            buffer_bytes: None,
+            buffer_depth: 0,
+            buffer_bytes: 0,
         },
     )
     .await;
@@ -734,16 +754,16 @@ async fn legacy_websocket_history_search_messages_are_explicitly_unsupported() {
 async fn generic_entity_diagnostics_are_disabled_in_production_sessions() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());
-    let handle = start_server(test_server_options(config_store.clone()))
-        .await
-        .expect("server starts");
+    let mut options = test_server_options(config_store.clone());
+    options.test_control_enabled = false;
+    let handle = start_server(options).await.expect("server starts");
     let (mut socket, _data_dir, _device_id) = paired_socket(handle.port(), &config_store).await;
 
     for message in [
-        ConnectorMessage::GetAllPages,
-        ConnectorMessage::GetEntity {
+        test_control(TestControlMessage::GetAllPages),
+        test_control(TestControlMessage::GetEntity {
             key: "manifest:settings".to_string(),
-        },
+        }),
     ] {
         send_connector(&mut socket, message).await;
         match next_daemon(&mut socket).await {
@@ -782,9 +802,9 @@ async fn websocket_auth_control_and_error_matrix_keeps_connections_predictable()
 
     unauthenticated
         .send(Message::Text(
-            json!({
+            test_control_json(json!({
                 "type": "get_all_pages"
-            })
+            }))
             .to_string(),
         ))
         .await
@@ -817,12 +837,12 @@ async fn websocket_auth_control_and_error_matrix_keeps_connections_predictable()
 
     unauthenticated
         .send(Message::Text(
-            serde_json::to_string(&ConnectorMessage::TestSeedData {
+            serde_json::to_string(&test_control(TestControlMessage::SeedData {
                 files: vec![browser_recall_daemon::protocol::TestSeedFilePayload {
                     path: "../escape.json".to_string(),
                     content: "{}".to_string(),
                 }],
-            })
+            }))
             .expect("invalid seed json"),
         ))
         .await
@@ -840,12 +860,12 @@ async fn websocket_auth_control_and_error_matrix_keeps_connections_predictable()
 
     unauthenticated
         .send(Message::Text(
-            serde_json::to_string(&ConnectorMessage::TestSeedData {
+            serde_json::to_string(&test_control(TestControlMessage::SeedData {
                 files: vec![browser_recall_daemon::protocol::TestSeedFilePayload {
                     path: "logs/seed-device/2024-03-04.jsonl".to_string(),
-                    content: "{\"timestamp\":1710000000000,\"action\":\"visit_page\",\"url\":\"https://seed.example/page\",\"title\":\"Seed Page\"}\n".to_string(),
+                    content: "{\"timestamp\":1710000000000,\"action\":\"visit_page\",\"url\":\"https://seed.example/page\",\"title\":\"Seed Page\",\"referrerUrl\":null}\n".to_string(),
                 }],
-            })
+            }))
             .expect("seed json"),
         ))
         .await
@@ -861,7 +881,8 @@ async fn websocket_auth_control_and_error_matrix_keeps_connections_predictable()
 
     unauthenticated
         .send(Message::Text(
-            serde_json::to_string(&ConnectorMessage::TestResetData).expect("reset json"),
+            serde_json::to_string(&test_control(TestControlMessage::ResetData))
+                .expect("reset json"),
         ))
         .await
         .expect("send reset");
@@ -986,51 +1007,67 @@ async fn websocket_unauthenticated_matrix_rejects_privileged_messages_without_cl
         json!({ "type": "get_status" }),
         json!({ "type": "get_directory_info" }),
         json!({ "type": "get_directory_size" }),
-        json!({ "type": "clear_all_data" }),
-        json!({ "type": "replay_remote_entries", "deviceId": "peer", "entries": [] }),
-        json!({ "type": "set_device_id", "deviceId": "peer" }),
+        test_control_json(json!({ "type": "clear_all_data" })),
+        test_control_json(
+            json!({ "type": "replay_remote_entries", "deviceId": "peer", "entries": [] }),
+        ),
+        test_control_json(json!({ "type": "set_device_id", "deviceId": "peer" })),
         json!({ "type": "list_history_files", "includeSizes": true }),
         json!({ "type": "load_history_batch", "files": [] }),
-        json!({ "type": "get_all_pages" }),
+        test_control_json(json!({ "type": "get_all_pages" })),
         json!({ "type": "get_page_info", "slug": "missing" }),
-        json!({ "type": "get_page_summary", "url": "https://example.com/summary" }),
+        json!({ "type": "get_page_summary", "url": "https://example.com/summary", "title": null }),
         json!({ "type": "get_snapshot_html", "slug": "missing", "ts": 1 }),
-        json!({ "type": "get_entity", "key": "page:missing" }),
-        json!({ "type": "permanent_delete", "keys": ["note:missing"] }),
-        json!({ "type": "run_command", "action": "createList", "request": { "name": "Unauthenticated" } }),
-        json!({ "type": "search_notes", "query": "x" }),
-        json!({ "type": "search_snapshots", "query": "x" }),
-        json!({
+        test_control_json(json!({ "type": "get_entity", "key": "page:missing" })),
+        test_control_json(json!({ "type": "permanent_delete", "keys": ["note:missing"] })),
+        json!({ "type": "run_command", "action": "createList", "request": { "name": "Unauthenticated" }, "bufferDepth": 0, "bufferBytes": 0 }),
+        test_control_json(json!({ "type": "search_notes", "query": "x", "limit": null })),
+        test_control_json(json!({ "type": "search_snapshots", "query": "x", "limit": null })),
+        test_control_json(json!({
             "type": "event",
             "entry": {
                 "timestamp": 1_710_050_000_000i64,
                 "action": "visit_page",
-                "url": "https://example.com/unauth"
+                "url": "https://example.com/unauth",
+                "title": null,
+                "referrerUrl": null
             },
-            "source": "extension"
-        }),
-        json!({ "type": "run_rule_batch", "listIds": [], "entries": [] }),
-        json!({
+            "source": "extension",
+            "bufferDepth": 0,
+            "bufferBytes": 0
+        })),
+        test_control_json(json!({ "type": "run_rule_batch", "listIds": [], "entries": [] })),
+        test_control_json(json!({
             "type": "preview_rule",
             "rule": { "type": "keyword", "config": { "pattern": "x" } },
             "entries": []
-        }),
+        })),
         json!({
             "type": "snapshot",
             "slug": "unauth",
             "ts": 1_710_050_000_100i64,
             "url": "https://example.com/unauth",
+            "title": null,
+            "markdown": null,
             "html": "<html></html>",
-            "source": "extension"
+            "source": "extension",
+            "bufferDepth": 0,
+            "bufferBytes": 0
         }),
-        json!({
+        test_control_json(json!({
             "type": "note",
             "slug": "unauth-note",
+            "excerpt": null,
             "note": "unauth",
+            "cssPath": null,
+            "oldSlug": null,
             "url": "https://example.com/unauth",
+            "title": null,
             "ts": 1_710_050_000_200i64,
-            "source": "extension"
-        }),
+            "source": "extension",
+            "bufferDepth": 0,
+            "bufferBytes": 0
+        })),
     ] {
         send_raw(&mut socket, message).await;
         match next_daemon(&mut socket).await {
@@ -1062,8 +1099,27 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
     let (mut socket, data_dir, _device_id) = paired_socket(handle.port(), &config_store).await;
 
     for (action, request, expected) in [
-        ("reportVisit", json!({}), "reportVisit missing url"),
-        ("reportLeave", json!({}), "reportLeave missing url"),
+        (
+            "reportVisit",
+            json!({
+                "timestamp": 1_710_000_000_000i64,
+                "title": null,
+                "referrer": null,
+                "bodyPreview": null,
+                "bypassBlacklist": false
+            }),
+            "reportVisit request: missing field `url`",
+        ),
+        (
+            "reportLeave",
+            json!({
+                "timestamp": 1_710_000_000_000i64,
+                "title": null,
+                "scrollDepth": null,
+                "timeOnPage": null
+            }),
+            "reportLeave request: missing field `url`",
+        ),
         ("saveSettingsKey", json!({}), "saveSettingsKey missing key"),
         (
             "ratePage",
@@ -1092,6 +1148,8 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
             &mut socket,
             json!({
                 "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
                 "action": action,
                 "request": request
             }),
@@ -1112,6 +1170,7 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
     }
 
     for (key, value) in [
+        ("titleCleanupEnabled", json!(true)),
         (
             "titleTrimRules",
             json!([
@@ -1126,6 +1185,8 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
             &mut socket,
             json!({
                 "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
                 "action": "saveSettingsKey",
                 "request": { "key": key, "value": value }
             }),
@@ -1155,7 +1216,7 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
         } => {
             assert!(success);
             assert!(error.is_none());
-            assert_eq!(display_title, "API Guide");
+            assert_eq!(display_title.as_deref(), Some("API Guide"));
         }
         other => panic!("expected popup summary response, got {other:?}"),
     }
@@ -1164,11 +1225,91 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
+            "action": "reportVisit",
+            "request": {
+                "url": "https://example.com/missing-timestamp"
+            }
+        }),
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::CommandResult {
+            success: false,
+            error: Some(error),
+            ..
+        } => assert_eq!(
+            error,
+            "invalid reportVisit request: missing field `timestamp`"
+        ),
+        other => panic!("expected missing timestamp failure, got {other:?}"),
+    }
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
+            "action": "reportVisit",
+            "request": {
+                "observedAt": 1_710_030_000_000i64,
+                "url": "https://example.com/legacy-observed-at"
+            }
+        }),
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::CommandResult {
+            success: false,
+            error: Some(error),
+            ..
+        } => assert!(error.contains("unknown field `observedAt`")),
+        other => panic!("expected legacy timestamp rejection, got {other:?}"),
+    }
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
+            "action": "reportVisit",
+            "request": {
+                "timestamp": i64::MAX,
+                "url": "https://example.com/out-of-range-timestamp",
+                "title": null,
+                "referrer": null,
+                "bodyPreview": null,
+                "bypassBlacklist": false
+            }
+        }),
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::CommandResult {
+            success: false,
+            error: Some(error),
+            ..
+        } => assert_eq!(error, "reportVisit timestamp is out of range"),
+        other => panic!("expected timestamp range failure, got {other:?}"),
+    }
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "reportVisit",
             "request": {
                 "timestamp": 1_710_040_000_000i64,
                 "url": "https://private.example/secret",
-                "title": "Private Page"
+                "title": "Private Page",
+                "referrer": null,
+                "bodyPreview": null,
+                "bypassBlacklist": false
             }
         }),
     )
@@ -1192,11 +1333,15 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "reportVisit",
             "request": {
                 "timestamp": 1_710_040_000_100i64,
                 "url": "https://private.example/secret",
                 "title": "Private Page",
+                "referrer": null,
+                "bodyPreview": null,
                 "bypassBlacklist": true
             }
         }),
@@ -1210,15 +1355,17 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
 
     send_raw(
         &mut socket,
-        json!({
+        test_control_json(json!({
             "type": "replay_remote_entries",
             "deviceId": "peer",
             "entries": [{
                 "timestamp": 1_710_040_001_000i64,
                 "action": "visit_page",
-                "url": "not a url"
+                "url": "not a url",
+                "title": null,
+                "referrerUrl": null
             }]
-        }),
+        })),
     )
     .await;
     match next_daemon(&mut socket).await {
@@ -1236,14 +1383,15 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
 
     send_raw(
         &mut socket,
-        json!({
+        test_control_json(json!({
             "type": "run_rule_batch",
             "listIds": ["missing-list"],
             "entries": [{
                 "url": "https://example.com/no-match",
-                "title": "No Match"
+                "title": "No Match",
+                "bodyPreview": null
             }]
-        }),
+        })),
     )
     .await;
     match next_daemon(&mut socket).await {
@@ -1261,7 +1409,7 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
 
     send_raw(
         &mut socket,
-        json!({
+        test_control_json(json!({
             "type": "preview_rule",
             "rule": {
                 "type": "keyword",
@@ -1269,9 +1417,10 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
             },
             "entries": [{
                 "url": "https://example.com/private",
-                "title": "Private"
+                "title": "Private",
+                "bodyPreview": null
             }]
-        }),
+        })),
     )
     .await;
     match next_daemon(&mut socket).await {
@@ -1302,16 +1451,19 @@ async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
 
     send_raw(
         &mut socket,
-        json!({
+        test_control_json(json!({
             "type": "event",
             "entry": {
                 "timestamp": 1_710_060_000_000i64,
                 "action": "visit_page",
                 "url": "https://example.com/invalid-payload",
-                "title": 42
+                "title": 42,
+                "referrerUrl": null
             },
-            "source": "extension"
-        }),
+            "source": "extension",
+            "bufferDepth": 0,
+            "bufferBytes": 0
+        })),
     )
     .await;
     match next_daemon(&mut socket).await {
@@ -1324,16 +1476,19 @@ async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
 
     send_raw(
         &mut socket,
-        json!({
+        test_control_json(json!({
             "type": "event",
             "entry": {
                 "timestamp": 1_710_060_000_100i64,
                 "action": "visit_page",
                 "url": "not a url",
-                "title": "Invalid URL"
+                "title": "Invalid URL",
+                "referrerUrl": null
             },
-            "source": "extension"
-        }),
+            "source": "extension",
+            "bufferDepth": 0,
+            "bufferBytes": 0
+        })),
     )
     .await;
     match next_daemon(&mut socket).await {
@@ -1345,37 +1500,53 @@ async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
     }
 
     for message in [
-        json!({ "type": "clear_all_data" }),
-        json!({ "type": "replay_remote_entries", "deviceId": "peer", "entries": [] }),
-        json!({ "type": "set_device_id", "deviceId": "paused-device" }),
-        json!({ "type": "permanent_delete", "keys": ["note:paused"] }),
-        json!({ "type": "run_command", "action": "createList", "request": { "name": "Paused" } }),
-        json!({
+        test_control_json(json!({ "type": "clear_all_data" })),
+        test_control_json(
+            json!({ "type": "replay_remote_entries", "deviceId": "peer", "entries": [] }),
+        ),
+        test_control_json(json!({ "type": "set_device_id", "deviceId": "paused-device" })),
+        test_control_json(json!({ "type": "permanent_delete", "keys": ["note:paused"] })),
+        json!({ "type": "run_command", "action": "createList", "request": { "name": "Paused" }, "bufferDepth": 0, "bufferBytes": 0 }),
+        test_control_json(json!({
             "type": "event",
             "entry": {
                 "timestamp": 1_710_060_000_200i64,
                 "action": "visit_page",
-                "url": "https://example.com/paused"
+                "url": "https://example.com/paused",
+                "title": null,
+                "referrerUrl": null
             },
-            "source": "extension"
-        }),
-        json!({ "type": "run_rule_batch", "listIds": [], "entries": [] }),
+            "source": "extension",
+            "bufferDepth": 0,
+            "bufferBytes": 0
+        })),
+        test_control_json(json!({ "type": "run_rule_batch", "listIds": [], "entries": [] })),
         json!({
             "type": "snapshot",
             "slug": "paused",
             "ts": 1_710_060_000_300i64,
             "url": "https://example.com/paused",
+            "title": null,
+            "markdown": null,
             "html": "<html></html>",
-            "source": "extension"
+            "source": "extension",
+            "bufferDepth": 0,
+            "bufferBytes": 0
         }),
-        json!({
+        test_control_json(json!({
             "type": "note",
             "slug": "paused-note",
+            "excerpt": null,
             "note": "paused",
+            "cssPath": null,
+            "oldSlug": null,
             "url": "https://example.com/paused",
+            "title": null,
             "ts": 1_710_060_000_400i64,
-            "source": "extension"
-        }),
+            "source": "extension",
+            "bufferDepth": 0,
+            "bufferBytes": 0
+        })),
     ] {
         send_raw(&mut socket, message).await;
         match next_daemon(&mut socket).await {
@@ -1399,8 +1570,8 @@ async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
             markdown: None,
             html: "<html><body>bad</body></html>".to_string(),
             source: "extension".to_string(),
-            buffer_depth: None,
-            buffer_bytes: None,
+            buffer_depth: 0,
+            buffer_bytes: 0,
         },
     )
     .await;
@@ -1416,7 +1587,7 @@ async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
 
     send_connector(
         &mut socket,
-        ConnectorMessage::Note {
+        test_control(TestControlMessage::Note {
             slug: "bad-note-url".to_string(),
             excerpt: None,
             note: "bad".to_string(),
@@ -1426,9 +1597,9 @@ async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
             title: Some("Bad Note".to_string()),
             ts: 1_710_060_000_600i64,
             source: "extension".to_string(),
-            buffer_depth: None,
-            buffer_bytes: None,
-        },
+            buffer_depth: 0,
+            buffer_bytes: 0,
+        }),
     )
     .await;
     match next_daemon(&mut socket).await {
@@ -1463,45 +1634,8 @@ async fn websocket_read_error_and_secondary_command_matrix_is_structured() {
         &mut socket,
         json!({
             "type": "run_command",
-            "action": "ensureDefaultLists",
-            "request": {}
-        }),
-    )
-    .await;
-    assert!(matches!(
-        next_daemon(&mut socket).await,
-        DaemonMessage::CommandResult { success: true, .. }
-    ));
-
-    send_raw(
-        &mut socket,
-        json!({
-            "type": "run_command",
-            "action": "ensureDefaultLists",
-            "request": {}
-        }),
-    )
-    .await;
-    match next_daemon(&mut socket).await {
-        DaemonMessage::CommandResult {
-            success,
-            response: Some(response),
-            error,
-        } => {
-            assert!(success);
-            assert!(error.is_none());
-            assert_eq!(
-                response.get("created").and_then(Value::as_bool),
-                Some(false)
-            );
-        }
-        other => panic!("expected ensureDefaultLists no-op, got {other:?}"),
-    }
-
-    send_raw(
-        &mut socket,
-        json!({
-            "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "renamePage",
             "request": {
                 "url": "https://example.com/secondary",
@@ -1519,11 +1653,14 @@ async fn websocket_read_error_and_secondary_command_matrix_is_structured() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "createNote",
             "request": {
                 "url": "https://example.com/secondary",
                 "title": "Secondary",
                 "excerpt": ["secondary excerpt"],
+                "cssPath": [""],
                 "note": "secondary note"
             }
         }),
@@ -1550,6 +1687,8 @@ async fn websocket_read_error_and_secondary_command_matrix_is_structured() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "updateNote",
             "request": {
                 "noteSlug": note_slug,
@@ -1575,6 +1714,8 @@ async fn websocket_read_error_and_secondary_command_matrix_is_structured() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "clearAllData",
             "request": {}
         }),
@@ -1637,10 +1778,10 @@ async fn websocket_read_error_and_secondary_command_matrix_is_structured() {
         .expect("write notes file");
     send_connector(
         &mut socket,
-        ConnectorMessage::SearchNotes {
+        test_control(TestControlMessage::SearchNotes {
             query: "secondary".to_string(),
             limit: Some(10),
-        },
+        }),
     )
     .await;
     match next_daemon(&mut socket).await {
@@ -1667,10 +1808,10 @@ async fn websocket_read_error_and_secondary_command_matrix_is_structured() {
     .expect("write snapshots file");
     send_connector(
         &mut socket,
-        ConnectorMessage::SearchSnapshots {
+        test_control(TestControlMessage::SearchSnapshots {
             query: "secondary".to_string(),
             limit: Some(10),
-        },
+        }),
     )
     .await;
     match next_daemon(&mut socket).await {
@@ -1703,25 +1844,13 @@ async fn websocket_get_entity_covers_manifest_and_child_entities() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "saveSettingsKey",
             "request": {
                 "key": "localeOverride",
                 "value": "en"
             }
-        }),
-    )
-    .await;
-    assert!(matches!(
-        next_daemon(&mut socket).await,
-        DaemonMessage::CommandResult { success: true, .. }
-    ));
-
-    send_raw(
-        &mut socket,
-        json!({
-            "type": "run_command",
-            "action": "ensureDefaultLists",
-            "request": {}
         }),
     )
     .await;
@@ -1773,11 +1902,14 @@ async fn websocket_get_entity_covers_manifest_and_child_entities() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "createNote",
             "request": {
                 "url": "https://example.com/entity-note",
                 "title": "Entity Note",
                 "excerpt": ["entity excerpt"],
+                "cssPath": [""],
                 "note": "entity note"
             }
         }),
@@ -1812,6 +1944,8 @@ async fn websocket_get_entity_covers_manifest_and_child_entities() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "deleteNote",
             "request": { "noteSlug": note_slug }
         }),
@@ -1915,9 +2049,9 @@ async fn set_device_id_rewrites_config_only() {
     let new_device_id = "fresh-sync-device";
     send_connector(
         &mut socket,
-        ConnectorMessage::SetDeviceId {
+        test_control(TestControlMessage::SetDeviceId {
             device_id: new_device_id.to_string(),
-        },
+        }),
     )
     .await;
 
@@ -1971,11 +2105,12 @@ async fn clear_all_data_recreates_empty_layout_without_current_marker() {
             "action": "visit_page",
             "url": "https://example.com/page",
             "title": "Example",
+            "referrerUrl": null,
         }),
     )
     .await;
 
-    send_connector(&mut socket, ConnectorMessage::ClearAllData).await;
+    send_connector(&mut socket, test_control(TestControlMessage::ClearAllData)).await;
     let response = next_daemon(&mut socket).await;
     match response {
         DaemonMessage::ClearAllDataResult {
@@ -2041,6 +2176,7 @@ async fn search_messages_return_note_and_snapshot_hits() {
             "action": "visit_page",
             "url": "https://example.com/page",
             "title": "Banana Example",
+            "referrerUrl": null,
         }),
     )
     .await;
@@ -2063,8 +2199,8 @@ async fn search_messages_return_note_and_snapshot_hits() {
             markdown: Some("banana snapshot body".to_string()),
             html: "<html><body>banana snapshot body</body></html>".to_string(),
             source: "extension".to_string(),
-            buffer_depth: None,
-            buffer_bytes: None,
+            buffer_depth: 0,
+            buffer_bytes: 0,
         },
     )
     .await;
@@ -2072,10 +2208,10 @@ async fn search_messages_return_note_and_snapshot_hits() {
 
     send_connector(
         &mut socket,
-        ConnectorMessage::SearchNotes {
+        test_control(TestControlMessage::SearchNotes {
             query: "banana".to_string(),
             limit: None,
-        },
+        }),
     )
     .await;
     let notes = next_daemon(&mut socket).await;
@@ -2097,10 +2233,10 @@ async fn search_messages_return_note_and_snapshot_hits() {
 
     send_connector(
         &mut socket,
-        ConnectorMessage::SearchSnapshots {
+        test_control(TestControlMessage::SearchSnapshots {
             query: "banana".to_string(),
             limit: None,
-        },
+        }),
     )
     .await;
     let snapshots = next_daemon(&mut socket).await;
@@ -2138,7 +2274,8 @@ async fn popup_summary_returns_page_info_and_compact_lists() {
             "action": "create_list",
             "listOwner": "test-device",
             "name": "Reading",
-            "listId": "reading"
+            "listId": "reading",
+            "parentListId": null
         }),
         json!({
             "timestamp": 1_710_000_010_050i64,
@@ -2146,13 +2283,15 @@ async fn popup_summary_returns_page_info_and_compact_lists() {
             "listOwner": "test-device",
             "name": "Reading",
             "urls": ["https://example.com/popup"],
-            "titles": ["Popup Page"]
+            "titles": ["Popup Page"],
+            "source": null
         }),
         json!({
             "timestamp": 1_710_000_010_100i64,
             "action": "visit_page",
             "url": "https://example.com/popup",
             "title": "Popup Page",
+            "referrerUrl": null,
         }),
     ] {
         send_event_and_ack(&mut socket, entry).await;
@@ -2160,19 +2299,19 @@ async fn popup_summary_returns_page_info_and_compact_lists() {
 
     send_connector(
         &mut socket,
-        ConnectorMessage::Note {
+        test_control(TestControlMessage::Note {
             slug: "popup-note".to_string(),
             excerpt: Some(serde_json::json!(["hello"])),
             note: "popup annotation".to_string(),
-            css_path: None,
+            css_path: Some(serde_json::json!([""])),
             old_slug: None,
             url: "https://example.com/popup".to_string(),
             title: Some("Popup Page".to_string()),
             ts: 1_710_000_010_200i64,
             source: "extension".to_string(),
-            buffer_depth: None,
-            buffer_bytes: None,
-        },
+            buffer_depth: 0,
+            buffer_bytes: 0,
+        }),
     )
     .await;
     expect_ack(&mut socket).await;
@@ -2187,8 +2326,8 @@ async fn popup_summary_returns_page_info_and_compact_lists() {
             markdown: Some("popup snapshot".to_string()),
             html: "<html><body>popup snapshot</body></html>".to_string(),
             source: "extension".to_string(),
-            buffer_depth: None,
-            buffer_bytes: None,
+            buffer_depth: 0,
+            buffer_bytes: 0,
         },
     )
     .await;
@@ -2261,10 +2400,10 @@ async fn popup_summary_returns_page_info_and_compact_lists() {
 
     send_raw(
         &mut socket,
-        json!({
+        test_control_json(json!({
             "type": "get_entity",
             "key": format!("page:{page_slug}")
-        }),
+        })),
     )
     .await;
     let entity = next_daemon(&mut socket).await;
@@ -2293,7 +2432,8 @@ async fn popup_summary_returns_page_info_and_compact_lists() {
         &mut socket,
         json!({
             "type": "get_page_summary",
-            "url": "https://example.com/popup"
+            "url": "https://example.com/popup",
+            "title": null
         }),
     )
     .await;
@@ -2307,11 +2447,14 @@ async fn popup_summary_returns_page_info_and_compact_lists() {
         } => {
             assert!(success);
             assert!(error.is_none());
-            assert_eq!(lists.len(), 1);
-            assert_eq!(lists[0].slug, "reading");
-            assert_eq!(lists[0].name, "Reading");
-            assert!(lists[0].contains_page);
-            assert!(lists[0].last_activity > 0);
+            assert_eq!(lists.len(), 2);
+            let reading = lists
+                .iter()
+                .find(|list| list.slug == "reading")
+                .expect("Reading list");
+            assert_eq!(reading.name, "Reading");
+            assert!(reading.contains_page);
+            assert!(reading.last_activity > 0);
         }
         other => panic!("expected popup page summary, got {other:?}"),
     }
@@ -2325,7 +2468,12 @@ async fn popup_summary_returns_page_info_and_compact_lists() {
         } => {
             assert!(success);
             assert!(error.is_none());
-            assert!(settings.is_none());
+            let settings = settings.expect("default settings");
+            assert_eq!(
+                settings.get("theme").and_then(Value::as_str),
+                Some("system")
+            );
+            assert_eq!(settings.len(), 13);
         }
         other => panic!("expected settings result, got {other:?}"),
     }
@@ -2342,11 +2490,12 @@ async fn remote_replay_materializes_entities_without_appending_local_logs() {
         .expect("server starts");
 
     let (mut socket, data_dir, device_id) = paired_socket(handle.port(), &config_store).await;
+    let local_entries_before = log_entries(&read_log_files(&log_dir(&data_dir, &device_id)).await);
     let url =
         "https://www.douban.com/people/49804423/status/8969603475/?_spm_id=x&dt_dapp=1&_i=a,b";
     send_connector(
         &mut socket,
-        ConnectorMessage::ReplayRemoteEntries {
+        test_control(TestControlMessage::ReplayRemoteEntries {
             device_id: "peer-sync".to_string(),
             entries: vec![
                 json!({
@@ -2354,17 +2503,20 @@ async fn remote_replay_materializes_entities_without_appending_local_logs() {
                     "action": "visit_page",
                     "url": url,
                     "title": "Remote Page",
+                    "referrerUrl": null,
                 }),
                 json!({
                     "timestamp": 1_710_000_020_100i64,
                     "action": "create_note",
                     "url": url,
                     "path": "objects/notes/remote-note.json",
+                    "title": null,
                     "excerpt": ["remote excerpt"],
-                    "note": "remote note body"
+                    "note": "remote note body",
+                    "cssPath": [""]
                 }),
             ],
-        },
+        }),
     )
     .await;
 
@@ -2395,7 +2547,7 @@ async fn remote_replay_materializes_entities_without_appending_local_logs() {
     assert!(note_raw.contains(url));
 
     let logs = read_log_files(&log_dir(&data_dir, &device_id)).await;
-    assert!(logs.is_empty());
+    assert_eq!(log_entries(&logs), local_entries_before);
     let peer_logs = read_log_files(&log_dir(&data_dir, "peer-sync")).await;
     let peer_entries = log_entries(&peer_logs);
     assert_eq!(peer_entries.len(), 2);
@@ -2421,13 +2573,15 @@ async fn run_command_executes_desktop_mutation() {
             "action": "create_list",
             "listOwner": "test-device",
             "name": "Reading",
-            "listId": "reading"
+            "listId": "reading",
+            "parentListId": null
         }),
         json!({
             "timestamp": 1_710_000_030_100i64,
             "action": "visit_page",
             "url": "https://example.com/command",
             "title": "Command Page",
+            "referrerUrl": null,
         }),
     ] {
         send_event_and_ack(&mut actor, entry).await;
@@ -2437,6 +2591,8 @@ async fn run_command_executes_desktop_mutation() {
         &mut actor,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "toggleListPin",
             "request": {
                 "listId": "reading",
@@ -2494,6 +2650,8 @@ async fn desktop_and_websocket_adapters_share_command_validation() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "renamePage",
             "request": { "userTitle": "Missing URL" }
         }),
@@ -2518,9 +2676,9 @@ async fn desktop_and_websocket_adapters_share_command_validation() {
 async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());
-    let handle = start_server(test_server_options(config_store.clone()))
-        .await
-        .expect("server starts");
+    let mut options = test_server_options(config_store.clone());
+    options.test_control_enabled = false;
+    let handle = start_server(options).await.expect("server starts");
 
     let (mut socket, data_dir, device_id) = paired_socket(handle.port(), &config_store).await;
 
@@ -2553,7 +2711,7 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         other => panic!("expected directory size, got {other:?}"),
     }
 
-    send_connector(&mut socket, ConnectorMessage::TestResetData).await;
+    send_connector(&mut socket, test_control(TestControlMessage::ResetData)).await;
     match next_daemon(&mut socket).await {
         DaemonMessage::Error { error, code, .. } => {
             assert_eq!(error, "test_control_disabled");
@@ -2562,13 +2720,45 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         other => panic!("expected disabled test control error, got {other:?}"),
     }
 
+    for message in [
+        test_control(TestControlMessage::Event {
+            entry: json!({
+                "timestamp": 1_710_000_000_000i64,
+                "action": "update_setting",
+                "key": "theme",
+                "value": "raw-event"
+            }),
+            source: "extension".to_string(),
+            buffer_depth: 0,
+            buffer_bytes: 0,
+        }),
+        test_control(TestControlMessage::ClearAllData),
+        test_control(TestControlMessage::ReplayRemoteEntries {
+            device_id: "remote-device".to_string(),
+            entries: Vec::new(),
+        }),
+        test_control(TestControlMessage::SetDeviceId {
+            device_id: "replacement-device".to_string(),
+        }),
+        test_control(TestControlMessage::PermanentDelete { keys: Vec::new() }),
+    ] {
+        send_connector(&mut socket, message).await;
+        match next_daemon(&mut socket).await {
+            DaemonMessage::Error { error, code, .. } => {
+                assert_eq!(error, "test_control_disabled");
+                assert_eq!(code, "test_control_disabled");
+            }
+            other => panic!("expected authority bypass rejection, got {other:?}"),
+        }
+    }
+
     send_connector(
         &mut socket,
         ConnectorMessage::RunCommand {
             action: "unsupportedCommand".to_string(),
             request: json!({}),
-            buffer_depth: None,
-            buffer_bytes: None,
+            buffer_depth: 0,
+            buffer_bytes: 0,
         },
     )
     .await;
@@ -2589,6 +2779,8 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "saveSettingsKey",
             "request": { "key": "theme", "value": "dark" },
             "bufferDepth": 7,
@@ -2632,7 +2824,7 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         } => {
             assert!(success);
             assert!(error.is_none());
-            assert_eq!(display_title, "Matrix Page");
+            assert_eq!(display_title.as_deref(), Some("Matrix   Page"));
         }
         other => panic!("expected popup summary result, got {other:?}"),
     }
@@ -2641,13 +2833,16 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "reportVisit",
             "request": {
                 "timestamp": 1_710_030_000_000i64,
                 "url": "https://example.com/matrix",
                 "title": "Matrix Page",
-                "referrerUrl": "https://example.com/ref",
-                "bodyPreview": "matrix body"
+                "referrer": "https://example.com/ref",
+                "bodyPreview": "matrix body",
+                "bypassBlacklist": false
             }
         }),
     )
@@ -2661,6 +2856,8 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "reportLeave",
             "request": {
                 "timestamp": 1_710_030_005_000i64,
@@ -2681,6 +2878,8 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "ratePage",
             "request": {
                 "url": "https://example.com/matrix",
@@ -2699,6 +2898,8 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "saveListMeta",
             "request": { "name": "Matrix List" }
         }),
@@ -2725,6 +2926,8 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "addRule",
             "request": {
                 "listId": list_id,
@@ -2752,6 +2955,8 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "updateRule",
             "request": {
                 "listId": list_id,
@@ -2770,6 +2975,8 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "removeRule",
             "request": {
                 "listId": list_id,
@@ -2787,6 +2994,8 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "addListPins",
             "request": {
                 "listId": list_id,
@@ -2808,6 +3017,8 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "updateListTree",
             "request": {
                 "tree": [{ "slug": list_id, "children": [] }]
@@ -2824,11 +3035,14 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "createNote",
             "request": {
                 "url": "https://example.com/matrix",
                 "title": "Matrix Page",
                 "excerpt": ["matrix excerpt"],
+                "cssPath": [""],
                 "note": "matrix note"
             }
         }),
@@ -2855,6 +3069,8 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "updateNote",
             "request": {
                 "noteSlug": note_slug,
@@ -2884,6 +3100,8 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "deleteNote",
             "request": { "noteSlug": updated_note_slug }
         }),
@@ -2897,6 +3115,8 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "restoreNote",
             "request": { "noteSlug": updated_note_slug }
         }),
@@ -2920,6 +3140,8 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "deleteSnapshot",
             "request": {
                 "slug": page_slug,
@@ -2936,6 +3158,8 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "restoreSnapshot",
             "request": { "snapSlug": format!("{page_slug}-1710030010000") }
         }),
@@ -2950,6 +3174,8 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "deleteList",
             "request": { "listId": list_id }
         }),
@@ -2963,6 +3189,8 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "restoreList",
             "request": { "listId": list_id }
         }),
@@ -2977,11 +3205,14 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "importHistory",
             "request": {
                 "entries": [{
                     "url": "https://example.com/imported-history",
                     "title": "Imported History",
+                    "referrerUrl": null,
                     "visitTimes": [1_710_030_020_000i64]
                 }]
             }
@@ -2997,6 +3228,8 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "importBookmarks",
             "request": {
                 "tree": [{
@@ -3004,7 +3237,9 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
                     "bookmarks": [{
                         "url": "https://example.com/imported-bookmark",
                         "title": "Imported Bookmark"
-                    }]
+                    }],
+                    "skipped": [],
+                    "children": []
                 }]
             }
         }),
@@ -3082,7 +3317,7 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
             assert!(success);
             assert!(error.is_none());
             assert_eq!(page.url.as_deref(), Some("https://example.com/matrix"));
-            assert_eq!(attention.total_seconds, 5);
+            assert_eq!(attention.total_seconds, Some(5));
         }
         other => panic!("expected page summary, got {other:?}"),
     }
@@ -3110,28 +3345,25 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
 
     send_connector(
         &mut socket,
-        ConnectorMessage::PermanentDelete {
+        test_control(TestControlMessage::PermanentDelete {
             keys: vec!["manifest:orphaned".to_string()],
-        },
+        }),
     )
     .await;
     match next_daemon(&mut socket).await {
-        DaemonMessage::PermanentDeleteResult {
-            success,
-            deleted_keys,
-            error,
-        } => {
-            assert!(success);
-            assert!(deleted_keys.is_empty());
-            assert!(error.is_none());
+        DaemonMessage::Error { error, code, .. } => {
+            assert_eq!(error, "test_control_disabled");
+            assert_eq!(code, "test_control_disabled");
         }
-        other => panic!("expected no-op permanent delete, got {other:?}"),
+        other => panic!("expected authority bypass rejection, got {other:?}"),
     }
 
     send_raw(
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "permanentDeleteAll",
             "request": {}
         }),
@@ -3160,43 +3392,14 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
 }
 
 #[tokio::test]
-async fn run_command_bootstraps_default_lists_in_desktop() {
+async fn daemon_startup_bootstraps_default_lists() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());
     let handle = start_server(test_server_options(config_store.clone()))
         .await
         .expect("server starts");
 
-    let (mut socket, data_dir, _) = paired_socket(handle.port(), &config_store).await;
-    send_raw(
-        &mut socket,
-        json!({
-            "type": "run_command",
-            "action": "ensureDefaultLists",
-            "request": {}
-        }),
-    )
-    .await;
-
-    let response = next_daemon(&mut socket).await;
-    match response {
-        DaemonMessage::CommandResult {
-            success,
-            response,
-            error,
-        } => {
-            assert!(success);
-            assert!(error.is_none());
-            assert_eq!(
-                response
-                    .expect("response")
-                    .get("created")
-                    .and_then(|value| value.as_bool()),
-                Some(true)
-            );
-        }
-        other => panic!("expected command result, got {other:?}"),
-    }
+    let (_socket, data_dir, _) = paired_socket(handle.port(), &config_store).await;
 
     let hubs_path = list_path(&data_dir, "hubs");
     let list_raw = wait_for_text(&hubs_path, |raw| raw.contains("\"type\": \"function\"")).await;
@@ -3214,7 +3417,7 @@ async fn run_command_bootstraps_default_lists_in_desktop() {
 }
 
 #[tokio::test]
-async fn page_summary_classifies_popup_blacklist_with_desktop_policy() {
+async fn page_summary_and_visit_reject_non_web_platform_urls() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());
     let handle = start_server(test_server_options(config_store.clone()))
@@ -3238,10 +3441,9 @@ async fn page_summary_classifies_popup_blacklist_with_desktop_policy() {
             error,
             ..
         } => {
-            assert!(success);
-            assert!(error.is_none());
-            assert!(access.blacklisted);
-            assert!(!access.has_visit_history);
+            assert!(!success);
+            assert!(access.is_none());
+            assert!(error.as_deref().is_some_and(|message| !message.is_empty()));
         }
         other => panic!("expected popup summary result, got {other:?}"),
     }
@@ -3250,43 +3452,27 @@ async fn page_summary_classifies_popup_blacklist_with_desktop_policy() {
         &mut socket,
         json!({
             "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
             "action": "reportVisit",
             "request": {
                 "timestamp": 1_710_000_040_000i64,
                 "url": "chrome://settings",
                 "title": "Settings",
+                "referrer": null,
+                "bodyPreview": null,
                 "bypassBlacklist": true
             }
         }),
     )
     .await;
-    assert!(matches!(
-        next_daemon(&mut socket).await,
-        DaemonMessage::CommandResult { success: true, .. }
-    ));
-
-    send_raw(
-        &mut socket,
-        json!({
-            "type": "get_page_summary",
-            "url": "chrome://settings",
-            "title": "Settings"
-        }),
-    )
-    .await;
     match next_daemon(&mut socket).await {
-        DaemonMessage::PageSummaryResult {
-            success,
-            access,
-            error,
-            ..
-        } => {
-            assert!(success);
-            assert!(error.is_none());
-            assert!(!access.blacklisted);
-            assert!(access.has_visit_history);
-        }
-        other => panic!("expected popup summary result, got {other:?}"),
+        DaemonMessage::CommandResult {
+            success: false,
+            response: None,
+            error: Some(error),
+        } => assert!(!error.is_empty()),
+        other => panic!("expected non-web visit rejection, got {other:?}"),
     }
 
     handle.shutdown().await;
@@ -3308,7 +3494,8 @@ async fn popup_summary_lists_use_shared_storage_cache_after_desktop_side_write()
             "action": "create_list",
             "listOwner": "test-device",
             "name": "Existing",
-            "listId": "existing"
+            "listId": "existing",
+            "parentListId": null
         }),
     )
     .await;
@@ -3317,7 +3504,8 @@ async fn popup_summary_lists_use_shared_storage_cache_after_desktop_side_write()
         &mut socket,
         json!({
             "type": "get_page_summary",
-            "url": "https://example.com/popup-list-cache"
+            "url": "https://example.com/popup-list-cache",
+            "title": "Popup List Cache"
         }),
     )
     .await;
@@ -3329,7 +3517,7 @@ async fn popup_summary_lists_use_shared_storage_cache_after_desktop_side_write()
                     .iter()
                     .map(|list| list.name.as_str())
                     .collect::<Vec<_>>(),
-                vec!["Existing"]
+                vec!["Existing", "Hubs"]
             );
         }
         other => panic!("expected popup page summary, got {other:?}"),
@@ -3345,7 +3533,8 @@ async fn popup_summary_lists_use_shared_storage_cache_after_desktop_side_write()
         &mut socket,
         json!({
             "type": "get_page_summary",
-            "url": "https://example.com/popup-list-cache"
+            "url": "https://example.com/popup-list-cache",
+            "title": "Popup List Cache"
         }),
     )
     .await;
@@ -3356,7 +3545,7 @@ async fn popup_summary_lists_use_shared_storage_cache_after_desktop_side_write()
                 .iter()
                 .map(|list| list.name.as_str())
                 .collect::<Vec<_>>();
-            assert_eq!(names, vec!["Desktop Added", "Existing"]);
+            assert_eq!(names, vec!["Desktop Added", "Existing", "Hubs"]);
         }
         other => panic!("expected popup page summary, got {other:?}"),
     }
@@ -3465,7 +3654,11 @@ async fn note_replace_ingest_deletes_old_note_and_links_new_note() {
     )
     .await;
 
-    wait_for_absent(&note_path(&data_dir, "n1")).await;
+    let replaced_note_raw = wait_for_text(&note_path(&data_dir, "n1"), |raw| {
+        raw.contains("\"deleted\": true") && raw.contains("\"replacedBy\": \"note:n2\"")
+    })
+    .await;
+    assert!(replaced_note_raw.contains("\"deletionReason\": \"replaced\""));
 
     let new_note_path = note_path(&data_dir, "n2");
     let new_note_raw =
@@ -3506,7 +3699,8 @@ async fn permanent_delete_removes_orphaned_note_list_and_snapshot_files() {
             "action": "create_list",
             "listOwner": "test-device",
             "name": "Reading",
-            "listId": "reading-list"
+            "listId": "reading-list",
+            "parentListId": null
         }),
     )
     .await;
@@ -3546,13 +3740,13 @@ async fn permanent_delete_removes_orphaned_note_list_and_snapshot_files() {
 
     send_connector(
         &mut socket,
-        ConnectorMessage::PermanentDelete {
+        test_control(TestControlMessage::PermanentDelete {
             keys: vec![
                 "note:n1".to_string(),
                 format!("snapshot:{page_slug}-1710000010200"),
                 "list:reading-list".to_string(),
             ],
-        },
+        }),
     )
     .await;
 
@@ -3609,7 +3803,8 @@ async fn list_rule_pin_and_settings_events_persist_expected_files() {
             "action": "create_list",
             "listOwner": "test-device",
             "name": "Reading",
-            "listId": "reading-list"
+            "listId": "reading-list",
+            "parentListId": null
         }),
         json!({
             "timestamp": 1_710_000_003_100i64,
@@ -3617,7 +3812,8 @@ async fn list_rule_pin_and_settings_events_persist_expected_files() {
             "listOwner": "test-device",
             "name": "Reading",
             "urls": ["https://example.com/reading"],
-            "titles": ["Reading Page"]
+            "titles": ["Reading Page"],
+            "source": null
         }),
         json!({
             "timestamp": 1_710_000_003_200i64,
@@ -3634,7 +3830,7 @@ async fn list_rule_pin_and_settings_events_persist_expected_files() {
             "timestamp": 1_710_000_003_300i64,
             "action": "update_setting",
             "key": "theme",
-            "value": "sepia"
+            "value": "dark"
         }),
     ] {
         send_event_and_ack(&mut socket, entry).await;
@@ -3651,8 +3847,8 @@ async fn list_rule_pin_and_settings_events_persist_expected_files() {
 
     let settings_path = manifest_path(&data_dir, "settings.json");
     let settings_raw =
-        wait_for_text(&settings_path, |raw| raw.contains("\"theme\": \"sepia\"")).await;
-    assert!(settings_raw.contains("\"theme\": \"sepia\""));
+        wait_for_text(&settings_path, |raw| raw.contains("\"theme\": \"dark\"")).await;
+    assert!(settings_raw.contains("\"theme\": \"dark\""));
 
     let name_map_path = manifest_path(&data_dir, "list-name-to-id.json");
     let name_map_raw = wait_for_text(&name_map_path, |raw| {
@@ -3685,16 +3881,17 @@ async fn visit_events_auto_pin_lists_with_matching_function_rules() {
             "timestamp": 1_710_000_004_000i64,
             "action": "create_list",
             "listOwner": "test-device",
-            "name": "Hubs",
-            "listId": "hubs"
+            "name": "Auto Hubs",
+            "listId": "auto-hubs",
+            "parentListId": null
         }),
         json!({
             "timestamp": 1_710_000_004_100i64,
             "action": "add_rule",
             "listOwner": "test-device",
-            "name": "Hubs",
+            "name": "Auto Hubs",
             "rule": {
-                "id": "rule-f-hubs",
+                "id": "rule-f-auto-hubs",
                 "type": "function",
                 "config": {
                     "description": "Hub pages",
@@ -3707,19 +3904,20 @@ async fn visit_events_auto_pin_lists_with_matching_function_rules() {
             "action": "visit_page",
             "url": "https://example.com/",
             "title": "Example Home",
+            "referrerUrl": null,
         }),
     ] {
         send_event_and_ack(&mut socket, entry).await;
     }
 
-    let list_path = list_path(&data_dir, "hubs");
+    let list_path = list_path(&data_dir, "auto-hubs");
     let list_raw = wait_for_text(&list_path, |raw| {
-        raw.contains("\"rule-f-hubs\"")
+        raw.contains("\"rule-f-auto-hubs\"")
             && raw.contains("\"source\": \"auto\"")
             && raw.contains("\"id\": \"page:")
     })
     .await;
-    assert!(list_raw.contains("\"rule-f-hubs\""));
+    assert!(list_raw.contains("\"rule-f-auto-hubs\""));
     assert!(list_raw.contains("\"source\": \"auto\""));
     assert!(list_raw.contains("\"id\": \"page:"));
 
@@ -3748,7 +3946,7 @@ async fn preview_rule_reports_matches_and_compile_errors() {
 
     socket
         .send(Message::Text(
-            json!({
+            test_control_json(json!({
                 "type": "preview_rule",
                 "rule": {
                     "type": "function",
@@ -3760,14 +3958,16 @@ async fn preview_rule_reports_matches_and_compile_errors() {
                 "entries": [
                     {
                         "url": "https://example.com/long",
-                        "title": "A Very Long Title"
+                        "title": "A Very Long Title",
+                        "bodyPreview": null
                     },
                     {
                         "url": "https://example.com/short",
-                        "title": "Short"
+                        "title": "Short",
+                        "bodyPreview": null
                     }
                 ]
-            })
+            }))
             .to_string(),
         ))
         .await
@@ -3792,7 +3992,7 @@ async fn preview_rule_reports_matches_and_compile_errors() {
 
     socket
         .send(Message::Text(
-            json!({
+            test_control_json(json!({
                 "type": "preview_rule",
                 "rule": {
                     "type": "function",
@@ -3802,7 +4002,7 @@ async fn preview_rule_reports_matches_and_compile_errors() {
                     }
                 },
                 "entries": []
-            })
+            }))
             .to_string(),
         ))
         .await
@@ -3841,7 +4041,8 @@ async fn run_rule_batch_persists_matches_and_returns_hits() {
             "action": "create_list",
             "listOwner": "test-device",
             "name": "Reading",
-            "listId": "reading"
+            "listId": "reading",
+            "parentListId": null
         }),
         json!({
             "timestamp": 1_710_000_005_100i64,
@@ -3861,20 +4062,22 @@ async fn run_rule_batch_persists_matches_and_returns_hits() {
     let matching_url = "https://github.com/example/repo?_spm_id=x&utm_source=keep&_i=a,b";
     socket
         .send(Message::Text(
-            json!({
+            test_control_json(json!({
                 "type": "run_rule_batch",
                 "listIds": ["reading"],
                 "entries": [
                     {
                         "url": matching_url,
-                        "title": "Repo"
+                        "title": "Repo",
+                        "bodyPreview": null
                     },
                     {
                         "url": "https://example.com/",
-                        "title": "Example"
+                        "title": "Example",
+                        "bodyPreview": null
                     }
                 ]
-            })
+            }))
             .to_string(),
         ))
         .await
@@ -3945,7 +4148,8 @@ async fn run_rule_batch_invalid_matching_url_returns_structured_error() {
             "action": "create_list",
             "listOwner": "test-device",
             "name": "Broken Rule Batch",
-            "listId": "broken-rule-batch"
+            "listId": "broken-rule-batch",
+            "parentListId": null
         }),
         json!({
             "timestamp": 1_710_000_006_100i64,
@@ -3964,14 +4168,15 @@ async fn run_rule_batch_invalid_matching_url_returns_structured_error() {
 
     send_raw(
         &mut socket,
-        json!({
+        test_control_json(json!({
             "type": "run_rule_batch",
             "listIds": ["broken-rule-batch"],
             "entries": [{
                 "url": "not a url",
-                "title": "Match"
+                "title": "Match",
+                "bodyPreview": null
             }]
-        }),
+        })),
     )
     .await;
 
@@ -4002,17 +4207,18 @@ async fn replay_failure_pauses_daemon_and_rejects_followup_events() {
     let (mut socket, _data_dir, _device_id) = paired_socket(handle.port(), &config_store).await;
     socket
         .send(Message::Text(
-            serde_json::to_string(&ConnectorMessage::Event {
+            serde_json::to_string(&test_control(TestControlMessage::Event {
                 entry: json!({
                     "timestamp": 1_710_000_000_000i64,
                     "action": "visit_page",
                     "url": "not a url",
-                    "title": "Invalid URL"
+                    "title": "Invalid URL",
+                    "referrerUrl": null
                 }),
                 source: "extension".to_string(),
-                buffer_depth: None,
-                buffer_bytes: None,
-            })
+                buffer_depth: 0,
+                buffer_bytes: 0,
+            }))
             .expect("event json"),
         ))
         .await
@@ -4042,17 +4248,18 @@ async fn replay_failure_pauses_daemon_and_rejects_followup_events() {
 
     socket
         .send(Message::Text(
-            serde_json::to_string(&ConnectorMessage::Event {
+            serde_json::to_string(&test_control(TestControlMessage::Event {
                 entry: json!({
                     "timestamp": 1_710_000_000_100i64,
                     "action": "visit_page",
                     "url": "https://example.com/after-pause",
-                    "title": "After Pause"
+                    "title": "After Pause",
+                    "referrerUrl": null
                 }),
                 source: "extension".to_string(),
-                buffer_depth: None,
-                buffer_bytes: None,
-            })
+                buffer_depth: 0,
+                buffer_bytes: 0,
+            }))
             .expect("event json"),
         ))
         .await
@@ -4086,17 +4293,18 @@ async fn replay_failure_pauses_daemon_and_rejects_followup_events() {
 
     socket
         .send(Message::Text(
-            serde_json::to_string(&ConnectorMessage::Event {
+            serde_json::to_string(&test_control(TestControlMessage::Event {
                 entry: json!({
                     "timestamp": 1_710_000_000_200i64,
                     "action": "visit_page",
                     "url": "https://example.com/after-resume",
                     "title": "After Resume",
+                    "referrerUrl": null,
                 }),
                 source: "extension".to_string(),
-                buffer_depth: None,
-                buffer_bytes: None,
-            })
+                buffer_depth: 0,
+                buffer_bytes: 0,
+            }))
             .expect("event json"),
         ))
         .await

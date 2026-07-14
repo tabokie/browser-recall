@@ -1,5 +1,10 @@
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, openHelperPage, getSlugForUrl } from './helpers.js';
+import {
+  resetAndSeed,
+  settingsCheckpoint,
+  openHelperPage,
+  getSlugForUrl,
+} from './helpers.js';
 
 test.describe('Tab reported URL tracking', () => {
   test.beforeAll(({ localServer }) => {
@@ -15,9 +20,7 @@ test.describe('Tab reported URL tracking', () => {
     setupDir,
     localServer,
   }) => {
-    await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
-    ]);
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
 
     const helper = await openHelperPage(extContext, extensionId);
     const originalUrl = localServer.url('/spa-page');

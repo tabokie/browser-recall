@@ -1,5 +1,8 @@
 pub mod entities;
 mod handlers;
+pub mod settings;
+
+pub use settings::PERSISTENT_SETTINGS_KEYS;
 
 use chrono::{Local, TimeZone};
 use entities::{
@@ -27,21 +30,6 @@ pub(crate) const NOTE_PREFIX: &str = "note:";
 pub(crate) const SNAPSHOT_PREFIX: &str = "snapshot:";
 pub(crate) const LIST_PREFIX: &str = "list:";
 pub(crate) const SETTINGS_KEY: &str = "manifest:settings";
-pub const PERSISTENT_SETTINGS_KEYS: &[&str] = &[
-    "theme",
-    "colorScheme",
-    "localeOverride",
-    "historyFileBatch",
-    "captureSnapshotVideo",
-    "blacklistEnabled",
-    "urlBlacklist",
-    "titleCleanupEnabled",
-    "titleTrimRules",
-    "syncEnabled",
-    "syncMethod",
-    "syncRepoUrl",
-    "syncRetentionDays",
-];
 pub(crate) const NAME_TO_ID_KEY: &str = "manifest:name-to-id";
 pub(crate) const LIST_ORDER_KEY: &str = "manifest:list-order";
 pub(crate) const ORPHANED_KEY: &str = "manifest:orphaned";
@@ -67,6 +55,14 @@ where
         }
         Some(_) => Err(serde::de::Error::custom("value must be a string array")),
     }
+}
+
+fn deserialize_required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::deserialize(deserializer)
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -142,19 +138,28 @@ pub enum LogEntry {
     VisitPage {
         timestamp: i64,
         url: String,
-        #[serde(default)]
+        #[serde(deserialize_with = "deserialize_required_option")]
         title: Option<String>,
-        #[serde(default, rename = "referrerUrl")]
+        #[serde(
+            rename = "referrerUrl",
+            deserialize_with = "deserialize_required_option"
+        )]
         referrer_url: Option<String>,
     },
     LeavePage {
         timestamp: i64,
         url: String,
-        #[serde(default)]
+        #[serde(deserialize_with = "deserialize_required_option")]
         title: Option<String>,
-        #[serde(default, rename = "scrollDepth")]
+        #[serde(
+            rename = "scrollDepth",
+            deserialize_with = "deserialize_required_option"
+        )]
         scroll_depth: Option<i64>,
-        #[serde(default, rename = "timeOnPage")]
+        #[serde(
+            rename = "timeOnPage",
+            deserialize_with = "deserialize_required_option"
+        )]
         time_on_page: Option<i64>,
     },
     RenamePage {
@@ -167,7 +172,7 @@ pub enum LogEntry {
         timestamp: i64,
         url: String,
         likes: i64,
-        #[serde(default)]
+        #[serde(deserialize_with = "deserialize_required_option")]
         title: Option<String>,
     },
     UpdateSetting {
@@ -181,9 +186,9 @@ pub enum LogEntry {
         #[serde(rename = "listOwner")]
         list_owner: String,
         urls: Vec<String>,
-        #[serde(default)]
+        #[serde(deserialize_with = "deserialize_required_option")]
         titles: Option<Vec<Option<String>>>,
-        #[serde(default)]
+        #[serde(deserialize_with = "deserialize_required_option")]
         source: Option<String>,
     },
     UnpinFromList {
@@ -222,9 +227,12 @@ pub enum LogEntry {
         name: String,
         #[serde(rename = "listOwner")]
         list_owner: String,
-        #[serde(default, rename = "listId")]
+        #[serde(rename = "listId", deserialize_with = "deserialize_required_option")]
         list_id: Option<String>,
-        #[serde(default, rename = "parentListId")]
+        #[serde(
+            rename = "parentListId",
+            deserialize_with = "deserialize_required_option"
+        )]
         parent_list_id: Option<String>,
     },
     UpdateList {
@@ -232,7 +240,7 @@ pub enum LogEntry {
         name: String,
         #[serde(rename = "listOwner")]
         list_owner: String,
-        #[serde(default, rename = "newName")]
+        #[serde(rename = "newName", deserialize_with = "deserialize_required_option")]
         new_name: Option<String>,
     },
     UpdateListTree {
@@ -255,14 +263,13 @@ pub enum LogEntry {
         timestamp: i64,
         url: String,
         path: String,
-        #[serde(default)]
+        #[serde(deserialize_with = "deserialize_required_option")]
         title: Option<String>,
-        #[serde(default, deserialize_with = "deserialize_string_array_value")]
+        #[serde(deserialize_with = "deserialize_string_array_value")]
         excerpt: Option<Value>,
-        #[serde(default)]
+        #[serde(deserialize_with = "deserialize_required_option")]
         note: Option<String>,
         #[serde(
-            default,
             rename = "cssPath",
             deserialize_with = "deserialize_string_array_value"
         )]
@@ -270,29 +277,28 @@ pub enum LogEntry {
     },
     DeleteNote {
         timestamp: i64,
-        #[serde(default)]
+        #[serde(deserialize_with = "deserialize_required_option")]
         url: Option<String>,
         path: String,
     },
     RestoreNote {
         timestamp: i64,
-        #[serde(default)]
+        #[serde(deserialize_with = "deserialize_required_option")]
         url: Option<String>,
         path: String,
     },
     ReplaceNote {
         timestamp: i64,
-        #[serde(default)]
+        #[serde(deserialize_with = "deserialize_required_option")]
         url: Option<String>,
         path: String,
         #[serde(rename = "oldPath")]
         old_path: String,
-        #[serde(default, deserialize_with = "deserialize_string_array_value")]
+        #[serde(deserialize_with = "deserialize_string_array_value")]
         excerpt: Option<Value>,
-        #[serde(default)]
+        #[serde(deserialize_with = "deserialize_required_option")]
         note: Option<String>,
         #[serde(
-            default,
             rename = "cssPath",
             deserialize_with = "deserialize_string_array_value"
         )]
@@ -302,7 +308,7 @@ pub enum LogEntry {
         timestamp: i64,
         url: String,
         path: String,
-        #[serde(default)]
+        #[serde(deserialize_with = "deserialize_required_option")]
         title: Option<String>,
     },
     DeleteSnapshot {
@@ -371,12 +377,12 @@ impl fmt::Display for ReplayError {
 impl Error for ReplayError {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct RuleInput {
-    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub id: Option<String>,
     #[serde(rename = "type")]
     pub rule_type: String,
-    #[serde(default)]
     pub config: BTreeMap<String, Value>,
 }
 
@@ -689,14 +695,6 @@ pub(crate) fn default_note(slug: &str) -> NoteEntity {
     NoteEntity::new(slug.to_string())
 }
 
-pub(crate) fn default_list(slug: &str) -> ListEntity {
-    ListEntity::new(slug.to_string())
-}
-
-pub(crate) fn default_name_to_id() -> NameToIdManifest {
-    NameToIdManifest::new()
-}
-
 pub(crate) fn default_orphaned() -> OrphanedManifest {
     OrphanedManifest::new()
 }
@@ -787,14 +785,16 @@ pub(crate) async fn find_lists_with_pin<L, Fut>(
     result: &EntityMap,
     load: &L,
     pin_id: &str,
-) -> Vec<(String, ListEntity)>
+) -> Result<Vec<(String, ListEntity)>, ReplayError>
 where
     L: Fn(&str) -> Fut,
     Fut: Future<Output = Option<Entity>>,
 {
-    let name_map = get_name_to_id(result, load, NAME_TO_ID_KEY)
-        .await
-        .unwrap_or_else(NameToIdManifest::new);
+    let Some(name_map) = get_name_to_id(result, load, NAME_TO_ID_KEY).await else {
+        // The list index is created by the first create_list entry. Its absence
+        // therefore means this projection has never contained a list.
+        return Ok(Vec::new());
+    };
     let mut seen = HashSet::new();
     let mut matches = Vec::new();
     for list_id in name_map.paths.values() {
@@ -802,14 +802,16 @@ where
         if !seen.insert(list_key.clone()) {
             continue;
         }
-        let Some(list) = get_list(result, load, &list_key).await else {
-            continue;
-        };
+        let list = get_list(result, load, &list_key).await.ok_or_else(|| {
+            ReplayError::InvalidEntry(format!("name-to-id references missing list: {list_key}"))
+        })?;
+        let owner = list.owner.clone();
+        validate_list_identity(&list_key, &list, &owner)?;
         if list.pins.iter().any(|pin| pin.id == pin_id) {
             matches.push((list_key, list));
         }
     }
-    matches
+    Ok(matches)
 }
 
 pub(crate) async fn ensure_page<L, Fut>(
@@ -830,8 +832,11 @@ where
         }
         page
     });
-    if page.created_at.is_none() && timestamp > 0 {
-        page.created_at = Some(timestamp);
+    if timestamp > 0 {
+        page.created_at = Some(
+            page.created_at
+                .map_or(timestamp, |created_at| created_at.min(timestamp)),
+        );
     }
     if page.url.is_none() {
         page.url = Some(url.to_string());
@@ -857,11 +862,16 @@ where
     let mut page = get_page(result, load, &page_key).await.unwrap_or_else(|| {
         created = true;
         let mut page = default_page(&slug);
-        page.created_at = Some(timestamp);
+        if timestamp > 0 {
+            page.created_at = Some(timestamp);
+        }
         page
     });
-    if page.created_at.is_none() {
-        page.created_at = Some(timestamp);
+    if timestamp > 0 {
+        page.created_at = Some(
+            page.created_at
+                .map_or(timestamp, |created_at| created_at.min(timestamp)),
+        );
     }
     page.url = Some(url.to_string());
     if created {
@@ -889,22 +899,54 @@ pub(crate) fn touch_timestamp_map(
 pub(crate) fn append_unique(items: &mut Vec<String>, value: String) {
     if !items.contains(&value) {
         items.push(value);
+        items.sort_unstable();
     }
 }
 
-pub(crate) fn note_slug_from_path(path: &str) -> &str {
-    path.strip_prefix("objects/notes/")
-        .expect("note path must start with objects/notes/")
-        .strip_suffix(".json")
-        .expect("note path must end with .json")
+pub(crate) fn note_slug_from_path(path: &str) -> Result<&str, ReplayError> {
+    let slug = path
+        .strip_prefix("objects/notes/")
+        .and_then(|value| value.strip_suffix(".json"))
+        .ok_or_else(|| {
+            ReplayError::InvalidEntry(format!(
+                "note path must be objects/notes/<slug>.json: {path}"
+            ))
+        })?;
+    if slug.is_empty() || slug.contains('/') || slug == "." || slug == ".." {
+        return Err(ReplayError::InvalidEntry(format!(
+            "note path contains an invalid slug: {path}"
+        )));
+    }
+    Ok(slug)
 }
 
-pub(crate) fn snapshot_stem_from_path(path: &str) -> &str {
-    path.strip_prefix("objects/snapshots/")
-        .expect("snapshot path must start with objects/snapshots/")
-        .rsplit_once('/')
-        .map(|(_, stem)| stem)
-        .expect("snapshot path must include shard segment")
+pub(crate) fn snapshot_stem_from_path(path: &str) -> Result<&str, ReplayError> {
+    let relative = path.strip_prefix("objects/snapshots/").ok_or_else(|| {
+        ReplayError::InvalidEntry(format!(
+            "snapshot path must start with objects/snapshots/: {path}"
+        ))
+    })?;
+    let (shard, stem) = relative.split_once('/').ok_or_else(|| {
+        ReplayError::InvalidEntry(format!("snapshot path is missing its shard: {path}"))
+    })?;
+    if shard.len() != 2 || !shard.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(ReplayError::InvalidEntry(format!(
+            "snapshot path has an invalid shard: {path}"
+        )));
+    }
+    let (slug, timestamp) = stem.rsplit_once('-').ok_or_else(|| {
+        ReplayError::InvalidEntry(format!("snapshot path is missing its timestamp: {path}"))
+    })?;
+    if slug.is_empty()
+        || slug.contains('/')
+        || timestamp.parse::<i64>().is_err()
+        || relative.matches('/').count() != 1
+    {
+        return Err(ReplayError::InvalidEntry(format!(
+            "snapshot path has an invalid stem: {path}"
+        )));
+    }
+    Ok(stem)
 }
 
 pub(crate) fn entity_slug(key: &str) -> &str {
@@ -913,6 +955,25 @@ pub(crate) fn entity_slug(key: &str) -> &str {
 
 pub(crate) fn is_system_list(key: &str) -> bool {
     key.starts_with("list:system/")
+}
+
+pub(crate) fn validate_list_identity(
+    key: &str,
+    list: &ListEntity,
+    expected_owner: &str,
+) -> Result<(), ReplayError> {
+    if list.owner != expected_owner {
+        return Err(ReplayError::InvalidEntry(format!(
+            "{key} owner {:?} does not match command owner {expected_owner:?}",
+            list.owner
+        )));
+    }
+    if list.name.trim().is_empty() {
+        return Err(ReplayError::InvalidEntry(format!(
+            "{key} has no name; migrate browser data before replay"
+        )));
+    }
+    Ok(())
 }
 
 pub fn page_retains_checkpoint(page: &PageEntity) -> bool {
@@ -963,7 +1024,7 @@ where
 
     let name_map = get_name_to_id(result, load, NAME_TO_ID_KEY)
         .await
-        .unwrap_or_else(default_name_to_id);
+        .ok_or_else(|| ReplayError::InvalidEntry("name-to-id manifest is missing".to_string()))?;
     if let Some(list_id) = name_map.paths.get(&format!("{list_owner}/{name}")) {
         return Ok(Some(format!("{LIST_PREFIX}{list_id}")));
     }
@@ -976,7 +1037,7 @@ where
             continue;
         }
         if let Some(list) = get_list(result, load, &orphan.key).await {
-            if list.owner.as_deref() == Some(list_owner) && list.name == name {
+            if list.owner == list_owner && list.name == name {
                 return Ok(Some(orphan.key));
             }
         }
@@ -1102,15 +1163,18 @@ pub(crate) fn generate_list_id(name: &str, timestamp: i64) -> String {
     )
 }
 
-pub(crate) fn generate_rule_id(rule_type: &str, timestamp: i64) -> String {
-    let prefix = rule_type.chars().next().unwrap_or('r');
+pub(crate) fn generate_rule_id(rule_type: &str, timestamp: i64) -> Result<String, ReplayError> {
+    let prefix = rule_type
+        .chars()
+        .next()
+        .ok_or_else(|| ReplayError::InvalidEntry("rule type must not be empty".to_string()))?;
     let hash_input = format!("{rule_type}:{timestamp}");
     let suffix = to_base36(hash_string(&hash_input));
-    format!(
+    Ok(format!(
         "rule-{prefix}-{}-{}",
         timestamp.to_string().to_lowercase(),
         &suffix[..suffix.len().min(4)]
-    )
+    ))
 }
 
 fn hash_string(text: &str) -> u64 {
@@ -1124,25 +1188,26 @@ fn hash_string(text: &str) -> u64 {
     i64::from(hash).unsigned_abs()
 }
 
-pub(crate) fn local_visit_date(timestamp: i64) -> i32 {
+pub(crate) fn local_visit_date(timestamp: i64) -> Result<i32, ReplayError> {
     let datetime = Local
         .timestamp_millis_opt(timestamp)
         .single()
-        .unwrap_or_else(|| {
-            Local
-                .with_ymd_and_hms(1970, 1, 1, 0, 0, 0)
-                .earliest()
-                .expect("epoch exists")
-        });
+        .ok_or_else(|| ReplayError::InvalidEntry(format!("invalid timestamp: {timestamp}")))?;
     let year = datetime.year();
     let month = i32::from(datetime.month() as u16);
     let day = i32::from(datetime.day() as u16);
-    year * 10000 + month * 100 + day
+    Ok(year * 10000 + month * 100 + day)
 }
 
 pub fn generate_slug_from_url(url: &str) -> Result<String, ReplayError> {
     let parsed = Url::parse(url).map_err(|_| ReplayError::InvalidUrl(url.to_string()))?;
-    let mut domain = parsed.host_str().unwrap_or_default().to_lowercase();
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return Err(ReplayError::InvalidUrl(url.to_string()));
+    }
+    let mut domain = parsed
+        .host_str()
+        .ok_or_else(|| ReplayError::InvalidUrl(url.to_string()))?
+        .to_lowercase();
     if let Some(stripped) = domain.strip_prefix("www.") {
         domain = stripped.to_string();
     }
@@ -1249,13 +1314,7 @@ mod tests {
         assert!(note.note.is_none());
         assert!(!note.deleted);
 
-        let list = default_list("list-slug");
-        assert_eq!(list.slug, "list-slug");
-        assert!(list.pins.is_empty());
-        assert!(list.rules.is_empty());
-        assert!(!list.deleted);
-
-        let name_map = default_name_to_id();
+        let name_map = NameToIdManifest::new();
         assert!(name_map.timestamps.is_empty());
         assert!(name_map.paths.is_empty());
 

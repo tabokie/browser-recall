@@ -111,7 +111,9 @@ function pauseService(code, message) {
   badgeController
     .setServicePaused({ title: message })
     .catch((error) => logDebug('[badge] service pause failed:', error.message));
-  chrome.storage.session.set({ serviceError }).catch(() => {});
+  chrome.storage.session.set({ serviceError }).catch((error) => {
+    logError('[service] Failed to persist paused state:', error);
+  });
   logError(`Service paused: [${code}] ${message}`);
 }
 
@@ -122,7 +124,9 @@ function resumeService() {
     .catch((error) =>
       logDebug('[badge] service resume failed:', error.message),
     );
-  chrome.storage.session.remove(['serviceError']).catch(() => {});
+  chrome.storage.session.remove(['serviceError']).catch((error) => {
+    logError('[service] Failed to clear paused state:', error);
+  });
   logDebug('Service resumed');
 }
 
@@ -132,13 +136,31 @@ function isServicePaused() {
 
 async function getWorkspaceState() {
   const { workspace } = await chrome.storage.session.get(['workspace']);
-  return workspace || null;
+  if (workspace === undefined) return null;
+  if (
+    !workspace ||
+    typeof workspace !== 'object' ||
+    Array.isArray(workspace) ||
+    (workspace.mode !== 'default' && workspace.mode !== 'private')
+  ) {
+    throw new Error('Stored recording state must have mode default or private');
+  }
+  return workspace;
 }
 
-// Session storage: in-memory IPC, survives SW termination, cleared on browser restart.
-chrome.storage.session.setAccessLevel({
-  accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS',
-});
+// Session storage is in-memory IPC, survives SW termination, and is cleared on
+// browser restart. Chromium requires an explicit content-script access grant;
+// Firefox exposes extension session storage without this Chromium-only API.
+if (getBrowserCapabilities().supportsSessionAccessLevel) {
+  chrome.storage.session
+    .setAccessLevel({
+      accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS',
+    })
+    .catch((error) => {
+      logError('[background] Could not expose session storage:', error);
+      pauseService('session_access_failed', error.message);
+    });
+}
 
 const badgeController = createBadgeController({
   logDebug,
@@ -165,36 +187,18 @@ const badgeController = createBadgeController({
 });
 
 async function handleGetDesktopConnectorState() {
-  const refreshed = await refreshDesktopConnectorStateProbe();
-  const connector = refreshed || (await getConnectorBridgeState());
+  const connector = await refreshDesktopConnectorStateProbe();
   syncDesktopConnectorPauseState(connector);
   badgeController.scheduleConnectorBadgeRefresh(connector);
   return { success: true, ...connector };
 }
 
 async function refreshDesktopConnectorStateProbe() {
-  let timer;
-  try {
-    return await Promise.race([
-      refreshConnectorBridgeState(),
-      new Promise((resolve) => {
-        timer = setTimeout(
-          () => resolve(null),
-          CONNECTOR_STATE_REFRESH_TIMEOUT_MS,
-        );
-      }),
-    ]);
-  } catch (error) {
-    logDebug('[connector] state refresh failed:', error.message);
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+  return refreshConnectorBridgeState(CONNECTOR_STATE_REFRESH_TIMEOUT_MS);
 }
 
 async function handleConnectDesktopBridge() {
-  const refreshed = await connectDesktopBridge();
-  const connector = refreshed || (await getConnectorBridgeState());
+  const connector = await connectDesktopBridge();
   syncDesktopConnectorPauseState(connector);
   badgeController.scheduleConnectorBadgeRefresh(connector);
   return { success: true, ...connector };
@@ -269,7 +273,7 @@ async function loadDesktopHistoryRange(from, to) {
   if (!filesResp?.success) {
     throw new Error(filesResp?.error || 'Desktop history file list failed');
   }
-  const files = (filesResp.files || [])
+  const files = filesResp.files
     .filter((file) => {
       const dateStr = file.replace('.jsonl', '');
       return dateStr >= from && dateStr <= to;
@@ -280,8 +284,8 @@ async function loadDesktopHistoryRange(from, to) {
   if (!batchResp?.success) {
     throw new Error(batchResp?.error || 'Desktop history batch failed');
   }
-  const entries = [...(batchResp.entries || [])].sort(
-    (left, right) => (left.timestamp || 0) - (right.timestamp || 0),
+  const entries = [...batchResp.entries].sort(
+    (left, right) => left.timestamp - right.timestamp,
   );
   return { entries, files };
 }
@@ -491,7 +495,11 @@ let drainNotifyTimer = null;
 
 function scheduleDrainNotify() {
   if (drainNotifyTimer) return;
-  drainNotifyTimer = setTimeout(drainNow, DRAIN_INTERVAL_MS);
+  drainNotifyTimer = setTimeout(() => {
+    void drainNow().catch((error) => {
+      logDebug('[connector] scheduled flush failed:', error.message);
+    });
+  }, DRAIN_INTERVAL_MS);
 }
 
 async function drainNow() {
@@ -499,14 +507,9 @@ async function drainNow() {
     clearTimeout(drainNotifyTimer);
     drainNotifyTimer = null;
   }
-  try {
-    const connector = await flushDesktopBuffer();
-    syncDesktopConnectorPauseState(connector);
-    return connector;
-  } catch (error) {
-    logDebug('[connector] scheduled flush failed:', error.message);
-    return null;
-  }
+  const connector = await flushDesktopBuffer();
+  syncDesktopConnectorPauseState(connector);
+  return connector;
 }
 
 async function flushInteractiveWrites() {
@@ -570,39 +573,27 @@ async function buildVisitReport(
   bodyPreview,
   bypassBlacklist,
 ) {
-  const request = {
+  return {
     timestamp: await nextLogTimestamp(),
     url,
+    title: title || null,
+    referrer: referrerUrl || null,
+    bodyPreview: bodyPreview || null,
+    bypassBlacklist: bypassBlacklist === true,
   };
-  if (title) request.title = title;
-  if (referrerUrl) request.referrer = referrerUrl;
-  if (bodyPreview) request.bodyPreview = bodyPreview;
-  if (bypassBlacklist) request.bypassBlacklist = true;
-  return request;
 }
 
 async function buildLeaveReport(url, title, scrollDepth, timeOnPage) {
-  const request = {
+  return {
     timestamp: await nextLogTimestamp(),
     url,
+    title: title || null,
+    scrollDepth: scrollDepth ?? null,
+    timeOnPage: timeOnPage ?? null,
   };
-  if (title) request.title = title;
-  if (scrollDepth !== undefined && scrollDepth !== null)
-    request.scrollDepth = scrollDepth;
-  if (timeOnPage !== undefined && timeOnPage > 0)
-    request.timeOnPage = timeOnPage;
-  return request;
 }
 
 // ─── Settings Keys ───────────────────────────────────────────────────
-
-async function ensureDefaultLists() {
-  try {
-    await runDesktopCommand('ensureDefaultLists');
-  } catch (e) {
-    logDebug('First-run default list creation failed:', e.message);
-  }
-}
 
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
   try {
@@ -612,7 +603,7 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
       badgeIdentityUrlForTab(tabId, tab.url),
     );
   } catch (e) {
-    /* tab may have been closed */
+    logDebug('[badge] activated tab became unavailable:', e.message);
   }
 });
 
@@ -705,8 +696,7 @@ function callContextMenuMethod(methodName, ...args) {
   return new Promise((resolve, reject) => {
     try {
       method(...args, () => {
-        const error =
-          globalThis.browser?.runtime?.lastError || chrome.runtime.lastError;
+        const error = chrome.runtime.lastError;
         if (error) {
           reject(new Error(error.message));
           return;
@@ -844,34 +834,44 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
     if (url && /\.pdf(\?|#|$)/i.test(new URL(url).pathname)) {
       throw new Error(cannotCapturePdfMessage);
     }
-    // Fallback: ask content script to check for Chrome's PDF viewer embed
-    try {
-      const pdfCheck = await chrome.tabs.sendMessage(tabId, {
-        action: 'isPdfPage',
-      });
-      if (pdfCheck?.isPdf) throw new Error(cannotCapturePdfMessage);
-    } catch (e) {
-      if (
-        e.message === cannotCapturePdfMessage ||
-        e.message === 'Cannot capture PDF pages'
-      )
-        throw e;
-      if (isExtensionRuntimeFailure(e)) throw e;
-      // Content script might not be loaded — proceed with capture
+    // Also check the page capability because Chrome's PDF viewer URL is not a
+    // reliable indicator of its embedded native plugin.
+    const pdfCheck = await chrome.tabs.sendMessage(tabId, {
+      action: 'isPdfPage',
+    });
+    if (!pdfCheck || typeof pdfCheck.isPdf !== 'boolean') {
+      throw new Error('PDF capability response is invalid');
     }
+    if (pdfCheck.isPdf) throw new Error(cannotCapturePdfMessage);
     const mdResp = await chrome.tabs.sendMessage(tabId, {
       action: 'extractMarkdown',
     });
+    if (
+      !mdResp ||
+      mdResp.success !== true ||
+      typeof mdResp.markdown !== 'string'
+    ) {
+      throw new Error(
+        mdResp?.error || 'Markdown extraction response is invalid',
+      );
+    }
     const settingsResponse = await requestDesktopSettings();
     if (!settingsResponse?.success) {
       throw new Error(
         settingsResponse?.error || 'Desktop settings unavailable',
       );
     }
-    const settings = settingsResponse.settings || {};
+    const settings = settingsResponse.settings;
     const capture = await captureSavePage(tabId, settings);
+    if (
+      !capture ||
+      typeof capture.html !== 'string' ||
+      !Array.isArray(capture.warnings)
+    ) {
+      throw new Error('Snapshot capture returned an invalid payload');
+    }
     const html = prepareSnapshotHtml(capture.html, slug, url);
-    const markdown = mdResp?.markdown || '';
+    const markdown = mdResp.markdown;
     if (!markdown && !html) {
       throw new Error(
         tr(
@@ -886,17 +886,20 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
       url,
       title,
       markdown,
-      html: html || '',
+      html,
     });
     await flushInteractiveWrites();
-    return { warnings: capture.warnings || [] };
+    return { warnings: capture.warnings };
   } finally {
     stopSpinnerBadge(tabId);
   }
 }
 
 function captureWarningMessage(warnings) {
-  const count = warnings?.length || 0;
+  if (!Array.isArray(warnings)) {
+    throw new Error('Snapshot capture warnings must be an array');
+  }
+  const count = warnings.length;
   if (count === 0) return null;
   if (count === 1) {
     return tr(
@@ -919,36 +922,44 @@ function collapseSelectionWhitespace(value) {
     .trim();
 }
 
-async function getContextMenuSelectionPayload(tabId, fallbackText) {
-  const fallback = String(fallbackText || '').trim();
+async function getContextMenuSelectionPayload(tabId, menuSelectionText) {
+  const menuSelection = String(menuSelectionText || '').trim();
   if (!tabId || tabId <= 0) {
-    return { excerpt: fallback ? [fallback] : [], cssPath: [''] };
+    throw new Error('Cannot capture a highlight without a source tab');
   }
 
-  try {
-    const response = await chrome.tabs.sendMessage(tabId, {
-      action: 'getStructuredSelectionText',
-    });
-    const structured = String(response?.selectionText || '').trim();
-    if (
-      structured &&
-      collapseSelectionWhitespace(structured) ===
-        collapseSelectionWhitespace(fallback)
-    ) {
-      return {
-        excerpt: Array.isArray(response.selectionExcerpt)
-          ? response.selectionExcerpt
-          : [structured],
-        cssPath: Array.isArray(response.selectionCssPath)
-          ? response.selectionCssPath
-          : [''],
-      };
-    }
-  } catch (error) {
-    logDebug('[context-menu] Structured selection unavailable:', error.message);
+  const response = await chrome.tabs.sendMessage(tabId, {
+    action: 'getStructuredSelectionText',
+  });
+  if (!response || typeof response !== 'object') {
+    throw new Error('Page returned no structured selection');
   }
-
-  return { excerpt: fallback ? [fallback] : [], cssPath: [''] };
+  const structured = String(response.selectionText || '').trim();
+  if (!structured) {
+    throw new Error('Page returned an empty structured selection');
+  }
+  if (
+    collapseSelectionWhitespace(structured) !==
+    collapseSelectionWhitespace(menuSelection)
+  ) {
+    throw new Error('Page selection changed before the highlight was captured');
+  }
+  if (
+    !Array.isArray(response.selectionExcerpt) ||
+    !response.selectionExcerpt.every((part) => typeof part === 'string')
+  ) {
+    throw new Error('Page selection excerpt must be a string array');
+  }
+  if (
+    !Array.isArray(response.selectionCssPath) ||
+    !response.selectionCssPath.every((part) => typeof part === 'string')
+  ) {
+    throw new Error('Page selection CSS path must be a string array');
+  }
+  return {
+    excerpt: response.selectionExcerpt,
+    cssPath: response.selectionCssPath,
+  };
 }
 
 async function handleContextMenuHighlight(url, title, selectionText, tabId) {
@@ -977,7 +988,12 @@ async function handleContextMenuHighlight(url, title, selectionText, tabId) {
         notes,
         pageSlug: slug,
       })
-      .catch(() => {});
+      .catch((error) =>
+        logDebug(
+          '[context-menu] highlight panel delivery failed:',
+          error.message,
+        ),
+      );
   }
 
   return { success: true, noteSlug: response.noteSlug };
@@ -1006,7 +1022,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       info.selectionText.trim(),
       activeTab.id,
     );
-    if (response?.success === false) {
+    if (response?.success !== true) {
       await notifyTabUserActionError(
         activeTab.id,
         response.error,
@@ -1029,7 +1045,9 @@ chrome.commands.onCommand.addListener(async (command) => {
   logDebug(`[background] Command received: ${command}`);
 
   const recordingState = await getWorkspaceState();
-  if (recordingState && recordingState.mode === 'private') return;
+  if (recordingState && recordingState.mode === 'private') {
+    return { success: true, handled: false, reason: 'private_workspace' };
+  }
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (
@@ -1038,13 +1056,15 @@ chrome.commands.onCommand.addListener(async (command) => {
     tab.url.startsWith('chrome-extension://')
   ) {
     logDebug('[background] Command ignored: no suitable tab');
-    return;
+    return { success: true, handled: false, reason: 'no_suitable_tab' };
   }
 
   if (command === 'capture-snapshot') {
     chrome.tabs
       .sendMessage(tab.id, { action: 'showCaptureSpinner' })
-      .catch(() => {});
+      .catch((error) =>
+        logDebug('[capture] spinner delivery failed:', error.message),
+      );
     try {
       const slug = generateSlugFromUrl(tab.url);
       const timestamp = await nextLogTimestamp();
@@ -1057,25 +1077,36 @@ chrome.commands.onCommand.addListener(async (command) => {
       );
       chrome.tabs
         .sendMessage(tab.id, { action: 'hideCaptureSpinner' })
-        .catch(() => {});
+        .catch((error) =>
+          logDebug('[capture] spinner dismissal failed:', error.message),
+        );
       const warning = captureWarningMessage(capture.warnings);
       if (warning) {
         await notifyTabUserActionError(tab.id, warning, warning);
       } else {
         chrome.tabs
           .sendMessage(tab.id, { action: 'showCaptureNotification' })
-          .catch(() => {});
+          .catch((error) =>
+            logDebug('[capture] notification delivery failed:', error.message),
+          );
       }
+      return { success: true };
     } catch (error) {
       logDebug('[capture] ERROR:', error.message, error);
       chrome.tabs
         .sendMessage(tab.id, { action: 'hideCaptureSpinner' })
-        .catch(() => {});
+        .catch((deliveryError) =>
+          logDebug(
+            '[capture] spinner dismissal after failure failed:',
+            deliveryError.message,
+          ),
+        );
       await notifyTabUserActionError(
         tab.id,
         error,
         tr('extensionCaptureFailed', 'Capture failed'),
       );
+      return { success: false, error: error.message };
     }
   } else if (command === 'highlight-selection') {
     try {
@@ -1084,13 +1115,18 @@ chrome.commands.onCommand.addListener(async (command) => {
         action: 'highlightSelection',
       });
       logDebug('[background] highlightSelection response:', resp);
-      if (resp?.success === false) {
+      if (resp?.success !== true) {
         await notifyTabUserActionError(
           tab.id,
           resp.error,
           tr('extensionHighlightFailed', 'Highlight failed'),
         );
+        return {
+          success: false,
+          error: resp?.error || 'Highlight response is incomplete',
+        };
       }
+      return { success: true };
     } catch (error) {
       logDebug('[background] Could not highlight selection:', error.message);
       await notifyTabUserActionError(
@@ -1098,6 +1134,7 @@ chrome.commands.onCommand.addListener(async (command) => {
         error,
         tr('extensionHighlightFailed', 'Highlight failed'),
       );
+      return { success: false, error: error.message };
     }
   } else if (command === 'like-page' || command === 'dislike-page') {
     const delta = command === 'like-page' ? 1 : -1;
@@ -1119,6 +1156,7 @@ chrome.commands.onCommand.addListener(async (command) => {
         'showLikeNotification',
         { delta },
       );
+      return { success: true };
     } catch (error) {
       logDebug(`[${command}] ERROR:`, error.message, error);
       await notifyTabUserActionError(
@@ -1126,14 +1164,17 @@ chrome.commands.onCommand.addListener(async (command) => {
         error,
         tr('extensionLikeFailed', 'Like failed'),
       );
+      return { success: false, error: error.message };
     }
   }
+
+  return { success: false, error: `Unknown browser command: ${command}` };
 });
 
 // ─── Message Handlers: Tab/Popup Queries ─────────────────────────────
 
 function handleGetReportedUrl(request) {
-  return { success: true, url: tabReportedUrls.get(request.tabId) || null };
+  return { success: true, url: tabReportedUrls.get(request.tabId) ?? null };
 }
 
 async function handleGetPageInfo(request) {
@@ -1153,9 +1194,9 @@ async function handleGetPageInfo(request) {
     return {
       success: true,
       slug: desktopResp.slug,
-      entry: desktopResp.entry || null,
-      snapshots: desktopResp.snapshots || [],
-      notes: desktopResp.notes || [],
+      entry: desktopResp.entry,
+      snapshots: desktopResp.snapshots,
+      notes: desktopResp.notes,
     };
   } catch (error) {
     return {
@@ -1196,14 +1237,14 @@ async function handleGetPageSummary(request) {
     }
     return {
       success: true,
-      url: desktopResp.url || request.url,
+      url: desktopResp.url,
       displayTitle: desktopResp.displayTitle,
       access: desktopResp.access,
-      page: desktopResp.page || null,
-      notes: desktopResp.notes || [],
-      snapshots: desktopResp.snapshots || [],
-      lists: desktopResp.lists || [],
-      attention: desktopResp.attention || null,
+      page: desktopResp.page,
+      notes: desktopResp.notes,
+      snapshots: desktopResp.snapshots,
+      lists: desktopResp.lists,
+      attention: desktopResp.attention,
     };
   } catch (error) {
     return {
@@ -1302,7 +1343,6 @@ async function handleRecordPageActivity(request, sender) {
         request.timeOnPage,
       );
       const response = await enqueueReportCommand('reportLeave', report);
-      void drainNow();
       return response;
     } else if (request.user_title !== undefined) {
       const renameResp = await runDesktopCommand('renamePage', {
@@ -1332,20 +1372,17 @@ async function handleClearDesktopQueue() {
 async function handleDrainDesktopQueue() {
   const connector = await drainNow();
   await new Promise((r) => setTimeout(r, 50));
-  const refreshed = connector || (await getConnectorBridgeState());
-  return { success: true, remaining: refreshed.pendingCommands || 0 };
-}
-
-async function handleGetDeviceId() {
-  const deviceId = (await getDeviceId()) || null;
-  if (!deviceId && isServicePaused()) {
-    return {
-      success: false,
-      error: `Service paused [${serviceError.code}]`,
-      code: serviceError.code,
-    };
+  const refreshed = connector;
+  if (
+    !refreshed ||
+    !Number.isSafeInteger(refreshed.pendingCommands) ||
+    refreshed.pendingCommands < 0
+  ) {
+    throw new Error(
+      'Connector drain returned an invalid pending command count',
+    );
   }
-  return { success: true, deviceId };
+  return { success: true, remaining: refreshed.pendingCommands };
 }
 
 function popupBootstrapToken() {
@@ -1377,9 +1414,18 @@ async function consumePopupBootstrapEntry(token, entry) {
   }
   if (entry.mutationRevision !== popupBootstrapMutationRevision) {
     const preparedTab = entry.bootstrap?.tab;
-    const tab = Number.isFinite(preparedTab?.id)
-      ? await chrome.tabs.get(preparedTab.id).catch(() => preparedTab)
-      : preparedTab;
+    let tab = preparedTab;
+    if (Number.isFinite(preparedTab?.id)) {
+      try {
+        tab = await chrome.tabs.get(preparedTab.id);
+      } catch (error) {
+        clearPreparedActionPopup(preparedTab.id);
+        return {
+          success: false,
+          error: `Popup bootstrap tab is unavailable: ${error.message}`,
+        };
+      }
+    }
     if (!tab) {
       clearPreparedActionPopup(preparedTab?.id);
       return { success: false, error: 'Popup bootstrap invalidated' };
@@ -1420,12 +1466,10 @@ async function setPreparedActionPopup(tabId, popupPath) {
 }
 
 function snapshotViewerSlugFromUrl(url) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.href.startsWith(chrome.runtime.getURL('snapshot-viewer.html'))) {
-      return parsed.searchParams.get('slug');
-    }
-  } catch {}
+  const parsed = new URL(url);
+  if (parsed.href.startsWith(chrome.runtime.getURL('snapshot-viewer.html'))) {
+    return parsed.searchParams.get('slug');
+  }
   return null;
 }
 
@@ -1439,10 +1483,10 @@ function popupTabIsUnavailable(tab) {
   );
 }
 
-async function resolvePreparedPopupIdentity(tab) {
+async function resolvePopupPageIdentity(tab) {
   let effectiveUrl = tab.url;
   let effectiveSlug = null;
-  let effectiveTitle = tab.title || '<unknown>';
+  let effectiveTitle = typeof tab.title === 'string' ? tab.title : '';
 
   const reportedUrl = tabReportedUrls.get(tab.id);
   if (reportedUrl && isSameDocumentPageUrl(reportedUrl, tab.url)) {
@@ -1452,35 +1496,71 @@ async function resolvePreparedPopupIdentity(tab) {
   const viewerSlug = snapshotViewerSlugFromUrl(tab.url);
   if (viewerSlug) {
     const pageInfo = await handleGetPageInfo({ slug: viewerSlug });
-    if (pageInfo?.success && pageInfo.entry?.url) {
-      effectiveSlug = viewerSlug;
-      effectiveUrl = pageInfo.entry.url;
-      if (pageInfo.entry.title) effectiveTitle = pageInfo.entry.title;
+    if (!pageInfo?.success || !pageInfo.entry?.url) {
+      throw new Error(
+        pageInfo?.error || 'Snapshot viewer page identity is unavailable',
+      );
     }
+    effectiveSlug = viewerSlug;
+    effectiveUrl = pageInfo.entry.url;
+    if (pageInfo.entry.title) effectiveTitle = pageInfo.entry.title;
   } else if (tab.id != null) {
-    try {
-      const identity = await chrome.tabs.sendMessage(tab.id, {
-        action: 'getPageIdentity',
-      });
-      if (identity?.success && identity.embedded && identity.slug) {
-        effectiveSlug = identity.slug;
-        if (identity.url) {
-          effectiveUrl = identity.url;
-        } else {
-          const pageInfo = await handleGetPageInfo({ slug: identity.slug });
-          if (pageInfo?.success && pageInfo.entry?.url) {
-            effectiveUrl = pageInfo.entry.url;
-            if (pageInfo.entry.title) effectiveTitle = pageInfo.entry.title;
-          }
-        }
+    const identity = await chrome.tabs.sendMessage(tab.id, {
+      action: 'getPageIdentity',
+    });
+    if (
+      identity?.success !== true ||
+      typeof identity.embedded !== 'boolean' ||
+      typeof identity.slug !== 'string' ||
+      !identity.slug ||
+      typeof identity.url !== 'string' ||
+      !identity.url
+    ) {
+      throw new Error('Page identity response is invalid');
+    }
+    if (identity.embedded) {
+      effectiveSlug = identity.slug;
+      effectiveUrl = identity.url;
+      const pageInfo = await handleGetPageInfo({ slug: identity.slug });
+      if (!pageInfo?.success || !pageInfo.entry?.url) {
+        throw new Error(
+          pageInfo?.error || 'Embedded page identity is unavailable',
+        );
       }
-    } catch {}
+      if (pageInfo.entry.url !== identity.url) {
+        throw new Error('Embedded page identity does not match desktop data');
+      }
+      if (pageInfo.entry.title) {
+        effectiveTitle = pageInfo.entry.title;
+      }
+    } else {
+      const expectedSlug = generateSlugFromUrl(identity.url);
+      if (identity.url !== tab.url || identity.slug !== expectedSlug) {
+        throw new Error('Page identity does not match the active tab');
+      }
+      effectiveUrl = identity.url;
+      effectiveSlug = identity.slug;
+    }
   }
 
   return {
-    slug: effectiveSlug || generateSlugFromUrl(effectiveUrl),
+    slug: effectiveSlug ?? generateSlugFromUrl(effectiveUrl),
     url: effectiveUrl,
     title: effectiveTitle,
+  };
+}
+
+async function handleResolvePopupPageIdentity(request) {
+  if (!Number.isSafeInteger(request.tabId) || request.tabId < 0) {
+    throw new Error('resolvePopupPageIdentity requires a valid tabId');
+  }
+  const tab = await chrome.tabs.get(request.tabId);
+  if (popupTabIsUnavailable(tab)) {
+    throw new Error('Popup page identity is unavailable for this tab');
+  }
+  return {
+    success: true,
+    identity: await resolvePopupPageIdentity(tab),
   };
 }
 
@@ -1492,7 +1572,20 @@ async function preparePopupBootstrapForTab(tab) {
     };
   }
 
-  const identity = await resolvePreparedPopupIdentity(tab);
+  let identity;
+  try {
+    identity = await resolvePopupPageIdentity(tab);
+  } catch (error) {
+    return {
+      mode: 'data-unavailable',
+      tab,
+      error: error.message,
+      diagnostic: {
+        reason: 'popup-page-identity-failed',
+        url: tab.url,
+      },
+    };
+  }
   const preparedTab = {
     id: tab.id,
     url: tab.url,
@@ -1552,7 +1645,7 @@ async function preparePopupBootstrapForTab(tab) {
 
 function timeoutPopupBootstrap(tab) {
   const url = tab?.url || '';
-  const title = tab?.title || '<unknown>';
+  const title = typeof tab?.title === 'string' ? tab.title : '';
   const identity = url
     ? { slug: generateSlugFromUrl(url), url, title }
     : { slug: '', url: '', title };
@@ -1616,13 +1709,12 @@ async function openPreparedActionPopup(tab) {
     await setPreparedActionPopup(tabId, popupPath);
     await chrome.action.openPopup();
   } catch (error) {
-    logDebug('[popup] action openPopup failed:', error.message);
     clearPreparedActionPopup(tabId);
-    await chrome.tabs.create({ url: chrome.runtime.getURL(popupPath) });
+    throw error;
   } finally {
     // Some engines resolve/callback openPopup before the popup document has
     // consumed its token. Prefer cleanup in handleConsumePopupBootstrap(); this
-    // fallback only prevents a stale mapping if the popup never opens.
+    // expiry prevents a stale mapping if the popup never opens.
     setTimeout(() => {
       clearPreparedActionPopup(tabId);
     }, POPUP_ACTION_MAPPING_FALLBACK_CLEAR_MS);
@@ -1643,7 +1735,12 @@ globalThis.browserRecallPreparedPopupForTest = {
       ? await chrome.tabs.get(request.tabId)
       : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
     const { bootstrap, popupPath } = await preparePopupOpenPayload(tab);
-    return { success: true, mode: bootstrap.mode, popupPath };
+    return {
+      success: true,
+      mode: bootstrap.mode,
+      error: bootstrap.error ?? null,
+      popupPath,
+    };
   },
   async reset() {
     pendingPopupBootstraps.clear();
@@ -1669,7 +1766,7 @@ async function handleLoadPageNotes(request) {
           ),
       };
     }
-    notes = desktopResp.notes || [];
+    notes = desktopResp.notes;
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -1695,7 +1792,7 @@ async function handleListSnapshots(request) {
           ),
       };
     }
-    snapshots = desktopResp.snapshots || [];
+    snapshots = desktopResp.snapshots;
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -1705,32 +1802,29 @@ async function handleListSnapshots(request) {
   return { success: true, snapshots };
 }
 
-async function requestSnapshotHtml(request, fallbackError) {
+async function requestSnapshotHtml(request) {
   try {
     const desktopResp = await requestDesktopSnapshotHtml(
       request.slug,
       request.timestamp,
     );
-    if (!desktopResp?.success || !desktopResp?.html) {
+    if (desktopResp.success !== true) {
       return {
         success: false,
-        error: desktopResp?.error || fallbackError,
+        error: desktopResp.error,
       };
     }
     return { success: true, html: desktopResp.html };
   } catch (error) {
     return {
       success: false,
-      error: error.message || fallbackError,
+      error: error.message,
     };
   }
 }
 
 async function handleGetSnapshotUrl(request) {
-  const response = await requestSnapshotHtml(
-    request,
-    'Desktop snapshot url failed',
-  );
+  const response = await requestSnapshotHtml(request);
   if (!response.success) return response;
   return {
     success: true,
@@ -1739,7 +1833,7 @@ async function handleGetSnapshotUrl(request) {
 }
 
 function handleGetSnapshotHtml(request) {
-  return requestSnapshotHtml(request, 'Desktop snapshot html failed');
+  return requestSnapshotHtml(request);
 }
 
 async function handleOpenSnapshot(request) {
@@ -1783,21 +1877,30 @@ async function handleSaveSettingsKey(request) {
 
 async function handleCreateNote(request, sender) {
   const response = await runDesktopCommand('createNote', {
-    ...request,
-    url: request.url || sender?.tab?.url,
+    pageSlug: request.pageSlug ?? null,
+    url: request.url ?? sender?.tab?.url ?? null,
+    title: request.title ?? null,
+    excerpt: request.excerpt ?? null,
+    note: request.note ?? null,
+    cssPath: request.cssPath ?? null,
   });
   if (!response.success) return response;
   return response;
 }
 
 async function handleDeleteNote(request) {
-  const response = await runDesktopCommand('deleteNote', request);
+  const response = await runDesktopCommand('deleteNote', {
+    noteSlug: request.noteSlug,
+  });
   if (!response.success) return response;
   return response;
 }
 
 async function handleUpdateNote(request) {
-  const response = await runDesktopCommand('updateNote', request);
+  const response = await runDesktopCommand('updateNote', {
+    noteSlug: request.noteSlug,
+    note: request.note,
+  });
   if (!response.success) return response;
   return response;
 }
@@ -1805,37 +1908,61 @@ async function handleUpdateNote(request) {
 // ─── Message Handlers: List Mutations ────────────────────────────────
 
 async function handleToggleListPin(request) {
-  const response = await runDesktopCommand('toggleListPin', request);
+  const response = await runDesktopCommand('toggleListPin', {
+    listId: request.listId,
+    url: request.url ?? null,
+    title: request.title ?? null,
+    id: request.id ?? null,
+  });
   if (!response.success) return response;
   return response;
 }
 
 async function handleAddListPins(request) {
-  const response = await runDesktopCommand('addListPins', request);
+  const command = {
+    listId: request.listId,
+    urls: request.urls,
+  };
+  if (Object.prototype.hasOwnProperty.call(request, 'titles')) {
+    command.titles = request.titles;
+  }
+  const response = await runDesktopCommand('addListPins', command);
   if (!response.success) return response;
   return response;
 }
 
 async function handleSaveListMeta(request) {
-  const response = await runDesktopCommand('saveListMeta', request);
+  const response = await runDesktopCommand('saveListMeta', {
+    listId: request.listId ?? null,
+    name: request.name ?? null,
+    parentPath: request.parentPath ?? null,
+  });
   if (!response.success) return response;
   return response;
 }
 
 async function handleCreateListAndPin(request) {
-  const response = await runDesktopCommand('createListAndPin', request);
+  const response = await runDesktopCommand('createListAndPin', {
+    name: request.name,
+    url: request.url,
+    title: request.title ?? null,
+  });
   if (!response.success) return response;
   return response;
 }
 
 async function handleDeleteList(request) {
-  const response = await runDesktopCommand('deleteList', request);
+  const response = await runDesktopCommand('deleteList', {
+    listId: request.listId,
+  });
   if (!response.success) return response;
   return response;
 }
 
 async function handleUpdateListTree(request) {
-  const response = await runDesktopCommand('updateListTree', request);
+  const response = await runDesktopCommand('updateListTree', {
+    tree: request.tree,
+  });
   if (!response.success) return response;
   return response;
 }
@@ -1855,12 +1982,14 @@ async function handleInitializeFilesystem(request) {
     };
   }
   if (connector.deviceId) localDeviceId = connector.deviceId;
-  await ensureDefaultLists();
   return { success: true };
 }
 
 async function handleDeleteSnapshot(request) {
-  const response = await runDesktopCommand('deleteSnapshot', request);
+  const response = await runDesktopCommand('deleteSnapshot', {
+    slug: request.slug,
+    timestamp: request.timestamp,
+  });
   if (!response.success) return response;
   return response;
 }
@@ -1884,7 +2013,6 @@ async function resetEphemeralConnectorStateForTest() {
 
 globalThis.browserRecallBackgroundTestControl = {
   clearDesktopBuffer,
-  ensureDefaultLists,
   flushDesktopBuffer,
   getConnectorBridgeState,
   resetEphemeralConnectorState: resetEphemeralConnectorStateForTest,
@@ -1910,7 +2038,10 @@ function handleRuntimeMutation(request) {
 }
 
 async function handleSetRecordingPaused(request) {
-  const paused = request.paused === true;
+  if (typeof request.paused !== 'boolean') {
+    throw new Error('setRecordingPaused requires a boolean paused value');
+  }
+  const paused = request.paused;
   await chrome.storage.session.set({
     workspace: {
       mode: paused ? 'private' : 'default',
@@ -1946,6 +2077,9 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
         case 'getReportedUrl':
           sendResponse(handleGetReportedUrl(request));
           break;
+        case 'resolvePopupPageIdentity':
+          sendResponse(await handleResolvePopupPageIdentity(request));
+          break;
         case 'getPageInfo':
           sendResponse(await handleGetPageInfo(request));
           break;
@@ -1968,9 +2102,6 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
           break;
         case 'flushDesktopQueue':
           sendResponse(await handleDrainDesktopQueue());
-          break;
-        case 'getDeviceId':
-          sendResponse(await handleGetDeviceId());
           break;
         case 'getDesktopConnectorState':
           sendResponse(await handleGetDesktopConnectorState());

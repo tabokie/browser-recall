@@ -211,10 +211,6 @@
     "message": "Disimpan secara lokal sebagai file JSONL yang mudah dibaca dan disusun berdasarkan tanggal. Buka dengan editor teks apa pun atau proses dengan jq.",
     "description": "Desktop local data storage help text."
   },
-  "desktopDefaultBrowserProfile": {
-    "message": "Profil bawaan",
-    "description": "Fallback browser profile name."
-  },
   "desktopDebugLogging": {
     "message": "Debug logging (reset saat restart)",
     "description": "Desktop debug logging setting."

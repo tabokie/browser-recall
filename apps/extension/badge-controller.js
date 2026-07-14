@@ -315,15 +315,15 @@ export function createBadgeController({
         tabId,
         pageMarkerIconPaths({ hasNotes, hasLists }),
       );
-    } catch {
-      // Non-critical; badge updates should never break navigation.
+    } catch (error) {
+      logDebug('[badge] page badge update failed:', error.message);
     }
   }
 
   function collectBadgeUrlsFromEntry(entry) {
     const urls = new Set();
     if (entry?.url?.startsWith('http')) urls.add(entry.url);
-    for (const url of entry?.urls || []) {
+    for (const url of entry.urls ?? []) {
       if (typeof url === 'string' && url.startsWith('http')) urls.add(url);
     }
     return [...urls];

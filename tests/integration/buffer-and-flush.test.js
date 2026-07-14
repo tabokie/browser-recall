@@ -492,13 +492,16 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
           timestamp: 1710000002100,
           url: 'https://example.com/queued',
           title: 'Queued Page',
+          referrer: null,
+          bodyPreview: null,
+          bypassBlacklist: false,
         },
       },
       {
         action: 'saveSettingsKey',
         request: {
           key: 'theme',
-          value: 'sepia',
+          value: 'dark',
         },
       },
       {
@@ -507,6 +510,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
           timestamp: 1710000002300,
           url: 'https://example.com/queued',
           title: 'Queued Page',
+          scrollDepth: null,
           timeOnPage: 42,
         },
       },
@@ -530,11 +534,16 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     });
 
     const dataRoot = path.join(dir, 'browser-data');
-    const settingsRaw = readFileSync(
-      path.join(dataRoot, 'views', 'manifest', 'settings.json'),
-      'utf8',
-    );
-    expect(settingsRaw).toContain('"theme": "sepia"');
+    const settingsResponse = await wsClient.requestDesktopSettings();
+    expect(settingsResponse.settings.theme).toBe('dark');
+    await expect(
+      wsClient.requestDesktopCommand('saveSettingsKey', {
+        key: 'theme',
+        value: 'light',
+      }),
+    ).resolves.toMatchObject({ success: true });
+    const directSettingsResponse = await wsClient.requestDesktopSettings();
+    expect(directSettingsResponse.settings.theme).toBe('light');
 
     const logsDir = path.join(dataRoot, 'logs');
     const lines = await readAllLogLines(logsDir);
@@ -599,11 +608,14 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       timestamp: 1710000002400,
       url: rawOfflineUrl,
       title: 'Offline Page',
+      referrer: null,
+      bodyPreview: null,
+      bypassBlacklist: false,
     });
     await wsClient.enqueueDesktopCommand('createNote', {
       excerpt: ['offline highlight'],
       note: 'offline note body',
-      cssPath: null,
+      cssPath: [''],
       url: rawOfflineUrl,
       title: 'Offline Page',
     });
@@ -623,7 +635,10 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     });
 
     const dataRoot = path.join(dir, 'browser-data');
-    const noteFiles = await readdir(path.join(dataRoot, 'objects', 'notes'));
+    const noteFiles = await waitFor(async () => {
+      const files = await readdir(path.join(dataRoot, 'objects', 'notes'));
+      return files.length > 0 ? files : null;
+    });
     const noteRaw = readFileSync(
       path.join(dataRoot, 'objects', 'notes', noteFiles[0]),
       'utf8',
@@ -714,7 +729,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(readFileSync(snapshotPath, 'utf8')).toContain('large snapshot body');
   }, 30_000);
 
-  it('drops one unknown buffered command item and continues flushing the queue', async () => {
+  it('preserves an unknown buffered item and pauses instead of losing queued data', async () => {
     const dir = mkdtempSync(
       path.join(tmpdir(), 'browser-recall-buffer-invalid-event-'),
     );
@@ -765,18 +780,22 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     await wsClient.initConnectorBridge();
     await waitFor(async () => {
       const state = await wsClient.getConnectorBridgeState();
-      return state.state === 'connected' && state.pendingCommands === 0;
+      return state.state === 'paused';
     });
 
     const dataRoot = path.join(dir, 'browser-data');
-    const settingsRaw = readFileSync(
-      path.join(dataRoot, 'views', 'manifest', 'settings.json'),
-      'utf8',
+    const settings = JSON.parse(
+      readFileSync(
+        path.join(dataRoot, 'views', 'manifest', 'settings.json'),
+        'utf8',
+      ),
     );
-    expect(settingsRaw).toContain('"theme": "after-poison"');
-    expect(store.desktopPendingCommands).toBe(0);
-    expect(store.desktopCommandBuffer).toEqual([]);
-    expect(store.connectorState).toBe('connected');
+    expect(settings.theme).toBe('system');
+    expect(store.desktopPendingCommands).toBe(2);
+    expect(store.desktopCommandBuffer).toHaveLength(2);
+    expect(store.desktopCommandBuffer[0].kind).toBe('unknown');
+    expect(store.connectorState).toBe('paused');
+    expect(store.connectorLastErrorCode).toBe('invalid_buffer_item');
   }, 30_000);
 
   it('keeps a daemon socket alive after a malformed connector frame', async () => {
@@ -795,7 +814,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
         type: 'pair_request',
         protocolVersion: 2,
         browserId: 'raw-browser',
-        browserName: 'Raw Browser',
+        browserName: 'Chrome',
         extensionId: 'abcdefghijklmnop',
         browserProfile: 'Default profile',
       }),
@@ -868,6 +887,9 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       timestamp: 1710000002700,
       url,
       title: 'Popup Overlap',
+      referrer: null,
+      bodyPreview: null,
+      bypassBlacklist: false,
     });
     await waitFor(async () => {
       const state = await wsClient.getConnectorBridgeState();
@@ -959,6 +981,9 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       timestamp: 1710000002900,
       url,
       title: 'Socket Close Recovery',
+      referrer: null,
+      bodyPreview: null,
+      bypassBlacklist: false,
     });
     await waitFor(async () => {
       const state = await wsClient.getConnectorBridgeState();
@@ -1202,6 +1227,45 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
         'ws://127.0.0.1:28473',
       ]),
     );
+  });
+
+  it('pauses with a diagnostic when the persisted desktop port is invalid', async () => {
+    originalWebSocket = globalThis.WebSocket;
+    originalChrome = globalThis.chrome;
+    originalNavigator = globalThis.navigator;
+    originalSetTimeout = globalThis.setTimeout;
+
+    const { chrome, store, alarms } = createChromeMock();
+    store.connectorDaemonPort = '28471';
+    globalThis.chrome = chrome;
+    globalThis.WebSocket = RefusingWebSocket;
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { userAgent: 'Chrome/123.0.0.0 Safari/537.36' },
+      configurable: true,
+    });
+    globalThis.setTimeout = (fn, delay, ...args) => {
+      const timer = originalSetTimeout(fn, delay, ...args);
+      timer?.unref?.();
+      return timer;
+    };
+
+    const wsClient =
+      await import('../../apps/extension/connector/ws-client.js');
+
+    await wsClient.initConnectorBridge();
+    const state = await wsClient.getConnectorBridgeState();
+
+    expect(state.state).toBe('paused');
+    expect(state.lastError).toBe(
+      'Stored connector port must be an integer from 1 to 65535',
+    );
+    expect(state.lastErrorCode).toBe('invalid_connector_port');
+    expect(state.lastDiagnostic).toMatchObject({
+      code: 'invalid_connector_configuration',
+      errorCode: 'invalid_connector_port',
+    });
+    expect(RefusingWebSocket.urls).toEqual([]);
+    expect(alarms.has('browserRecallConnectorReconnect')).toBe(false);
   });
 
   it('keeps retrying a manual reconnect while desktop is still starting', async () => {
@@ -1588,11 +1652,27 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       JSON.stringify({
         type: 'change',
         mutations: [
-          { type: 'history', url: 'https://example.com/change' },
+          {
+            type: 'history',
+            listId: null,
+            pageSlug: null,
+            noteSlug: null,
+            oldNoteSlug: null,
+            slug: null,
+            url: 'https://example.com/change',
+            urls: null,
+            key: null,
+          },
           {
             type: 'note',
+            listId: null,
             pageSlug: 'change',
             noteSlug: 'change-note',
+            oldNoteSlug: null,
+            slug: null,
+            url: null,
+            urls: null,
+            key: null,
           },
         ],
       }),
@@ -1602,13 +1682,26 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
       action: 'mutation',
       type: 'history',
+      listId: null,
+      pageSlug: null,
+      noteSlug: null,
+      oldNoteSlug: null,
+      slug: null,
       url: 'https://example.com/change',
+      urls: null,
+      key: null,
     });
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
       action: 'mutation',
       type: 'note',
+      listId: null,
       pageSlug: 'change',
       noteSlug: 'change-note',
+      oldNoteSlug: null,
+      slug: null,
+      url: null,
+      urls: null,
+      key: null,
     });
   }, 30_000);
 });

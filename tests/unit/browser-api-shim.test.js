@@ -44,7 +44,7 @@ function promiseStorageArea(seed = {}) {
 }
 
 describe('browser-api shim', () => {
-  it('wraps Firefox chrome compatibility APIs and no-ops session access level', async () => {
+  it('wraps Firefox APIs without inventing unsupported session methods', async () => {
     const context = {
       console,
       navigator: {
@@ -58,9 +58,12 @@ describe('browser-api shim', () => {
         },
       },
       browser: {
+        action: {},
+        contextMenus: {},
         runtime: {
           id: 'browser-recall@example.invalid',
           getBrowserInfo: async () => ({ name: 'Firefox' }),
+          getURL: (path) => `moz-extension://browser-recall.invalid/${path}`,
         },
         storage: {
           local: promiseStorageArea(),
@@ -73,26 +76,18 @@ describe('browser-api shim', () => {
 
     expect(context.browserRecallWebExtension.engine).toBe('firefox');
     expect(context.chrome.runtime.id).toBe('browser-recall@example.invalid');
-    expect(typeof context.chrome.storage.session.setAccessLevel).toBe(
-      'function',
-    );
-    await expect(
-      context.chrome.storage.session.setAccessLevel({
-        accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS',
-      }),
-    ).resolves.toBeUndefined();
+    expect(context.chrome.storage.session.setAccessLevel).toBeUndefined();
 
-    const callback = vi.fn();
-    const value = await context.chrome.storage.session.get(
-      ['colorScheme'],
-      callback,
-    );
+    const value = await context.chrome.storage.session.get(['colorScheme']);
     expect(value).toEqual({ colorScheme: 'amber' });
-    expect(callback).toHaveBeenCalledWith({ colorScheme: 'amber' });
   });
 
   it('keeps native Chromium chrome API when browser is absent', () => {
     const nativeChrome = {
+      runtime: {
+        id: 'chromium-extension-id',
+        getURL: (path) => `chrome-extension://chromium-extension-id/${path}`,
+      },
       storage: {
         session: {
           setAccessLevel: vi.fn(),
@@ -101,12 +96,46 @@ describe('browser-api shim', () => {
     };
     const context = {
       console,
+      navigator: {
+        userAgent:
+          'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+      },
       chrome: nativeChrome,
     };
 
     runShim(context);
 
     expect(context.chrome).toBe(nativeChrome);
+    expect(context.browserRecallWebExtension.engine).toBe('chromium');
+  });
+
+  it('uses the Chromium extension API when Chrome exposes an unrelated browser global', () => {
+    const nativeChrome = {
+      runtime: {
+        id: 'chromium-extension-id',
+        getURL: (path) => `chrome-extension://chromium-extension-id/${path}`,
+      },
+      storage: {
+        session: {
+          setAccessLevel: vi.fn(),
+        },
+      },
+    };
+    const unrelatedBrowserGlobal = { currentWindow: {} };
+    const context = {
+      console,
+      navigator: {
+        userAgent:
+          'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.0.0 Safari/537.36',
+      },
+      chrome: nativeChrome,
+      browser: unrelatedBrowserGlobal,
+    };
+
+    runShim(context);
+
+    expect(context.chrome).toBe(nativeChrome);
+    expect(context.browser).toBe(nativeChrome);
     expect(context.browserRecallWebExtension.engine).toBe('chromium');
   });
 
@@ -118,8 +147,11 @@ describe('browser-api shim', () => {
           'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0',
       },
       browser: {
+        action: {},
+        contextMenus: {},
         runtime: {
           id: 'browser-recall@example.invalid',
+          getURL: (path) => `moz-extension://browser-recall.invalid/${path}`,
         },
         storage: {
           local: promiseStorageArea(),
@@ -149,7 +181,7 @@ describe('browser-api shim', () => {
     expect(isRuntimeFailure(new Error('Validation failed.'))).toBe(false);
   });
 
-  it('fills runtime.getURL from the extension page origin when the browser API omits it', () => {
+  it('rejects a browser platform that omits runtime.getURL', () => {
     const context = {
       console,
       URL,
@@ -163,6 +195,8 @@ describe('browser-api shim', () => {
         },
       },
       browser: {
+        action: {},
+        contextMenus: {},
         runtime: {
           id: 'browser-recall@example.invalid',
           getBrowserInfo: async () => ({ name: 'Firefox' }),
@@ -174,10 +208,34 @@ describe('browser-api shim', () => {
       },
     };
 
-    runShim(context);
+    expect(() => runShim(context)).toThrow(
+      'Browser Recall requires the Firefox WebExtension API',
+    );
+  });
 
-    expect(context.chrome.runtime.getURL('popup.html')).toBe(
-      'moz-extension://browser-recall.invalid/popup.html',
+  it('rejects Firefox platforms that expose only the legacy browserAction API', () => {
+    const context = {
+      console,
+      navigator: {
+        userAgent:
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0',
+      },
+      browser: {
+        browserAction: {},
+        contextMenus: {},
+        runtime: {
+          id: 'browser-recall@example.invalid',
+          getURL: (path) => `moz-extension://browser-recall.invalid/${path}`,
+        },
+        storage: {
+          local: promiseStorageArea(),
+          session: promiseStorageArea(),
+        },
+      },
+    };
+
+    expect(() => runShim(context)).toThrow(
+      'Browser Recall requires the Firefox action API',
     );
   });
 
@@ -190,6 +248,8 @@ describe('browser-api shim', () => {
           'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0',
       },
       browser: {
+        action: {},
+        contextMenus: {},
         runtime: {
           id: 'browser-recall@example.invalid',
           getManifest() {
@@ -216,7 +276,7 @@ describe('browser-api shim', () => {
     expect(url?.then).toBeUndefined();
   });
 
-  it('promisifies callback-style WebExtension methods', async () => {
+  it('rejects unsupported Safari-style callback APIs', () => {
     const context = {
       console,
       navigator: {
@@ -227,6 +287,9 @@ describe('browser-api shim', () => {
       browser: {
         runtime: {
           id: 'orion-extension@example.invalid',
+          getURL(path) {
+            return `safari-web-extension://browser-recall.invalid/${path}`;
+          },
           getBrowserInfo(callback) {
             callback({ name: 'Orion' });
           },
@@ -244,20 +307,6 @@ describe('browser-api shim', () => {
       },
     };
 
-    runShim(context);
-
-    expect(context.browserRecallWebExtension.engine).toBe('chromium');
-    await expect(
-      context.chrome.storage.local.get(['connectorState']),
-    ).resolves.toEqual({
-      connectorState: 'connected',
-      requested: ['connectorState'],
-    });
-    await expect(
-      context.chrome.runtime.sendMessage({ action: 'getPageSummary' }),
-    ).resolves.toEqual({
-      success: true,
-      action: 'getPageSummary',
-    });
+    expect(() => runShim(context)).toThrow('Unsupported browser user agent');
   });
 });

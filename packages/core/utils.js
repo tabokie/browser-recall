@@ -4,8 +4,6 @@ import {
   generateSlug,
   generateSlugFromUrl,
 } from './page-identity.js';
-import { logDebug } from './logger.js';
-
 export {
   canonicalizePageUrl,
   generateSlugFromUrl,
@@ -19,59 +17,52 @@ export const INTERNAL_URL_PREFIXES = ['chrome://', 'edge://', 'about:'];
 export const DEFAULT_URL_BLACKLIST = [...INTERNAL_URL_PREFIXES];
 
 export function isInternalBrowserUrl(url) {
-  return INTERNAL_URL_PREFIXES.some((prefix) =>
-    String(url || '').startsWith(prefix),
-  );
+  if (typeof url !== 'string') {
+    throw new Error('Browser URL must be a string');
+  }
+  return INTERNAL_URL_PREFIXES.some((prefix) => url.startsWith(prefix));
 }
 
 // Send a message to background and throw on error response.
 // Use for all data-reading messages where silent defaults are unacceptable.
 export async function sendAction(msg) {
   const resp = await chrome.runtime.sendMessage(msg);
-  if (resp?.success === false)
-    throw new Error(resp.error || `${msg.action} failed`);
-  return resp ?? {};
+  if (!resp || typeof resp !== 'object' || Array.isArray(resp))
+    throw new Error(`${msg.action} returned an invalid response`);
+  if (resp.success !== true) {
+    if (typeof resp.error !== 'string' || !resp.error.trim()) {
+      throw new Error(`${msg.action} failure response is missing an error`);
+    }
+    throw new Error(resp.error);
+  }
+  return resp;
 }
 
 // Save a single settings key through background; Desktop applies the write.
 export async function saveSettingsValue(key, value) {
-  try {
-    await chrome.runtime.sendMessage({ action: 'saveSettingsKey', key, value });
-  } catch (error) {
-    logDebug('saveSettingsValue file write failed:', error.message);
-  }
+  await sendAction({ action: 'saveSettingsKey', key, value });
 }
 
-function canonicalizePageUrlIfValid(url) {
-  try {
-    return canonicalizePageUrl(url);
-  } catch {
-    return url;
-  }
+function canonicalizePageReference(value) {
+  if (value.startsWith('objects/notes/')) return value;
+  return canonicalizePageUrl(value);
 }
 
 export function canonicalizePageRequest(request = {}) {
   const output = { ...request };
-  for (const key of ['url', 'referrer', 'referrerUrl']) {
+  for (const key of ['url', 'referrer']) {
     if (typeof output[key] === 'string') {
-      output[key] = canonicalizePageUrlIfValid(output[key]);
+      output[key] = canonicalizePageUrl(output[key]);
     }
   }
-  for (const key of ['urls', 'items']) {
+  for (const key of ['urls']) {
     if (Array.isArray(output[key])) {
       output[key] = output[key].map((url) =>
-        typeof url === 'string' ? canonicalizePageUrlIfValid(url) : url,
+        typeof url === 'string' ? canonicalizePageReference(url) : url,
       );
     }
   }
   return output;
-}
-
-// Generate slug from list title for list file naming
-export function generateSlugFromTitle(title) {
-  // Hash title + timestamp for uniqueness
-  const hashInput = title + Date.now();
-  return generateSlug(title, hashInput);
 }
 
 // Format timestamp to YYYY-MM-DD date key

@@ -4,6 +4,47 @@ import path from 'node:path';
 const ROOT = process.cwd();
 const BINARY_PATH = path.join(ROOT, 'target', 'debug', 'browser-recall-daemon');
 const BUILD_PROMISE = Symbol.for('browser-recall.integration-daemon-build');
+const TEST_CONTROL_MESSAGE_TYPES = new Set([
+  'clear_all_data',
+  'replay_remote_entries',
+  'set_device_id',
+  'get_all_pages',
+  'get_entity',
+  'permanent_delete',
+  'event',
+  'run_rule_batch',
+  'preview_rule',
+  'search_notes',
+  'search_snapshots',
+  'test_reset_data',
+  'test_seed_data',
+  'note',
+]);
+
+export function installTestControlWireAdapter(socket) {
+  const send = socket.send.bind(socket);
+  socket.send = (data, ...args) => {
+    if (typeof data !== 'string') return send(data, ...args);
+    const request = JSON.parse(data);
+    if (!TEST_CONTROL_MESSAGE_TYPES.has(request.type)) {
+      return send(data, ...args);
+    }
+    const type =
+      request.type === 'test_reset_data'
+        ? 'reset_data'
+        : request.type === 'test_seed_data'
+          ? 'seed_data'
+          : request.type;
+    return send(
+      JSON.stringify({
+        type: 'test_control',
+        request: { ...request, type },
+      }),
+      ...args,
+    );
+  };
+  return socket;
+}
 
 export function ensureTestDaemonBuilt() {
   // Deduplicate only an in-flight build; retaining a successful build marker
@@ -40,34 +81,37 @@ export function ensureTestDaemonBuilt() {
   return process[BUILD_PROMISE];
 }
 
-export function launchTestDaemon(configDir, { ports, approveMode = 'allow' }) {
+export function launchTestDaemon(
+  configDir,
+  { ports, approveMode = 'allow', testControl = false },
+) {
   if (!Array.isArray(ports) || ports.length === 0) {
     throw new Error('launchTestDaemon requires at least one port');
   }
-  return spawn(
-    BINARY_PATH,
-    [
-      '--config-dir',
-      configDir,
-      '--data-dir',
-      path.join(configDir, 'browser-data'),
-      '--approve-mode',
-      approveMode,
-    ],
-    {
-      cwd: ROOT,
-      env: { ...process.env, BROWSER_RECALL_PORTS: ports.join(',') },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  );
+  const args = [
+    '--config-dir',
+    configDir,
+    '--data-dir',
+    path.join(configDir, 'browser-data'),
+    '--approve-mode',
+    approveMode,
+  ];
+  if (testControl) args.push('--test-control');
+  return spawn(BINARY_PATH, args, {
+    cwd: ROOT,
+    env: { ...process.env, BROWSER_RECALL_PORTS: ports.join(',') },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
 }
 
 export function waitForDaemonListening(child, timeoutMs = 15_000) {
   return new Promise((resolve, reject) => {
     let output = '';
+    let errorOutput = '';
     const cleanup = () => {
       clearTimeout(timer);
       child.stdout.off('data', onData);
+      child.stderr.off('data', onErrorData);
       child.off('error', onError);
       child.off('exit', onExit);
     };
@@ -83,10 +127,13 @@ export function waitForDaemonListening(child, timeoutMs = 15_000) {
       resolve(Number(match[1]));
     };
     const onError = (error) => fail(error);
+    const onErrorData = (chunk) => {
+      errorOutput += chunk.toString();
+    };
     const onExit = (code, signal) =>
       fail(
         new Error(
-          `daemon exited early with ${signal ? `signal ${signal}` : `code ${code}`}`,
+          `daemon exited early with ${signal ? `signal ${signal}` : `code ${code}`}: ${errorOutput.trim() || 'no stderr output'}`,
         ),
       );
     const timer = setTimeout(
@@ -94,6 +141,7 @@ export function waitForDaemonListening(child, timeoutMs = 15_000) {
       timeoutMs,
     );
     child.stdout.on('data', onData);
+    child.stderr.on('data', onErrorData);
     child.once('error', onError);
     child.once('exit', onExit);
   });

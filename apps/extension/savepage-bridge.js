@@ -54,7 +54,19 @@ async function injectSavepageScripts(tabId) {
   logDebug('[savepage] content.js injected, waiting for scriptLoaded message');
 }
 
-export function captureSavePage(tabId, settings = {}) {
+export function captureSavePage(tabId, settings) {
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+    return Promise.reject(
+      new Error('Snapshot capture settings must be an object'),
+    );
+  }
+  if (typeof settings.captureSnapshotVideo !== 'boolean') {
+    return Promise.reject(
+      new Error(
+        'Snapshot capture setting captureSnapshotVideo must be a boolean',
+      ),
+    );
+  }
   if (captureSessions.has(tabId)) {
     return Promise.reject(
       new Error('Snapshot capture is already in progress for this tab'),
@@ -67,7 +79,7 @@ export function captureSavePage(tabId, settings = {}) {
       cleanupTimeoutId: null,
       reject,
       resolve,
-      settings: settings || {},
+      settings,
       settled: false,
       started: false,
       timeoutId: null,
@@ -88,7 +100,9 @@ export function captureSavePage(tabId, settings = {}) {
           type: 'cancelSave',
           captureId: session.id,
         })
-        .catch(() => {});
+        .catch((error) =>
+          logDebug('[savepage] cancel delivery failed:', error.message),
+        );
       settleCaptureSession(tabId, session, {
         error: new Error('Save Page WE capture timed out'),
         keepSession: true,

@@ -52,6 +52,7 @@ function compactPopupListFixtures(lists, pageSlug) {
 
 function completePopupSummary(tab, summary) {
   return {
+    url: tab.url,
     displayTitle: summary.page?.title || tab.title,
     access: { blacklisted: false, hasVisitHistory: Boolean(summary.page) },
     ...summary,
@@ -107,7 +108,30 @@ function installDom(url = 'chrome-extension://abcdefghijklmnop/popup.html') {
 function installChromeMock({ tab, responses }) {
   const storageChanged = listenerStore();
   const runtimeMessages = listenerStore();
+  const localStore = {};
   const sessionStore = {};
+  const initialConnector = responses.getDesktopConnectorState;
+  if (
+    initialConnector &&
+    typeof initialConnector === 'object' &&
+    initialConnector.success === true
+  ) {
+    Object.assign(localStore, {
+      connectorState: initialConnector.state,
+      connectorDaemonPort: initialConnector.port ?? null,
+      connectorDeviceId: initialConnector.deviceId ?? null,
+      connectorAuthToken: initialConnector.hasToken ? 'test-token' : null,
+      desktopPendingCommands: initialConnector.pendingCommands ?? 0,
+      desktopPendingBytes: initialConnector.pendingBytes ?? 0,
+      desktopRefuseMode: initialConnector.refuseMode ?? false,
+      connectorLastError: initialConnector.lastError ?? null,
+      connectorLastErrorCode: initialConnector.lastErrorCode ?? null,
+      connectorLastDrainedAt: initialConnector.lastDrainedAt ?? null,
+      connectorDataFolder: initialConnector.dataFolder ?? null,
+      connectorDaemonBufferDepth: initialConnector.daemonBufferDepth ?? null,
+      connectorLastDiagnostic: initialConnector.lastDiagnostic ?? null,
+    });
+  }
 
   globalThis.chrome = {
     i18n: {
@@ -133,6 +157,21 @@ function installChromeMock({ tab, responses }) {
           )
         ) {
           throw new Error(`Obsolete popup RPC invoked: ${request.action}`);
+        }
+        if (request.action === 'resolvePopupPageIdentity') {
+          const reported = responses.getReportedUrl;
+          const effectiveUrl =
+            reported?.success === true && typeof reported.url === 'string'
+              ? reported.url
+              : tab.url;
+          return {
+            success: true,
+            identity: {
+              slug: generateSlugFromUrl(effectiveUrl),
+              url: effectiveUrl,
+              title: tab.title || '',
+            },
+          };
         }
         const handler = responses[request.action];
         if (!handler) return { success: true };
@@ -163,6 +202,21 @@ function installChromeMock({ tab, responses }) {
     storage: {
       local: {
         onChanged: storageChanged,
+        async get(keys) {
+          if (Array.isArray(keys)) {
+            return Object.fromEntries(
+              keys
+                .filter((key) =>
+                  Object.prototype.hasOwnProperty.call(localStore, key),
+                )
+                .map((key) => [key, localStore[key]]),
+            );
+          }
+          return { ...localStore };
+        },
+        async set(values) {
+          Object.assign(localStore, values);
+        },
       },
       session: {
         async get(keys) {
@@ -190,7 +244,17 @@ function installChromeMock({ tab, responses }) {
     },
     tabs: {
       query: vi.fn(async () => [tab]),
-      sendMessage: vi.fn(async () => ({ success: true })),
+      sendMessage: vi.fn(async (_tabId, request) => {
+        if (request?.action === 'getPageIdentity') {
+          return {
+            success: true,
+            embedded: false,
+            slug: generateSlugFromUrl(tab.url),
+            url: tab.url,
+          };
+        }
+        return { success: true };
+      }),
     },
   };
 
@@ -327,7 +391,7 @@ describe('popup desktop state rendering', () => {
         url: tab.url,
         title: 'Prepared Desktop Title',
       },
-      summary: {
+      summary: completePopupSummary(tab, {
         success: true,
         url: tab.url,
         page: {
@@ -339,8 +403,11 @@ describe('popup desktop state rendering', () => {
         },
         notes: [],
         snapshots: [],
-        lists: [{ slug: 'reading', name: 'Reading', pins: [] }],
-      },
+        lists: compactPopupListFixtures(
+          [{ slug: 'reading', name: 'Reading', pins: [] }],
+          generateSlugFromUrl(tab.url),
+        ),
+      }),
     };
     installDom(
       'chrome-extension://abcdefghijklmnop/popup.html?bootstrap=token-1',
@@ -523,7 +590,9 @@ describe('popup desktop state rendering', () => {
         },
         getReportedUrl: { success: true, url: tab.url },
         setRecordingPaused: (request) => {
-          sessionStore.workspace = request.paused ? { mode: 'private' } : {};
+          sessionStore.workspace = request.paused
+            ? { mode: 'private' }
+            : { mode: 'default' };
           return { success: true };
         },
         recordPageActivity: { success: true },
@@ -616,7 +685,9 @@ describe('popup desktop state rendering', () => {
         setRecordingPaused: async (request) => {
           saveCalls++;
           if (saveCalls === 1) await firstPauseSave.promise;
-          sessionStore.workspace = request.paused ? { mode: 'private' } : {};
+          sessionStore.workspace = request.paused
+            ? { mode: 'private' }
+            : { mode: 'default' };
           return { success: true };
         },
         recordPageActivity: { success: true },
@@ -700,7 +771,9 @@ describe('popup desktop state rendering', () => {
         setRecordingPaused: async (request) => {
           saveCalls++;
           if (saveCalls === 1) await firstPauseSave.promise;
-          sessionStore.workspace = request.paused ? { mode: 'private' } : {};
+          sessionStore.workspace = request.paused
+            ? { mode: 'private' }
+            : { mode: 'default' };
           return { success: true };
         },
         recordPageActivity: { success: true },
@@ -798,7 +871,9 @@ describe('popup desktop state rendering', () => {
         getReportedUrl: { success: true, url: tab.url },
         setRecordingPaused: (request) => {
           pauseCalls++;
-          sessionStore.workspace = request.paused ? { mode: 'private' } : {};
+          sessionStore.workspace = request.paused
+            ? { mode: 'private' }
+            : { mode: 'default' };
           return { success: true };
         },
         trimTitle: (request) => ({ title: request.title }),
@@ -1025,7 +1100,8 @@ describe('popup desktop state rendering', () => {
           notes: [
             {
               slug: 'highlight-note',
-              excerpt: 'Marked passage',
+              excerpt: ['Marked passage'],
+              cssPath: ['body'],
               note: 'Old note',
             },
           ],
@@ -1087,7 +1163,8 @@ describe('popup desktop state rendering', () => {
         notes: [
           {
             slug: 'highlight-note',
-            excerpt: 'Marked passage',
+            excerpt: ['Marked passage'],
+            cssPath: ['body'],
             note: 'Old note',
           },
         ],
@@ -1157,7 +1234,9 @@ describe('popup desktop state rendering', () => {
         },
         getReportedUrl: { success: true, url: tab.url },
         setRecordingPaused: (request) => {
-          sessionStore.workspace = request.paused ? { mode: 'private' } : {};
+          sessionStore.workspace = request.paused
+            ? { mode: 'private' }
+            : { mode: 'default' };
           return { success: true };
         },
         recordPageActivity: { success: true },
@@ -1248,7 +1327,9 @@ describe('popup desktop state rendering', () => {
         },
         getReportedUrl: { success: true, url: tab.url },
         setRecordingPaused: (request) => {
-          sessionStore.workspace = request.paused ? { mode: 'private' } : {};
+          sessionStore.workspace = request.paused
+            ? { mode: 'private' }
+            : { mode: 'default' };
           return { success: true };
         },
         recordPageActivity: { success: true },
@@ -1271,9 +1352,11 @@ describe('popup desktop state rendering', () => {
     );
     const toggle = document.getElementById('recordingToggle');
     toggle.click();
+    await waitFor(() => sessionStore.workspace?.mode === 'private');
     await waitFor(
       () =>
-        document.getElementById('dashboardContent')?.style.display === 'none',
+        document.getElementById('dashboardContent')?.style.display === 'none' &&
+        toggle.disabled === false,
     );
     toggle.click();
     await waitFor(() => summaryCalls === 2);
@@ -1368,7 +1451,9 @@ describe('popup desktop state rendering', () => {
           hasToken: true,
         },
         setRecordingPaused: (request) => {
-          sessionStore.workspace = request.paused ? { mode: 'private' } : {};
+          sessionStore.workspace = request.paused
+            ? { mode: 'private' }
+            : { mode: 'default' };
           return { success: true };
         },
       },
@@ -1498,9 +1583,17 @@ describe('popup desktop state rendering', () => {
         getPopupLists: { success: true, lists: [] },
       },
     });
-    chrome.tabs.sendMessage.mockRejectedValue(
-      new Error('Receiving end does not exist.'),
-    );
+    chrome.tabs.sendMessage.mockImplementation(async (_tabId, request) => {
+      if (request?.action === 'showErrorNotification') {
+        throw new Error('Receiving end does not exist.');
+      }
+      return {
+        success: true,
+        embedded: false,
+        slug: generateSlugFromUrl(tab.url),
+        url: tab.url,
+      };
+    });
 
     await import('../../apps/extension/popup.js');
 
@@ -1614,7 +1707,7 @@ describe('popup desktop state rendering', () => {
     await import('../../apps/extension/popup.js');
 
     await waitFor(
-      () => document.getElementById('dashboard').style.display === 'flex',
+      () => document.getElementById('pageTitle').textContent === tab.title,
     );
 
     expect(document.getElementById('setup-required').style.display).toBe(
@@ -2295,6 +2388,64 @@ describe('popup desktop state rendering', () => {
     document.querySelector('.list-chip').click();
     await waitFor(() => document.querySelector('.list-chip:not(.selected)'));
     expect(document.getElementById('listCount').textContent).toBe('10');
+  });
+
+  it('rejects a list mutation response that omits explicit success', async () => {
+    const tab = {
+      id: 56,
+      url: 'https://example.com/strict-list-mutation-response',
+      title: 'Strict List Mutation Response',
+    };
+    const pageSlug = generateSlugFromUrl(tab.url);
+    const lists = [
+      {
+        slug: 'reading',
+        name: 'Reading',
+        pins: [],
+      },
+    ];
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: {
+          displayTitle: tab.title,
+          access: { blacklisted: false, hasVisitHistory: true },
+          success: true,
+          url: tab.url,
+          page: {
+            slug: pageSlug,
+            url: tab.url,
+            title: tab.title,
+            visitDates: [],
+          },
+          notes: [],
+          snapshots: [],
+          lists: compactPopupListFixtures(lists, pageSlug),
+        },
+        getPopupLists: { success: true, lists },
+        toggleListPin: { pinned: true },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(() => document.querySelector('.list-chip'));
+    document.querySelector('.list-chip').click();
+    await waitFor(() => document.getElementById('errorBubble'));
+    expect(document.getElementById('errorBubble').textContent).toContain(
+      'toggleListPin failed',
+    );
+    expect(document.querySelector('.list-chip.selected')).toBeNull();
   });
 
   it('keeps the chip strip in sync after exact-match picker toggles a hidden list', async () => {

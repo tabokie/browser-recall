@@ -8,20 +8,23 @@ pub fn connector_key(browser_id: &str, extension_id: &str) -> ConnectorKey {
     (browser_id.to_string(), extension_id.to_string())
 }
 
-pub fn current_local_day_start_unix() -> u64 {
+pub fn current_local_day_start_unix() -> Result<u64, String> {
     local_day_start_unix(Local::now())
 }
 
-pub fn local_day_start_unix(now: DateTime<Local>) -> u64 {
-    let Some(midnight) = now.date_naive().and_hms_opt(0, 0, 0) else {
-        return 0;
-    };
+pub fn local_day_start_unix(now: DateTime<Local>) -> Result<u64, String> {
+    let midnight = now
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .ok_or_else(|| "local calendar day has no midnight representation".to_string())?;
     let timestamp = match Local.from_local_datetime(&midnight) {
         LocalResult::Single(value) => value.timestamp(),
         LocalResult::Ambiguous(earliest, _) => earliest.timestamp(),
-        LocalResult::None => 0,
+        LocalResult::None => {
+            return Err("local timezone has no midnight for the current day".to_string())
+        }
     };
-    timestamp.max(0) as u64
+    u64::try_from(timestamp).map_err(|_| "local day begins before the Unix epoch".to_string())
 }
 
 pub fn prune_inactive_connectors(
@@ -51,7 +54,7 @@ mod tests {
     #[test]
     fn prune_inactive_connectors_keeps_connected_and_seen_today() {
         let now = Local.with_ymd_and_hms(2026, 4, 29, 12, 0, 0).unwrap();
-        let cutoff = local_day_start_unix(now);
+        let cutoff = local_day_start_unix(now).expect("local day cutoff");
         let mut connectors = vec![
             ApprovedConnector {
                 browser_id: "connected-old".into(),

@@ -1,0 +1,13 @@
+- Scan the codebase thoroughly for patterns such as silent fallback, backward compat. We want the code to have clear and well-specified expectation for platform behavior and data flow. These patterns are bad because they gloss over the real issues and prioritize functioning over a simple mental model over how the code works.
+- Fix them all thoroughly
+- Continue
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) with the original 10 issues, examine one by one
+- Close all of the gaps and fix all of the issues
+- Good, but this session remains a huge pile of changes, I want you to review it from a high level and tell me what justifies for the increased LoC, and figure out if there's any over complicated design or architecture.
+- Go ahead, restructure for simplicity.
+- Please review my uncommitted changes
+- Fix them all
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.6 Sol
+- Go ahead
+- Sure
+- Sure

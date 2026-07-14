@@ -36,6 +36,15 @@ if (!highlightLifecycleModule?.create) {
 // Recording paused: skip all content script functionality.
 chrome.storage.session.get(['workspace'], (result) => {
   const recordingState = result.workspace;
+  if (
+    recordingState !== undefined &&
+    (!recordingState ||
+      typeof recordingState !== 'object' ||
+      Array.isArray(recordingState) ||
+      (recordingState.mode !== 'default' && recordingState.mode !== 'private'))
+  ) {
+    throw new Error('Stored recording state must have mode default or private');
+  }
   if (recordingState && recordingState.mode === 'private') {
     console.log('[content] Recording paused — all tracking disabled');
     return;
@@ -254,11 +263,7 @@ function initContentScript() {
   }
 
   function slugFromUrl(url) {
-    try {
-      return pageIdentity.generateSlugFromUrl(url);
-    } catch (e) {
-      return null;
-    }
+    return pageIdentity.generateSlugFromUrl(url);
   }
 
   function getEmbeddedPageSlug() {
@@ -446,17 +451,23 @@ function initContentScript() {
     textarea.addEventListener('input', autoResize);
 
     let closed = false;
-    function finish({ save }) {
+    async function finish({ save }) {
       if (closed) return;
       closed = true;
       document.removeEventListener('keydown', handleKeyDown, true);
       document.removeEventListener('mousedown', handleOutsideClick);
       const note = save ? textarea.value : null;
-      host.remove();
-      if (!save) return;
-      Promise.resolve(onClose(note)).catch((error) => {
+      if (!save) {
+        host.remove();
+        return;
+      }
+      try {
+        await onClose(note);
+      } catch (error) {
         showExtensionReloadNotification(error);
-      });
+      } finally {
+        host.remove();
+      }
     }
 
     function close() {
@@ -501,51 +512,45 @@ function initContentScript() {
         'Add a page note... Esc to save.',
       ),
       existingNote,
-      onClose(note) {
+      async onClose(note) {
         if (note === (existingNote || '')) return;
 
-        if (existingNoteSlug) {
-          chrome.runtime
-            .sendMessage({
+        try {
+          if (existingNoteSlug) {
+            const response = await chrome.runtime.sendMessage({
               action: 'updateNote',
               noteSlug: existingNoteSlug,
               note,
-            })
-            .then((resp) => {
-              if (
-                showUserActionFailureFromResponse(
-                  resp,
-                  tr('extensionUpdateFailed', 'Update failed'),
-                )
-              ) {
-                return;
-              }
-              if (resp?.noteSlug) existingNoteSlug = resp.noteSlug;
-            })
-            .catch((error) => {
-              showExtensionReloadNotification(error);
             });
-          return;
-        }
+            if (
+              showUserActionFailureFromResponse(
+                response,
+                tr('extensionUpdateFailed', 'Update failed'),
+                ['noteSlug'],
+              )
+            ) {
+              return;
+            }
+            if (response?.noteSlug) existingNoteSlug = response.noteSlug;
+            return;
+          }
 
-        chrome.runtime
-          .sendMessage({
+          const response = await chrome.runtime.sendMessage({
             action: 'createNote',
             pageSlug,
             url: window.location.href,
             excerpt: null,
             note,
             cssPath: null,
-          })
-          .then((resp) => {
-            showUserActionFailureFromResponse(
-              resp,
-              tr('extensionCreateNoteFailed', 'Create note failed'),
-            );
-          })
-          .catch((error) => {
-            showExtensionReloadNotification(error);
           });
+          showUserActionFailureFromResponse(
+            response,
+            tr('extensionCreateNoteFailed', 'Create note failed'),
+            ['noteSlug'],
+          );
+        } catch (error) {
+          showExtensionReloadNotification(error);
+        }
       },
     });
   }
@@ -669,6 +674,7 @@ function initContentScript() {
             showUserActionFailureFromResponse(
               response,
               tr('extensionUpdateFailed', 'Update failed'),
+              ['noteSlug'],
             )
           ) {
             return;
@@ -989,10 +995,20 @@ function initContentScript() {
     return true;
   }
 
-  function showUserActionFailureFromResponse(resp, fallback) {
-    if (resp?.success !== false) return false;
+  function showUserActionFailureFromResponse(
+    resp,
+    fallback,
+    requiredStringFields = [],
+  ) {
+    const valid =
+      resp?.success === true &&
+      requiredStringFields.every(
+        (field) =>
+          typeof resp[field] === 'string' && resp[field].trim().length > 0,
+      );
+    if (valid) return false;
     const message =
-      resp.error || fallback || tr('extensionActionFailed', 'Action failed');
+      resp?.error || fallback || tr('extensionActionFailed', 'Action failed');
     if (!showExtensionReloadNotification(message)) {
       showErrorNotification(message);
     }
@@ -1010,10 +1026,16 @@ function initContentScript() {
         tr('extensionCouldNotLoadNotes', 'Could not load notes.'),
       )
     ) {
-      console.warn('[content] loadPageNotes failed:', response.error);
+      console.warn('[content] loadPageNotes failed:', response?.error);
       return null;
     }
-    return response?.notes || [];
+    if (response?.success !== true || !Array.isArray(response.notes)) {
+      showErrorNotification(
+        tr('extensionCouldNotLoadNotes', 'Could not load notes.'),
+      );
+      return null;
+    }
+    return response.notes;
   }
 
   // ─── Highlights Panel (for pages where visual marks can't render) ─────
@@ -1107,6 +1129,7 @@ function initContentScript() {
                 showUserActionFailureFromResponse(
                   resp,
                   tr('extensionUpdateFailed', 'Update failed'),
+                  ['noteSlug'],
                 )
               ) {
                 return;
@@ -1246,6 +1269,7 @@ function initContentScript() {
                 showUserActionFailureFromResponse(
                   resp,
                   tr('extensionHighlightFailed', 'Highlight failed'),
+                  ['noteSlug'],
                 )
               ) {
                 return;
@@ -1290,22 +1314,20 @@ function initContentScript() {
                 showUserActionFailureFromResponse(
                   resp,
                   tr('extensionHighlightFailed', 'Highlight failed'),
+                  ['noteSlug'],
                 )
               ) {
                 return;
               }
               const noteSlug = resp?.noteSlug;
-              // Try browser's selection range first, fall back to text search
-              let mark = wrapRangeWithMark(range, selectedText, timestamp);
-              if (mark) {
-                if (noteSlug) mark.dataset.noteSlug = noteSlug;
-              } else {
-                mark = highlightTextInPage(selectedText);
-                if (mark && noteSlug) mark.dataset.noteSlug = noteSlug;
+              const mark = wrapRangeWithMark(range, selectedText, timestamp);
+              if (!mark) {
+                throw new Error(
+                  'The selected range could not be wrapped after the note committed',
+                );
               }
-              if (mark) {
-                showHighlightEditOverlay(mark, selectedText, noteSlug, '');
-              }
+              if (noteSlug) mark.dataset.noteSlug = noteSlug;
+              showHighlightEditOverlay(mark, selectedText, noteSlug, '');
             })
             .catch((error) => {
               showExtensionReloadNotification(error);
@@ -1347,8 +1369,15 @@ function initContentScript() {
       }
       sendResponse({ success: true });
     } else if (request.action === 'showHighlightsPanel') {
+      if (!Array.isArray(request.notes)) {
+        sendResponse({
+          success: false,
+          error: 'showHighlightsPanel notes must be an array',
+        });
+        return;
+      }
       _panelDismissed = false; // Reset so new highlight shows panel
-      showHighlightsPanel(request.notes || [], request.pageSlug);
+      showHighlightsPanel(request.notes, request.pageSlug);
       sendResponse({ success: true });
     } else if (request.action === 'isPdfPage') {
       sendResponse({
@@ -1390,7 +1419,7 @@ function initContentScript() {
       const pdfSlug = getSlugForCurrentPage();
       let pdfRetryTimer = null;
 
-      function renderPdfHighlights(notes = []) {
+      function renderPdfHighlights(notes) {
         showHighlightsPanel(notes, pdfSlug, {
           hint: tr(
             'extensionPdfHighlightHint',
@@ -1412,14 +1441,16 @@ function initContentScript() {
                 ),
               )
             ) {
-              renderPdfHighlights();
               return;
             }
-            renderPdfHighlights(resp?.notes || []);
+            if (!Array.isArray(resp.notes)) {
+              throw new Error('loadPageNotes response notes must be an array');
+            }
+            renderPdfHighlights(resp.notes);
           })
           .catch((error) => {
             if (showExtensionReloadNotification(error)) return;
-            renderPdfHighlights();
+            showErrorNotification(error.message);
           });
       }
       showPdfPanel();
@@ -1444,7 +1475,10 @@ function initContentScript() {
         });
       }
     }, 1500);
-  } catch {}
+  } catch (error) {
+    console.error('[Browser Recall] content initialization failed:', error);
+    showErrorNotification(error.message);
+  }
 
   // Before unload, send final attention report
   window.addEventListener('beforeunload', () => {

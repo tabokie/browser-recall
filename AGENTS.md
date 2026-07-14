@@ -23,6 +23,7 @@ Project name: **browser-recall** (display name "Browser Recall"). Version 1.0 ta
 
 - Data layout is `logs/`, `objects/`, and `views/`; see [ARCHITECTURE.md](./ARCHITECTURE.md) for exact paths.
 - Logs are authoritative. Checkpoints in `views/` are replay-derived and rebuildable.
+- Replay tests for mutable identifiers must reapply the same entry after its first application; rename handlers must recognize the already-applied destination through immutable identity or replay timestamps.
 - Page checkpoints are selective: persist only pages with durable user state, meaning list parent, note/snapshot child, user title, or rating.
 - Replay-derived checkpoint policy must live in the Rust replay crate; daemon persistence and verification should call the same function instead of duplicating policy in JS or daemon code.
 - Log records use the strict Rust replay schema. Command-only fields such as rule body previews, checkpoint hints, legacy `items`, rule `fields`, and `case_sensitive` must not reach JSONL.
@@ -33,6 +34,7 @@ Project name: **browser-recall** (display name "Browser Recall"). Version 1.0 ta
 ## Daemon Runtime
 
 - Writes are serialized in the daemon command/runtime layer: reserve checkpoint-worker capacity, append canonical logs, apply replay effects to the in-memory projection, then enqueue ordered checkpoint persistence.
+- Mutation commands must return validation failures as errors; success-only authority wrappers must never reinterpret `{ success: false }` responses.
 - Reads use the latest daemon projection cache and fall through to disk on coordinated cache misses.
 - `views/manifest/replay-progress.json` records per-device durable replay progress so startup can replay acknowledged log entries that reached JSONL before async checkpoints flushed.
 - On shutdown or destructive storage operations, flush or coordinate checkpoint work so stale async checkpoint writes cannot resurrect deleted data.
@@ -42,6 +44,7 @@ Project name: **browser-recall** (display name "Browser Recall"). Version 1.0 ta
 
 - The extension sends semantic daemon commands (`reportVisit`, `reportLeave`, `createNote`, etc.), not raw replay log records.
 - The connector command buffer is a short-lived availability bridge, not a second durable write model. Keep it out of replay schema decisions.
+- Fire-and-forget connector work must observe failures and publish an explicit diagnostic state transition; validation errors must never strand the connector in `starting` or `connecting`.
 - Popup and badge reads should ask the daemon for current data when opened/refreshed; do not maintain product entity caches in the extension.
 - Content scripts run in an isolated world. Page-world History API overrides require an injected page-world bridge; DOM events cross worlds but JS property overrides do not.
 - Content scripts and `chrome.scripting.executeScript` do not work on `blob:` URLs. Use an extension viewer page instead.

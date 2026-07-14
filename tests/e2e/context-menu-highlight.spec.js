@@ -1,37 +1,53 @@
 import { test, expect } from './fixtures.js';
 import {
   resetAndSeed,
+  settingsCheckpoint,
   getSlugForUrl,
   openHelperPage,
   pageCheckpointPath,
+  pageEntityFixture,
+  noteEntityFixture,
   longestLeftBorderRun,
 } from './helpers.js';
-
-const TEST_URL = 'https://example.com/article';
-const TEST_SLUG = getSlugForUrl(TEST_URL);
 
 test.describe('Context menu highlight', () => {
   test('contextMenuHighlight creates note for page', async ({
     extContext,
     extensionId,
     setupDir,
+    localServer,
   }) => {
+    localServer.addPage('/context-menu-create', {
+      title: 'Example Article',
+      body: '<main><p>key finding from the paper</p></main>',
+    });
+    const url = localServer.url('/context-menu-create');
+    const slug = getSlugForUrl(url);
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
-        path: `pages/${TEST_SLUG}.json`,
-        data: {
-          slug: TEST_SLUG,
-          url: TEST_URL,
+        path: pageCheckpointPath(slug),
+        data: pageEntityFixture({
+          slug,
+          url,
           title: 'Example Article',
-          timestamp: now,
           parentIds: [],
           childIds: [],
-        },
+          timestamps: { 'test-device': now },
+          createdAt: now,
+          visitDates: [],
+          scrollDepth: null,
+          timeOnPage: null,
+          user_title: null,
+          likes: null,
+        }),
       },
     ]);
 
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.locator('p').selectText();
     const helper = await openHelperPage(extContext, extensionId);
     const resp = await helper.evaluate(
       ({ url, text }) =>
@@ -41,20 +57,21 @@ test.describe('Context menu highlight', () => {
           title: 'Example Article',
           selectionText: text,
         }),
-      { url: TEST_URL, text: 'key finding from the paper' },
+      { url, text: 'key finding from the paper' },
     );
     expect(resp.success).toBe(true);
     expect(resp.noteSlug).toBeTruthy();
 
     const notesResp = await helper.evaluate(
       (slug) => chrome.runtime.sendMessage({ action: 'loadPageNotes', slug }),
-      TEST_SLUG,
+      slug,
     );
     expect(notesResp.success).toBe(true);
     expect(notesResp.notes).toHaveLength(1);
     expect(notesResp.notes[0].excerpt).toEqual(['key finding from the paper']);
 
     await helper.close();
+    await page.close();
   });
 
   test('contextMenuHighlight preserves cross-block selection newlines', async ({
@@ -72,17 +89,23 @@ test.describe('Context menu highlight', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: pageUrl,
           title: 'Ctx Lines',
           timestamps: { 'test-device': now },
           parentIds: [],
           childIds: [],
-        },
+          createdAt: now,
+          visitDates: [],
+          scrollDepth: null,
+          timeOnPage: null,
+          user_title: null,
+          likes: null,
+        }),
       },
     ]);
 
@@ -143,33 +166,40 @@ test.describe('Context menu highlight', () => {
   }) => {
     localServer.addPage('/ctx-test', {
       title: 'Ctx Test',
-      body: '<p>Content</p>',
+      body: '<p>important excerpt</p>',
     });
     const pageUrl = localServer.url('/ctx-test');
     const slug = getSlugForUrl(pageUrl);
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
-        path: `pages/${slug}.json`,
-        data: {
+        path: pageCheckpointPath(slug),
+        data: pageEntityFixture({
           slug,
           url: pageUrl,
           title: 'Ctx Test',
-          timestamp: now,
           parentIds: [],
           childIds: [],
-        },
+          timestamps: { 'test-device': now },
+          createdAt: now,
+          visitDates: [],
+          scrollDepth: null,
+          timeOnPage: null,
+          user_title: null,
+          likes: null,
+        }),
       },
     ]);
 
     const page = await extContext.newPage();
     await page.goto(pageUrl);
     await page.waitForLoadState('domcontentloaded');
+    await page.locator('p').selectText();
 
     const helper = await openHelperPage(extContext, extensionId);
-    await helper.evaluate(
+    const response = await helper.evaluate(
       ({ url, text }) =>
         chrome.runtime.sendMessage({
           action: 'contextMenuHighlight',
@@ -179,6 +209,7 @@ test.describe('Context menu highlight', () => {
         }),
       { url: pageUrl, text: 'important excerpt' },
     );
+    expect(response).toMatchObject({ success: true });
 
     await page.waitForSelector('#browser-recall-highlights-panel', {
       timeout: 5000,
@@ -204,53 +235,68 @@ test.describe('Context menu highlight', () => {
   }) => {
     localServer.addPage('/ctx-multi', {
       title: 'Multi',
-      body: '<p>Content</p>',
+      body: '<p>third</p>',
     });
     const pageUrl = localServer.url('/ctx-multi');
     const slug = getSlugForUrl(pageUrl);
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: pageUrl,
           title: 'Multi',
           timestamps: { 'test-device': now },
           parentIds: [],
           childIds: ['note:note-a', 'note:note-b'],
-        },
+          createdAt: now,
+          visitDates: [],
+          scrollDepth: null,
+          timeOnPage: null,
+          user_title: null,
+          likes: null,
+        }),
       },
       {
         path: 'objects/notes/note-a.json',
-        data: {
+        data: noteEntityFixture({
           slug: 'note-a',
           excerpt: ['first line\nfirst second line'],
           note: 'my note',
           cssPath: [''],
           url: pageUrl,
-        },
+          deleted: false,
+          deletedTs: null,
+          deletionReason: null,
+          replacedBy: null,
+        }),
       },
       {
         path: 'objects/notes/note-b.json',
-        data: {
+        data: noteEntityFixture({
           slug: 'note-b',
           excerpt: ['second'],
           note: '',
           cssPath: [''],
           url: pageUrl,
-        },
+          deleted: false,
+          deletedTs: null,
+          deletionReason: null,
+          replacedBy: null,
+        }),
       },
     ]);
 
     const page = await extContext.newPage();
     await page.goto(pageUrl);
     await page.waitForLoadState('domcontentloaded');
+    await page.locator('p').selectText();
 
     const helper = await openHelperPage(extContext, extensionId);
-    await helper.evaluate(
+    const response = await helper.evaluate(
       ({ url }) =>
         chrome.runtime.sendMessage({
           action: 'contextMenuHighlight',
@@ -260,6 +306,7 @@ test.describe('Context menu highlight', () => {
         }),
       { url: pageUrl },
     );
+    expect(response).toMatchObject({ success: true });
 
     await page.waitForSelector('#browser-recall-highlights-panel', {
       timeout: 5000,
@@ -272,17 +319,23 @@ test.describe('Context menu highlight', () => {
       const firstExcerpt = panel?.shadowRoot?.querySelector('.excerpt');
       return {
         count: items.length,
-        firstText: firstExcerpt?.textContent,
+        texts: items.map(
+          (item) => item.querySelector('.excerpt')?.textContent || '',
+        ),
         firstWhiteSpace: firstExcerpt
           ? getComputedStyle(firstExcerpt).whiteSpace
           : null,
       };
     });
-    expect(panelDetails).toEqual({
-      count: 3,
-      firstText: 'first line\nfirst second line',
-      firstWhiteSpace: 'pre-wrap',
-    });
+    expect(panelDetails.count).toBe(3);
+    expect(panelDetails.texts).toEqual(
+      expect.arrayContaining([
+        'first line\nfirst second line',
+        'second',
+        'third',
+      ]),
+    );
+    expect(panelDetails.firstWhiteSpace).toBe('pre-wrap');
 
     await page.close();
     await helper.close();

@@ -7,6 +7,7 @@ import { generateSlugFromUrl } from '../../packages/core/page-identity.js';
 import {
   collectDaemonMessages as collectMessages,
   ensureTestDaemonBuilt,
+  installTestControlWireAdapter,
   launchTestDaemon,
   nextDaemonMessage as nextMessage,
   stopTestDaemon,
@@ -20,6 +21,7 @@ function launchDaemon(configDir) {
   return launchTestDaemon(configDir, {
     ports: PORT_CANDIDATES,
     approveMode: 'allow',
+    testControl: true,
   });
 }
 
@@ -39,10 +41,12 @@ async function pairSocket(port) {
       browserId: 'browser-install-1',
       browserName: 'Chrome',
       extensionId: 'abcdefghijklmnop',
+      browserProfile: null,
     }),
   );
   const [, approved] = await pairingMessages;
   expect(approved.type).toBe('pair_approved');
+  installTestControlWireAdapter(socket);
   return { socket, deviceId: approved.deviceId };
 }
 
@@ -79,12 +83,15 @@ describe.sequential('popup rpc integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp,
           action: 'visit_page',
           url,
           title: 'Popup Summary',
+          referrerUrl: null,
         },
       }),
     );
@@ -93,6 +100,8 @@ describe.sequential('popup rpc integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: timestamp + 1,
@@ -100,6 +109,7 @@ describe.sequential('popup rpc integration', () => {
           name: 'Reading',
           listOwner: deviceId,
           listId: 'reading-popup',
+          parentListId: null,
         },
       }),
     );
@@ -108,6 +118,8 @@ describe.sequential('popup rpc integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: timestamp + 2,
@@ -116,6 +128,7 @@ describe.sequential('popup rpc integration', () => {
           listOwner: deviceId,
           urls: [url],
           titles: ['Popup Summary'],
+          source: null,
         },
       }),
     );
@@ -124,10 +137,14 @@ describe.sequential('popup rpc integration', () => {
     socket.send(
       JSON.stringify({
         type: 'note',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         slug: noteSlug,
         excerpt: ['Summary highlight'],
         note: 'Summary note body',
+        cssPath: [''],
+        oldSlug: null,
         url,
         title: 'Popup Summary',
         ts: timestamp + 3,
@@ -138,11 +155,14 @@ describe.sequential('popup rpc integration', () => {
     socket.send(
       JSON.stringify({
         type: 'snapshot',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         slug,
         ts: timestamp + 4,
         url,
         title: 'Popup Summary',
+        markdown: null,
         html: '<html><body>popup summary</body></html>',
       }),
     );
@@ -171,10 +191,10 @@ describe.sequential('popup rpc integration', () => {
         title: 'Popup Summary',
       },
       attention: {
-        totalSeconds: 0,
         lastVisit: timestamp + 4,
       },
     });
+    expect(summary.attention.totalSeconds).toBeNull();
     expect(summary.notes).toEqual([
       expect.objectContaining({
         slug: noteSlug,

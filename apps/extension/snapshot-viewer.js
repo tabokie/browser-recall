@@ -41,6 +41,30 @@ function showSnapshotRuntimeError(error) {
   return true;
 }
 
+function showSnapshotError(error) {
+  if (showSnapshotRuntimeError(error)) return;
+  const message =
+    typeof error?.message === 'string' && error.message
+      ? error.message
+      : tr('extensionActionFailed', 'Action failed', undefined);
+  let banner = document.getElementById('snapshotRuntimeError');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'snapshotRuntimeError';
+    banner.setAttribute('role', 'alert');
+    banner.style.cssText = paperErrorPopoutCss({
+      zIndex: 2147483647,
+      fontSize: '13px',
+      padding: '8px 14px',
+      maxWidth: '420px',
+    });
+    applyPaperErrorPopoutStyle(banner);
+    document.body.appendChild(banner);
+  }
+  banner.textContent = message;
+  logDebug('[snapshot-viewer] operation failed:', message);
+}
+
 if (!slug || !Number.isFinite(ts)) {
   document.body.textContent = tr(
     'extensionSnapshotMissingParams',
@@ -71,10 +95,15 @@ try {
     }),
   ]);
 } catch (error) {
-  if (!showSnapshotRuntimeError(error)) throw error;
+  showSnapshotError(error);
+  throw error;
 }
 
-if (!htmlResp?.success || !htmlResp.html) {
+if (
+  htmlResp?.success !== true ||
+  typeof htmlResp.html !== 'string' ||
+  !htmlResp.html
+) {
   document.body.textContent = tr(
     'extensionSnapshotNotFound',
     'Snapshot not found.',
@@ -82,8 +111,17 @@ if (!htmlResp?.success || !htmlResp.html) {
   );
   throw new Error(htmlResp?.error || 'getSnapshotHtml failed');
 }
+if (
+  pageResp?.success !== true ||
+  !pageResp.entry ||
+  typeof pageResp.entry !== 'object' ||
+  typeof pageResp.entry.url !== 'string' ||
+  !pageResp.entry.url
+) {
+  throw new Error(pageResp?.error || 'getPageInfo returned invalid page data');
+}
 
-const pageUrl = pageResp?.entry?.url || '';
+const pageUrl = pageResp.entry.url;
 const html = htmlResp.html;
 const frame = document.getElementById('frame');
 frame.srcdoc = html;
@@ -98,7 +136,9 @@ frame.addEventListener('load', async () => {
       action: 'loadPageNotes',
       slug,
     });
-    if (!resp?.success || !resp?.notes) return;
+    if (resp?.success !== true || !Array.isArray(resp.notes)) {
+      throw new Error(resp?.error || 'loadPageNotes returned invalid notes');
+    }
 
     const doc = frame.contentDocument;
     let highlightLifecycle;
@@ -135,30 +175,38 @@ frame.addEventListener('load', async () => {
           cssPath: [''],
         })
         .then((response) => {
-          if (!response?.success) return;
+          if (
+            response?.success !== true ||
+            typeof response.noteSlug !== 'string' ||
+            !response.noteSlug
+          ) {
+            throw new Error(
+              response?.error || 'createNote returned invalid data',
+            );
+          }
           const noteSlug = response.noteSlug;
           const mark = highlightLifecycle.createMark(range, selectedText, {
             noteSlug,
           });
-          if (mark) {
-            showHighlightEditOverlay(
-              doc,
-              mark,
-              selectedText,
-              noteSlug,
-              '',
-              highlightLifecycle,
+          if (!mark) {
+            throw new Error(
+              'Saved highlight could not be applied to the snapshot',
             );
           }
+          showHighlightEditOverlay(
+            doc,
+            mark,
+            selectedText,
+            noteSlug,
+            '',
+            highlightLifecycle,
+          );
           selection.removeAllRanges();
         })
-        .catch((error) => {
-          showSnapshotRuntimeError(error);
-        });
+        .catch(showSnapshotError);
     });
   } catch (error) {
-    if (showSnapshotRuntimeError(error)) return;
-    logDebug('[snapshot-viewer] highlight injection failed:', error.message);
+    showSnapshotError(error);
   }
 });
 
@@ -172,7 +220,10 @@ function attachMarkClickHandler(doc, mark, highlightLifecycle) {
     chrome.runtime
       .sendMessage({ action: 'loadPageNotes', slug })
       .then((resp) => {
-        const notes = resp?.notes || [];
+        if (resp?.success !== true || !Array.isArray(resp.notes)) {
+          throw new Error(resp?.error || 'Could not load page notes');
+        }
+        const notes = resp.notes;
         const match = notes.find((note) => note.slug === noteSlug);
         const displayText = match
           ? extensionSurface.formatHighlightExcerpt(match.excerpt)
@@ -186,17 +237,7 @@ function attachMarkClickHandler(doc, mark, highlightLifecycle) {
           highlightLifecycle,
         );
       })
-      .catch((error) => {
-        if (showSnapshotRuntimeError(error)) return;
-        showHighlightEditOverlay(
-          doc,
-          mark,
-          text,
-          noteSlug,
-          '',
-          highlightLifecycle,
-        );
-      });
+      .catch(showSnapshotError);
   });
 }
 
@@ -278,13 +319,18 @@ function showHighlightEditOverlay(
       chrome.runtime
         .sendMessage({ action: 'updateNote', noteSlug, note })
         .then((response) => {
-          if (response?.noteSlug) {
-            highlightLifecycle.replaceNote(noteSlug, response.noteSlug);
+          if (
+            response?.success !== true ||
+            typeof response.noteSlug !== 'string' ||
+            !response.noteSlug
+          ) {
+            throw new Error(
+              response?.error || 'updateNote returned invalid data',
+            );
           }
+          highlightLifecycle.replaceNote(noteSlug, response.noteSlug);
         })
-        .catch((error) => {
-          showSnapshotRuntimeError(error);
-        });
+        .catch(showSnapshotError);
     }
     host.remove();
   }
@@ -295,9 +341,12 @@ function showHighlightEditOverlay(
     if (noteSlug)
       chrome.runtime
         .sendMessage({ action: 'deleteNote', noteSlug })
-        .catch((error) => {
-          showSnapshotRuntimeError(error);
-        });
+        .then((response) => {
+          if (response?.success !== true) {
+            throw new Error(response?.error || 'deleteNote failed');
+          }
+        })
+        .catch(showSnapshotError);
     host.remove();
   });
   textarea.addEventListener('keydown', (event) => {

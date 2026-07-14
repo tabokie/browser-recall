@@ -1,7 +1,5 @@
-use browser_recall::{
-    search_batch, search_notes, search_records, search_snapshots, SearchRecord, SearchResult,
-};
-use serde::Deserialize;
+use browser_recall::{search_notes, search_records, search_snapshots, SearchRecord, SearchResult};
+use browser_recall_replay::LogEntry;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -69,17 +67,15 @@ pub fn search_history_in_data_dir(
 
     let logs_root = data_dir.join("logs");
     let pages_dir = data_dir.join("views").join("pages");
-    if !logs_root.exists() {
-        return Ok(Vec::new());
-    }
+    require_directory(&logs_root, "history log")?;
 
     let mut merged_by_url: HashMap<String, HistorySearchHit> = HashMap::new();
     for device_dir in list_subdirs(&logs_root)? {
-        let file_names = list_jsonl_files(&device_dir)?;
-        if file_names.is_empty() {
+        let records = latest_history_records_for_device(&device_dir)?;
+        if records.is_empty() {
             continue;
         }
-        let results = search_batch(&device_dir, &pages_dir, query, &file_names)?;
+        let results = search_records(&pages_dir, query, records)?;
         merge_history_hits(&mut merged_by_url, results.into_iter().map(Into::into));
     }
 
@@ -102,9 +98,7 @@ where
 
     let logs_root = data_dir.join("logs");
     let pages_dir = data_dir.join("views").join("pages");
-    if !logs_root.exists() {
-        return Ok(Vec::new());
-    }
+    require_directory(&logs_root, "history log")?;
 
     let mut tasks = Vec::new();
     for device_dir in list_subdirs(&logs_root)? {
@@ -186,6 +180,7 @@ pub fn search_notes_in_data_dir(
     }
 
     let notes_dir = data_dir.join("objects").join("notes");
+    require_directory(&notes_dir, "note object")?;
     let hits = search_notes(&notes_dir, query)?
         .into_iter()
         .map(|hit| NoteSearchHit {
@@ -207,44 +202,51 @@ pub fn search_snapshots_in_data_dir(
     }
 
     let snapshots_dir = data_dir.join("objects").join("snapshots");
-    if !snapshots_dir.exists() {
-        return Ok(Vec::new());
-    }
+    require_directory(&snapshots_dir, "snapshot object")?;
 
     let file_names = list_snapshot_files(&snapshots_dir)?;
-    let hits = search_snapshots(&snapshots_dir, query, &file_names)?
+    let mut hits_by_snapshot = HashMap::new();
+    for hit in search_snapshots(&snapshots_dir, query, &file_names)? {
+        let key = (hit.slug.clone(), hit.timestamp);
+        hits_by_snapshot
+            .entry(key)
+            .and_modify(|score: &mut f64| *score = score.max(hit.score))
+            .or_insert(hit.score);
+    }
+    let mut hits = hits_by_snapshot
         .into_iter()
-        .map(|hit| SnapshotSearchHit {
-            slug: hit.slug,
-            timestamp: hit.timestamp,
-            score: hit.score,
+        .map(|((slug, timestamp), score)| SnapshotSearchHit {
+            slug,
+            timestamp,
+            score,
         })
-        .collect();
+        .collect::<Vec<_>>();
+    hits.sort_by(|left, right| {
+        right
+            .score
+            .total_cmp(&left.score)
+            .then_with(|| right.timestamp.cmp(&left.timestamp))
+            .then_with(|| left.slug.cmp(&right.slug))
+    });
     Ok(truncate_to_limit(hits, limit))
 }
 
 fn list_subdirs(root: &Path) -> io::Result<Vec<PathBuf>> {
     let mut dirs = Vec::new();
     for entry in fs::read_dir(root)? {
-        let Ok(entry) = entry else {
-            continue;
-        };
+        let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
             dirs.push(path);
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unexpected file in history log root: {}", path.display()),
+            ));
         }
     }
     dirs.sort();
     Ok(dirs)
-}
-
-#[derive(Debug, Deserialize)]
-struct RawHistoryRecord {
-    timestamp: i64,
-    url: String,
-    title: String,
-    #[serde(default)]
-    slug: Option<String>,
 }
 
 fn latest_history_records_for_device(device_dir: &Path) -> io::Result<Vec<SearchRecord>> {
@@ -254,23 +256,60 @@ fn latest_history_records_for_device(device_dir: &Path) -> io::Result<Vec<Search
 
     for file_name in file_names {
         let path = device_dir.join(file_name);
-        let Ok(text) = fs::read_to_string(path) else {
-            continue;
-        };
-        for line in text.lines() {
+        let text = fs::read_to_string(&path)?;
+        for (line_index, line) in text.lines().enumerate() {
             if line.trim().is_empty() {
-                continue;
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "{} line {} is blank; JSONL records must be canonical entries",
+                        path.display(),
+                        line_index + 1
+                    ),
+                ));
             }
-            let Ok(item) = serde_json::from_str::<RawHistoryRecord>(line) else {
-                continue;
+            let item = serde_json::from_str::<LogEntry>(line).map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "{} line {} is not a canonical log entry: {error}",
+                        path.display(),
+                        line_index + 1
+                    ),
+                )
+            })?;
+            let (timestamp, url, title) = match item {
+                LogEntry::VisitPage {
+                    timestamp,
+                    url,
+                    title,
+                    ..
+                }
+                | LogEntry::LeavePage {
+                    timestamp,
+                    url,
+                    title,
+                    ..
+                } => (timestamp, url, title),
+                _ => continue,
             };
-            if seen_urls.insert(item.url.clone()) {
+            let title = title.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "{} line {} history entry is missing title",
+                        path.display(),
+                        line_index + 1
+                    ),
+                )
+            })?;
+            if seen_urls.insert(url.clone()) {
                 records.push(SearchRecord {
-                    timestamp: item.timestamp,
-                    url: item.url,
-                    title: item.title,
+                    timestamp,
+                    url,
+                    title,
                     user_title: None,
-                    slug: item.slug,
+                    slug: None,
                 });
             }
         }
@@ -282,19 +321,28 @@ fn latest_history_records_for_device(device_dir: &Path) -> io::Result<Vec<Search
 fn list_jsonl_files(dir: &Path) -> io::Result<Vec<String>> {
     let mut files = Vec::new();
     for entry in fs::read_dir(dir)? {
-        let Ok(entry) = entry else {
-            continue;
-        };
+        let entry = entry?;
         let path = entry.path();
+        if path.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unexpected directory in device log: {}", path.display()),
+            ));
+        }
         if !path.is_file() {
-            continue;
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unexpected entry in device log: {}", path.display()),
+            ));
         }
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        if name.ends_with(".jsonl") {
-            files.push(name.to_string());
-        }
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "log filename is not UTF-8")
+            })?;
+        validate_log_filename(name)?;
+        files.push(name.to_string());
     }
     files.sort();
     files.reverse();
@@ -302,48 +350,84 @@ fn list_jsonl_files(dir: &Path) -> io::Result<Vec<String>> {
 }
 
 fn list_snapshot_files(dir: &Path) -> io::Result<Vec<String>> {
-    let mut files_by_stem: HashMap<String, String> = HashMap::new();
-    collect_snapshot_files(dir, dir, &mut files_by_stem)?;
-    let mut files: Vec<_> = files_by_stem.into_values().collect();
+    let mut files = Vec::new();
+    collect_snapshot_files(dir, dir, &mut files)?;
     files.sort();
     Ok(files)
 }
 
-fn collect_snapshot_files(
-    root: &Path,
-    dir: &Path,
-    files_by_stem: &mut HashMap<String, String>,
-) -> io::Result<()> {
+fn collect_snapshot_files(root: &Path, dir: &Path, files: &mut Vec<String>) -> io::Result<()> {
     for entry in fs::read_dir(dir)? {
-        let Ok(entry) = entry else {
-            continue;
-        };
+        let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
-            collect_snapshot_files(root, &path, files_by_stem)?;
+            collect_snapshot_files(root, &path, files)?;
             continue;
         }
         if !path.is_file() {
-            continue;
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unexpected snapshot entry: {}", path.display()),
+            ));
         }
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "snapshot filename is not UTF-8")
+            })?;
         if !(name.ends_with(".md") || name.ends_with(".html")) {
-            continue;
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unexpected snapshot file: {}", path.display()),
+            ));
         }
-        let stem = name
-            .strip_suffix(".md")
-            .or_else(|| name.strip_suffix(".html"))
-            .unwrap_or(name);
-        let relative = path.strip_prefix(root).unwrap_or(&path).to_string_lossy();
-        match files_by_stem.get(stem) {
-            Some(existing) if existing.ends_with(".md") => {}
-            _ => {
-                files_by_stem.insert(stem.to_string(), relative.to_string());
-            }
-        }
+        let relative = path.strip_prefix(root).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("snapshot path escaped its root: {error}"),
+            )
+        })?;
+        let relative = relative.to_str().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "snapshot path is not UTF-8")
+        })?;
+        files.push(relative.to_string());
     }
+    Ok(())
+}
+
+fn require_directory(path: &Path, kind: &str) -> io::Result<()> {
+    let metadata = fs::metadata(path).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "{kind} directory {} is unavailable: {error}",
+                path.display()
+            ),
+        )
+    })?;
+    if !metadata.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{kind} path is not a directory: {}", path.display()),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_log_filename(name: &str) -> io::Result<()> {
+    let date = name.strip_suffix(".jsonl").ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unexpected non-JSONL history file: {name}"),
+        )
+    })?;
+    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("history filename must be YYYY-MM-DD.jsonl: {name}: {error}"),
+        )
+    })?;
     Ok(())
 }
 
@@ -422,10 +506,11 @@ mod tests {
         fs::write(
             device_a.join("2026-04-18.jsonl"),
             json!({
+                "action": "visit_page",
                 "timestamp": 100,
                 "url": "https://example.com/article",
                 "title": "Article A",
-                "slug": "example-article"
+                "referrerUrl": null
             })
             .to_string(),
         )
@@ -434,17 +519,19 @@ mod tests {
             device_b.join("2026-04-18.jsonl"),
             [
                 json!({
+                    "action": "visit_page",
                     "timestamp": 200,
                     "url": "https://example.com/article",
                     "title": "Article A newer",
-                    "slug": "example-article"
+                    "referrerUrl": null
                 })
                 .to_string(),
                 json!({
+                    "action": "visit_page",
                     "timestamp": 150,
                     "url": "https://example.com/second",
                     "title": "Article B",
-                    "slug": "second-article"
+                    "referrerUrl": null
                 })
                 .to_string(),
             ]
@@ -473,15 +560,15 @@ mod tests {
 
         for index in 0..6 {
             let url = format!("https://example.com/parallel-{index}");
-            let slug = format!("parallel-{index}");
             let target = if index % 2 == 0 { &device_a } else { &device_b };
             fs::write(
                 target.join(format!("2026-04-{:02}.jsonl", index + 1)),
                 json!({
+                    "action": "visit_page",
                     "timestamp": 1000 + index,
                     "url": url,
                     "title": format!("Parallel banana {index}"),
-                    "slug": slug,
+                    "referrerUrl": null,
                 })
                 .to_string(),
             )
@@ -517,10 +604,11 @@ mod tests {
         fs::write(
             device.join("2026-04-19.jsonl"),
             json!({
+                "action": "visit_page",
                 "timestamp": 200,
                 "url": "https://example.com/duplicate",
                 "title": "Newest title without match",
-                "slug": "duplicate",
+                "referrerUrl": null,
             })
             .to_string(),
         )
@@ -529,10 +617,11 @@ mod tests {
             fs::write(
                 device.join(format!("2026-04-1{index}.jsonl")),
                 json!({
+                    "action": "visit_page",
                     "timestamp": 150 - index,
                     "url": format!("https://example.com/filler-{index}"),
                     "title": format!("Filler {index}"),
-                    "slug": format!("filler-{index}"),
+                    "referrerUrl": null,
                 })
                 .to_string(),
             )
@@ -541,10 +630,11 @@ mod tests {
         fs::write(
             device.join("2026-04-09.jsonl"),
             json!({
+                "action": "visit_page",
                 "timestamp": 100,
                 "url": "https://example.com/duplicate",
                 "title": "Older needle title",
-                "slug": "duplicate",
+                "referrerUrl": null,
             })
             .to_string(),
         )
@@ -576,10 +666,11 @@ mod tests {
             fs::write(
                 device.join(format!("2026-04-{:02}.jsonl", index + 1)),
                 json!({
+                    "action": "visit_page",
                     "timestamp": 1000 + index,
                     "url": format!("https://example.com/limited-{index}"),
                     "title": format!("Limited needle {index}"),
-                    "slug": format!("limited-{index}"),
+                    "referrerUrl": null,
                 })
                 .to_string(),
             )
@@ -613,10 +704,11 @@ mod tests {
         fs::write(
             device.join("2026-04-18.jsonl"),
             json!({
+                "action": "visit_page",
                 "timestamp": 100,
                 "url": "https://example.com/cancelled",
                 "title": "Cancelled banana",
-                "slug": "cancelled",
+                "referrerUrl": null,
             })
             .to_string(),
         )
@@ -639,14 +731,12 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let notes_dir = temp_dir.path().join("objects/notes");
         fs::create_dir_all(&notes_dir).unwrap();
+        let mut note = browser_recall_replay::entities::NoteEntity::new("note-a".to_string());
+        note.url = Some("https://example.com/article".to_string());
+        note.excerpt = Some(json!(["banana excerpt"]));
         fs::write(
             notes_dir.join("note-a.json"),
-            json!({
-                "slug": "note-a",
-                "url": "https://example.com/article",
-                "excerpt": ["banana excerpt"]
-            })
-            .to_string(),
+            serde_json::to_string(&note).unwrap(),
         )
         .unwrap();
 
@@ -686,10 +776,15 @@ mod tests {
     }
 
     #[test]
-    fn search_snapshots_in_data_dir_falls_back_to_html_files() {
+    fn search_snapshots_in_data_dir_reads_html_when_markdown_does_not_match() {
         let temp_dir = tempdir().unwrap();
         let snapshots_dir = temp_dir.path().join("objects/snapshots/aa");
         fs::create_dir_all(&snapshots_dir).unwrap();
+        fs::write(
+            snapshots_dir.join("my-page-1709251200000.md"),
+            "markdown without the query",
+        )
+        .unwrap();
         fs::write(
             snapshots_dir.join("my-page-1709251200000.html"),
             "<html><body>banana snapshot</body></html>",

@@ -275,6 +275,8 @@ function enqueuePopupUiMutation(action, task) {
     });
   };
   const queued = popupUiMutationQueue.then(runWhenIdle, runWhenIdle);
+  // Keep a fulfilled serialization tail; callers receive `queued` and observe
+  // the rejection from their own mutation.
   popupUiMutationQueue = queued
     .catch(() => {})
     .finally(() => {
@@ -298,6 +300,8 @@ function enqueueFocusedAutosave(task) {
     runWhenCommandIdle,
     runWhenCommandIdle,
   );
+  // Keep a fulfilled serialization tail; the autosave caller still receives
+  // `queued` and observes its own rejection.
   focusedAutosaveQueue = queued.catch(() => {});
   return queued;
 }
@@ -307,7 +311,10 @@ function hideElement(id) {
   if (element) element.style.display = 'none';
 }
 
-function renderConnectorDiagnostic(connector = {}, options = {}) {
+function renderConnectorDiagnostic(connector, options = {}) {
+  if (!connector || typeof connector !== 'object' || Array.isArray(connector)) {
+    throw new Error('Connector diagnostic requires connector state');
+  }
   const { reveal = true } = options;
   hideElement('blacklisted');
   setPopupSurface('setup', { reveal });
@@ -365,7 +372,7 @@ function renderPageDiagnostic({ title, message, detail = null, actions = [] }) {
   if (pageHeader) pageHeader.style.display = 'none';
 }
 
-function showSetupRequired(connector = {}, options = {}) {
+function showSetupRequired(connector, options = {}) {
   renderConnectorDiagnostic(connector, options);
 }
 
@@ -511,7 +518,7 @@ function formatDuration(ms) {
   return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-function applyDesktopConnectorUi(connector = {}) {
+function applyDesktopConnectorUi(connector) {
   const formatted = formatDesktopConnectorState(connector);
   const pending = desktopConnectInFlight || connector.state === 'pair_pending';
   const checking = desktopConnectInFlight;
@@ -631,8 +638,8 @@ function formatSetupDiagnostic(diagnostic) {
   if (diagnostic.connector) {
     lines.push(`connector: ${diagnostic.connector.state || 'unknown'}`);
     lines.push(`deviceId: ${diagnostic.connector.deviceId || 'none'}`);
-    lines.push(`pendingCommands: ${diagnostic.connector.pendingCommands ?? 0}`);
-    lines.push(`pendingBytes: ${diagnostic.connector.pendingBytes ?? 0}`);
+    lines.push(`pendingCommands: ${diagnostic.connector.pendingCommands}`);
+    lines.push(`pendingBytes: ${diagnostic.connector.pendingBytes}`);
     if (diagnostic.connector.lastError)
       lines.push(`connectorError: ${diagnostic.connector.lastError}`);
   }
@@ -718,7 +725,7 @@ async function refreshDesktopConnectorState() {
           undefined,
         ),
     );
-    return null;
+    throw error;
   }
 }
 
@@ -743,15 +750,6 @@ async function loadDashboardIfConnected(connector) {
   return true;
 }
 
-function refreshDesktopConnectorStateInBackground() {
-  void (async () => {
-    const connector = await refreshDesktopConnectorState();
-    await loadDashboardIfConnected(connector);
-  })().catch((error) => {
-    logDebug('[popup] background connector refresh failed:', error.message);
-  });
-}
-
 async function connectDesktopBridge() {
   if (desktopConnectInFlight) return;
   desktopConnectInFlight = true;
@@ -773,12 +771,14 @@ async function connectDesktopBridge() {
 
 // Render snapshots section
 function renderSnapshots(snapshots) {
+  if (!Array.isArray(snapshots)) {
+    throw new Error('Popup snapshot projection must be an array');
+  }
   const container = document.getElementById('snapshotList');
   const count = document.getElementById('snapshotCount');
   const section = document.getElementById('snapshotSection');
-  if (count)
-    count.textContent = String(snapshots?.length || 0).padStart(2, '0');
-  if (!snapshots || snapshots.length === 0) {
+  if (count) count.textContent = String(snapshots.length).padStart(2, '0');
+  if (snapshots.length === 0) {
     container.innerHTML = '';
     section?.classList.add('is-empty');
     showSection('snapshotSection');
@@ -807,11 +807,12 @@ function renderSnapshots(snapshots) {
       e.stopPropagation();
       void runPopupUiMutation('delete-snapshot', async () => {
         const ts = parseInt(btn.dataset.ts, 10);
-        await chrome.runtime.sendMessage({
+        const response = await chrome.runtime.sendMessage({
           action: 'deleteSnapshot',
           slug: currentPage.slug,
           timestamp: ts,
         });
+        requireSuccessfulResponse(response, 'deleteSnapshot');
         await refreshCurrentPageSummary();
       }).catch((error) => showErrorBubble(error.message));
     });
@@ -838,7 +839,10 @@ function renderVisitsAndLikes(entry) {
 
   const items = [];
 
-  const visitDates = entry?.visitDates || [];
+  if (!entry || typeof entry !== 'object' || !Array.isArray(entry.visitDates)) {
+    throw new Error('Popup page projection is missing visitDates');
+  }
+  const visitDates = entry.visitDates;
   if (visitDates.length > 0) {
     const parse = (yyyymmdd) => {
       const y = Math.floor(yyyymmdd / 10000);
@@ -944,26 +948,36 @@ async function sendPageNoteSave(ta) {
   const note = ta.value;
   const noteSlug = ta.dataset.noteSlug;
   if (noteSlug) {
-    const resp = await chrome.runtime.sendMessage({
-      action: 'updateNote',
-      noteSlug,
-      note,
-    });
-    if (resp?.noteSlug && resp.noteSlug !== noteSlug) {
+    const resp = requireSuccessfulResponse(
+      await chrome.runtime.sendMessage({
+        action: 'updateNote',
+        noteSlug,
+        note,
+      }),
+      'updateNote',
+    );
+    if (typeof resp.noteSlug !== 'string' || !resp.noteSlug) {
+      throw new Error('updateNote response missing noteSlug');
+    }
+    if (resp.noteSlug !== noteSlug) {
       ta.dataset.noteSlug = resp.noteSlug;
     }
   } else if (note) {
-    const resp = await chrome.runtime.sendMessage({
-      action: 'createNote',
-      pageSlug: currentPage.slug,
-      url: currentPage.url,
-      excerpt: null,
-      note,
-      cssPath: null,
-    });
-    if (resp?.noteSlug) {
-      ta.dataset.noteSlug = resp.noteSlug;
+    const resp = requireSuccessfulResponse(
+      await chrome.runtime.sendMessage({
+        action: 'createNote',
+        pageSlug: currentPage.slug,
+        url: currentPage.url,
+        excerpt: null,
+        note,
+        cssPath: null,
+      }),
+      'createNote',
+    );
+    if (typeof resp.noteSlug !== 'string' || !resp.noteSlug) {
+      throw new Error('createNote response missing noteSlug');
     }
+    ta.dataset.noteSlug = resp.noteSlug;
   }
 }
 
@@ -990,7 +1004,10 @@ function renderNotes(notes) {
   }
   const container = document.getElementById('highlightList');
   const section = document.getElementById('notesSection');
-  currentPage.notes = Array.isArray(notes) ? notes : [];
+  if (!Array.isArray(notes)) {
+    throw new Error('Popup note projection must be an array');
+  }
+  currentPage.notes = notes;
 
   const globalNote = currentPage.notes.find((n) => n.excerpt === null);
   renderPageNoteWrap(globalNote);
@@ -1040,18 +1057,24 @@ function bindHighlightActions(container) {
       void runPopupUiMutation('delete-note', async () => {
         const noteSlug = btn.dataset.noteSlug;
         if (!noteSlug) return;
-        try {
-          await chrome.runtime.sendMessage({ action: 'deleteNote', noteSlug });
-          const [tab] = await chrome.tabs.query({
-            active: true,
-            currentWindow: true,
-          });
-          if (tab?.id)
-            chrome.tabs
-              .sendMessage(tab.id, { action: 'removeHighlightMark', noteSlug })
-              .catch(() => {});
-        } catch (e) {
-          logError('[popup] Delete note error:', e);
+        const response = await chrome.runtime.sendMessage({
+          action: 'deleteNote',
+          noteSlug,
+        });
+        requireSuccessfulResponse(response, 'deleteNote');
+        const [tab] = await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
+        if (tab?.id) {
+          chrome.tabs
+            .sendMessage(tab.id, { action: 'removeHighlightMark', noteSlug })
+            .catch((error) =>
+              logDebug(
+                '[popup] Highlight removal message had no receiver:',
+                error.message,
+              ),
+            );
         }
         currentPage.notes = currentPage.notes.filter(
           (n) => n.slug !== noteSlug,
@@ -1101,12 +1124,18 @@ function openHighlightNoteEditor(item, note) {
 
 async function saveHighlightNoteWithoutLock({ item, note, textarea, slug }) {
   return enqueueFocusedAutosave(async () => {
-    const resp = await chrome.runtime.sendMessage({
-      action: 'updateNote',
-      noteSlug: slug,
-      note: textarea.value,
-    });
-    if (resp?.noteSlug && resp.noteSlug !== slug) {
+    const resp = requireSuccessfulResponse(
+      await chrome.runtime.sendMessage({
+        action: 'updateNote',
+        noteSlug: slug,
+        note: textarea.value,
+      }),
+      'updateNote',
+    );
+    if (typeof resp.noteSlug !== 'string' || !resp.noteSlug) {
+      throw new Error('updateNote response missing noteSlug');
+    }
+    if (resp.noteSlug !== slug) {
       item.dataset.noteSlug = resp.noteSlug;
       note.slug = resp.noteSlug;
     }
@@ -1192,7 +1221,10 @@ function handleListChipsClick(event) {
 
 async function renderListChips(listOverride = null) {
   const container = document.getElementById('listChips');
-  const lists = listOverride || currentPage.summary?.lists || [];
+  const lists = listOverride ?? currentPage.summary?.lists;
+  if (!Array.isArray(lists)) {
+    throw new Error('Popup list projection must be an array');
+  }
 
   // Partition into lists containing this page vs. others
   const containsPage = [];
@@ -1295,16 +1327,29 @@ async function sendListPinToggle(listId) {
   });
 }
 
+function requireListPinToggleResponse(response) {
+  requireSuccessfulResponse(response, 'toggleListPin');
+  if (typeof response.pinned !== 'boolean') {
+    throw new Error('toggleListPin response missing boolean pinned');
+  }
+  return response.pinned;
+}
+
+function requireSuccessfulResponse(response, action) {
+  if (!response || typeof response !== 'object' || Array.isArray(response)) {
+    throw new Error(`${action} returned no response`);
+  }
+  if (response.success !== true) {
+    throw new Error(response.error || `${action} failed`);
+  }
+  return response;
+}
+
 async function toggleListPin(listId) {
   const response = await sendListPinToggle(listId);
-  if (
-    response &&
-    response.success !== false &&
-    typeof response.pinned === 'boolean'
-  ) {
-    applyLocalListPinState(listId, response.pinned);
-    syncListChipToggle(listId, response.pinned);
-  }
+  const pinned = requireListPinToggleResponse(response);
+  applyLocalListPinState(listId, pinned);
+  syncListChipToggle(listId, pinned);
   return response;
 }
 
@@ -1592,18 +1637,11 @@ function openListPicker(lists, options = {}) {
       const listId = option.dataset.listId;
       if (!listId) return true;
       const response = await sendListPinToggle(listId);
-      if (
-        response &&
-        response.success !== false &&
-        typeof response.pinned === 'boolean'
-      ) {
-        applyLocalListPinState(listId, response.pinned);
-        applyPinStateToLists(pickerLists, listId, response.pinned);
-      }
-      const chipSynced =
-        response?.pinned === undefined ||
-        syncListChipToggle(listId, response.pinned);
-      const pickerSynced = syncListPickerOptionToggle(listId, response?.pinned);
+      const pinned = requireListPinToggleResponse(response);
+      applyLocalListPinState(listId, pinned);
+      applyPinStateToLists(pickerLists, listId, pinned);
+      const chipSynced = syncListChipToggle(listId, pinned);
+      const pickerSynced = syncListPickerOptionToggle(listId, pinned);
       if (!chipSynced || !pickerSynced) {
         await renderListChips(currentPage.summary?.lists || pickerLists);
       }
@@ -1901,7 +1939,7 @@ async function openListPickerFromTyping(
 ) {
   if (isPopupUiMutating()) return;
   if (!currentPage.summary) {
-    await popupInitialization.catch(() => null);
+    await popupInitialization;
     if (!currentPage.summary || popupShellState.surface !== 'dashboard') return;
   }
   const existingInput = listPickerInput();
@@ -1957,9 +1995,10 @@ async function createListAndPin(name) {
     url: currentPage.url,
     title: currentPage.title || currentPage.tab?.title || '',
   });
+  requireSuccessfulResponse(resp, 'createListAndPin');
   const listId = resp?.listId;
-  if (!resp?.success || !listId || resp.pinned !== true) {
-    throw new Error(resp?.error || 'Desktop did not create and pin the list');
+  if (!listId || resp.pinned !== true) {
+    throw new Error('Desktop did not create and pin the list');
   }
 
   const list = {
@@ -1974,13 +2013,22 @@ async function createListAndPin(name) {
   logDebug('[popup] Created list and pinned page:', name, listId);
 }
 
-// Recording pause state (session-only, not persisted to disk). The storage key
-// remains "workspace" so content/background private-mode checks stay compatible.
+// Recording pause state is session-only and shared with content/background code
+// through the single `workspace: { mode }` schema.
 async function loadRecordingState() {
   if (recordingUiState.hydrated) {
     return { paused: recordingUiState.paused };
   }
   const { workspace } = await chrome.storage.session.get(['workspace']);
+  if (
+    workspace !== undefined &&
+    (!workspace ||
+      typeof workspace !== 'object' ||
+      Array.isArray(workspace) ||
+      (workspace.mode !== 'default' && workspace.mode !== 'private'))
+  ) {
+    throw new Error('Stored recording state must have mode default or private');
+  }
   recordingUiState.paused = workspace?.mode === 'private';
   recordingUiState.hydrated = true;
   applyRecordingBarState();
@@ -1988,10 +2036,13 @@ async function loadRecordingState() {
 }
 
 async function saveRecordingState(paused) {
-  await chrome.runtime.sendMessage({
-    action: 'setRecordingPaused',
-    paused,
-  });
+  requireSuccessfulResponse(
+    await chrome.runtime.sendMessage({
+      action: 'setRecordingPaused',
+      paused,
+    }),
+    'setRecordingPaused',
+  );
 }
 
 function applyRecordingBarState() {
@@ -2035,13 +2086,14 @@ async function handleRecordingToggleClick() {
     // Resuming recording: record the current page visit and show details.
     if (paused && !nextPaused && currentPage.tab) {
       const url = currentPage.tab._effectiveUrl || currentPage.tab.url;
-      await chrome.runtime.sendMessage({
+      const response = await chrome.runtime.sendMessage({
         action: 'recordPageActivity',
         url,
         title: currentPage.tab.title || null,
         slug: generateSlugFromUrl(url),
         isInitialLoad: true,
       });
+      requireSuccessfulResponse(response, 'recordPageActivity');
       await showDashboard(currentPage.tab, {
         hideContentUntilReady: true,
         compactUntilReady: true,
@@ -2101,11 +2153,12 @@ function startEditingTitle() {
       currentPage.entry.user_title = newTitle;
       currentPage.title = newTitle;
       await enqueuePopupUiMutation('save-title', async () => {
-        await chrome.runtime.sendMessage({
+        const response = await chrome.runtime.sendMessage({
           action: 'recordPageActivity',
           url: currentPage.entry.url,
           user_title: newTitle,
         });
+        requireSuccessfulResponse(response, 'recordPageActivity');
         logDebug('[popup] User title updated to:', newTitle);
       }).catch((error) => {
         logError('[popup] Failed to save user title:', error);
@@ -2163,7 +2216,7 @@ document.getElementById('captureBtn').addEventListener('click', () => {
         action: 'captureCurrentPageFromPopup',
       });
       logDebug('[popup] Capture response:', resp);
-      if (resp && resp.success) {
+      if (resp?.success === true) {
         await refreshCurrentPageSummary();
         if (resp.warning) {
           await notifyActivePageError(resp.warning, resp.warning);
@@ -2198,20 +2251,37 @@ function restoreDashboardContent() {
 
 async function resolvePageIdentity(tab) {
   const effectiveUrl = tab._effectiveUrl || tab.url;
-  const title = tab._effectiveTitle || tab.title || '<unknown>';
+  const title = tab._effectiveTitle || tab.title || '';
   const slug = tab._effectiveSlug || generateSlugFromUrl(effectiveUrl);
   return { slug, url: effectiveUrl, title };
 }
 
-function pageSummaryFallback(tab, slug, summary = {}) {
-  const url = summary.url || currentPage.url || tab._effectiveUrl || tab.url;
+function transientPageView(slug, summary) {
   return {
     slug,
-    url,
-    title: currentPage.title || tab.title || '<unknown>',
+    url: summary.url,
+    title: summary.displayTitle,
     visitDates: [],
     hasSnapshots: false,
+    transient: true,
   };
+}
+
+function validatePopupSummary(summary) {
+  if (
+    summary?.success !== true ||
+    typeof summary.url !== 'string' ||
+    typeof summary.displayTitle !== 'string' ||
+    typeof summary.access?.blacklisted !== 'boolean' ||
+    typeof summary.access?.hasVisitHistory !== 'boolean' ||
+    !Array.isArray(summary.notes) ||
+    !Array.isArray(summary.snapshots) ||
+    !Array.isArray(summary.lists) ||
+    (summary.page !== null &&
+      (typeof summary.page !== 'object' || Array.isArray(summary.page)))
+  ) {
+    throw new Error('Desktop returned an incomplete popup summary');
+  }
 }
 
 async function fetchAndRenderPageData(tab, slug, options = {}) {
@@ -2233,13 +2303,7 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
     logDebug('[popup] getPageSummary response:', summary);
 
     if (summary?.success) {
-      if (
-        typeof summary.displayTitle !== 'string' ||
-        typeof summary.access?.blacklisted !== 'boolean' ||
-        typeof summary.access?.hasVisitHistory !== 'boolean'
-      ) {
-        throw new Error('Desktop returned an incomplete popup summary');
-      }
+      validatePopupSummary(summary);
       if (summary.access.blacklisted && !summary.access.hasVisitHistory) {
         currentPage.pageSummaryState = 'succeeded';
         renderBlacklistDiagnostic(
@@ -2250,7 +2314,7 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
       }
       if (resetSections) resetDashboardSections();
       else clearPageDiagnosticSection();
-      const page = summary.page || pageSummaryFallback(tab, slug, summary);
+      const page = summary.page || transientPageView(slug, summary);
       const title = page.user_title ? page.user_title : summary.displayTitle;
       if (generation !== currentPage.generation) return false;
       currentPage.summary = { ...summary, page };
@@ -2268,7 +2332,7 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
         renderNotes(summary.notes);
       }
       logDebug(
-        `[popup] Loaded ${summary.notes?.length || 0} notes, ${summary.snapshots?.length || 0} snapshots, ${summary.lists?.length || 0} lists`,
+        `[popup] Loaded ${summary.notes.length} notes, ${summary.snapshots.length} snapshots, ${summary.lists.length} lists`,
       );
     } else {
       currentPage.pageSummaryState = 'failed';
@@ -2290,7 +2354,7 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
           },
         );
       } else {
-        showSetupRequired(connector || { state: 'offline', hasToken: true });
+        showSetupRequired(connector);
       }
       return false;
     }
@@ -2315,7 +2379,7 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
         },
       );
     } else {
-      showSetupRequired(connector || { state: 'offline', hasToken: true });
+      showSetupRequired(connector);
     }
     return false;
   }
@@ -2359,12 +2423,7 @@ function listMutationTargetsCurrentPage(request) {
     (url) => typeof url === 'string' && url,
   );
   if (urls.length === 0) return true;
-  try {
-    return urls.some((url) => generateSlugFromUrl(url) === currentPage.slug);
-  } catch (error) {
-    logDebug('[popup] invalid list mutation URL:', error.message);
-    return false;
-  }
+  return urls.some((url) => generateSlugFromUrl(url) === currentPage.slug);
 }
 
 function scheduleLiveListRefresh(request) {
@@ -2481,10 +2540,7 @@ async function showDashboard(tab, options = {}) {
     resetSections: false,
   });
   if (!updated || generation !== currentPage.generation) return;
-  const summaryLists = Array.isArray(currentPage.summary?.lists)
-    ? currentPage.summary.lists
-    : null;
-  await renderListChips(summaryLists || []);
+  await renderListChips(currentPage.summary.lists);
   if (generation !== currentPage.generation) return;
   await finishDashboardRender(tab, generation);
   schedulePendingLiveListRefresh();
@@ -2519,74 +2575,32 @@ async function resolveActiveTab() {
   return tab;
 }
 
-function snapshotViewerSlugFromUrl(url) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.href.startsWith(chrome.runtime.getURL('snapshot-viewer.html'))) {
-      return parsed.searchParams.get('slug');
-    }
-  } catch {}
-  return null;
-}
-
 function isSnapshotViewerUrl(url) {
-  return Boolean(snapshotViewerSlugFromUrl(url));
+  return url.startsWith(chrome.runtime.getURL('snapshot-viewer.html'));
 }
 
 async function resolveEffectiveUrl(tab) {
-  let effectiveUrl = tab.url;
-  try {
-    const reported = await chrome.runtime.sendMessage({
-      action: 'getReportedUrl',
-      tabId: tab.id,
-    });
-    if (reported?.success && reported.url) {
-      effectiveUrl = reported.url;
-    }
-  } catch {}
-
-  if (tab.id != null) {
-    const viewerSlug = snapshotViewerSlugFromUrl(tab.url);
-    if (viewerSlug) {
-      try {
-        const pageInfo = await chrome.runtime.sendMessage({
-          action: 'getPageInfo',
-          slug: viewerSlug,
-        });
-        if (pageInfo?.success && pageInfo.entry?.url) {
-          tab._effectiveSlug = viewerSlug;
-          effectiveUrl = pageInfo.entry.url;
-          if (pageInfo.entry.title) tab._effectiveTitle = pageInfo.entry.title;
-        }
-      } catch {}
-      tab._effectiveUrl = effectiveUrl;
-      return;
-    }
-
-    try {
-      const identity = await chrome.tabs.sendMessage(tab.id, {
-        action: 'getPageIdentity',
-      });
-      if (identity?.success && identity.embedded && identity.slug) {
-        tab._effectiveSlug = identity.slug;
-        if (identity.url) {
-          effectiveUrl = identity.url;
-        } else {
-          const pageInfo = await chrome.runtime.sendMessage({
-            action: 'getPageInfo',
-            slug: identity.slug,
-          });
-          if (pageInfo?.success && pageInfo.entry?.url) {
-            effectiveUrl = pageInfo.entry.url;
-            if (pageInfo.entry.title)
-              tab._effectiveTitle = pageInfo.entry.title;
-          }
-        }
-      }
-    } catch {}
+  const response = await chrome.runtime.sendMessage({
+    action: 'resolvePopupPageIdentity',
+    tabId: tab.id,
+  });
+  const identity = response?.identity;
+  if (
+    response?.success !== true ||
+    !identity ||
+    typeof identity.slug !== 'string' ||
+    !identity.slug ||
+    typeof identity.url !== 'string' ||
+    !identity.url ||
+    typeof identity.title !== 'string'
+  ) {
+    throw new Error(
+      response?.error || 'Popup page identity response is invalid',
+    );
   }
-
-  tab._effectiveUrl = effectiveUrl;
+  tab._effectiveSlug = identity.slug;
+  tab._effectiveUrl = identity.url;
+  tab._effectiveTitle = identity.title;
 }
 
 async function handlePrivateMode(tab) {
@@ -2619,7 +2633,7 @@ function renderBlacklistDiagnostic(tab, effectiveUrl) {
 
             try {
               const slug = generateSlugFromUrl(effectiveUrl);
-              await chrome.runtime.sendMessage({
+              const activityResponse = await chrome.runtime.sendMessage({
                 action: 'recordPageActivity',
                 url: effectiveUrl,
                 title: tab.title || null,
@@ -2627,16 +2641,17 @@ function renderBlacklistDiagnostic(tab, effectiveUrl) {
                 isInitialLoad: true,
                 bypassBlacklist: true,
               });
+              requireSuccessfulResponse(activityResponse, 'recordPageActivity');
               const resp = await chrome.runtime.sendMessage({
                 action: 'captureCurrentPageFromPopup',
               });
-              if (resp?.success && resp.warning) {
+              if (resp?.success === true && resp.warning) {
                 await notifyPageError({
                   tabId: tab.id,
                   message: resp.warning,
                   fallback: resp.warning,
                 });
-              } else if (resp && !resp.success) {
+              } else if (resp?.success !== true) {
                 await notifyPageError({
                   tabId: tab.id,
                   message: resp.error,
@@ -2675,45 +2690,51 @@ function renderBlacklistDiagnostic(tab, effectiveUrl) {
 }
 
 function popupBootstrapToken() {
-  try {
-    return new URL(window.location.href).searchParams.get('bootstrap');
-  } catch {
-    return null;
-  }
+  return new URL(window.location.href).searchParams.get('bootstrap');
 }
 
 async function consumePopupBootstrap() {
   const token = popupBootstrapToken();
   if (!token) return null;
-  try {
-    // Background prepared the popup model before opening this URL. The token is
-    // an in-memory one-shot handoff, not extension-side product persistence.
-    const response = await chrome.runtime.sendMessage({
-      action: 'consumePopupBootstrap',
-      token,
-    });
-    if (response?.success && response.bootstrap) return response.bootstrap;
-  } catch (error) {
-    logDebug('[popup] bootstrap consume failed:', error.message);
+  // Background prepared the popup model before opening this URL. The token is
+  // an in-memory one-shot handoff, not extension-side product persistence.
+  const response = await chrome.runtime.sendMessage({
+    action: 'consumePopupBootstrap',
+    token,
+  });
+  if (response?.success !== true) {
+    throw new Error(response?.error || 'Popup bootstrap consume failed');
   }
-  return null;
+  if (
+    !response.bootstrap ||
+    typeof response.bootstrap !== 'object' ||
+    Array.isArray(response.bootstrap)
+  ) {
+    throw new Error('Popup bootstrap response is missing its prepared model');
+  }
+  return response.bootstrap;
 }
 
 async function renderPreparedDashboard(bootstrap) {
   const generation = nextCurrentPageGeneration();
   const tab = bootstrap.tab;
-  const identity = bootstrap.identity || {};
-  const summary = bootstrap.summary || {};
-  const slug = identity.slug || generateSlugFromUrl(identity.url || tab.url);
-  const url = identity.url || summary.url || tab._effectiveUrl || tab.url;
-  const page = summary.page || pageSummaryFallback(tab, slug, summary);
-  const title =
-    page.user_title ||
-    identity.title ||
-    page.title ||
-    tab._effectiveTitle ||
-    tab.title ||
-    '<unknown>';
+  const identity = bootstrap.identity;
+  const summary = bootstrap.summary;
+  if (!tab || !identity || typeof identity !== 'object') {
+    throw new Error('Prepared popup is missing tab identity');
+  }
+  if (
+    typeof identity.slug !== 'string' ||
+    typeof identity.url !== 'string' ||
+    typeof identity.title !== 'string'
+  ) {
+    throw new Error('Prepared popup identity is incomplete');
+  }
+  validatePopupSummary(summary);
+  const slug = identity.slug;
+  const url = identity.url;
+  const page = summary.page || transientPageView(slug, summary);
+  const title = page.user_title || summary.displayTitle;
 
   if (slug !== currentPage.slug) frozenChipOrder = null;
   resetCurrentPageIdentity({ slug, url, title, tab });
@@ -2727,74 +2748,77 @@ async function renderPreparedDashboard(bootstrap) {
   document.getElementById('pageTitle').textContent = currentPage.title;
   document.getElementById('pageUrl').textContent = currentPage.url;
   renderVisitsAndLikes(page);
-  renderSnapshots(summary.snapshots || []);
-  renderNotes(summary.notes || []);
-  await renderListChips(Array.isArray(summary.lists) ? summary.lists : []);
+  renderSnapshots(summary.snapshots);
+  renderNotes(summary.notes);
+  await renderListChips(summary.lists);
   if (generation !== currentPage.generation) return;
   await finishDashboardRender(tab, generation);
   schedulePendingLiveListRefresh();
 }
 
 async function renderPreparedPopup(bootstrap) {
-  if (!bootstrap?.mode) return false;
+  if (!bootstrap || typeof bootstrap !== 'object' || Array.isArray(bootstrap)) {
+    throw new Error('Prepared popup model must be an object');
+  }
+  if (typeof bootstrap.mode !== 'string') {
+    throw new Error('Prepared popup model is missing its mode');
+  }
   if (bootstrap.connector) applyDesktopConnectorUi(bootstrap.connector);
 
   switch (bootstrap.mode) {
     case 'setup':
-      showSetupRequired(bootstrap.connector || { state: 'offline' });
-      return true;
+      showSetupRequired(bootstrap.connector);
+      return;
     case 'unavailable':
-      showUnavailablePage(
-        bootstrap.message ||
-          tr(
-            'extensionNotAvailablePage',
-            'Not available for this page',
-            undefined,
-          ),
-      );
-      return true;
+      if (typeof bootstrap.message !== 'string' || !bootstrap.message) {
+        throw new Error('Unavailable popup model is missing its message');
+      }
+      showUnavailablePage(bootstrap.message);
+      return;
     case 'private': {
-      currentPage.tab = bootstrap.tab || null;
+      if (!bootstrap.tab || typeof bootstrap.tab !== 'object') {
+        throw new Error('Private popup model is missing its tab');
+      }
+      currentPage.tab = bootstrap.tab;
       renderBannerOnly();
       revealPopup();
-      return true;
+      return;
     }
-    case 'blacklisted':
-      renderBlacklistDiagnostic(
-        bootstrap.tab,
-        bootstrap.identity?.url ||
-          bootstrap.tab._effectiveUrl ||
-          bootstrap.tab.url,
-      );
-      return true;
+    case 'blacklisted': {
+      if (
+        !bootstrap.tab ||
+        typeof bootstrap.tab !== 'object' ||
+        typeof bootstrap.identity?.url !== 'string' ||
+        !bootstrap.identity.url
+      ) {
+        throw new Error('Blacklisted popup model is missing its page identity');
+      }
+      renderBlacklistDiagnostic(bootstrap.tab, bootstrap.identity.url);
+      return;
+    }
     case 'data-unavailable':
-      showDesktopDataUnavailable(
-        bootstrap.error ||
-          tr(
-            'extensionDesktopPageDataUnavailable',
-            'Desktop page data unavailable.',
-            undefined,
-          ),
-        bootstrap.diagnostic || null,
-      );
-      return true;
+      if (typeof bootstrap.error !== 'string' || !bootstrap.error) {
+        throw new Error('Data-unavailable popup model is missing its error');
+      }
+      showDesktopDataUnavailable(bootstrap.error, bootstrap.diagnostic);
+      return;
     case 'dashboard':
       await renderPreparedDashboard(bootstrap);
-      return true;
+      return;
     default:
-      return false;
+      throw new Error(`Unknown prepared popup mode: ${bootstrap.mode}`);
   }
 }
 
 // Initialize popup
 async function loadConnectedDashboard(connector) {
   await verifyDeviceIdentity(connector);
-  setPopupSurface('dashboard', { reveal: false });
 
   const tab = await resolveActiveTab();
   if (!tab) return;
   await resolveEffectiveUrl(tab);
   if (await handlePrivateMode(tab)) return;
+  setPopupSurface('dashboard-shell', { reveal: false });
   await showDashboard(tab);
 }
 
@@ -2803,29 +2827,14 @@ async function initPopup() {
   localizeDocument();
   await applyTheme();
   const bootstrap = await consumePopupBootstrap();
-  if (bootstrap && (await renderPreparedPopup(bootstrap))) return;
-
-  const cachedConnector = await getCachedDesktopConnectorState();
-  if (
-    cachedConnector?.state === 'connected' &&
-    cachedConnector.deviceId &&
-    !cachedConnector.refuseMode
-  ) {
-    void refreshDesktopConnectorState().catch((error) => {
-      logDebug('[popup] background connector refresh failed:', error.message);
-    });
-    await loadConnectedDashboard(cachedConnector);
-    return;
-  }
-  if (cachedConnector && cachedConnector.state !== 'starting') {
-    showSetupRequired(cachedConnector);
-    refreshDesktopConnectorStateInBackground();
+  if (bootstrap) {
+    await renderPreparedPopup(bootstrap);
     return;
   }
 
   const connector = await refreshDesktopConnectorState();
-  if (connector?.state !== 'connected' || !connector?.deviceId) {
-    showSetupRequired(connector || { state: 'offline' });
+  if (connector.state !== 'connected' || !connector.deviceId) {
+    showSetupRequired(connector);
     return;
   }
 
@@ -2843,7 +2852,6 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     const connector = setupRequiredVisible()
       ? await refreshDesktopConnectorState()
       : await getCachedDesktopConnectorState();
-    if (!connector) return;
     applyDesktopConnectorUi(connector);
     if (setupRequiredVisible()) {
       await loadDashboardIfConnected(connector);

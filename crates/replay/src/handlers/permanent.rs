@@ -19,16 +19,22 @@ where
     Fut: Future<Output = Option<Entity>>,
 {
     let mut result = EntityMap::new();
-    let delete_keys = keys
-        .iter()
-        .filter(|key| {
-            key.starts_with("note:")
-                || key.starts_with("list:")
-                || key.starts_with("page:")
-                || key.starts_with("snapshot:")
-        })
-        .cloned()
-        .collect::<HashSet<_>>();
+    for key in keys {
+        if !(key.starts_with("note:")
+            || key.starts_with("list:")
+            || key.starts_with("page:")
+            || key.starts_with("snapshot:"))
+            || entity_slug(key).is_empty()
+        {
+            return Err(ReplayError::InvalidEntry(format!(
+                "unsupported permanent-delete key: {key}"
+            )));
+        }
+    }
+    let delete_keys = keys.iter().cloned().collect::<HashSet<_>>();
+    if delete_keys.is_empty() {
+        return Ok(result);
+    }
 
     for key in &delete_keys {
         result.insert(key.clone(), EntityEffect::Delete);
@@ -36,19 +42,19 @@ where
 
     for key in &delete_keys {
         if key.starts_with(NOTE_PREFIX) {
-            remove_note_references(&mut result, load, key, timestamp, context).await;
+            remove_note_references(&mut result, load, key, timestamp, context).await?;
         } else if key.starts_with(SNAPSHOT_PREFIX) {
-            remove_snapshot_references(&mut result, load, key, timestamp, context).await;
+            remove_snapshot_references(&mut result, load, key, timestamp, context).await?;
         } else if key.starts_with(LIST_PREFIX) {
-            remove_list_references(&mut result, load, key, timestamp, context).await;
+            remove_list_references(&mut result, load, key, timestamp, context).await?;
         } else if key.starts_with(PAGE_PREFIX) {
-            remove_page_references(&mut result, load, key, timestamp, context).await;
+            remove_page_references(&mut result, load, key, timestamp, context).await?;
         }
     }
 
     let mut orphaned = get_orphaned(&result, load, ORPHANED_KEY)
         .await
-        .unwrap_or_else(crate::default_orphaned);
+        .ok_or_else(|| ReplayError::InvalidEntry("orphaned manifest is missing".to_string()))?;
     orphaned
         .entries
         .retain(|entry| !delete_keys.contains(&entry.key));
@@ -67,19 +73,20 @@ async fn remove_note_references<L, Fut>(
     note_key: &str,
     timestamp: i64,
     context: &Context,
-) where
+) -> Result<(), ReplayError>
+where
     L: Fn(&str) -> Fut,
     Fut: Future<Output = Option<Entity>>,
 {
     if let Some(note) = load(note_key).await.and_then(Entity::into_note) {
         if let Some(url) = note.url {
-            if let Ok(slug) = generate_slug_from_url(&url) {
-                let page_key = format!("{PAGE_PREFIX}{slug}");
-                remove_child_from_page(result, load, &page_key, note_key, timestamp, context).await;
-            }
+            let slug = generate_slug_from_url(&url)?;
+            let page_key = format!("{PAGE_PREFIX}{slug}");
+            remove_child_from_page(result, load, &page_key, note_key, timestamp, context).await?;
         }
     }
-    remove_pin_from_lists(result, load, note_key, timestamp, context).await;
+    remove_pin_from_lists(result, load, note_key, timestamp, context).await?;
+    Ok(())
 }
 
 async fn remove_snapshot_references<L, Fut>(
@@ -88,15 +95,20 @@ async fn remove_snapshot_references<L, Fut>(
     snapshot_key: &str,
     timestamp: i64,
     context: &Context,
-) where
+) -> Result<(), ReplayError>
+where
     L: Fn(&str) -> Fut,
     Fut: Future<Output = Option<Entity>>,
 {
     let stem = entity_slug(snapshot_key);
-    if let Some((slug, _)) = stem.rsplit_once('-') {
-        let page_key = format!("{PAGE_PREFIX}{slug}");
-        remove_child_from_page(result, load, &page_key, snapshot_key, timestamp, context).await;
-    }
+    let (slug, timestamp_part) = stem.rsplit_once('-').ok_or_else(|| {
+        ReplayError::InvalidEntry(format!("invalid snapshot key: {snapshot_key}"))
+    })?;
+    timestamp_part
+        .parse::<i64>()
+        .map_err(|_| ReplayError::InvalidEntry(format!("invalid snapshot key: {snapshot_key}")))?;
+    let page_key = format!("{PAGE_PREFIX}{slug}");
+    remove_child_from_page(result, load, &page_key, snapshot_key, timestamp, context).await
 }
 
 async fn remove_list_references<L, Fut>(
@@ -105,7 +117,8 @@ async fn remove_list_references<L, Fut>(
     list_key: &str,
     timestamp: i64,
     context: &Context,
-) where
+) -> Result<(), ReplayError>
+where
     L: Fn(&str) -> Fut,
     Fut: Future<Output = Option<Entity>>,
 {
@@ -122,24 +135,27 @@ async fn remove_list_references<L, Fut>(
         }
     }
 
-    if let Some(mut order) = get_list_order(result, load, LIST_ORDER_KEY).await {
-        order.tree = remove_from_tree(&order.tree, list_key);
-        touch_timestamp_map(&mut order.timestamps, &context.device_id, timestamp);
-        result.insert(
-            LIST_ORDER_KEY.to_string(),
-            EntityEffect::Upsert(Entity::ListOrder(order)),
-        );
-    }
+    let mut order = get_list_order(result, load, LIST_ORDER_KEY)
+        .await
+        .ok_or_else(|| ReplayError::InvalidEntry("list-order manifest is missing".to_string()))?;
+    order.tree = remove_from_tree(&order.tree, list_key);
+    touch_timestamp_map(&mut order.timestamps, &context.device_id, timestamp);
+    result.insert(
+        LIST_ORDER_KEY.to_string(),
+        EntityEffect::Upsert(Entity::ListOrder(order)),
+    );
 
-    if let Some(mut name_map) = get_name_to_id(result, load, NAME_TO_ID_KEY).await {
-        let list_slug = entity_slug(list_key);
-        name_map.paths.retain(|_, value| value != list_slug);
-        touch_timestamp_map(&mut name_map.timestamps, &context.device_id, timestamp);
-        result.insert(
-            NAME_TO_ID_KEY.to_string(),
-            EntityEffect::Upsert(Entity::NameToId(name_map)),
-        );
-    }
+    let mut name_map = get_name_to_id(result, load, NAME_TO_ID_KEY)
+        .await
+        .ok_or_else(|| ReplayError::InvalidEntry("name-to-id manifest is missing".to_string()))?;
+    let list_slug = entity_slug(list_key);
+    name_map.paths.retain(|_, value| value != list_slug);
+    touch_timestamp_map(&mut name_map.timestamps, &context.device_id, timestamp);
+    result.insert(
+        NAME_TO_ID_KEY.to_string(),
+        EntityEffect::Upsert(Entity::NameToId(name_map)),
+    );
+    Ok(())
 }
 
 async fn remove_page_references<L, Fut>(
@@ -148,11 +164,12 @@ async fn remove_page_references<L, Fut>(
     page_key: &str,
     timestamp: i64,
     context: &Context,
-) where
+) -> Result<(), ReplayError>
+where
     L: Fn(&str) -> Fut,
     Fut: Future<Output = Option<Entity>>,
 {
-    remove_pin_from_lists(result, load, page_key, timestamp, context).await;
+    remove_pin_from_lists(result, load, page_key, timestamp, context).await
 }
 
 async fn remove_child_from_page<L, Fut>(
@@ -162,7 +179,8 @@ async fn remove_child_from_page<L, Fut>(
     child_key: &str,
     timestamp: i64,
     context: &Context,
-) where
+) -> Result<(), ReplayError>
+where
     L: Fn(&str) -> Fut,
     Fut: Future<Output = Option<Entity>>,
 {
@@ -171,6 +189,7 @@ async fn remove_child_from_page<L, Fut>(
         touch_timestamp_map(&mut page.timestamps, &context.device_id, timestamp);
         retain_page_or_delete(result, page_key.to_string(), page);
     }
+    Ok(())
 }
 
 async fn remove_pin_from_lists<L, Fut>(
@@ -179,13 +198,15 @@ async fn remove_pin_from_lists<L, Fut>(
     pin_id: &str,
     timestamp: i64,
     context: &Context,
-) where
+) -> Result<(), ReplayError>
+where
     L: Fn(&str) -> Fut,
     Fut: Future<Output = Option<Entity>>,
 {
-    for (list_key, mut list) in find_lists_with_pin(result, load, pin_id).await {
+    for (list_key, mut list) in find_lists_with_pin(result, load, pin_id).await? {
         list.pins.retain(|pin| pin.id != pin_id);
         touch_timestamp_map(&mut list.timestamps, &context.device_id, timestamp);
         result.insert(list_key, EntityEffect::Upsert(Entity::List(list)));
     }
+    Ok(())
 }

@@ -60,7 +60,7 @@ async fn round_trips_all_entity_types_and_snapshot_artifacts() {
     let list = ListEntity {
         slug: "reading".into(),
         name: "Reading".into(),
-        owner: Some("device-a".into()),
+        owner: "device-a".into(),
         pins: vec![PinEntity {
             id: "page:page-a".into(),
             pinned_at: 20,
@@ -277,7 +277,8 @@ async fn sync_file_roundtrip_collects_expected_files_and_refreshes_reads() {
                         "timestamp": 1_710_100_000_001i64,
                         "action": "visit_page",
                         "url": "https://example.com/sync-a",
-                        "title": "Sync A"
+                        "title": "Sync A",
+                        "referrerUrl": null
                     }))
                     .expect("log json"),
                     String::new(),
@@ -291,21 +292,19 @@ async fn sync_file_roundtrip_collects_expected_files_and_refreshes_reads() {
                     "timestamp": 1i64,
                     "action": "visit_page",
                     "url": "https://example.com/old",
-                    "title": "Old"
+                    "title": "Old",
+                    "referrerUrl": null
                 }))
                 .expect("old log json"),
             ),
             (
-                "logs/device-a/readme.txt".to_string(),
-                "ignored".to_string(),
-            ),
-            (
-                "logs/device-b/not-a-date.jsonl".to_string(),
+                format!("logs/device-b/{today}.jsonl"),
                 serde_json::to_string(&json!({
                     "timestamp": 1_710_100_000_000i64,
                     "action": "visit_page",
                     "url": "https://example.com/sync-b",
-                    "title": "Sync B"
+                    "title": "Sync B",
+                    "referrerUrl": null
                 }))
                 .expect("device-b log json"),
             ),
@@ -333,7 +332,7 @@ async fn sync_file_roundtrip_collects_expected_files_and_refreshes_reads() {
                 serde_json::to_string(&ListEntity {
                     slug: "remote".to_string(),
                     name: "Remote".to_string(),
-                    owner: Some("device-b".to_string()),
+                    owner: "device-b".to_string(),
                     pins: Vec::new(),
                     rules: Vec::new(),
                     timestamps: HashMap::new(),
@@ -358,11 +357,11 @@ async fn sync_file_roundtrip_collects_expected_files_and_refreshes_reads() {
         lists.get("remote").map(|list| list.name.as_str()),
         Some("Remote")
     );
-    let missing_lists = Storage::new(temp_dir.path().join("missing"))
+    let missing_lists_error = Storage::new(temp_dir.path().join("missing"))
         .load_all_lists()
         .await
-        .expect("missing lists dir returns empty");
-    assert!(missing_lists.is_empty());
+        .expect_err("missing list storage must be reported");
+    assert_eq!(missing_lists_error.kind(), std::io::ErrorKind::NotFound);
 
     let listing = storage
         .list_history_files(true)
@@ -370,11 +369,7 @@ async fn sync_file_roundtrip_collects_expected_files_and_refreshes_reads() {
         .expect("list history files");
     assert_eq!(
         listing.files,
-        vec![
-            "not-a-date.jsonl".to_string(),
-            format!("{today}.jsonl"),
-            "1999-01-01.jsonl".to_string(),
-        ]
+        vec![format!("{today}.jsonl"), "1999-01-01.jsonl".to_string()]
     );
     assert_eq!(
         listing.devices,
@@ -389,10 +384,54 @@ async fn sync_file_roundtrip_collects_expected_files_and_refreshes_reads() {
             > 0
     );
 
-    let batch = storage
-        .load_history_batch(&[format!("{today}.jsonl"), "not-a-date.jsonl".to_string()])
+    let error = storage
+        .load_history_batch(&[format!("{today}.jsonl")])
         .await
-        .expect("load history batch");
+        .expect_err("blank JSONL records must fail the whole history read");
+    assert!(error.to_string().contains("blank JSONL record"));
+
+    storage
+        .write_sync_files(&[(
+            format!("logs/device-a/{today}.jsonl"),
+            [
+                serde_json::to_string(&json!({
+                    "timestamp": 1_710_100_000_001i64,
+                    "action": "visit_page",
+                    "url": "https://example.com/sync-a",
+                    "title": "Sync A",
+                    "referrerUrl": null
+                }))
+                .expect("log json"),
+                "not json".to_string(),
+            ]
+            .join("\n"),
+        )])
+        .await
+        .expect("replace blank log");
+    let error = storage
+        .load_history_batch(&[format!("{today}.jsonl")])
+        .await
+        .expect_err("malformed JSONL must fail the whole history read");
+    assert!(error.to_string().contains("invalid JSONL"));
+
+    storage
+        .write_sync_files(&[(
+            format!("logs/device-a/{today}.jsonl"),
+            serde_json::to_string(&json!({
+                "timestamp": 1_710_100_000_001i64,
+                "action": "visit_page",
+                "url": "https://example.com/sync-a",
+                "title": "Sync A",
+                "referrerUrl": null
+            }))
+            .expect("replacement log json"),
+        )])
+        .await
+        .expect("replace malformed log");
+    let batch = storage
+        .load_history_batch(&[format!("{today}.jsonl")])
+        .await
+        .expect("load repaired history batch");
     assert_eq!(batch.len(), 2);
     assert_eq!(
         batch
@@ -402,10 +441,19 @@ async fn sync_file_roundtrip_collects_expected_files_and_refreshes_reads() {
         vec!["device-b", "device-a"]
     );
 
-    let collected = storage
-        .collect_sync_files("device-a", 0)
+    let error = storage
+        .collect_sync_files("device-a", 1)
         .await
-        .expect("collect sync files");
+        .expect_err("unexpected files in a canonical object directory must fail sync");
+    assert!(error.to_string().contains("unexpected non-JSON note file"));
+    tokio::fs::remove_file(temp_dir.path().join("objects/notes/ignored.tmp"))
+        .await
+        .expect("remove invalid note artifact");
+
+    let collected = storage
+        .collect_sync_files("device-a", 1)
+        .await
+        .expect("collect canonical sync files");
     let collected_paths = collected
         .iter()
         .map(|(path, _)| path.as_str())
@@ -413,14 +461,13 @@ async fn sync_file_roundtrip_collects_expected_files_and_refreshes_reads() {
     assert!(collected_paths.contains(&format!("logs/device-a/{today}.jsonl").as_str()));
     assert!(!collected_paths.contains(&"logs/device-a/1999-01-01.jsonl"));
     assert!(collected_paths.contains(&"objects/notes/sync-note.json"));
-    assert!(!collected_paths.contains(&"objects/notes/ignored.tmp"));
 
     let missing_storage = Storage::new(temp_dir.path().join("missing-storage"));
-    assert!(missing_storage
-        .collect_sync_files("device-a", 0)
+    let missing_sync_error = missing_storage
+        .collect_sync_files("device-a", 1)
         .await
-        .expect("missing sync dirs")
-        .is_empty());
+        .expect_err("missing sync storage must be reported");
+    assert_eq!(missing_sync_error.kind(), std::io::ErrorKind::NotFound);
 
     let size = storage.directory_size().await.expect("directory size");
     assert!(size > 0);
@@ -436,11 +483,11 @@ async fn sync_file_roundtrip_collects_expected_files_and_refreshes_reads() {
             .expect("directory size after clear"),
         0
     );
-    let cleared_missing = missing_storage
+    let clear_missing_error = missing_storage
         .clear_all_data("device-a")
         .await
-        .expect("clear missing data root");
-    assert_eq!(cleared_missing, 0);
+        .expect_err("missing data root must be reported before destructive operations");
+    assert_eq!(clear_missing_error.kind(), std::io::ErrorKind::NotFound);
 }
 
 #[tokio::test]

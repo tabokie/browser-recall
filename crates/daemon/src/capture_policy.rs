@@ -4,28 +4,7 @@ use browser_recall_replay::generate_slug_from_url;
 use chrono::{Local, TimeZone};
 use serde_json::Value;
 
-const DEFAULT_URL_BLACKLIST: &[&str] = &["chrome://", "edge://", "about:"];
-
-fn default_url_blacklist() -> Vec<String> {
-    DEFAULT_URL_BLACKLIST
-        .iter()
-        .map(|value| value.to_string())
-        .collect()
-}
-
-fn settings_bool(settings: Option<&Entity>, key: &str) -> Option<bool> {
-    let Some(Entity::Settings(settings)) = settings else {
-        return None;
-    };
-    settings.values.get(key).and_then(Value::as_bool)
-}
-
-fn settings_array<'a>(settings: Option<&'a Entity>, key: &str) -> Option<&'a Vec<Value>> {
-    let Some(Entity::Settings(settings)) = settings else {
-        return None;
-    };
-    settings.values.get(key).and_then(Value::as_array)
-}
+const INTERNAL_URL_PREFIXES: &[&str] = &["chrome://", "edge://", "about:"];
 
 fn strip_balanced_segments(input: &str, open: char, close: char) -> String {
     let mut output = String::with_capacity(input.len());
@@ -44,20 +23,27 @@ fn strip_balanced_segments(input: &str, open: char, close: char) -> String {
     output
 }
 
-pub fn trim_title_from_settings(settings: Option<&Entity>, raw_title: &str, url: &str) -> String {
+pub fn trim_title_from_settings(
+    settings: Option<&Entity>,
+    raw_title: &str,
+    url: &str,
+) -> Result<String, String> {
+    let values = crate::settings::values_from_entity(settings)?;
     let mut title = raw_title.to_string();
-    if settings_bool(settings, "titleCleanupEnabled") == Some(false) {
-        return title.trim().to_string();
+    if values["titleCleanupEnabled"] == Value::Bool(false) {
+        return Ok(title.trim().to_string());
     }
-    for rule in settings_array(settings, "titleTrimRules")
-        .into_iter()
-        .flatten()
+    for rule in values["titleTrimRules"]
+        .as_array()
+        .expect("validated title trim rules")
     {
-        let prefix = rule.get("urlPrefix").and_then(Value::as_str).unwrap_or("");
+        let prefix = rule["urlPrefix"]
+            .as_str()
+            .expect("validated title trim prefix");
         if prefix.is_empty() || !url.starts_with(prefix) {
             continue;
         }
-        match rule.get("action").and_then(Value::as_str).unwrap_or("") {
+        match rule["action"].as_str().expect("validated trim action") {
             "remove_after_pipe" => {
                 if let Some(index) = title.find('|').filter(|index| *index > 0) {
                     title.truncate(index);
@@ -68,23 +54,28 @@ pub fn trim_title_from_settings(settings: Option<&Entity>, raw_title: &str, url:
             _ => {}
         }
     }
-    title.split_whitespace().collect::<Vec<_>>().join(" ")
+    Ok(title.split_whitespace().collect::<Vec<_>>().join(" "))
 }
 
-pub fn blacklist_prefixes(settings: Option<&Entity>) -> Vec<String> {
-    if settings_bool(settings, "blacklistEnabled") == Some(false) {
-        return default_url_blacklist();
+pub fn blacklist_prefixes(settings: Option<&Entity>) -> Result<Vec<String>, String> {
+    let values = crate::settings::values_from_entity(settings)?;
+    if values["blacklistEnabled"] == Value::Bool(false) {
+        return Ok(INTERNAL_URL_PREFIXES
+            .iter()
+            .map(|value| value.to_string())
+            .collect());
     }
-    settings_array(settings, "urlBlacklist")
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect::<Vec<_>>()
+    Ok(values["urlBlacklist"]
+        .as_array()
+        .expect("validated URL blacklist")
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .expect("validated blacklist string")
+                .to_string()
         })
-        .filter(|values| !values.is_empty())
-        .unwrap_or_else(default_url_blacklist)
+        .collect())
 }
 
 pub async fn should_record_visit(
@@ -97,14 +88,14 @@ pub async fn should_record_visit(
     if bypass_blacklist {
         return Ok(true);
     }
-    if !blacklist_prefixes(settings)
+    if !blacklist_prefixes(settings)?
         .iter()
         .any(|prefix| url.starts_with(prefix))
     {
         return Ok(true);
     }
 
-    let date_file = format!("{}.jsonl", date_key_from_timestamp(timestamp));
+    let date_file = format!("{}.jsonl", date_key_from_timestamp(timestamp)?);
     let entries = storage
         .load_history_batch(&[date_file])
         .await
@@ -124,9 +115,10 @@ pub async fn should_record_visit(
         .is_some())
 }
 
-fn date_key_from_timestamp(timestamp: i64) -> String {
-    match Local.timestamp_millis_opt(timestamp).single() {
-        Some(datetime) => datetime.format("%Y-%m-%d").to_string(),
-        None => Local::now().format("%Y-%m-%d").to_string(),
-    }
+fn date_key_from_timestamp(timestamp: i64) -> Result<String, String> {
+    Local
+        .timestamp_millis_opt(timestamp)
+        .single()
+        .map(|datetime| datetime.format("%Y-%m-%d").to_string())
+        .ok_or_else(|| "timestamp is out of range".to_string())
 }

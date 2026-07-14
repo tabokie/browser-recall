@@ -21,6 +21,12 @@ export function generateSlug(text, hashInput) {
 
 export function canonicalizePageUrl(url) {
   const parsed = new URL(url);
+  if (
+    (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+    !parsed.hostname
+  ) {
+    throw new Error('Page URL must use HTTP or HTTPS and include a hostname');
+  }
   const keptParams = [];
   let removedParam = false;
   for (const [key, value] of parsed.searchParams.entries()) {
@@ -53,17 +59,13 @@ export function generateSlugFromUrl(url) {
 }
 
 export function isSameDocumentPageUrl(left, right) {
-  try {
-    const leftUrl = new URL(left);
-    const rightUrl = new URL(right);
-    return (
-      leftUrl.origin === rightUrl.origin &&
-      leftUrl.pathname === rightUrl.pathname &&
-      leftUrl.search === rightUrl.search
-    );
-  } catch {
-    return left === right;
-  }
+  const leftUrl = new URL(canonicalizePageUrl(left));
+  const rightUrl = new URL(canonicalizePageUrl(right));
+  return (
+    leftUrl.origin === rightUrl.origin &&
+    leftUrl.pathname === rightUrl.pathname &&
+    leftUrl.search === rightUrl.search
+  );
 }
 
 export function createPageIdentityGlobalScript() {

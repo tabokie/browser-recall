@@ -6,6 +6,7 @@ use base64::Engine;
 use browser_recall_replay::LogEntry;
 use chrono::TimeZone;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -77,12 +78,70 @@ struct RemoteChanges {
     entries: Vec<Value>,
 }
 
+async fn load_or_initialize_sync_manifest(
+    storage: &Storage,
+    key: &str,
+    initial: Value,
+) -> Result<Value, SyncError> {
+    match storage
+        .load_sync_manifest(key)
+        .await
+        .map_err(|error| SyncError::Message(error.to_string()))?
+    {
+        Some(value) => Ok(value),
+        None => {
+            storage
+                .save_sync_manifest(key, &initial)
+                .await
+                .map_err(|error| SyncError::Message(error.to_string()))?;
+            Ok(initial)
+        }
+    }
+}
+
+fn require_single_object_field<'a>(
+    manifest: &'a mut Value,
+    manifest_name: &str,
+    field: &str,
+) -> Result<&'a mut serde_json::Map<String, Value>, SyncError> {
+    let object = manifest
+        .as_object_mut()
+        .ok_or_else(|| SyncError::Message(format!("{manifest_name} manifest must be an object")))?;
+    if object.len() != 1 || !object.contains_key(field) {
+        return Err(SyncError::Message(format!(
+            "{manifest_name} manifest must contain exactly `{field}`"
+        )));
+    }
+    object
+        .get_mut(field)
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| SyncError::Message(format!("{manifest_name}.{field} must be an object")))
+}
+
+fn validate_string_map(
+    values: &serde_json::Map<String, Value>,
+    context: &str,
+) -> Result<(), SyncError> {
+    for (key, value) in values {
+        if key.is_empty() || value.as_str().is_none() {
+            return Err(SyncError::Message(format!(
+                "{context} must map non-empty paths to string hashes"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn parse_remote_log_entries(log_files: &[SyncFile]) -> Result<Vec<Value>, SyncError> {
     let mut entries = Vec::new();
     for file in log_files {
         for (index, line) in file.content.lines().enumerate() {
             if line.trim().is_empty() {
-                continue;
+                return Err(SyncError::Message(format!(
+                    "{} line {} is blank; JSONL records must be canonical entries",
+                    file.path,
+                    index + 1
+                )));
             }
             let entry = serde_json::from_str::<Value>(line).map_err(|error| {
                 SyncError::Message(format!(
@@ -301,14 +360,14 @@ impl SyncController {
         match self.start_manual_sync() {
             SyncStart::Unavailable => {
                 return json!({
-                    "success": true,
+                    "success": false,
                     "skipped": true,
                     "error": "Sync already in progress",
                 });
             }
             SyncStart::RateLimited(retry_at_ms) => {
                 return json!({
-                    "success": true,
+                    "success": false,
                     "skipped": true,
                     "error": retry_time_message(retry_at_ms),
                 });
@@ -322,7 +381,7 @@ impl SyncController {
                 let result = self.complete_execution(execution);
                 if let Err(error) = self.persist_state() {
                     json!({
-                        "success": true,
+                        "success": false,
                         "error": error,
                     })
                 } else {
@@ -340,7 +399,7 @@ impl SyncController {
             }) => {
                 self.record_rate_limit(retry_at_ms);
                 json!({
-                    "success": true,
+                    "success": false,
                     "error": retry_time_message(retry_at_ms),
                     "rateLimitedUntil": retry_at_ms,
                 })
@@ -349,25 +408,25 @@ impl SyncController {
                 self.expire_auth();
                 if let Err(error) = self.persist_state() {
                     json!({
-                        "success": true,
+                        "success": false,
                         "error": error,
                         "authExpired": true,
                     })
                 } else {
                     json!({
-                        "success": true,
+                        "success": false,
                         "error": message,
                         "authExpired": true,
                     })
                 }
             }
             Err(SyncError::Message(message)) if message == "Cancelled" => json!({
-                "success": true,
+                "success": false,
                 "skipped": true,
                 "error": "Cancelled",
             }),
             Err(SyncError::Message(message)) => json!({
-                "success": true,
+                "success": false,
                 "error": message,
             }),
         };
@@ -404,7 +463,10 @@ impl SyncController {
             }
             Err(SyncError::RateLimited { retry_at_ms, .. }) => {
                 self.record_rate_limit(retry_at_ms);
-                Ok(SyncBackgroundOutcome::Idle)
+                Err(SyncError::RateLimited {
+                    retry_at_ms,
+                    message: retry_time_message(retry_at_ms),
+                })
             }
             Err(SyncError::AuthExpired(message)) => {
                 self.expire_auth();
@@ -607,40 +669,19 @@ pub async fn load_sync_settings(storage: &Storage) -> Result<SyncSettingsPayload
         .load_settings()
         .await
         .map_err(|error| error.to_string())?
-        .unwrap_or_default();
-    let enabled = settings
-        .values
-        .get("syncEnabled")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let method = settings
-        .values
-        .get("syncMethod")
-        .and_then(Value::as_str)
-        .unwrap_or("github");
-    if method != "github" {
-        return Err("Desktop sync only supports GitHub".to_string());
-    }
-    let repo_url = settings
-        .values
-        .get("syncRepoUrl")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
+        .ok_or_else(|| "settings manifest is missing".to_string())?;
+    crate::settings::validate_complete(&settings.values)?;
+    let enabled = settings.values["syncEnabled"]
+        .as_bool()
+        .expect("validated syncEnabled");
+    let repo_url = settings.values["syncRepoUrl"]
+        .as_str()
+        .expect("validated syncRepoUrl")
         .trim()
         .to_string();
-    let retention_days = settings
-        .values
-        .get("syncRetentionDays")
-        .and_then(Value::as_i64)
-        .or_else(|| {
-            settings
-                .values
-                .get("syncRetentionDays")
-                .and_then(Value::as_u64)
-                .and_then(|value| i64::try_from(value).ok())
-        })
-        .unwrap_or(7)
-        .max(1);
+    let retention_days = settings.values["syncRetentionDays"]
+        .as_i64()
+        .expect("validated syncRetentionDays");
     Ok(SyncSettingsPayload {
         enabled,
         repo_url,
@@ -718,7 +759,7 @@ fn retry_time_message(retry_at_ms: i64) -> String {
     let timestamp = chrono::Local
         .timestamp_millis_opt(retry_at_ms)
         .single()
-        .unwrap_or_else(chrono::Local::now);
+        .expect("GitHub rate-limit timestamp was validated before storage");
     format!(
         "Rate limited, will retry at {}",
         timestamp.format("%H:%M:%S")
@@ -761,6 +802,65 @@ pub struct GitHubTransport {
     owner: String,
     repo: String,
     token: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubBranchPayload {
+    name: String,
+    commit: GitHubCommitPayload,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubCommitPayload {
+    sha: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubTreePayload {
+    tree: Vec<GitHubTreeEntryPayload>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubTreeEntryPayload {
+    path: String,
+    #[serde(rename = "type")]
+    entry_type: String,
+    sha: Option<String>,
+}
+
+fn parse_github_branches(value: Value) -> Result<Vec<SyncBranch>, SyncError> {
+    let branches = serde_json::from_value::<Vec<GitHubBranchPayload>>(value).map_err(|error| {
+        SyncError::Message(format!(
+            "GitHub branches payload has an invalid shape: {error}"
+        ))
+    })?;
+    Ok(branches
+        .into_iter()
+        .map(|branch| SyncBranch {
+            name: branch.name,
+            sha: branch.commit.sha,
+        })
+        .collect())
+}
+
+fn parse_github_tree(value: Value) -> Result<Vec<(String, String)>, SyncError> {
+    let payload = serde_json::from_value::<GitHubTreePayload>(value).map_err(|error| {
+        SyncError::Message(format!("GitHub tree payload has an invalid shape: {error}"))
+    })?;
+    payload
+        .tree
+        .into_iter()
+        .filter(|entry| entry.entry_type == "blob")
+        .map(|entry| {
+            let sha = entry.sha.ok_or_else(|| {
+                SyncError::Message(format!(
+                    "GitHub tree blob {} is missing its sha",
+                    entry.path
+                ))
+            })?;
+            Ok((entry.path, sha))
+        })
+        .collect()
 }
 
 impl GitHubTransport {
@@ -827,7 +927,11 @@ impl GitHubTransport {
                 .and_then(|value| value.to_str().ok())
                 .and_then(|value| value.parse::<i64>().ok())
                 .map(|seconds| seconds * 1000 + 60_000)
-                .unwrap_or_else(|| chrono::Local::now().timestamp_millis() + 60 * 60 * 1000);
+                .ok_or_else(|| {
+                    SyncError::Message(
+                        "GitHub rate-limit response is missing a valid reset timestamp".to_string(),
+                    )
+                })?;
             return Err(SyncError::RateLimited {
                 retry_at_ms,
                 message: "GitHub API rate limit exceeded".to_string(),
@@ -835,7 +939,10 @@ impl GitHubTransport {
         }
 
         let status = response.status();
-        let text = response.text().await.unwrap_or_default();
+        let text = response
+            .text()
+            .await
+            .map_err(|error| SyncError::Message(error.to_string()))?;
         let message = format!("GitHub API error {}: {}", status.as_u16(), text);
         if status == reqwest::StatusCode::UNAUTHORIZED
             || (status == reqwest::StatusCode::FORBIDDEN && !message.contains("rate limit"))
@@ -853,18 +960,7 @@ impl GitHubTransport {
                 None,
             )
             .await?;
-        let Some(branches) = value.as_array() else {
-            return Ok(Vec::new());
-        };
-        Ok(branches
-            .iter()
-            .filter_map(|branch| {
-                Some(SyncBranch {
-                    name: branch.get("name")?.as_str()?.to_string(),
-                    sha: branch.get("commit")?.get("sha")?.as_str()?.to_string(),
-                })
-            })
-            .collect())
+        parse_github_branches(value)
     }
 
     async fn get_tree(&self, sha: &str) -> Result<Vec<(String, String)>, SyncError> {
@@ -875,19 +971,7 @@ impl GitHubTransport {
                 None,
             )
             .await?;
-        let Some(entries) = value.get("tree").and_then(Value::as_array) else {
-            return Ok(Vec::new());
-        };
-        Ok(entries
-            .iter()
-            .filter(|entry| entry.get("type").and_then(Value::as_str) == Some("blob"))
-            .filter_map(|entry| {
-                Some((
-                    entry.get("path")?.as_str()?.to_string(),
-                    entry.get("sha")?.as_str()?.to_string(),
-                ))
-            })
-            .collect())
+        parse_github_tree(value)
     }
 
     async fn get_blob(&self, sha: &str) -> Result<String, SyncError> {
@@ -1128,15 +1212,10 @@ impl GitHubTransport {
             .cloned()
             .collect::<Vec<_>>();
 
-        let mut cursors = storage
-            .load_sync_manifest("sync-cursors")
-            .await
-            .map_err(|error| SyncError::Message(error.to_string()))?
-            .unwrap_or_else(|| json!({ "cursors": {} }));
-        let cursor_map = cursors
-            .get_mut("cursors")
-            .and_then(Value::as_object_mut)
-            .ok_or_else(|| SyncError::Message("sync-cursors manifest malformed".to_string()))?;
+        let mut cursors =
+            load_or_initialize_sync_manifest(storage, "sync-cursors", json!({ "cursors": {} }))
+                .await?;
+        let cursor_map = require_single_object_field(&mut cursors, "sync-cursors", "cursors")?;
 
         let mut replayed = 0usize;
         let now = chrono::Local::now().timestamp_millis();
@@ -1146,22 +1225,52 @@ impl GitHubTransport {
                 return Err(SyncError::Message("Cancelled".to_string()));
             }
 
-            let old_cursor = cursor_map
-                .get(&peer.name)
-                .and_then(Value::as_object)
-                .cloned()
-                .unwrap_or_default();
-            let old_tree_sha = old_cursor.get("treeSha").and_then(Value::as_str);
+            let old_cursor = match cursor_map.get(&peer.name) {
+                Some(value) => {
+                    let cursor = value.as_object().cloned().ok_or_else(|| {
+                        SyncError::Message(format!("sync cursor for {} is malformed", peer.name))
+                    })?;
+                    if cursor.len() != 2
+                        || !cursor.contains_key("treeSha")
+                        || !cursor.contains_key("files")
+                    {
+                        return Err(SyncError::Message(format!(
+                            "sync cursor for {} must contain exactly treeSha and files",
+                            peer.name
+                        )));
+                    }
+                    cursor
+                }
+                None => serde_json::Map::new(),
+            };
+            let old_tree_sha = match old_cursor.get("treeSha") {
+                Some(Value::String(value)) if !value.is_empty() => Some(value.as_str()),
+                Some(_) => {
+                    return Err(SyncError::Message(format!(
+                        "sync cursor treeSha for {} must be a non-empty string",
+                        peer.name
+                    )))
+                }
+                None => None,
+            };
             if old_tree_sha == Some(peer.sha.as_str()) {
                 continue;
             }
 
             let tree = self.get_tree(&peer.sha).await?;
-            let old_files = old_cursor
-                .get("files")
-                .and_then(Value::as_object)
-                .cloned()
-                .unwrap_or_default();
+            let old_files = match old_cursor.get("files") {
+                Some(value) => value.as_object().cloned().ok_or_else(|| {
+                    SyncError::Message(format!("sync cursor files for {} are malformed", peer.name))
+                })?,
+                None if old_cursor.is_empty() => serde_json::Map::new(),
+                None => {
+                    return Err(SyncError::Message(format!(
+                        "sync cursor files for {} are missing",
+                        peer.name
+                    )))
+                }
+            };
+            validate_string_map(&old_files, &format!("sync cursor files for {}", peer.name))?;
             let changes = self
                 .download_remote_changes(&tree, &old_files, paused_devices.contains(&peer.name))
                 .await?;
@@ -1218,16 +1327,12 @@ impl GitHubTransport {
             })
             .collect::<serde_json::Map<String, Value>>();
 
-        let push_state = storage
-            .load_sync_manifest("sync-push-state")
-            .await
-            .map_err(|error| SyncError::Message(error.to_string()))?
-            .unwrap_or_else(|| json!({ "files": {} }));
-        let old_hashes = push_state
-            .get("files")
-            .and_then(Value::as_object)
-            .cloned()
-            .unwrap_or_default();
+        let mut push_state =
+            load_or_initialize_sync_manifest(storage, "sync-push-state", json!({ "files": {} }))
+                .await?;
+        let old_hashes =
+            require_single_object_field(&mut push_state, "sync-push-state", "files")?.clone();
+        validate_string_map(&old_hashes, "sync-push-state files")?;
 
         let changed = new_hashes.len() != old_hashes.len()
             || new_hashes
@@ -1258,14 +1363,11 @@ impl GitHubTransport {
         storage: &crate::storage::Storage,
     ) -> Result<(), SyncError> {
         self.delete_branch(device_id).await?;
-        let mut cursors = storage
-            .load_sync_manifest("sync-cursors")
-            .await
-            .map_err(|error| SyncError::Message(error.to_string()))?
-            .unwrap_or_else(|| json!({ "cursors": {} }));
-        if let Some(map) = cursors.get_mut("cursors").and_then(Value::as_object_mut) {
-            map.remove(device_id);
-        }
+        let mut cursors =
+            load_or_initialize_sync_manifest(storage, "sync-cursors", json!({ "cursors": {} }))
+                .await?;
+        let map = require_single_object_field(&mut cursors, "sync-cursors", "cursors")?;
+        map.remove(device_id);
         storage
             .save_sync_manifest("sync-cursors", &cursors)
             .await
@@ -1289,7 +1391,10 @@ pub async fn fetch_github_user(token: &str) -> Result<String, SyncError> {
 
     if !response.status().is_success() {
         let status = response.status();
-        let text = response.text().await.unwrap_or_default();
+        let text = response
+            .text()
+            .await
+            .map_err(|error| SyncError::Message(error.to_string()))?;
         let message = format!("GitHub API error {}: {}", status.as_u16(), text);
         if status == reqwest::StatusCode::UNAUTHORIZED
             || (status == reqwest::StatusCode::FORBIDDEN && !message.contains("rate limit"))
@@ -1312,7 +1417,8 @@ pub async fn fetch_github_user(token: &str) -> Result<String, SyncError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_remote_log_entries, SyncFile};
+    use super::{parse_github_branches, parse_github_tree, parse_remote_log_entries, SyncFile};
+    use serde_json::json;
 
     #[test]
     fn malformed_remote_log_line_is_rejected_with_file_and_line_context() {
@@ -1329,5 +1435,31 @@ mod tests {
         let message = error.message();
         assert!(message.contains("logs/peer/2026-07-04.jsonl"));
         assert!(message.contains("line 2"));
+    }
+
+    #[test]
+    fn malformed_github_branch_payload_is_rejected_instead_of_dropped() {
+        let error = parse_github_branches(json!([
+            { "name": "device-a", "commit": { "sha": "abc" } },
+            { "name": "device-b", "commit": {} }
+        ]))
+        .expect_err("a malformed branch must fail the whole response");
+
+        assert!(error.message().contains("invalid shape"));
+        assert!(error.message().contains("sha"));
+    }
+
+    #[test]
+    fn malformed_github_tree_payload_is_rejected_instead_of_becoming_empty() {
+        let error = parse_github_tree(json!({ "truncated": false }))
+            .expect_err("a response without tree must fail");
+        assert!(error.message().contains("invalid shape"));
+        assert!(error.message().contains("tree"));
+
+        let error = parse_github_tree(json!({
+            "tree": [{ "path": "logs/device-a/2026-07-14.jsonl", "type": "blob" }]
+        }))
+        .expect_err("a blob without sha must fail");
+        assert!(error.message().contains("missing its sha"));
     }
 }

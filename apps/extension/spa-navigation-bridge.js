@@ -14,7 +14,12 @@
     for (const listener of [...listeners]) {
       try {
         listener(url);
-      } catch {}
+      } catch (error) {
+        console.error(
+          '[Browser Recall] SPA navigation listener failed:',
+          error,
+        );
+      }
     }
   }
 
@@ -27,7 +32,11 @@
   };
 
   window.addEventListener(EVENT_NAME, (event) => {
-    notify(event.detail?.url || window.location.href);
+    if (typeof event.detail?.url !== 'string' || !event.detail.url) {
+      console.error('[Browser Recall] SPA navigation event has no URL');
+      return;
+    }
+    notify(event.detail.url);
   });
 
   const script = document.createElement('script');

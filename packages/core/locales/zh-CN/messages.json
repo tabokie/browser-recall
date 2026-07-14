@@ -211,10 +211,6 @@
     "message": "数据以按日期组织的人类可读 JSONL 文件形式存储在本地。可使用任何文本编辑器打开，或使用 jq 处理。",
     "description": "Desktop local data storage help text."
   },
-  "desktopDefaultBrowserProfile": {
-    "message": "默认配置文件",
-    "description": "Fallback browser profile name."
-  },
   "desktopDebugLogging": {
     "message": "调试日志（重启后重置）",
     "description": "Desktop debug logging setting."

@@ -3,37 +3,25 @@ use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct PageEntity {
     pub slug: String,
-    #[serde(default, rename = "parentIds")]
+    #[serde(rename = "parentIds")]
     pub parent_ids: Vec<String>,
-    #[serde(default, rename = "childIds")]
+    #[serde(rename = "childIds")]
     pub child_ids: Vec<String>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub timestamps: HashMap<String, i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    #[serde(default, rename = "createdAt", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "createdAt")]
     pub created_at: Option<i64>,
-    #[serde(default, rename = "visitDates", skip_serializing_if = "Vec::is_empty")]
+    #[serde(rename = "visitDates")]
     pub visit_dates: Vec<i32>,
-    #[serde(
-        default,
-        rename = "scrollDepth",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "scrollDepth")]
     pub scroll_depth: Option<i64>,
-    #[serde(
-        default,
-        rename = "timeOnPage",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "timeOnPage")]
     pub time_on_page: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_title: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub likes: Option<i64>,
 }
 
@@ -57,31 +45,20 @@ impl PageEntity {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct NoteEntity {
     pub slug: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub excerpt: Option<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
-    #[serde(default, rename = "cssPath", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "cssPath")]
     pub css_path: Option<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
-    #[serde(default, skip_serializing_if = "is_false")]
     pub deleted: bool,
-    #[serde(default, rename = "deletedTs", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "deletedTs")]
     pub deleted_ts: Option<i64>,
-    #[serde(
-        default,
-        rename = "deletionReason",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "deletionReason")]
     pub deletion_reason: Option<String>,
-    #[serde(
-        default,
-        rename = "replacedBy",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "replacedBy")]
     pub replaced_by: Option<String>,
 }
 
@@ -102,50 +79,48 @@ impl NoteEntity {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct PinEntity {
     pub id: String,
     #[serde(rename = "pinnedAt")]
     pub pinned_at: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct RuleEntity {
     pub id: String,
     #[serde(rename = "type")]
     pub rule_type: String,
-    #[serde(default)]
     pub config: BTreeMap<String, Value>,
     #[serde(rename = "createdAt")]
     pub created_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct ListEntity {
+    #[serde(deserialize_with = "deserialize_non_empty_string")]
     pub slug: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(deserialize_with = "deserialize_non_empty_string")]
     pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub owner: Option<String>,
-    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_non_empty_string")]
+    pub owner: String,
     pub pins: Vec<PinEntity>,
-    #[serde(default)]
     pub rules: Vec<RuleEntity>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub timestamps: HashMap<String, i64>,
-    #[serde(default, skip_serializing_if = "is_false")]
     pub deleted: bool,
-    #[serde(default, rename = "deletedTs", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "deletedTs")]
     pub deleted_ts: Option<i64>,
 }
 
 impl ListEntity {
-    pub fn new(slug: String) -> Self {
+    pub fn new(slug: String, name: String, owner: String) -> Self {
         Self {
             slug,
-            name: String::new(),
-            owner: None,
+            name,
+            owner,
             pins: Vec::new(),
             rules: Vec::new(),
             timestamps: HashMap::new(),
@@ -157,7 +132,6 @@ impl ListEntity {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SettingsEntity {
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub timestamps: HashMap<String, i64>,
     #[serde(flatten)]
     pub values: BTreeMap<String, Value>,
@@ -179,10 +153,9 @@ impl Default for SettingsEntity {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct NameToIdManifest {
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub timestamps: HashMap<String, i64>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub paths: BTreeMap<String, String>,
 }
 
@@ -202,17 +175,16 @@ impl Default for NameToIdManifest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct TreeNode {
     pub id: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<TreeNode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct ListOrderManifest {
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub timestamps: HashMap<String, i64>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tree: Vec<TreeNode>,
 }
 
@@ -232,17 +204,16 @@ impl Default for ListOrderManifest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct OrphanedEntry {
     pub key: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct OrphanedManifest {
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub timestamps: HashMap<String, i64>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub entries: Vec<OrphanedEntry>,
 }
 
@@ -373,8 +344,15 @@ impl Entity {
     }
 }
 
-fn is_false(value: &bool) -> bool {
-    !*value
+fn deserialize_non_empty_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    if value.trim().is_empty() {
+        return Err(serde::de::Error::custom("value must be a non-empty string"));
+    }
+    Ok(value)
 }
 
 #[cfg(test)]
@@ -383,7 +361,11 @@ mod tests {
 
     #[test]
     fn list_serialization_keeps_empty_collection_fields() {
-        let list = ListEntity::new("reading".to_string());
+        let list = ListEntity::new(
+            "reading".to_string(),
+            "Reading".to_string(),
+            "test-device".to_string(),
+        );
         let value = serde_json::to_value(list).expect("serialize list");
 
         assert_eq!(value["pins"], serde_json::json!([]));
@@ -395,7 +377,11 @@ mod tests {
         let entities = [
             Entity::Page(PageEntity::new("page".to_string())),
             Entity::Note(NoteEntity::new("note".to_string())),
-            Entity::List(ListEntity::new("list".to_string())),
+            Entity::List(ListEntity::new(
+                "list".to_string(),
+                "List".to_string(),
+                "test-device".to_string(),
+            )),
             Entity::Settings(SettingsEntity::new()),
             Entity::NameToId(NameToIdManifest::new()),
             Entity::ListOrder(ListOrderManifest::new()),

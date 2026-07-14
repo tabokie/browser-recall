@@ -1,92 +1,83 @@
 (function installBrowserRecallWebExtensionApi(globalScope) {
   const nativeChrome = globalScope.chrome;
   const nativeBrowser = globalScope.browser;
-  const rawApi = nativeBrowser || nativeChrome;
 
-  if (!rawApi) {
-    throw new Error('Browser Recall requires the WebExtension API');
+  function detectEngine() {
+    const userAgent = globalScope.navigator?.userAgent || '';
+    if (/\bFirefox\//.test(userAgent)) return 'firefox';
+    if (/\b(?:HeadlessChrome|Chrome|Chromium|Edg)\//.test(userAgent)) {
+      return 'chromium';
+    }
+    throw new Error(
+      `Unsupported browser user agent: ${userAgent || '<empty>'}`,
+    );
   }
 
-  if (nativeChrome && !nativeBrowser) {
-    globalScope.browser = nativeBrowser || nativeChrome;
+  function isRuntimeFailure(error) {
+    const message = String(error?.message || error || '');
+    return /extension context invalidated|receiving end does not exist|message port closed|could not establish connection|requeststorageaccessfor: permission denied|navigation preload request was cancelled/i.test(
+      message,
+    );
+  }
+
+  const engine = detectEngine();
+  if (engine === 'chromium') {
+    if (
+      !nativeChrome?.runtime?.id ||
+      typeof nativeChrome.runtime.getURL !== 'function'
+    ) {
+      throw new Error('Browser Recall requires the Chromium WebExtension API');
+    }
+    globalScope.browser = nativeChrome;
     globalScope.browserRecallWebExtension = {
       api: nativeChrome,
       engine: 'chromium',
+      isRuntimeFailure,
     };
     return;
   }
 
-  function callbackify(target, methodName) {
+  if (
+    !nativeBrowser?.runtime?.id ||
+    typeof nativeBrowser.runtime.getURL !== 'function'
+  ) {
+    throw new Error('Browser Recall requires the Firefox WebExtension API');
+  }
+  const rawApi = nativeBrowser;
+  if (!rawApi.action) {
+    throw new Error('Browser Recall requires the Firefox action API');
+  }
+  if (!rawApi.contextMenus) {
+    throw new Error('Browser Recall requires the Firefox contextMenus API');
+  }
+
+  function bindPromiseMethod(target, methodName) {
     const method = target?.[methodName];
     if (typeof method !== 'function') return method;
-    return function callbackCompatibleMethod(...args) {
-      const callback =
-        typeof args[args.length - 1] === 'function' ? args.pop() : null;
-      const handleError = (error, reject) => {
-        console.error(
-          `[browser-api] ${methodName} failed:`,
-          error?.message || error,
+    return function browserPromiseMethod(...args) {
+      const result = method.apply(target, args);
+      if (!result || typeof result.then !== 'function') {
+        throw new Error(
+          `Firefox WebExtension method ${methodName} must return a Promise`,
         );
-        if (callback) callback(undefined);
-        if (reject) reject(error);
-      };
-
-      if (method.length <= args.length) {
-        try {
-          const result = method.apply(target, args);
-          if (callback && result?.then) {
-            result.then(
-              (value) => callback(value),
-              (error) => handleError(error),
-            );
-          } else if (callback) {
-            callback(result);
-          }
-          return result?.then ? result : Promise.resolve(result);
-        } catch (error) {
-          handleError(error);
-          return Promise.reject(error);
-        }
       }
-
-      return new Promise((resolve, reject) => {
-        const finish = (value) => {
-          if (callback) callback(value);
-          resolve(value);
-        };
-        try {
-          const result = method.apply(target, [...args, finish]);
-          if (result?.then) {
-            result.then(finish, (error) => handleError(error, reject));
-          } else if (result !== undefined) {
-            finish(result);
-          }
-        } catch (error) {
-          handleError(error, reject);
-        }
-      });
+      return result;
     };
   }
 
   function wrapStorageArea(target) {
     if (!target) return target;
-    return {
+    const wrapped = {
       ...target,
-      get: callbackify(target, 'get'),
-      set: callbackify(target, 'set'),
-      remove: callbackify(target, 'remove'),
-      clear: callbackify(target, 'clear'),
-      setAccessLevel:
-        typeof target.setAccessLevel === 'function'
-          ? callbackify(target, 'setAccessLevel')
-          : () => Promise.resolve(),
+      get: bindPromiseMethod(target, 'get'),
+      set: bindPromiseMethod(target, 'set'),
+      remove: bindPromiseMethod(target, 'remove'),
+      clear: bindPromiseMethod(target, 'clear'),
     };
-  }
-
-  function detectEngine() {
-    const userAgent = globalScope.navigator?.userAgent || '';
-    if (/\bFirefox\//.test(userAgent)) return 'firefox';
-    return 'chromium';
+    if (typeof target.setAccessLevel === 'function') {
+      wrapped.setAccessLevel = bindPromiseMethod(target, 'setAccessLevel');
+    }
+    return wrapped;
   }
 
   function wrapObject(target, methodNames) {
@@ -94,33 +85,9 @@
     const wrapped = { ...target };
     if ('id' in target) wrapped.id = target.id;
     for (const methodName of methodNames) {
-      wrapped[methodName] = callbackify(target, methodName);
+      wrapped[methodName] = bindPromiseMethod(target, methodName);
     }
     return wrapped;
-  }
-
-  function extensionResourceUrl(resourcePath = '') {
-    const normalized = String(resourcePath).replace(/^\/+/, '');
-    const locationHref =
-      globalScope.location?.href || globalScope.window?.location?.href || '';
-    try {
-      const locationUrl = new URL(locationHref);
-      if (
-        locationUrl.protocol === 'moz-extension:' ||
-        locationUrl.protocol === 'chrome-extension:' ||
-        locationUrl.protocol === 'safari-web-extension:'
-      ) {
-        const origin =
-          locationUrl.origin && locationUrl.origin !== 'null'
-            ? locationUrl.origin
-            : `${locationUrl.protocol}//${locationUrl.host}`;
-        return `${origin}/${normalized}`;
-      }
-    } catch {}
-    if (rawApi.runtime?.id) {
-      return `chrome-extension://${rawApi.runtime.id}/${normalized}`;
-    }
-    return normalized;
   }
 
   const storage = rawApi.storage
@@ -146,13 +113,13 @@
   if (runtime && typeof rawApi.runtime?.getURL === 'function') {
     runtime.getURL = rawApi.runtime.getURL.bind(rawApi.runtime);
   }
-  if (runtime && typeof runtime.getURL !== 'function') {
-    runtime.getURL = extensionResourceUrl;
+  if (!runtime || typeof runtime.getURL !== 'function') {
+    throw new Error('Browser Recall requires runtime.getURL');
   }
 
   const api = {
     ...rawApi,
-    action: wrapObject(rawApi.action || rawApi.browserAction, [
+    action: wrapObject(rawApi.action, [
       'setBadgeBackgroundColor',
       'setBadgeText',
       'setIcon',
@@ -161,7 +128,7 @@
       'getBadgeText',
     ]),
     commands: wrapObject(rawApi.commands, ['getAll']),
-    contextMenus: rawApi.contextMenus || rawApi.menus,
+    contextMenus: rawApi.contextMenus,
     runtime,
     scripting: wrapObject(rawApi.scripting, ['executeScript']),
     storage,
@@ -175,15 +142,10 @@
   };
 
   globalScope.chrome = api;
-  globalScope.browser = nativeBrowser || api;
+  globalScope.browser = nativeBrowser;
   globalScope.browserRecallWebExtension = {
     api,
-    engine: detectEngine(),
-    isRuntimeFailure(error) {
-      const message = String(error?.message || error || '');
-      return /extension context invalidated|receiving end does not exist|message port closed|could not establish connection|requeststorageaccessfor: permission denied|navigation preload request was cancelled/i.test(
-        message,
-      );
-    },
+    engine,
+    isRuntimeFailure,
   };
 })(globalThis);

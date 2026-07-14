@@ -312,8 +312,12 @@ fn retry_main_window_focus(app: AppHandle) {
             return;
         }
         if let Some(window) = app.get_webview_window("main") {
-            if window.is_visible().unwrap_or(false) && !window.is_focused().unwrap_or(false) {
-                log_window_error(window.set_focus(), "focus retry");
+            match (window.is_visible(), window.is_focused()) {
+                (Ok(true), Ok(false)) => log_window_error(window.set_focus(), "focus retry"),
+                (Ok(_), Ok(_)) => {}
+                (Err(error), _) | (_, Err(error)) => {
+                    warn!(%error, "failed to inspect main window before focus retry")
+                }
             }
         }
     });
@@ -339,11 +343,16 @@ fn close_main_window(app: &AppHandle) {
 }
 
 fn restore_normal_webview_window_frame(window: &WebviewWindow) {
-    if window.is_fullscreen().unwrap_or(false) {
-        let _ = window.set_fullscreen(false);
+    match window.is_fullscreen() {
+        Ok(true) => log_window_error(window.set_fullscreen(false), "exit fullscreen"),
+        Ok(false) => {}
+        Err(error) => warn!(%error, "failed to inspect main window fullscreen state"),
     }
-    let _ = window.set_size(LogicalSize::new(NORMAL_WINDOW_WIDTH, NORMAL_WINDOW_HEIGHT));
-    let _ = window.center();
+    log_window_error(
+        window.set_size(LogicalSize::new(NORMAL_WINDOW_WIDTH, NORMAL_WINDOW_HEIGHT)),
+        "restore size",
+    );
+    log_window_error(window.center(), "center");
 }
 
 fn create_main_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
@@ -458,16 +467,21 @@ fn apply_shell_state(app: &AppHandle) {
     let model = UiModel::from_state(&shell);
 
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
-        let _ = tray.set_title(None::<&str>);
+        if let Err(error) = tray.set_title(None::<&str>) {
+            warn!(%error, "failed to clear tray title");
+        }
     }
 
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.set_title(&window_title(&model));
-        if let Ok(payload) = serde_json::to_string(&model) {
-            let script = format!(
-                "window.__BR_STATE__ = {payload}; if (window.__renderBrowserRecall) window.__renderBrowserRecall();"
-            );
-            let _ = window.eval(&script);
+        log_window_error(window.set_title(&window_title(&model)), "set title");
+        match serde_json::to_string(&model) {
+            Ok(payload) => {
+                let script = format!(
+                    "window.__BR_STATE__ = {payload}; if (window.__renderBrowserRecall) window.__renderBrowserRecall();"
+                );
+                log_window_error(window.eval(&script), "apply shell state");
+            }
+            Err(error) => warn!(%error, "failed to serialize desktop shell state"),
         }
     }
 
@@ -798,11 +812,15 @@ async fn start_shell_server(app: &AppHandle) -> Result<ServerSnapshot, String> {
 }
 
 fn emit_runtime_message(app: &AppHandle, payload: Value) {
-    let _ = app.emit(BRIDGE_RUNTIME_MESSAGE_EVENT, payload);
+    if let Err(error) = app.emit(BRIDGE_RUNTIME_MESSAGE_EVENT, payload) {
+        warn!(%error, "failed to emit runtime message");
+    }
 }
 
 fn emit_history_search_event(app: &AppHandle, payload: Value) {
-    let _ = app.emit(BRIDGE_SEARCH_HISTORY_EVENT, payload);
+    if let Err(error) = app.emit(BRIDGE_SEARCH_HISTORY_EVENT, payload) {
+        warn!(%error, "failed to emit history search event");
+    }
 }
 
 fn emit_storage_change_message(
@@ -814,19 +832,29 @@ fn emit_storage_change_message(
     if changes.is_empty() {
         return;
     }
-    let _ = app.emit(
+    if let Err(error) = app.emit(
         BRIDGE_STORAGE_CHANGE_EVENT,
         json!({
             "areaName": area_name,
             "sourceId": source_id,
             "changes": changes,
         }),
-    );
+    ) {
+        warn!(%error, "failed to emit storage change event");
+    }
 }
 
 fn emit_protocol_mutation(app: &AppHandle, mutation: &MutationPayload) {
-    let Ok(Value::Object(mut payload)) = serde_json::to_value(mutation) else {
-        return;
+    let mut payload = match serde_json::to_value(mutation) {
+        Ok(Value::Object(payload)) => payload,
+        Ok(_) => {
+            warn!("serialized protocol mutation was not an object");
+            return;
+        }
+        Err(error) => {
+            warn!(%error, "failed to serialize protocol mutation");
+            return;
+        }
     };
     payload.insert("action".to_string(), Value::String("mutation".to_string()));
     emit_runtime_message(app, Value::Object(payload));
@@ -906,7 +934,10 @@ fn session_bridge_clear(state: &mut StorageBridgeState) -> Map<String, Value> {
 }
 
 fn emit_passive_mutation(app: &AppHandle, mutation_type: &str, detail: Value) {
-    let mut payload = detail.as_object().cloned().unwrap_or_default();
+    let mut payload = detail
+        .as_object()
+        .cloned()
+        .expect("passive mutation detail must be an object");
     payload.insert("action".to_string(), Value::String("mutation".to_string()));
     payload.insert("type".to_string(), Value::String(mutation_type.to_string()));
     emit_runtime_message(app, Value::Object(payload));
@@ -939,7 +970,9 @@ async fn run_background_sync_once(app: AppHandle) {
             warn!(%message, "background sync auth expired");
         }
         Err(SyncError::Message(message)) if message == "Cancelled" => {}
-        Err(SyncError::RateLimited { .. }) => {}
+        Err(SyncError::RateLimited { message, .. }) => {
+            warn!(%message, "background sync rate limited");
+        }
         Err(SyncError::Message(message)) => {
             warn!(%message, "background sync failed");
         }
@@ -1093,7 +1126,7 @@ async fn complete_desktop_setup(app: &AppHandle, request: &Value) -> Result<Valu
     let launch_at_login = request
         .get("launchAtLogin")
         .and_then(Value::as_bool)
-        .unwrap_or(config.launch_at_login);
+        .ok_or_else(|| "completeDesktopSetup missing launchAtLogin".to_string())?;
     if launch_at_login && !login_item::is_supported() {
         return Err("Launch at login is unavailable on this OS".to_string());
     }
@@ -1121,24 +1154,33 @@ async fn complete_desktop_setup(app: &AppHandle, request: &Value) -> Result<Valu
 
 #[tauri::command]
 async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> {
+    let request_object = request
+        .as_object()
+        .ok_or_else(|| "bridge request must be an object".to_string())?;
     let action = request
         .get("action")
         .and_then(Value::as_str)
         .ok_or_else(|| "bridge action missing `action`".to_string())?;
+    if CommandAuthority::supports(action) {
+        if let Some(server) = server_control_for_app(&app) {
+            let mut daemon_request = request.clone();
+            daemon_request
+                .as_object_mut()
+                .expect("bridge request was validated as an object")
+                .remove("action");
+            return server
+                .run_command(action, daemon_request)
+                .await
+                .map_err(|error| error.to_string());
+        }
+        return Err("Browser Recall daemon is not running".to_string());
+    }
+    validate_desktop_bridge_fields(action, request_object)?;
     if action == "getDesktopSystemLocale" {
         return Ok(json!({
             "success": true,
             "locale": sys_locale::get_locale(),
         }));
-    }
-    if CommandAuthority::supports(action) {
-        if let Some(server) = server_control_for_app(&app) {
-            return server
-                .run_command(action, request.clone())
-                .await
-                .map_err(|error| error.to_string());
-        }
-        return Err("Browser Recall daemon is not running".to_string());
     }
     let storage = storage_for_app(&app)?;
     let snapshot = shell_snapshot(&app);
@@ -1238,15 +1280,15 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                     .as_ref()
                     .map(ServerHandle::control_handle)
             };
-            if let Some(server) = server {
-                let _ = server
+            let revoked = if let Some(server) = server {
+                server
                     .revoke_connector(browser_id, extension_id)
                     .await
-                    .map_err(|error| error.to_string())?;
+                    .map_err(|error| error.to_string())?
             } else {
-                let _ = pair_browser_revoke(&state.config_store, browser_id, extension_id)?;
-            }
-            json!({ "success": true })
+                pair_browser_revoke(&state.config_store, browser_id, extension_id)?
+            };
+            json!({ "success": true, "revoked": revoked })
         }
         "getDirectoryInfo" => {
             if !setup_complete {
@@ -1255,13 +1297,15 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                     "info": null,
                 }));
             }
-            let data_folder = storage.root().to_string_lossy().to_string();
             let name = storage
                 .root()
                 .file_name()
                 .and_then(|value| value.to_str())
                 .map(str::to_string)
-                .unwrap_or(data_folder);
+                .ok_or_else(|| "data directory has no UTF-8 folder name".to_string())?;
+            let _entries = tokio::fs::read_dir(storage.root())
+                .await
+                .map_err(|error| format!("data directory is not readable: {error}"))?;
             json!({
                 "success": true,
                 "info": {
@@ -1331,12 +1375,19 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             let include_sizes = request
                 .get("includeSizes")
                 .and_then(Value::as_bool)
-                .unwrap_or(false);
+                .ok_or_else(|| "listHistoryFiles missing includeSizes".to_string())?;
             let listing = list_history_files(&storage, include_sizes).await?;
+            let sizes = if include_sizes {
+                listing
+                    .sizes
+                    .ok_or_else(|| "history file listing omitted requested sizes".to_string())?
+            } else {
+                std::collections::BTreeMap::new()
+            };
             json!({
                 "success": true,
                 "files": listing.files,
-                "sizes": listing.sizes.unwrap_or_default(),
+                "sizes": sizes,
                 "devices": listing.devices,
             })
         }
@@ -1346,9 +1397,13 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .and_then(Value::as_array)
                 .ok_or_else(|| "loadHistoryBatch missing files".to_string())?
                 .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect::<Vec<_>>();
+                .map(|value| {
+                    value
+                        .as_str()
+                        .map(str::to_string)
+                        .ok_or_else(|| "loadHistoryBatch files must be strings".to_string())
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             let entries = load_history_batch(&storage, &files).await?;
             json!({
                 "success": true,
@@ -1404,7 +1459,6 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .ok_or_else(|| "getSnapshotHtml missing slug".to_string())?;
             let timestamp = request
                 .get("timestamp")
-                .or_else(|| request.get("ts"))
                 .and_then(Value::as_i64)
                 .ok_or_else(|| "getSnapshotHtml missing timestamp".to_string())?;
             let html =
@@ -1440,7 +1494,6 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .ok_or_else(|| "openSnapshot missing slug".to_string())?;
             let timestamp = request
                 .get("timestamp")
-                .or_else(|| request.get("ts"))
                 .and_then(Value::as_i64)
                 .ok_or_else(|| "openSnapshot missing timestamp".to_string())?;
             let snapshot_path = storage.snapshot_html_file_path(slug, timestamp);
@@ -1464,7 +1517,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 request
                     .get("entries")
                     .cloned()
-                    .unwrap_or_else(|| Value::Array(Vec::new())),
+                    .ok_or_else(|| "previewRule missing entries".to_string())?,
             )
             .map_err(|error| error.to_string())?;
             preview_rule_payload(rule, entries)?
@@ -1490,7 +1543,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                     "localDeviceId": device_id,
                 }),
                 Err(error) => json!({
-                    "success": true,
+                    "success": false,
                     "devices": [],
                     "localDeviceId": device_id,
                     "error": error,
@@ -1528,7 +1581,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             let remember = request
                 .get("remember")
                 .and_then(Value::as_bool)
-                .unwrap_or(true);
+                .ok_or_else(|| "toggleSyncRemember missing remember".to_string())?;
             let state = app.state::<DesktopState>();
             state.sync.toggle_remember(remember)?;
             json!({ "success": true })
@@ -1553,7 +1606,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             let remember = request
                 .get("remember")
                 .and_then(Value::as_bool)
-                .unwrap_or(true);
+                .ok_or_else(|| "setSyncToken missing remember".to_string())?;
             let state = app.state::<DesktopState>();
             let github_user = state.sync.set_token(token, remember).await?;
             json!({
@@ -1581,6 +1634,63 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
     };
 
     Ok(response)
+}
+
+fn validate_desktop_bridge_fields(
+    action: &str,
+    request: &serde_json::Map<String, Value>,
+) -> Result<(), String> {
+    let fields: &[&str] = match action {
+        "openExternalUrl" | "getPageRelations" => &["url"],
+        "completeDesktopSetup" => &["launchAtLogin"],
+        "updateDesktopShellSettings" => &["launchAtLogin", "debugLogging"],
+        "revokePairedBrowser" => &["browserId", "extensionId"],
+        "getListDisplay" => &["listId"],
+        "getPageContext" => &["slugs"],
+        "listHistoryFiles" => &["includeSizes"],
+        "loadHistoryBatch" => &["files"],
+        "searchNotes" | "searchSnapshots" => &["query"],
+        "loadPageNotes" | "listSnapshots" => &["slug"],
+        "getSnapshotHtml" | "openSnapshot" => &["slug", "timestamp"],
+        "previewRule" => &["rule", "entries"],
+        "toggleSyncDevicePaused" | "deleteSyncDevice" => &["deviceId"],
+        "toggleSyncRemember" => &["remember"],
+        "setSyncToken" => &["token", "remember"],
+        "getDesktopSystemLocale"
+        | "getDeviceId"
+        | "getDesktopConnectorState"
+        | "triggerDesktopPairing"
+        | "getDesktopShellState"
+        | "startWindowDrag"
+        | "toggleWindowFullscreen"
+        | "chooseDesktopDataFolder"
+        | "getDirectoryInfo"
+        | "getDirectorySize"
+        | "getAllPageContext"
+        | "getListTree"
+        | "getRecycleBin"
+        | "getSettings"
+        | "resumeService"
+        | "getSyncDevices"
+        | "syncListDevices"
+        | "updateSyncSettings"
+        | "clearSyncFolder"
+        | "flushDesktopQueue"
+        | "initializeFilesystem"
+        | "cancelSync"
+        | "clearSyncToken"
+        | "syncNow"
+        | "getSyncAuthState" => &[],
+        _ => return Ok(()),
+    };
+    for key in request.keys() {
+        if key != "action" && !fields.contains(&key.as_str()) {
+            return Err(format!(
+                "{action} bridge request contains unknown field: {key}"
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]

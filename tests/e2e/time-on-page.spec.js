@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, openHelperPage } from './helpers.js';
+import { resetAndSeed, settingsCheckpoint, openHelperPage } from './helpers.js';
 
 const TITLE_LIFECYCLE_SEED = 'title-lifecycle-20260505-a';
 
@@ -52,10 +52,7 @@ test('timeOnPage reports foreground delta, not cumulative time since load', asyn
     body: '<h1>Time Test</h1>',
   });
   await resetAndSeed(extContext, extensionId, [
-    {
-      path: 'views/manifest/settings.json',
-      data: { trimRules: [], blacklist: [] },
-    },
+    settingsCheckpoint({ urlBlacklist: [] }),
   ]);
   const testUrl = localServer.url('/time-test');
 
@@ -121,10 +118,7 @@ test(`leave_page reports the latest same-URL document title seed=${TITLE_LIFECYC
     body: '<h1>Title lifecycle</h1><p>Title changes without navigation.</p>',
   });
   await resetAndSeed(extContext, extensionId, [
-    {
-      path: 'views/manifest/settings.json',
-      data: { trimRules: [], blacklist: [] },
-    },
+    settingsCheckpoint({ urlBlacklist: [] }),
   ]);
 
   const testUrl = localServer.url('/title-lifecycle');

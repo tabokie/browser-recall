@@ -2,9 +2,12 @@ import { test, expect } from './fixtures.js';
 import crypto from 'crypto';
 import {
   resetAndSeed,
+  settingsCheckpoint,
   getSlugForUrl,
   openHelperPage,
   pageCheckpointPath,
+  pageEntityFixture,
+  noteEntityFixture,
   longestLeftBorderRun,
 } from './helpers.js';
 
@@ -20,27 +23,28 @@ function snapshotSidecarPath(slug, timestamp, ext) {
 }
 
 async function openPopupForUrl(extContext, extensionId, { url, title }) {
-  const popup = await extContext.newPage();
-  await popup.addInitScript(
-    ({ url, title }) => {
-      const patchTabsQuery = () => {
-        if (!globalThis.chrome?.tabs?.query) {
-          setTimeout(patchTabsQuery, 0);
-          return;
-        }
-        const originalQuery = chrome.tabs.query.bind(chrome.tabs);
-        chrome.tabs.query = async (queryInfo) => {
-          if (queryInfo?.active && queryInfo?.currentWindow) {
-            return [{ id: 12001, url, title }];
-          }
-          return originalQuery(queryInfo);
-        };
+  const helper = await openHelperPage(extContext, extensionId);
+  const prepared = await helper.evaluate(async (pageUrl) => {
+    const tabs = await chrome.tabs.query({ url: pageUrl });
+    if (tabs.length !== 1) {
+      return {
+        success: false,
+        error: `Expected one source tab for ${pageUrl}, found ${tabs.length}`,
       };
-      patchTabsQuery();
-    },
-    { url, title },
-  );
-  await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+    }
+    return chrome.runtime.sendMessage({
+      action: 'preparePopupBootstrapForTest',
+      tabId: tabs[0].id,
+    });
+  }, url);
+  await helper.close();
+  if (!prepared?.success) {
+    throw new Error(
+      `preparePopupBootstrapForTest failed for ${title}: ${JSON.stringify(prepared)}`,
+    );
+  }
+  const popup = await extContext.newPage();
+  await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
   await expect(popup.locator('#dashboard')).toBeVisible();
   return popup;
 }
@@ -59,9 +63,7 @@ test.describe('Snapshot slug meta tag', () => {
     const pageUrl = localServer.url('/capture-cold-start-shortcut');
     const slug = getSlugForUrl(pageUrl);
 
-    await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
-    ]);
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
 
     const page = await extContext.newPage();
     await page.goto(pageUrl);
@@ -81,12 +83,14 @@ test.describe('Snapshot slug meta tag', () => {
     expect(commandResp).toEqual({ success: true });
 
     await expect
-      .poll(() =>
-        helper.evaluate(
-          (key) =>
-            chrome.runtime.sendMessage({ action: 'readDesktopValue', key }),
-          `page:${slug}`,
-        ),
+      .poll(
+        () =>
+          helper.evaluate(
+            (key) =>
+              chrome.runtime.sendMessage({ action: 'readDesktopValue', key }),
+            `page:${slug}`,
+          ),
+        { timeout: 10_000 },
       )
       .toMatchObject({
         success: true,
@@ -110,9 +114,7 @@ test.describe('Snapshot slug meta tag', () => {
     const pageUrl = localServer.url('/capture-stale-connector');
     const slug = getSlugForUrl(pageUrl);
 
-    await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
-    ]);
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
 
     const page = await extContext.newPage();
     await page.goto(pageUrl);
@@ -173,27 +175,27 @@ test.describe('Snapshot slug meta tag', () => {
 
     // Seed: page entity with a note child, and the note entity with an excerpt
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: originalUrl,
           title: 'Example Article',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [`note:${noteSlug}`],
-        },
+        }),
       },
       {
         path: `objects/notes/${noteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug,
           excerpt: [highlightText],
           note: '',
           cssPath: ['body > p'],
           url: originalUrl,
-        },
+        }),
       },
     ]);
 
@@ -227,31 +229,31 @@ test.describe('Snapshot slug meta tag', () => {
 
     localServer.addPage('/snapshot-popup-view', {
       title: 'Stored Snapshot',
-      body: `<meta name="x-browser-recall-slug" content="${slug}"><p>This page contains a ${highlightText}.</p>`,
+      body: `<meta name="x-browser-recall-slug" content="${slug}"><meta name="x-browser-recall-url" content="${originalUrl}"><p>This page contains a ${highlightText}.</p>`,
     });
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: originalUrl,
           title: 'Original Snapshot Page',
           parentIds: [],
           childIds: [`note:${noteSlug}`],
           timestamps: { 'test-device': now },
-        },
+        }),
       },
       {
         path: `objects/notes/${noteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug,
           excerpt: [highlightText],
           note: 'snapshot popup note',
           cssPath: ['body > p'],
           url: originalUrl,
-        },
+        }),
       },
       {
         path: `logs/test-device/2026-03-01.jsonl`,
@@ -261,6 +263,7 @@ test.describe('Snapshot slug meta tag', () => {
             action: 'visit_page',
             url: originalUrl,
             title: 'Original Snapshot Page',
+            referrerUrl: null,
           },
         ],
       },
@@ -278,22 +281,22 @@ test.describe('Snapshot slug meta tag', () => {
     }, snapshotUrl);
     expect(snapshotTab).not.toBeNull();
 
+    const flushResult = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'flushDesktopQueueForTest' }),
+    );
+    expect(flushResult.success).toBe(true);
+    const prepared = await helper.evaluate(
+      (tabId) =>
+        chrome.runtime.sendMessage({
+          action: 'preparePopupBootstrapForTest',
+          tabId,
+        }),
+      snapshotTab.id,
+    );
+    expect(prepared.success).toBe(true);
+    expect(prepared.mode, prepared.error).toBe('dashboard');
     const popup = await extContext.newPage();
-    await popup.addInitScript((tab) => {
-      const patchTabsQuery = () => {
-        if (!globalThis.chrome?.tabs?.query) {
-          setTimeout(patchTabsQuery, 0);
-          return;
-        }
-        const originalQuery = chrome.tabs.query.bind(chrome.tabs);
-        chrome.tabs.query = async (queryInfo) => {
-          if (queryInfo?.active && queryInfo?.currentWindow) return [tab];
-          return originalQuery(queryInfo);
-        };
-      };
-      patchTabsQuery();
-    }, snapshotTab);
-    await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+    await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
 
     await expect(popup.locator('#dashboard')).toBeVisible();
     await expect(popup.locator('#pageTitle')).toHaveText(
@@ -319,27 +322,27 @@ test.describe('Snapshot slug meta tag', () => {
     const highlightText = 'restored snapshot highlight';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: originalUrl,
           title: 'Popup Open Snapshot',
           parentIds: [],
           childIds: [`note:${noteSlug}`, `snapshot:${slug}-${timestamp}`],
           timestamps: { 'test-device': timestamp },
-        },
+        }),
       },
       {
         path: `objects/notes/${noteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug,
           excerpt: [highlightText],
           note: 'snapshot note',
           cssPath: ['body > p'],
           url: originalUrl,
-        },
+        }),
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'html'),
@@ -357,10 +360,20 @@ test.describe('Snapshot slug meta tag', () => {
             action: 'visit_page',
             url: originalUrl,
             title: 'Popup Open Snapshot',
+            referrerUrl: null,
           },
         ],
       },
     ]);
+
+    await extContext.route(originalUrl, (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: '<!doctype html><title>Popup Open Snapshot</title><p>Original page</p>',
+      }),
+    );
+    const sourcePage = await extContext.newPage();
+    await sourcePage.goto(originalUrl);
 
     const popup = await openPopupForUrl(extContext, extensionId, {
       url: originalUrl,
@@ -415,6 +428,7 @@ test.describe('Snapshot slug meta tag', () => {
     await viewerPopup.close();
     await viewer.close();
     await popup.close();
+    await sourcePage.close();
   });
 
   test('snapshot viewer creates highlight notes with array excerpt metadata', async ({
@@ -428,17 +442,17 @@ test.describe('Snapshot slug meta tag', () => {
     const highlightText = 'new snapshot highlight';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: originalUrl,
           title: 'Snapshot Create Highlight',
           parentIds: [],
           childIds: [`snapshot:${slug}-${timestamp}`],
           timestamps: { 'test-device': timestamp },
-        },
+        }),
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'html'),
@@ -507,27 +521,27 @@ test.describe('Snapshot slug meta tag', () => {
     const highlightText = 'duplicate highlight text';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: originalUrl,
           title: 'Snapshot Scoped Highlight',
           parentIds: [],
           childIds: [`snapshot:${slug}-${timestamp}`, `note:${noteSlug}`],
           timestamps: { 'test-device': timestamp },
-        },
+        }),
       },
       {
         path: `objects/notes/${noteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug,
           excerpt: [highlightText],
           note: '',
           cssPath: ['body > section:nth-of-type(2) > p:nth-of-type(1)'],
           url: originalUrl,
-        },
+        }),
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'html'),
@@ -567,27 +581,27 @@ test.describe('Snapshot slug meta tag', () => {
     const highlightText = 'saved excerpt outside Browser Recall UI';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: originalUrl,
           title: 'Snapshot Highlight UI Exclusion',
           parentIds: [],
           childIds: [`snapshot:${slug}-${timestamp}`, `note:${noteSlug}`],
           timestamps: { 'test-device': timestamp },
-        },
+        }),
       },
       {
         path: `objects/notes/${noteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug,
           excerpt: [highlightText],
           note: '',
           cssPath: [''],
           url: originalUrl,
-        },
+        }),
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'html'),
@@ -632,9 +646,7 @@ test.describe('Snapshot slug meta tag', () => {
     const pageUrl = localServer.url('/with-highlights');
     const slug = getSlugForUrl(pageUrl);
 
-    await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
-    ]);
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
 
     const page = await extContext.newPage();
     await page.goto(pageUrl);
@@ -685,9 +697,7 @@ test.describe('Snapshot slug meta tag', () => {
     const pageUrl = localServer.url('/capture-meta');
     const slug = getSlugForUrl(pageUrl);
 
-    await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
-    ]);
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
 
     // Navigate to the page so content script is available for capture
     const page = await extContext.newPage();

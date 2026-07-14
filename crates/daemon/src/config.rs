@@ -1,5 +1,5 @@
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
@@ -7,6 +7,14 @@ use std::path::{Path, PathBuf};
 
 const DEVICE_ID_MAX_LEN: usize = 48;
 const DEVICE_ID_MACHINE_SUFFIX_LEN: usize = 12;
+
+fn deserialize_required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::deserialize(deserializer)
+}
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(transparent)]
@@ -19,55 +27,52 @@ impl fmt::Debug for Token {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct ApprovedConnector {
     pub browser_id: String,
     pub browser_name: String,
     pub extension_id: String,
-    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub browser_profile: Option<String>,
     pub token: Token,
     pub approved_at: u64,
-    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub last_seen_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(deny_unknown_fields)]
 pub struct SyncDeviceRecord {
-    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub last_pushed: Option<i64>,
-    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub last_pulled: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct DaemonConfig {
     pub device_id: String,
     pub data_dir: PathBuf,
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub last_port: Option<u16>,
-    #[serde(default)]
     pub launch_at_login: bool,
-    #[serde(default = "default_log_level")]
     pub log_level: String,
-    #[serde(default)]
     pub setup_complete: bool,
-    #[serde(default)]
     pub connectors: Vec<ApprovedConnector>,
-    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub sync_github_token: Option<Token>,
-    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub sync_github_user: Option<String>,
-    #[serde(default = "default_sync_remember_token")]
     pub sync_remember_token: bool,
-    #[serde(default)]
     pub sync_paused_devices: Vec<String>,
-    #[serde(default)]
     pub sync_devices: BTreeMap<String, SyncDeviceRecord>,
 }
 
 impl DaemonConfig {
-    pub fn new_unconfigured() -> Self {
-        Self {
-            device_id: default_device_id(),
+    pub fn new_unconfigured() -> std::io::Result<Self> {
+        Ok(Self {
+            device_id: default_device_id()?,
             data_dir: PathBuf::new(),
             last_port: None,
             launch_at_login: true,
@@ -79,13 +84,15 @@ impl DaemonConfig {
             sync_remember_token: true,
             sync_paused_devices: Vec::new(),
             sync_devices: BTreeMap::new(),
-        }
+        })
     }
 
-    pub fn new_configured(data_dir: PathBuf) -> Result<Self, &'static str> {
-        let mut config = Self::new_unconfigured();
-        config.select_data_directory(data_dir)?;
-        config.complete_setup()?;
+    pub fn new_configured(data_dir: PathBuf) -> std::io::Result<Self> {
+        let mut config = Self::new_unconfigured()?;
+        config
+            .select_data_directory(data_dir)
+            .map_err(invalid_data)?;
+        config.complete_setup().map_err(invalid_data)?;
         Ok(config)
     }
 
@@ -108,6 +115,41 @@ impl DaemonConfig {
 
     pub fn is_configured(&self) -> bool {
         self.setup_complete && !self.data_dir.as_os_str().is_empty()
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.device_id.is_empty()
+            || self.device_id.len() > DEVICE_ID_MAX_LEN
+            || !self
+                .device_id
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        {
+            return Err("device_id must be a lowercase path-safe identifier".to_string());
+        }
+        if self.setup_complete && self.data_dir.as_os_str().is_empty() {
+            return Err("configured daemon is missing data_dir".to_string());
+        }
+        if !matches!(self.log_level.as_str(), "info" | "debug") {
+            return Err("log_level must be info or debug".to_string());
+        }
+        for connector in &self.connectors {
+            if connector.browser_id.trim().is_empty()
+                || connector.browser_name.trim().is_empty()
+                || connector.extension_id.trim().is_empty()
+                || connector.token.0.is_empty()
+            {
+                return Err("connector identity and token fields must not be empty".to_string());
+            }
+            if connector
+                .browser_profile
+                .as_deref()
+                .is_some_and(|profile| profile.trim().is_empty())
+            {
+                return Err("browser_profile must be non-empty when present".to_string());
+            }
+        }
+        Ok(())
     }
 }
 
@@ -144,6 +186,7 @@ impl ConfigStore {
 
         let raw = fs::read_to_string(path)?;
         let config = serde_json::from_str::<DaemonConfig>(&raw).map_err(invalid_data)?;
+        config.validate().map_err(invalid_data)?;
         Ok(Some(config))
     }
 
@@ -151,13 +194,14 @@ impl ConfigStore {
         if let Some(config) = self.load()? {
             Ok(config)
         } else {
-            let config = DaemonConfig::new_unconfigured();
+            let config = DaemonConfig::new_unconfigured()?;
             self.save(&config)?;
             Ok(config)
         }
     }
 
     pub fn save(&self, config: &DaemonConfig) -> std::io::Result<()> {
+        config.validate().map_err(invalid_data)?;
         fs::create_dir_all(&self.root_dir)?;
         let payload = serde_json::to_string_pretty(config).map_err(invalid_data)?;
         fs::write(self.config_path(), payload)
@@ -172,10 +216,6 @@ fn default_log_level() -> String {
     "info".to_string()
 }
 
-fn default_sync_remember_token() -> bool {
-    true
-}
-
 pub fn random_string(len: usize) -> String {
     thread_rng()
         .sample_iter(Alphanumeric)
@@ -184,14 +224,17 @@ pub fn random_string(len: usize) -> String {
         .collect()
 }
 
-pub fn default_device_id() -> String {
-    device_id_from_os_parts(
-        &current_hostname(),
-        stable_os_device_identifier().as_deref(),
-    )
+pub fn default_device_id() -> std::io::Result<String> {
+    let hostname = current_hostname();
+    let machine_identifier = stable_os_device_identifier()?;
+    device_id_from_os_parts(hostname.as_deref(), machine_identifier.as_deref())
+        .ok_or_else(|| invalid_data("platform machine identifier did not produce a device ID"))
 }
 
-pub fn device_id_from_os_parts(hostname: &str, machine_identifier: Option<&str>) -> String {
+pub fn device_id_from_os_parts(
+    hostname: Option<&str>,
+    machine_identifier: Option<&str>,
+) -> Option<String> {
     let suffix = machine_identifier
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -201,11 +244,13 @@ pub fn device_id_from_os_parts(hostname: &str, machine_identifier: Option<&str>)
     } else {
         DEVICE_ID_MAX_LEN
     };
-    let base = device_id_component_from_hostname(hostname, base_max_len)
-        .unwrap_or_else(|| "desktop".to_string());
+    let base = hostname.and_then(|value| device_id_component_from_hostname(value, base_max_len));
 
     match suffix {
-        Some(suffix) => format!("{base}-{suffix}"),
+        Some(suffix) => Some(format!(
+            "{}-{suffix}",
+            base.unwrap_or_else(|| "machine".to_string())
+        )),
         None => base,
     }
 }
@@ -266,22 +311,28 @@ fn stable_device_suffix(machine_identifier: &str) -> String {
         .collect()
 }
 
-fn stable_os_device_identifier() -> Option<String> {
-    platform_machine_identifier()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+fn stable_os_device_identifier() -> std::io::Result<Option<String>> {
+    let value = platform_machine_identifier()?;
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        return Err(invalid_data("platform machine identifier is empty"));
+    }
+    Ok(Some(value))
 }
 
 #[cfg(target_os = "macos")]
-fn platform_machine_identifier() -> Option<String> {
+fn platform_machine_identifier() -> std::io::Result<String> {
     let output = std::process::Command::new("ioreg")
         .args(["-rd1", "-c", "IOPlatformExpertDevice"])
-        .output()
-        .ok()?;
+        .output()?;
     if !output.status.success() {
-        return None;
+        return Err(invalid_data(format!(
+            "ioreg failed while reading IOPlatformUUID with status {}",
+            output.status
+        )));
     }
     parse_ioreg_platform_uuid(&String::from_utf8_lossy(&output.stdout))
+        .ok_or_else(|| invalid_data("ioreg output is missing IOPlatformUUID"))
 }
 
 #[cfg(target_os = "macos")]
@@ -296,14 +347,27 @@ fn parse_ioreg_platform_uuid(output: &str) -> Option<String> {
 }
 
 #[cfg(target_os = "linux")]
-fn platform_machine_identifier() -> Option<String> {
-    ["/etc/machine-id", "/var/lib/dbus/machine-id"]
-        .iter()
-        .find_map(|path| fs::read_to_string(path).ok())
+fn platform_machine_identifier() -> std::io::Result<String> {
+    for path in ["/etc/machine-id", "/var/lib/dbus/machine-id"] {
+        match fs::read_to_string(path) {
+            Ok(value) => return Ok(value),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(std::io::Error::new(
+                    error.kind(),
+                    format!("failed to read {path}: {error}"),
+                ))
+            }
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "platform machine identifier is unavailable: neither /etc/machine-id nor /var/lib/dbus/machine-id exists",
+    ))
 }
 
 #[cfg(target_os = "windows")]
-fn platform_machine_identifier() -> Option<String> {
+fn platform_machine_identifier() -> std::io::Result<String> {
     let output = std::process::Command::new("reg")
         .args([
             "query",
@@ -311,44 +375,50 @@ fn platform_machine_identifier() -> Option<String> {
             "/v",
             "MachineGuid",
         ])
-        .output()
-        .ok()?;
+        .output()?;
     if !output.status.success() {
-        return None;
+        return Err(invalid_data(format!(
+            "registry query for MachineGuid failed with status {}",
+            output.status
+        )));
     }
     String::from_utf8_lossy(&output.stdout)
         .lines()
         .find(|line| line.contains("MachineGuid"))
         .and_then(|line| line.split_whitespace().last())
         .map(str::to_string)
+        .ok_or_else(|| invalid_data("registry output is missing MachineGuid"))
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-fn platform_machine_identifier() -> Option<String> {
-    None
+fn platform_machine_identifier() -> std::io::Result<String> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "platform machine identity is not implemented for this operating system",
+    ))
 }
 
-pub fn current_hostname() -> String {
+pub fn current_hostname() -> Option<String> {
     hostname::get()
         .ok()
         .and_then(|value| value.into_string().ok())
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "unknown".to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        current_hostname, default_device_id, device_id_from_hostname, device_id_from_os_parts,
-        stable_device_suffix, ConfigStore, DaemonConfig, Token,
+        current_hostname, device_id_from_hostname, device_id_from_os_parts, stable_device_suffix,
+        ConfigStore, DaemonConfig, Token,
     };
     use tempfile::tempdir;
 
     #[test]
     fn new_unconfigured_uses_os_derived_device_id() {
-        let config = DaemonConfig::new_unconfigured();
-        assert_eq!(config.device_id, default_device_id());
+        let config = DaemonConfig::new_unconfigured().expect("platform device identity");
         assert!(!config.device_id.is_empty());
+        assert_ne!(config.device_id, "desktop");
+        assert_ne!(config.device_id, "unknown");
         assert!(!config.is_configured());
     }
 
@@ -374,24 +444,25 @@ mod tests {
     fn os_device_id_includes_stable_machine_suffix() {
         let suffix = stable_device_suffix("machine-id-123");
         assert_eq!(
-            device_id_from_os_parts("John's MacBook Pro.local", Some("machine-id-123")),
-            format!("johns-macbook-pro-local-{suffix}")
+            device_id_from_os_parts(Some("John's MacBook Pro.local"), Some("machine-id-123")),
+            Some(format!("johns-macbook-pro-local-{suffix}"))
         );
         assert_eq!(
-            device_id_from_os_parts("東京", Some("machine-id-123")),
-            format!("desktop-{suffix}")
+            device_id_from_os_parts(Some("東京"), Some("machine-id-123")),
+            Some(format!("machine-{suffix}"))
         );
         assert_eq!(
             device_id_from_os_parts(
-                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                Some("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"),
                 Some("machine-id-123"),
             ),
-            format!("abcdefghijklmnopqrstuvwxyzabcdefghi-{suffix}")
+            Some(format!("abcdefghijklmnopqrstuvwxyzabcdefghi-{suffix}"))
         );
         assert_eq!(
-            device_id_from_os_parts("Office", Some("  ")),
-            "office".to_string()
+            device_id_from_os_parts(Some("Office"), Some("  ")),
+            Some("office".to_string())
         );
+        assert_eq!(device_id_from_os_parts(None, None), None);
     }
 
     #[test]
@@ -410,7 +481,9 @@ mod tests {
         let loaded = store.load().expect("load saved").expect("config exists");
         assert_eq!(loaded.sync_github_token, Some(Token("secret".to_string())));
         assert_eq!(format!("{:?}", Token("secret".to_string())), "<redacted>");
-        assert!(!current_hostname().trim().is_empty());
+        if let Some(hostname) = current_hostname() {
+            assert!(!hostname.trim().is_empty());
+        }
 
         std::fs::write(store.config_path(), "{not json").expect("write invalid json");
         let error = store.load().expect_err("invalid config should fail");

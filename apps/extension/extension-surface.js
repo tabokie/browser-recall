@@ -44,9 +44,16 @@
   }
 
   function highlightExcerptParts(excerpt) {
-    return Array.isArray(excerpt)
-      ? excerpt.map((part) => String(part || '')).filter(Boolean)
-      : [];
+    if (excerpt === null) return [];
+    if (
+      !Array.isArray(excerpt) ||
+      !excerpt.every((part) => typeof part === 'string' && part)
+    ) {
+      throw new Error(
+        'Highlight excerpt must be a non-empty string array or null',
+      );
+    }
+    return excerpt;
   }
 
   function positionNearRect(host, rect, win = window, options = {}) {

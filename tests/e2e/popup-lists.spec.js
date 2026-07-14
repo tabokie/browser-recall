@@ -1,10 +1,16 @@
 import { test, expect } from './fixtures.js';
 import {
   resetAndSeed,
+  settingsCheckpoint,
   getExtensionMessage,
   getSlugForUrl,
   openHelperPage,
   pageCheckpointPath,
+  pageEntityFixture,
+  noteEntityFixture,
+  listEntityFixture,
+  listOrderFixture,
+  listNameToIdFixture,
   pickSeeded,
   seededRandom,
 } from './helpers.js';
@@ -18,31 +24,40 @@ async function openPopupForUrl(
   extensionId,
   { url, title, expectedTitle = title, locale, messages = {} },
 ) {
+  const helper = await openHelperPage(extContext, extensionId);
+  const prepared = await helper.evaluate(async (pageUrl) => {
+    const tabs = await chrome.tabs.query({ url: pageUrl });
+    if (tabs.length !== 1) {
+      return {
+        success: false,
+        error: `Expected one source tab for ${pageUrl}, found ${tabs.length}`,
+      };
+    }
+    return chrome.runtime.sendMessage({
+      action: 'preparePopupBootstrapForTest',
+      tabId: tabs[0].id,
+    });
+  }, url);
+  await helper.close();
+  if (!prepared?.success) {
+    throw new Error(
+      `preparePopupBootstrapForTest failed: ${JSON.stringify(prepared)}`,
+    );
+  }
+
   const popup = await extContext.newPage();
-  await popup.addInitScript(
-    ({ url, title, locale, messages }) => {
-      const patchTabsQuery = () => {
-        if (!globalThis.chrome?.tabs?.query) {
-          setTimeout(patchTabsQuery, 0);
-          return;
-        }
-        const originalQuery = chrome.tabs.query.bind(chrome.tabs);
-        chrome.tabs.query = async (queryInfo) => {
-          if (queryInfo?.active && queryInfo?.currentWindow) {
-            return [{ id: 10001, url, title }];
-          }
-          return originalQuery(queryInfo);
-        };
+  if (locale) {
+    await popup.addInitScript(
+      ({ locale, messages }) => {
         if (locale) {
           chrome.i18n.getUILanguage = () => locale;
           chrome.i18n.getMessage = (key) => messages[key] || '';
         }
-      };
-      patchTabsQuery();
-    },
-    { url, title, locale, messages },
-  );
-  await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+      },
+      { locale, messages },
+    );
+  }
+  await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
   await expect(popup.locator('#dashboard')).toBeVisible();
   await expect(popup.locator('#pageTitle')).toHaveText(expectedTitle);
   return popup;
@@ -135,9 +150,7 @@ test.describe('Popup list chip behavior', () => {
     });
     const url = localServer.url('/localized-page-note');
 
-    await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
-    ]);
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
 
     const page = await extContext.newPage();
     await page.goto(url);
@@ -194,9 +207,7 @@ test.describe('Popup list chip behavior', () => {
     });
     const url = localServer.url('/popup-startup-stability');
 
-    await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
-    ]);
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
 
     const popup = await extContext.newPage();
     await popup.addInitScript(
@@ -364,35 +375,35 @@ test.describe('Popup list chip behavior', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: {
-          timestamp: now,
-          tree: [{ id: 'list:prepared-list' }],
-        },
+        data: listOrderFixture({
+          deviceTimestamp: now,
+          tree: [{ id: 'list:prepared-list', children: [] }],
+        }),
       },
       {
         path: 'views/lists/prepared-list.json',
-        data: {
+        data: listEntityFixture({
           slug: 'prepared-list',
           name: 'AI',
           owner: 'test-device',
-          timestamp: now,
-          pins: [{ id: `page:${slug}`, pinnedAt: now }],
-        },
+          deviceTimestamp: now,
+          pins: [{ id: `page:${slug}`, pinnedAt: now, source: null }],
+        }),
       },
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Show HN: Browser Recall',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: ['list:prepared-list'],
           childIds: [],
           visitDates: [20260617],
-        },
+        }),
       },
     ]);
 
@@ -486,42 +497,42 @@ test.describe('Popup list chip behavior', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: {
-          timestamp: now,
-          tree: [{ id: 'list:ai' }],
-        },
+        data: listOrderFixture({
+          deviceTimestamp: now,
+          tree: [{ id: 'list:ai', children: [] }],
+        }),
       },
       {
         path: 'views/lists/ai.json',
-        data: {
+        data: listEntityFixture({
           slug: 'ai',
           name: 'AI',
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
       },
       {
         path: 'views/manifest/list-name-to-id.json',
-        data: {
-          timestamp: now,
+        data: listNameToIdFixture({
+          deviceTimestamp: now,
           paths: { 'test-device/AI': 'ai' },
-        },
+        }),
       },
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Prepared Popup Membership Race',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [],
           visitDates: [20260617],
-        },
+        }),
       },
     ]);
 
@@ -591,123 +602,136 @@ test.describe('Popup list chip behavior', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: {
-          timestamp: now,
-          tree: [{ id: 'list:chip-list' }, { id: 'list:picker-list' }],
-        },
+        data: listOrderFixture({
+          deviceTimestamp: now,
+          tree: [
+            { id: 'list:chip-list', children: [] },
+            { id: 'list:picker-list', children: [] },
+          ],
+        }),
       },
       {
         path: 'views/lists/chip-list.json',
-        data: {
+        data: listEntityFixture({
           slug: 'chip-list',
           name: 'Chip List',
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
       },
       {
         path: 'views/lists/picker-list.json',
-        data: {
+        data: listEntityFixture({
           slug: 'picker-list',
           name: 'Picker List',
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
+      },
+      {
+        path: 'views/manifest/list-name-to-id.json',
+        data: listNameToIdFixture({
+          deviceTimestamp: now,
+          paths: {
+            'test-device/Chip List': 'chip-list',
+            'test-device/Picker List': 'picker-list',
+          },
+        }),
       },
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Popup List Toggle No Flash',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [],
           visitDates: [20260618],
-        },
+        }),
       },
     ]);
 
-    const popup = await extContext.newPage();
-    await popup.addInitScript(
-      ({ url }) => {
-        let releaseToggle;
-        let releaseRefresh;
-        let stallRefresh = false;
-        const toggleEvents = [];
-        globalThis.__releaseListToggleForTest = () => releaseToggle?.();
-        globalThis.__releaseListRefreshForTest = () => releaseRefresh?.();
-        globalThis.__listToggleEventsForTest = toggleEvents;
-        globalThis.__popupMutatingTransitionsForTest = [];
+    const sourcePage = await extContext.newPage();
+    await sourcePage.goto(url);
+    const bootstrapHelper = await openHelperPage(extContext, extensionId);
+    const prepared = await bootstrapHelper.evaluate(async (pageUrl) => {
+      const tabs = await chrome.tabs.query({ url: pageUrl });
+      if (tabs.length !== 1) {
+        return {
+          success: false,
+          error: `Expected one source tab for ${pageUrl}, found ${tabs.length}`,
+        };
+      }
+      return chrome.runtime.sendMessage({
+        action: 'preparePopupBootstrapForTest',
+        tabId: tabs[0].id,
+      });
+    }, url);
+    await bootstrapHelper.close();
+    if (!prepared?.success) {
+      throw new Error(
+        `preparePopupBootstrapForTest failed: ${JSON.stringify(prepared)}`,
+      );
+    }
 
-        const patchApis = () => {
-          if (!globalThis.chrome?.tabs?.query || !chrome.runtime?.sendMessage) {
-            setTimeout(patchApis, 0);
+    const popup = await extContext.newPage();
+    await popup.addInitScript(() => {
+      let releaseToggle;
+      const toggleEvents = [];
+      globalThis.__releaseListToggleForTest = () => releaseToggle?.();
+      globalThis.__listToggleEventsForTest = toggleEvents;
+      globalThis.__popupMutatingTransitionsForTest = [];
+
+      const patchApis = () => {
+        if (!globalThis.chrome?.tabs?.query || !chrome.runtime?.sendMessage) {
+          setTimeout(patchApis, 0);
+          return;
+        }
+
+        const originalSendMessage = chrome.runtime.sendMessage.bind(
+          chrome.runtime,
+        );
+        chrome.runtime.sendMessage = async (request, ...rest) => {
+          if (request?.action === 'toggleListPin') {
+            toggleEvents.push(`started:${request.listId}`);
+            await new Promise((resolve) => {
+              releaseToggle = resolve;
+            });
+            toggleEvents.push(`released:${request.listId}`);
+            const response = await originalSendMessage(request, ...rest);
+            toggleEvents.push(
+              `completed:${request.listId}:${response?.success}:${response?.pinned}:${response?.error || ''}`,
+            );
+            return response;
+          }
+          return originalSendMessage(request, ...rest);
+        };
+
+        const observeMutationState = () => {
+          if (!document.body) {
+            setTimeout(observeMutationState, 0);
             return;
           }
-
-          const originalQuery = chrome.tabs.query.bind(chrome.tabs);
-          chrome.tabs.query = async (queryInfo) => {
-            if (queryInfo?.active && queryInfo?.currentWindow) {
-              return [
-                {
-                  id: 10001,
-                  url,
-                  title: 'Popup List Toggle No Flash',
-                },
-              ];
-            }
-            return originalQuery(queryInfo);
-          };
-
-          const originalSendMessage = chrome.runtime.sendMessage.bind(
-            chrome.runtime,
-          );
-          chrome.runtime.sendMessage = async (request, ...rest) => {
-            if (request?.action === 'toggleListPin') {
-              toggleEvents.push(`started:${request.listId}`);
-              await new Promise((resolve) => {
-                releaseToggle = resolve;
-              });
-              toggleEvents.push(`released:${request.listId}`);
-              stallRefresh = true;
-            } else if (request?.action === 'getPageSummary' && stallRefresh) {
-              toggleEvents.push('refresh-started');
-              await new Promise((resolve) => {
-                releaseRefresh = resolve;
-              });
-              toggleEvents.push('refresh-released');
-              stallRefresh = false;
-            }
-            return originalSendMessage(request, ...rest);
-          };
-
-          const observeMutationState = () => {
-            if (!document.body) {
-              setTimeout(observeMutationState, 0);
-              return;
-            }
-            new MutationObserver(() => {
-              globalThis.__popupMutatingTransitionsForTest.push(
-                document.body.classList.contains('popup-ui-mutating'),
-              );
-            }).observe(document.body, {
-              attributes: true,
-              attributeFilter: ['class'],
-            });
-          };
-          observeMutationState();
+          new MutationObserver(() => {
+            globalThis.__popupMutatingTransitionsForTest.push(
+              document.body.classList.contains('popup-ui-mutating'),
+            );
+          }).observe(document.body, {
+            attributes: true,
+            attributeFilter: ['class'],
+          });
         };
-        patchApis();
-      },
-      { url },
-    );
-    await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+        observeMutationState();
+      };
+      patchApis();
+    });
+    await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
     await expect(popup.locator('#dashboard')).toBeVisible();
     await expect(popup.locator('#pageTitle')).toHaveText(
       'Popup List Toggle No Flash',
@@ -758,7 +782,7 @@ test.describe('Popup list chip behavior', () => {
     await popup.evaluate(() => globalThis.__releaseListToggleForTest());
     await expect
       .poll(() => popup.evaluate(() => globalThis.__listToggleEventsForTest))
-      .toContain('refresh-started');
+      .toContain('completed:chip-list:true:true:');
     await expect(
       popup.locator('#listChips .list-chip.selected', {
         hasText: 'Chip List',
@@ -768,7 +792,6 @@ test.describe('Popup list chip behavior', () => {
       await popup.evaluate(() => globalThis.__popupMutatingTransitionsForTest),
     ).not.toContain(true);
     await expectPopupNotDimmed();
-    await popup.evaluate(() => globalThis.__releaseListRefreshForTest());
 
     await popup.locator('#listAddBtn').click();
     await expect(popup.locator('#listPickerHost.list-picker')).toBeVisible();
@@ -804,7 +827,7 @@ test.describe('Popup list chip behavior', () => {
     await popup.evaluate(() => globalThis.__releaseListToggleForTest());
     await expect
       .poll(() => popup.evaluate(() => globalThis.__listToggleEventsForTest))
-      .toContain('refresh-started');
+      .toContain('completed:picker-list:true:true:');
     await expect(
       popup.locator('#listPickerHost.list-picker .list-picker-row.selected', {
         hasText: 'Picker List',
@@ -814,9 +837,9 @@ test.describe('Popup list chip behavior', () => {
       await popup.evaluate(() => globalThis.__popupMutatingTransitionsForTest),
     ).not.toContain(true);
     await expectPopupNotDimmed();
-    await popup.evaluate(() => globalThis.__releaseListRefreshForTest());
 
     await popup.close();
+    await sourcePage.close();
   });
 
   test('popup opened after a list already exists shows it as available', async ({
@@ -833,7 +856,7 @@ test.describe('Popup list chip behavior', () => {
     const url = localServer.url('/popup-list-refresh');
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: `logs/test-device/2026-03-01.jsonl`,
         lines: [
@@ -842,6 +865,7 @@ test.describe('Popup list chip behavior', () => {
             action: 'visit_page',
             url,
             title: 'Popup List Refresh',
+            referrerUrl: null,
           },
         ],
       },
@@ -878,27 +902,10 @@ test.describe('Popup list chip behavior', () => {
     await page.waitForLoadState('domcontentloaded');
     await page.bringToFront();
 
-    const popup = await extContext.newPage();
-    await popup.addInitScript(
-      ({ url }) => {
-        const patchTabsQuery = () => {
-          if (!globalThis.chrome?.tabs?.query) {
-            setTimeout(patchTabsQuery, 0);
-            return;
-          }
-          const originalQuery = chrome.tabs.query.bind(chrome.tabs);
-          chrome.tabs.query = async (queryInfo) => {
-            if (queryInfo?.active && queryInfo?.currentWindow) {
-              return [{ id: 10001, url, title: 'Popup List Refresh' }];
-            }
-            return originalQuery(queryInfo);
-          };
-        };
-        patchTabsQuery();
-      },
-      { url },
-    );
-    await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+    const popup = await openPopupForUrl(extContext, extensionId, {
+      url,
+      title: 'Popup List Refresh',
+    });
     await expect
       .poll(() =>
         popup
@@ -939,40 +946,50 @@ test.describe('Popup list chip behavior', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: {
-          timestamp: now,
-          tree: [{ id: 'list:fast-list' }],
-        },
+        data: listOrderFixture({
+          deviceTimestamp: now,
+          tree: [{ id: 'list:fast-list', children: [] }],
+        }),
       },
       {
         path: 'views/lists/fast-list.json',
-        data: {
+        data: listEntityFixture({
           slug: 'fast-list',
           name: 'Fast List',
           owner: 'test-device',
-          timestamp: now,
-          pins: [{ id: `page:${slug}`, pinnedAt: now }],
-        },
+          deviceTimestamp: now,
+          pins: [{ id: `page:${slug}`, pinnedAt: now, source: null }],
+        }),
       },
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Popup Fast Lists',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: ['list:fast-list'],
           childIds: [],
-        },
+        }),
       },
     ]);
 
+    const sourcePage = await extContext.newPage();
+    await sourcePage.goto(url);
+    const tabHelper = await openHelperPage(extContext, extensionId);
+    const sourceTabId = await tabHelper.evaluate(async (pageUrl) => {
+      const tabs = await chrome.tabs.query({ url: pageUrl });
+      return tabs.length === 1 ? tabs[0].id : null;
+    }, url);
+    await tabHelper.close();
+    expect(sourceTabId).toBeTruthy();
+
     const popup = await extContext.newPage();
     await popup.addInitScript(
-      ({ url }) => {
+      ({ url, sourceTabId }) => {
         const patchApis = () => {
           if (!globalThis.chrome?.runtime?.sendMessage || !chrome.tabs?.query) {
             setTimeout(patchApis, 0);
@@ -981,7 +998,7 @@ test.describe('Popup list chip behavior', () => {
           const originalQuery = chrome.tabs.query.bind(chrome.tabs);
           chrome.tabs.query = async (queryInfo) => {
             if (queryInfo?.active && queryInfo?.currentWindow) {
-              return [{ id: 10001, url, title: 'Popup Fast Lists' }];
+              return [{ id: sourceTabId, url, title: 'Popup Fast Lists' }];
             }
             return originalQuery(queryInfo);
           };
@@ -1016,7 +1033,7 @@ test.describe('Popup list chip behavior', () => {
         };
         patchApis();
       },
-      { url },
+      { url, sourceTabId },
     );
 
     await popup.goto(`chrome-extension://${extensionId}/popup.html`);
@@ -1068,6 +1085,7 @@ test.describe('Popup list chip behavior', () => {
       ),
     ).toEqual(['getPageSummary']);
     await popup.close();
+    await sourcePage.close();
   });
 
   test('toggling a chip does not change chip order', async ({
@@ -1078,69 +1096,75 @@ test.describe('Popup list chip behavior', () => {
     const now = Date.now();
     // Seed 3 lists with different pinnedAt timestamps
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: {
-          timestamp: now,
+        data: listOrderFixture({
+          deviceTimestamp: now,
           tree: [
-            { id: 'list:alpha' },
-            { id: 'list:beta' },
-            { id: 'list:gamma' },
+            { id: 'list:alpha', children: [] },
+            { id: 'list:beta', children: [] },
+            { id: 'list:gamma', children: [] },
           ],
-        },
+        }),
       },
       {
         path: 'views/lists/alpha.json',
-        data: {
+        data: listEntityFixture({
           slug: 'alpha',
           name: 'Alpha',
           owner: 'test-device',
-          timestamp: now,
-          pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now - 3000 }],
-        },
+          deviceTimestamp: now,
+          pins: [
+            { id: `page:${TEST_SLUG}`, pinnedAt: now - 3000, source: null },
+          ],
+        }),
       },
       {
         path: 'views/lists/beta.json',
-        data: {
+        data: listEntityFixture({
           slug: 'beta',
           name: 'Beta',
           owner: 'test-device',
-          timestamp: now,
-          pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now - 2000 }],
-        },
+          deviceTimestamp: now,
+          pins: [
+            { id: `page:${TEST_SLUG}`, pinnedAt: now - 2000, source: null },
+          ],
+        }),
       },
       {
         path: 'views/lists/gamma.json',
-        data: {
+        data: listEntityFixture({
           slug: 'gamma',
           name: 'Gamma',
           owner: 'test-device',
-          timestamp: now,
-          pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now - 1000 }],
-        },
+          deviceTimestamp: now,
+          pins: [
+            { id: `page:${TEST_SLUG}`, pinnedAt: now - 1000, source: null },
+          ],
+        }),
       },
       {
         path: pageCheckpointPath(TEST_SLUG),
-        data: {
+        data: pageEntityFixture({
           slug: TEST_SLUG,
           url: TEST_URL,
           title: 'Example',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: ['list:alpha', 'list:beta', 'list:gamma'],
           childIds: [],
-        },
+        }),
       },
       {
         path: 'views/manifest/list-name-to-id.json',
-        data: {
-          timestamp: now,
+        data: listNameToIdFixture({
+          deviceTimestamp: now,
           paths: {
             'test-device/Alpha': 'alpha',
             'test-device/Beta': 'beta',
             'test-device/Gamma': 'gamma',
           },
-        },
+        }),
       },
       {
         path: `logs/test-device/2026-03-01.jsonl`,
@@ -1150,6 +1174,7 @@ test.describe('Popup list chip behavior', () => {
             action: 'visit_page',
             url: TEST_URL,
             title: 'Example',
+            referrerUrl: null,
           },
         ],
       },
@@ -1233,43 +1258,43 @@ test.describe('Popup list chip behavior', () => {
   }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: {
-          timestamp: now,
-          tree: [{ id: 'list:existing' }],
-        },
+        data: listOrderFixture({
+          deviceTimestamp: now,
+          tree: [{ id: 'list:existing', children: [] }],
+        }),
       },
       {
         path: 'views/lists/existing.json',
-        data: {
+        data: listEntityFixture({
           slug: 'existing',
           name: 'Existing',
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
       },
       {
         path: pageCheckpointPath(TEST_SLUG),
-        data: {
+        data: pageEntityFixture({
           slug: TEST_SLUG,
           url: TEST_URL,
           title: 'Example',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
       {
         path: 'views/manifest/list-name-to-id.json',
-        data: {
-          timestamp: now,
+        data: listNameToIdFixture({
+          deviceTimestamp: now,
           paths: {
             'test-device/Existing': 'existing',
           },
-        },
+        }),
       },
     ]);
 
@@ -1317,31 +1342,34 @@ test.describe('Popup list chip behavior', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: { timestamp: now, tree: [{ id: 'list:existing' }] },
+        data: listOrderFixture({
+          deviceTimestamp: now,
+          tree: [{ id: 'list:existing', children: [] }],
+        }),
       },
       {
         path: 'views/lists/existing.json',
-        data: {
+        data: listEntityFixture({
           slug: 'existing',
           name: 'Existing',
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
       },
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Popup Live Lists',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
     ]);
 
@@ -1395,34 +1423,46 @@ test.describe('Popup list chip behavior', () => {
     });
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: {
-          timestamp: now,
-          tree: lists.map((list) => ({ id: `list:${list.slug}` })),
-        },
+        data: listOrderFixture({
+          deviceTimestamp: now,
+          tree: lists.map((list) => ({
+            id: `list:${list.slug}`,
+            children: [],
+          })),
+        }),
       },
       ...lists.map((list) => ({
         path: `views/lists/${list.slug}.json`,
-        data: {
+        data: listEntityFixture({
           slug: list.slug,
           name: list.name,
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
       })),
       {
+        path: 'views/manifest/list-name-to-id.json',
+        data: listNameToIdFixture({
+          deviceTimestamp: now,
+          paths: Object.fromEntries(
+            lists.map((list) => [`test-device/${list.name}`, list.slug]),
+          ),
+        }),
+      },
+      {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Popup Floating List Picker',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
     ]);
 
@@ -1788,44 +1828,47 @@ test.describe('Popup list chip behavior', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: {
-          timestamp: now,
-          tree: [{ id: 'list:reading' }, { id: 'list:archive' }],
-        },
+        data: listOrderFixture({
+          deviceTimestamp: now,
+          tree: [
+            { id: 'list:reading', children: [] },
+            { id: 'list:archive', children: [] },
+          ],
+        }),
       },
       {
         path: 'views/lists/reading.json',
-        data: {
+        data: listEntityFixture({
           slug: 'reading',
           name: 'Reading',
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
       },
       {
         path: 'views/lists/archive.json',
-        data: {
+        data: listEntityFixture({
           slug: 'archive',
           name: 'Archive',
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
       },
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Popup Type List Search',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
     ]);
 
@@ -1871,44 +1914,47 @@ test.describe('Popup list chip behavior', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: {
-          timestamp: now,
-          tree: [{ id: 'list:reading' }, { id: 'list:archive' }],
-        },
+        data: listOrderFixture({
+          deviceTimestamp: now,
+          tree: [
+            { id: 'list:reading', children: [] },
+            { id: 'list:archive', children: [] },
+          ],
+        }),
       },
       {
         path: 'views/lists/reading.json',
-        data: {
+        data: listEntityFixture({
           slug: 'reading',
           name: 'Reading',
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
       },
       {
         path: 'views/lists/archive.json',
-        data: {
+        data: listEntityFixture({
           slug: 'archive',
           name: 'Archive',
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
       },
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Popup Immediate List Search',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
     ]);
 
@@ -1948,34 +1994,34 @@ test.describe('Popup list chip behavior', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: {
-          timestamp: now,
-          tree: [{ id: 'list:reading' }],
-        },
+        data: listOrderFixture({
+          deviceTimestamp: now,
+          tree: [{ id: 'list:reading', children: [] }],
+        }),
       },
       {
         path: 'views/lists/reading.json',
-        data: {
+        data: listEntityFixture({
           slug: 'reading',
           name: 'Reading',
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
       },
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Popup Type Open Close Race',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
     ]);
 
@@ -2018,31 +2064,31 @@ test.describe('Popup list chip behavior', () => {
     const stringNoteSlug = 'popup-string-newline-note';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: { timestamp: now, tree: [] },
+        data: listOrderFixture({ deviceTimestamp: now, tree: [] }),
       },
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Popup Highlight Newlines',
-          timestamp: now,
+          deviceTimestamp: now,
           childIds: [`note:${stringNoteSlug}`],
           parentIds: [],
-        },
+        }),
       },
       {
         path: `objects/notes/${stringNoteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: stringNoteSlug,
           excerpt: ['String first line\nString second line'],
           note: 'String note',
           cssPath: [''],
           url,
-        },
+        }),
       },
     ]);
 
@@ -2102,44 +2148,47 @@ test.describe('Popup list chip behavior', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: {
-          timestamp: now,
-          tree: [{ id: 'list:reading' }, { id: 'list:archive' }],
-        },
+        data: listOrderFixture({
+          deviceTimestamp: now,
+          tree: [
+            { id: 'list:reading', children: [] },
+            { id: 'list:archive', children: [] },
+          ],
+        }),
       },
       {
         path: 'views/lists/reading.json',
-        data: {
+        data: listEntityFixture({
           slug: 'reading',
           name: '阅读',
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
       },
       {
         path: 'views/lists/archive.json',
-        data: {
+        data: listEntityFixture({
           slug: 'archive',
           name: 'Archive',
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
       },
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Popup CJK IME List Search',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
     ]);
 
@@ -2229,44 +2278,47 @@ test.describe('Popup list chip behavior', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: {
-          timestamp: now,
-          tree: [{ id: 'list:reading' }, { id: 'list:archive' }],
-        },
+        data: listOrderFixture({
+          deviceTimestamp: now,
+          tree: [
+            { id: 'list:reading', children: [] },
+            { id: 'list:archive', children: [] },
+          ],
+        }),
       },
       {
         path: 'views/lists/reading.json',
-        data: {
+        data: listEntityFixture({
           slug: 'reading',
           name: 'Reading',
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
       },
       {
         path: 'views/lists/archive.json',
-        data: {
+        data: listEntityFixture({
           slug: 'archive',
           name: 'Archive',
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
       },
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Popup CJK IME Pinyin Preedit',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
     ]);
 
@@ -2364,21 +2416,21 @@ test.describe('Popup list chip behavior', () => {
     const url = localServer.url('/toolbar-popup-ime');
     const slug = getSlugForUrl(url);
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: { timestamp: now, tree: [] },
+        data: listOrderFixture({ deviceTimestamp: now, tree: [] }),
       },
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Toolbar Popup IME',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
     ]);
 
@@ -2475,40 +2527,43 @@ test.describe('Popup list chip behavior', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: { timestamp: now, tree: [{ id: 'list:reading-live' }] },
+        data: listOrderFixture({
+          deviceTimestamp: now,
+          tree: [{ id: 'list:reading-live', children: [] }],
+        }),
       },
       {
         path: 'views/lists/reading-live.json',
-        data: {
+        data: listEntityFixture({
           slug: 'reading-live',
           name: listName,
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
       },
       {
         path: 'views/manifest/list-name-to-id.json',
-        data: {
-          timestamp: now,
+        data: listNameToIdFixture({
+          deviceTimestamp: now,
           paths: {
             [`test-device/${listName}`]: 'reading-live',
           },
-        },
+        }),
       },
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title,
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
     ]);
 
@@ -2558,17 +2613,17 @@ test.describe('Popup list chip behavior', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Popup Title Edit',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
     ]);
 
@@ -2609,40 +2664,43 @@ test.describe('Popup list chip behavior', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+        data: listOrderFixture({
+          deviceTimestamp: now,
+          tree: [{ id: 'list:reading', children: [] }],
+        }),
       },
       {
         path: 'views/lists/reading.json',
-        data: {
+        data: listEntityFixture({
           slug: 'reading',
           name: 'Reading',
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
       },
       {
         path: 'views/manifest/list-name-to-id.json',
-        data: {
-          timestamp: now,
+        data: listNameToIdFixture({
+          deviceTimestamp: now,
           paths: {
             'test-device/Reading': 'reading',
           },
-        },
+        }),
       },
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Desktop Pinned Popup',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
     ]);
 
@@ -2696,17 +2754,17 @@ test.describe('Popup list chip behavior', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Capture Invalidated',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
     ]);
 
@@ -2777,47 +2835,48 @@ test.describe('Popup list chip behavior', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      {
-        path: 'views/manifest/settings.json',
-        data: {
-          titleTrimRules: [
-            { urlPrefix: localServer.baseUrl, action: 'remove_after_pipe' },
-          ],
-        },
-      },
+      settingsCheckpoint({
+        titleCleanupEnabled: true,
+        titleTrimRules: [
+          { urlPrefix: localServer.baseUrl, action: 'remove_after_pipe' },
+        ],
+      }),
       {
         path: 'views/manifest/list-order.json',
-        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+        data: listOrderFixture({
+          deviceTimestamp: now,
+          tree: [{ id: 'list:reading', children: [] }],
+        }),
       },
       {
         path: 'views/lists/reading.json',
-        data: {
+        data: listEntityFixture({
           slug: 'reading',
           name: 'Reading',
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
       },
       {
         path: 'views/manifest/list-name-to-id.json',
-        data: {
-          timestamp: now,
+        data: listNameToIdFixture({
+          deviceTimestamp: now,
           paths: {
             'test-device/Reading': 'reading',
           },
-        },
+        }),
       },
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Readable Title | Example Site',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
     ]);
 
@@ -2858,31 +2917,34 @@ test.describe('Popup list chip behavior', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: { timestamp: now, tree: [{ id: 'list:existing' }] },
+        data: listOrderFixture({
+          deviceTimestamp: now,
+          tree: [{ id: 'list:existing', children: [] }],
+        }),
       },
       {
         path: 'views/lists/existing.json',
-        data: {
+        data: listEntityFixture({
           slug: 'existing',
           name: 'Existing',
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
       },
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Popup New List Order',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
     ]);
 
@@ -2937,21 +2999,21 @@ test.describe('Popup list chip behavior', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: { timestamp: now, tree: [] },
+        data: listOrderFixture({ deviceTimestamp: now, tree: [] }),
       },
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Popup IME List Name',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
     ]);
 
@@ -3015,21 +3077,21 @@ test.describe('Popup list chip behavior', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: { timestamp: now, tree: [] },
+        data: listOrderFixture({ deviceTimestamp: now, tree: [] }),
       },
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Popup Reopen List Picker',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
     ]);
 
@@ -3087,54 +3149,57 @@ test.describe('Popup list chip behavior', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: 'views/manifest/list-order.json',
-        data: {
-          timestamp: now,
-          tree: [{ id: 'list:keyboard-alpha' }, { id: 'list:keyboard-beta' }],
-        },
+        data: listOrderFixture({
+          deviceTimestamp: now,
+          tree: [
+            { id: 'list:keyboard-alpha', children: [] },
+            { id: 'list:keyboard-beta', children: [] },
+          ],
+        }),
       },
       {
         path: 'views/lists/keyboard-alpha.json',
-        data: {
+        data: listEntityFixture({
           slug: 'keyboard-alpha',
           name: 'Keyboard Alpha',
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
       },
       {
         path: 'views/lists/keyboard-beta.json',
-        data: {
+        data: listEntityFixture({
           slug: 'keyboard-beta',
           name: 'Keyboard Beta',
           owner: 'test-device',
-          timestamp: now,
+          deviceTimestamp: now,
           pins: [],
-        },
+        }),
       },
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Popup List Keyboard Menu',
-          timestamp: now,
+          deviceTimestamp: now,
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
       {
         path: 'views/manifest/list-name-to-id.json',
-        data: {
-          timestamp: now,
+        data: listNameToIdFixture({
+          deviceTimestamp: now,
           paths: {
             'test-device/Keyboard Alpha': 'keyboard-alpha',
             'test-device/Keyboard Beta': 'keyboard-beta',
           },
-        },
+        }),
       },
     ]);
 

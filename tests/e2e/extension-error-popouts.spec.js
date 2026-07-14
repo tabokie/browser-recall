@@ -3,7 +3,11 @@ import {
   getExtensionMessage,
   getSlugForUrl,
   pageCheckpointPath,
+  pageEntityFixture,
+  noteEntityFixture,
+  openHelperPage,
   resetAndSeed,
+  settingsCheckpoint,
 } from './helpers.js';
 import crypto from 'crypto';
 
@@ -19,9 +23,18 @@ function snapshotSidecarPath(slug, timestamp, ext) {
 }
 
 async function openPopupForUrl(extContext, extensionId, { url, title }) {
+  const helper = await openHelperPage(extContext, extensionId);
+  const tabId = await helper.evaluate(async (pageUrl) => {
+    const tabs = await chrome.tabs.query({ url: pageUrl });
+    if (tabs.length !== 1 || !Number.isFinite(tabs[0].id)) {
+      throw new Error(`Expected one source tab for ${pageUrl}`);
+    }
+    return tabs[0].id;
+  }, url);
+  await helper.close();
   const popup = await extContext.newPage();
   await popup.addInitScript(
-    ({ url, title }) => {
+    ({ tabId, url, title }) => {
       const patchTabsQuery = () => {
         if (!globalThis.chrome?.tabs?.query) {
           setTimeout(patchTabsQuery, 0);
@@ -30,17 +43,19 @@ async function openPopupForUrl(extContext, extensionId, { url, title }) {
         const originalQuery = chrome.tabs.query.bind(chrome.tabs);
         chrome.tabs.query = async (queryInfo) => {
           if (queryInfo?.active && queryInfo?.currentWindow) {
-            return [{ id: 10001, url, title }];
+            return [{ id: tabId, url, title }];
           }
           return originalQuery(queryInfo);
         };
       };
       patchTabsQuery();
     },
-    { url, title },
+    { tabId, url, title },
   );
   await popup.goto(`chrome-extension://${extensionId}/popup.html`);
   await expect(popup.locator('#dashboard')).toBeVisible();
+  await expect(popup.locator('#pageUrl')).toHaveText(url);
+  await expect(popup.locator('#captureBtn')).toBeVisible();
   return popup;
 }
 
@@ -61,20 +76,30 @@ test.describe('extension error popouts', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url,
           title: 'Popup Error Paper',
-          timestamp: now,
           parentIds: [],
           childIds: [],
-        },
+          timestamps: { 'test-device': now },
+          createdAt: now,
+          visitDates: [],
+          scrollDepth: null,
+          timeOnPage: null,
+          user_title: null,
+          likes: null,
+        }),
       },
     ]);
 
+    const sourcePage = await extContext.newPage();
+    await sourcePage.goto(url);
+    await sourcePage.waitForLoadState('load');
+    await sourcePage.waitForTimeout(250);
     const popup = await openPopupForUrl(extContext, extensionId, {
       url,
       title: 'Popup Error Paper',
@@ -102,6 +127,7 @@ test.describe('extension error popouts', () => {
     await expect(bubble).toHaveCSS('border-top-width', '2px');
 
     await popup.close();
+    await sourcePage.close();
   });
 
   test('snapshot runtime error banner uses the paper surface', async ({
@@ -117,27 +143,37 @@ test.describe('extension error popouts', () => {
     const highlightText = 'snapshot paper error highlight';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: originalUrl,
           title: 'Snapshot Error Paper',
           parentIds: [],
           childIds: [`note:${noteSlug}`, `snapshot:${slug}-${timestamp}`],
           timestamps: { 'test-device': timestamp },
-        },
+          createdAt: timestamp,
+          visitDates: [],
+          scrollDepth: null,
+          timeOnPage: null,
+          user_title: null,
+          likes: null,
+        }),
       },
       {
         path: `objects/notes/${noteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug,
           excerpt: [highlightText],
           note: 'snapshot note',
           cssPath: ['body > p'],
           url: originalUrl,
-        },
+          deleted: false,
+          deletedTs: null,
+          deletionReason: null,
+          replacedBy: null,
+        }),
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'html'),

@@ -1,7 +1,7 @@
 mod support;
 
-use browser_recall_daemon::protocol::{ConnectorMessage, DaemonMessage};
-use browser_recall_daemon::ws_server::start_server;
+use browser_recall_daemon::protocol::{ConnectorMessage, DaemonMessage, TestControlMessage};
+use browser_recall_daemon::ws_server::{start_server, ServerStartOptions};
 use browser_recall_daemon::ConfigStore;
 use browser_recall_replay::entities::{
     ListEntity, ListOrderManifest, NameToIdManifest, OrphanedManifest, PageEntity,
@@ -17,6 +17,12 @@ use tokio::time::{sleep, Duration};
 use tokio_tungstenite::tungstenite::protocol::Message;
 
 use support::{next_text_message, paired_socket, test_server_options};
+
+fn test_control_server_options(config_store: ConfigStore) -> ServerStartOptions {
+    let mut options = test_server_options(config_store);
+    options.test_control_enabled = true;
+    options
+}
 
 async fn read_log_lines(log_dir: &std::path::Path) -> Vec<Value> {
     let mut entries = tokio::fs::read_dir(log_dir).await.expect("log dir exists");
@@ -65,8 +71,14 @@ async fn wait_for_ack(socket: &mut support::TestSocket) {
     loop {
         let message = next_text_message(socket).await;
         let parsed: DaemonMessage = serde_json::from_str(&message).expect("daemon message json");
-        if matches!(parsed, DaemonMessage::Ack { .. }) {
-            return;
+        match parsed {
+            DaemonMessage::Ack { .. } => return,
+            DaemonMessage::Error {
+                error,
+                code,
+                message,
+            } => panic!("daemon rejected drain event: {code}/{error}: {message}"),
+            _ => {}
         }
     }
 }
@@ -80,7 +92,7 @@ fn shard_for(value: &str) -> String {
 async fn drain_pipeline_preserves_fifo_order_for_page_updates() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());
-    let handle = start_server(test_server_options(config_store.clone()))
+    let handle = start_server(test_control_server_options(config_store.clone()))
         .await
         .expect("server starts");
 
@@ -92,11 +104,13 @@ async fn drain_pipeline_preserves_fifo_order_for_page_updates() {
             "action": "visit_page",
             "url": url,
             "title": "Initial Title",
+            "referrerUrl": null,
         }),
         json!({
             "timestamp": 1_710_000_100_100i64,
             "action": "leave_page",
             "url": url,
+            "title": null,
             "scrollDepth": 45,
             "timeOnPage": 12
         }),
@@ -110,18 +124,21 @@ async fn drain_pipeline_preserves_fifo_order_for_page_updates() {
             "timestamp": 1_710_000_100_300i64,
             "action": "rate_page",
             "url": url,
-            "likes": 1
+            "likes": 1,
+            "title": null
         }),
     ];
 
     for entry in entries {
         socket
             .send(Message::Text(
-                serde_json::to_string(&ConnectorMessage::Event {
-                    entry,
-                    source: "extension".to_string(),
-                    buffer_depth: None,
-                    buffer_bytes: None,
+                serde_json::to_string(&ConnectorMessage::TestControl {
+                    request: TestControlMessage::Event {
+                        entry,
+                        source: "extension".to_string(),
+                        buffer_depth: 0,
+                        buffer_bytes: 0,
+                    },
                 })
                 .expect("event json"),
             ))
@@ -151,6 +168,7 @@ async fn drain_pipeline_preserves_fifo_order_for_page_updates() {
     let lines = read_log_lines(&data_dir.join("logs").join(device_id)).await;
     let actions: Vec<_> = lines
         .iter()
+        .filter(|line| line.get("url").and_then(Value::as_str) == Some(url))
         .map(|line| {
             line.get("action")
                 .and_then(Value::as_str)
@@ -169,7 +187,7 @@ async fn drain_pipeline_preserves_fifo_order_for_page_updates() {
 async fn drain_pipeline_reconciles_list_manifests_after_sequential_mutations() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());
-    let handle = start_server(test_server_options(config_store.clone()))
+    let handle = start_server(test_control_server_options(config_store.clone()))
         .await
         .expect("server starts");
 
@@ -180,7 +198,8 @@ async fn drain_pipeline_reconciles_list_manifests_after_sequential_mutations() {
             "action": "create_list",
             "listOwner": "test-device",
             "name": "Reading",
-            "listId": "reading"
+            "listId": "reading",
+            "parentListId": null
         }),
         json!({
             "timestamp": 1_710_000_200_100i64,
@@ -200,11 +219,13 @@ async fn drain_pipeline_reconciles_list_manifests_after_sequential_mutations() {
     for entry in entries {
         socket
             .send(Message::Text(
-                serde_json::to_string(&ConnectorMessage::Event {
-                    entry,
-                    source: "extension".to_string(),
-                    buffer_depth: None,
-                    buffer_bytes: None,
+                serde_json::to_string(&ConnectorMessage::TestControl {
+                    request: TestControlMessage::Event {
+                        entry,
+                        source: "extension".to_string(),
+                        buffer_depth: 0,
+                        buffer_bytes: 0,
+                    },
                 })
                 .expect("event json"),
             ))
@@ -237,10 +258,10 @@ async fn drain_pipeline_reconciles_list_manifests_after_sequential_mutations() {
         .join("list-order.json");
     let list_order: ListOrderManifest =
         wait_for_json(&list_order_path, |list_order: &ListOrderManifest| {
-            list_order.tree.is_empty()
+            !list_order.tree.iter().any(|node| node.id == "reading")
         })
         .await;
-    assert!(list_order.tree.is_empty());
+    assert!(!list_order.tree.iter().any(|node| node.id == "reading"));
 
     let orphaned_raw = tokio::fs::read_to_string(
         data_dir

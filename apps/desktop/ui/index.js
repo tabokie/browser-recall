@@ -1,22 +1,10 @@
 // Options page for Browser Recall
 // Bookmark-manager style UI with sidebar navigation, search, and settings modal
-import {
-  HistoryEntry,
-  SearchEngine,
-  parseSearchQueryWords,
-  scoreSearchFields,
-} from './search-runtime.js';
-import {
-  getQueueContentMap,
-  buildHistoryForEngine,
-  extractHistoryQueue,
-} from './search-helpers.js';
+import { parseSearchQueryWords, scoreSearchFields } from './search-runtime.js';
 import {
   generateSlugFromUrl,
-  generateSlugFromTitle,
   escapeHtml,
   BODY_WORD_LIMIT,
-  DEFAULT_URL_BLACKLIST,
   collectVisitDateKeys,
 } from './utils.js';
 import {
@@ -24,11 +12,15 @@ import {
   loadListDisplay,
   loadListTreeProjection,
   loadAllPageContext,
+  loadDesktopConnectorState,
+  loadDesktopShellState,
+  loadDirectoryInfo,
+  loadDeviceIdentity,
   loadPageContext,
   loadRecycleBin,
   loadSettings,
   loadSettingsValue,
-  saveSettingsValue,
+  saveSettingsValue as persistSettingsValue,
   reloadApp,
   sendAction,
 } from './desktop-bridge.js';
@@ -340,7 +332,13 @@ function showServiceErrorBanner(svcErr) {
       await sendAction({ action: 'resumeService' });
       await refreshDesktopConnectorState();
       banner.style.display = 'none';
-    } catch {}
+    } catch (error) {
+      msgEl.textContent = tr(
+        'desktopErrorPrefix',
+        `Could not resume service: ${error.message}`,
+        [error.message],
+      );
+    }
   };
 
   banner.style.display = 'flex';
@@ -411,6 +409,53 @@ function showErrorBubble(
   });
 }
 
+function surfaceBackgroundError(context, error) {
+  const message = error instanceof Error ? error.message : String(error);
+  logError(`[options] ${context}:`, error);
+  showErrorBubble(`${context}: ${message}`, { suffix: '' });
+}
+
+async function saveSettingsValue(key, value) {
+  try {
+    await persistSettingsValue(key, value);
+  } catch (error) {
+    invalidateSettingsCache();
+    showErrorBubble(
+      tr('desktopSettingFailed', `Desktop setting failed: ${error.message}`, [
+        error.message,
+      ]),
+      { suffix: '' },
+    );
+    try {
+      await hydrateStartupSettings(await applyTheme());
+    } catch (restoreError) {
+      showErrorBubble(
+        tr(
+          'desktopErrorPrefix',
+          `Could not reload authoritative settings: ${restoreError.message}`,
+          [restoreError.message],
+        ),
+        { suffix: '' },
+      );
+    }
+    error.browserRecallSurfaced = true;
+    throw error;
+  }
+}
+
+function runSettingsChange(operation) {
+  void operation().catch((error) => {
+    if (!error.browserRecallSurfaced) {
+      showErrorBubble(
+        tr('desktopSettingFailed', `Desktop setting failed: ${error.message}`, [
+          error.message,
+        ]),
+        { suffix: '' },
+      );
+    }
+  });
+}
+
 function showBlockedBubble(message) {
   showTimedBubble({
     id: 'blockedBubble',
@@ -431,40 +476,26 @@ function showInfoBubble(message) {
   });
 }
 
-function applyDesktopConnectorUi(connector = {}) {
-  const pairPending = desktopPairInFlight || connector.state === 'pair_pending';
-
+function applyDesktopConnectorUi() {
   for (const id of ['selectDirBtn', 'onboardingDirBtn']) {
     const button = document.getElementById(id);
     if (!button) continue;
-    button.disabled = pairPending;
+    button.disabled = false;
     if (id === 'onboardingDirBtn') {
       button.textContent = tr('desktopChooseDataFolder', 'Choose Data Folder');
     } else {
-      button.textContent = pairPending
-        ? tr('desktopWaitingApproval', 'Waiting for approval...')
-        : tr('desktopPairFromBrowserPopup', 'Pair from Browser Popup');
+      button.textContent = tr(
+        'desktopPairFromBrowserPopup',
+        'Pair from Browser Popup',
+      );
     }
   }
 }
 
 async function refreshDesktopConnectorState() {
-  try {
-    const connector = await sendAction({
-      action: 'getDesktopConnectorState',
-    });
-    applyDesktopConnectorUi(connector);
-    return connector;
-  } catch (error) {
-    applyDesktopConnectorUi({
-      state: 'offline',
-      hasToken: false,
-      lastError:
-        error.message ||
-        tr('extensionDesktopBridgeUnavailable', 'Desktop bridge unavailable'),
-    });
-    return null;
-  }
+  const connector = await loadDesktopConnectorState();
+  applyDesktopConnectorUi(connector);
+  return connector;
 }
 
 async function completeOnboarding() {
@@ -522,29 +553,18 @@ async function initializeOnboardingLaunchAtLogin() {
     'onboardingLaunchAtLoginUnsupported',
   );
   if (!input || !row || !unsupported) return;
-  try {
-    const shell = await sendAction({ action: 'getDesktopShellState' });
-    const supported = !!shell.loginItemSupported;
-    input.disabled = !supported;
-    input.checked = supported ? shell.launchAtLogin !== false : false;
-    row.classList.toggle('disabled', !supported);
-    unsupported.style.display = supported ? 'none' : 'block';
-    if (!shell.setupComplete && shell.dataDir) {
-      const dirBtn = document.getElementById('onboardingDirBtn');
-      if (dirBtn) {
-        dirBtn.textContent = tr(
-          'desktopChangeDataFolder',
-          'Change Data Folder',
-        );
-      }
-      setOnboardingDataFolderConfigured(true, shell.dataDir);
+  const shell = await loadDesktopShellState();
+  const supported = shell.loginItemSupported;
+  input.disabled = !supported;
+  input.checked = supported ? shell.launchAtLogin : false;
+  row.classList.toggle('disabled', !supported);
+  unsupported.style.display = supported ? 'none' : 'block';
+  if (!shell.setupComplete && shell.dataDir) {
+    const dirBtn = document.getElementById('onboardingDirBtn');
+    if (dirBtn) {
+      dirBtn.textContent = tr('desktopChangeDataFolder', 'Change Data Folder');
     }
-  } catch (error) {
-    input.checked = true;
-    logDebug(
-      '[onboarding] failed to load launch-at-login state:',
-      error.message,
-    );
+    setOnboardingDataFolderConfigured(true, shell.dataDir);
   }
 }
 
@@ -777,14 +797,37 @@ let relatedExtraColumns = [];
 const HISTORY_MAX_FILES = 100; // cap total loaded files
 const DEFAULT_AVG_ENTRY_SIZE = 200;
 const URL_SEARCH_SCORE = 0.5;
-const NOTE_SEARCH_SCORE = 0.375;
-const SNAPSHOT_SEARCH_SCORE = 0.25;
 const SEARCH_SOURCE_PRIORITY = Object.freeze({
   snapshot: 1,
   note: 2,
   history: 3,
   title: 3,
 });
+const HISTORY_ACTIONS = new Set([
+  'visit_page',
+  'leave_page',
+  'rename_page',
+  'rate_page',
+  'update_setting',
+  'pin_to_list',
+  'unpin_from_list',
+  'add_rule',
+  'remove_rule',
+  'update_rule',
+  'create_list',
+  'update_list',
+  'update_list_tree',
+  'delete_list',
+  'restore_list',
+  'create_note',
+  'delete_note',
+  'restore_note',
+  'replace_note',
+  'create_snapshot',
+  'delete_snapshot',
+  'restore_snapshot',
+  'permanent_delete',
+]);
 const historyState = {
   fileBatch: 10, // files per load (configurable in settings)
   files: [], // all JSONL filenames, newest-first
@@ -808,11 +851,9 @@ const cardDataByUrl = new Map(); // url → { attDetail, timestamps } for detail
 const listNameById = new Map(); // listId → display name, populated by renderLists()
 let listsReadyPromise = Promise.resolve();
 let marqueeActive = false; // suppress click during marquee drag
-let queueContentMap = {}; // slug -> markdown from pending queue entries
 let draggedSidebarListId = null;
 let sidebarDragScrollFrame = 0;
 let sidebarDragScrollVelocity = 0;
-let desktopPairInFlight = false;
 let onboardingSelectedScheme = 'amber';
 let onboardingCompletionPromise = null;
 let onboardingDataFolderConfigured = false;
@@ -846,22 +887,18 @@ function normalizeFieldToArray(field) {
   return [field];
 }
 
-// Range filter field configs: fallback min/max/step, format for labels
+// Range filter field configs. Bounds always come from authoritative history data.
 function daysAgoToDate(v) {
   const d = new Date(Date.now() - v * 86400000);
   return d.toISOString().slice(0, 10);
 }
 const RANGE_CONFIGS = {
   lastVisit: {
-    min: 0,
-    max: 365,
     step: 1,
     format: daysAgoToDate,
     isDaysAgo: true,
   },
   firstVisit: {
-    min: 0,
-    max: 365,
     step: 1,
     format: daysAgoToDate,
     isDaysAgo: true,
@@ -906,67 +943,74 @@ function getFieldRanges() {
   cachedFieldRanges =
     historyState.byUrl.size > 0
       ? computeFieldRanges(Array.from(historyState.byUrl.values()))
-      : Object.fromEntries(
-          Object.keys(RANGE_CONFIGS).map((k) => [
-            k,
-            { min: RANGE_CONFIGS[k].min, max: RANGE_CONFIGS[k].max },
-          ]),
-        );
-  // Extend date ranges to cover all known files (even unloaded ones)
+      : null;
+  // File names provide authoritative date bounds even when their entries are unloaded.
   if (historyState.files.length > 0) {
-    const oldestFile = historyState.files[historyState.files.length - 1]; // files are newest-first
-    const oldestDate = oldestFile.replace('.jsonl', '');
-    const oldestDaysAgo = Math.ceil(
-      (Date.now() - new Date(oldestDate + 'T00:00:00Z').getTime()) / 86400000,
-    );
-    for (const key of ['lastVisit', 'firstVisit']) {
-      if (oldestDaysAgo > cachedFieldRanges[key].max) {
-        cachedFieldRanges[key].max = oldestDaysAgo;
+    const fileDays = historyState.files.map((filename) => {
+      const match = /^(\d{4}-\d{2}-\d{2})\.jsonl$/.exec(filename);
+      if (!match) throw new Error(`Invalid history filename: ${filename}`);
+      const timestamp = Date.parse(`${match[1]}T00:00:00Z`);
+      if (!Number.isFinite(timestamp)) {
+        throw new Error(`Invalid history date: ${filename}`);
       }
+      return (Date.now() - timestamp) / 86400000;
+    });
+    for (const key of ['lastVisit', 'firstVisit']) {
+      const step = RANGE_CONFIGS[key].step;
+      const fileMin = Math.floor(Math.min(...fileDays) / step) * step;
+      const fileMax = Math.ceil(Math.max(...fileDays) / step) * step;
+      const range = cachedFieldRanges?.[key] ?? {
+        min: fileMin,
+        max: fileMax,
+      };
+      range.min = Math.min(range.min, fileMin);
+      range.max = Math.max(range.max, fileMax);
+      if (range.min >= range.max) range.max = range.min + step;
+      cachedFieldRanges ??= {};
+      cachedFieldRanges[key] = range;
     }
   }
   return cachedFieldRanges;
 }
 
-// Get effective min/max for a range field: data-driven if available, else static fallback
 function getRangeConfig(field) {
   const cfg = RANGE_CONFIGS[field];
+  if (!cfg) throw new Error(`Unknown range field: ${field}`);
   const dataRanges = getFieldRanges();
   const dr = dataRanges?.[field];
+  if (!dr) throw new Error(`Range field ${field} requires history data`);
   return {
     ...cfg,
-    min: dr ? dr.min : cfg.min,
-    max: dr ? dr.max : cfg.max,
+    min: dr.min,
+    max: dr.max,
   };
 }
 
 // --- Search Module ---
-/**
- * Fetch a URL and extract body text (first BODY_WORD_LIMIT words).
- * Returns '' on timeout, network error, or non-HTML content.
- */
+/** Fetch a URL and extract body text (first BODY_WORD_LIMIT words). */
 async function fetchPageBody(url) {
-  try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
-    if (
-      !resp.ok ||
-      !(resp.headers.get('content-type') || '').includes('text/html')
-    )
-      return '';
-    const html = await resp.text();
-    return html
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/&[a-z#0-9]+;/gi, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .split(/\s+/)
-      .slice(0, BODY_WORD_LIMIT)
-      .join(' ');
-  } catch {
+  const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
+  if (!resp.ok) {
+    throw new Error(`Page body request failed for ${url}: HTTP ${resp.status}`);
+  }
+  const contentType = resp.headers.get('content-type');
+  if (typeof contentType !== 'string' || !contentType) {
+    throw new Error(`Page body response for ${url} has no content type`);
+  }
+  if (!contentType.includes('text/html')) {
     return '';
   }
+  const html = await resp.text();
+  return html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&[a-z#0-9]+;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .slice(0, BODY_WORD_LIMIT)
+    .join(' ');
 }
 
 // --- Progressive search ---
@@ -1066,7 +1110,10 @@ async function runStreamingHistorySearch(query, gen) {
   };
 
   unlisten = await tauriEventListen('bridge-search-history', async (event) => {
-    const payload = event?.payload || {};
+    const payload = event?.payload;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      throw new Error('History search event payload must be an object');
+    }
     if (payload.searchId !== searchId) return;
     if (payload.type === 'historySearchChunk') {
       if (gen !== searchState.generation) return;
@@ -1081,9 +1128,9 @@ async function runStreamingHistorySearch(query, gen) {
     if (payload.type === 'historySearchDone') {
       const current = gen === searchState.generation;
       if (current && !payload.success && !payload.cancelled && payload.error) {
-        logDebug(
-          '[Phase1] Desktop streaming history search failed:',
-          payload.error,
+        surfaceBackgroundError(
+          'History search failed',
+          new Error(payload.error),
         );
       }
       finish({ completePhase: current });
@@ -1097,21 +1144,42 @@ async function runStreamingHistorySearch(query, gen) {
     return true;
   } catch (error) {
     if (latestHistorySearchId === searchId) latestHistorySearchId = null;
-    Promise.resolve(unlisten?.()).catch(() => {});
+    Promise.resolve(unlisten?.()).catch((cleanupError) => {
+      logError(
+        '[options] Failed to stop history search listener:',
+        cleanupError,
+      );
+    });
     throw error;
   }
 }
 
 function searchSourcePriority(source) {
-  return SEARCH_SOURCE_PRIORITY[source] || 0;
+  if (!Object.prototype.hasOwnProperty.call(SEARCH_SOURCE_PRIORITY, source)) {
+    throw new Error(`Unknown search result source: ${String(source)}`);
+  }
+  return SEARCH_SOURCE_PRIORITY[source];
 }
 
 // Merge new results into searchState.results. Dedup by URL, take max score, track sources.
 function mergeSearchResults(newResults, source, gen) {
   if (gen !== searchState.generation) return; // stale generation — discard
+  if (!Array.isArray(newResults)) {
+    throw new Error(`${source} search results must be an array`);
+  }
   const nextSourcePriority = searchSourcePriority(source);
-  for (const r of newResults) {
-    if (!r.url) continue;
+  for (const [resultIndex, r] of newResults.entries()) {
+    if (
+      !r ||
+      typeof r.url !== 'string' ||
+      !r.url ||
+      !Number.isFinite(r.timestamp) ||
+      !Number.isFinite(r.score)
+    ) {
+      throw new Error(
+        `${source} search result ${resultIndex} has an invalid URL, timestamp, or score`,
+      );
+    }
     const idx = searchState.resultIndex.get(r.url);
     if (idx !== undefined) {
       const existing = searchState.results[idx];
@@ -1123,7 +1191,7 @@ function mergeSearchResults(newResults, source, gen) {
         existing.matchSources?.has('history') ||
         existing.matchSources?.has('title');
       if (isVisitSource) {
-        const nextTimestamp = r.timestamp || existing.timestamp || Date.now();
+        const nextTimestamp = r.timestamp;
         const existingTimestamp = existingHasVisitSource
           ? existing.timestamp || 0
           : 0;
@@ -1138,8 +1206,10 @@ function mergeSearchResults(newResults, source, gen) {
               : Math.max(nextScore, existingScore);
           existing.timestamp = nextTimestamp;
           existing.latestTs = nextTimestamp;
-          existing.title = r.title || existing.title || '';
-          existing.timestamps = r.timestamps || [nextTimestamp];
+          if (typeof r.title === 'string') existing.title = r.title;
+          existing.timestamps = Array.isArray(r.timestamps)
+            ? r.timestamps
+            : [nextTimestamp];
           delete existing._maxTs;
           delete existing._minTs;
         } else if (nextTimestamp > existingTimestamp) {
@@ -1148,14 +1218,14 @@ function mergeSearchResults(newResults, source, gen) {
           if (!existing.title && r.title) existing.title = r.title;
           if (Array.isArray(r.timestamps)) {
             existing.timestamps = [
-              ...new Set([...(existing.timestamps || []), ...r.timestamps]),
+              ...new Set([...(existing.timestamps ?? []), ...r.timestamps]),
             ].sort((left, right) => right - left);
           }
           delete existing._maxTs;
           delete existing._minTs;
         }
       } else if (nextSourcePriority >= existingPriority) {
-        const nextTimestamp = r.timestamp || existing.timestamp || Date.now();
+        const nextTimestamp = r.timestamp;
         const existingTimestamp = existing.timestamp || 0;
         const shouldPromote =
           nextSourcePriority > existingPriority ||
@@ -1166,7 +1236,9 @@ function mergeSearchResults(newResults, source, gen) {
           if (Number.isFinite(nextTimestamp) && nextTimestamp > 0) {
             existing.timestamp = nextTimestamp;
             existing.latestTs = nextTimestamp;
-            existing.timestamps = r.timestamps || [nextTimestamp];
+            existing.timestamps = Array.isArray(r.timestamps)
+              ? r.timestamps
+              : [nextTimestamp];
           }
           delete existing._maxTs;
           delete existing._minTs;
@@ -1188,17 +1260,17 @@ function mergeSearchResults(newResults, source, gen) {
     } else {
       const entry = {
         url: r.url,
-        title: r.title || '',
+        title: typeof r.title === 'string' ? r.title : '',
         user_title: r.user_title,
         slug: r.slug || generateSlugFromUrl(r.url),
-        timestamp: r.timestamp || Date.now(),
-        score: r.score || 0,
-        createdAt: r.createdAt || 0,
-        attScore: r.attScore || 0,
-        attDetail: r.attDetail || null,
-        notes: r.notes || [],
-        timestamps: r.timestamps || [r.timestamp || Date.now()],
-        latestTs: r.timestamp || Date.now(),
+        timestamp: r.timestamp,
+        score: r.score,
+        createdAt: r.createdAt ?? null,
+        attScore: r.attScore ?? 0,
+        attDetail: r.attDetail ?? null,
+        notes: r.notes ?? [],
+        timestamps: Array.isArray(r.timestamps) ? r.timestamps : [r.timestamp],
+        latestTs: r.timestamp,
         deviceIds: r.deviceIds,
         sourcePriority: nextSourcePriority,
         matchSources: new Set([source]),
@@ -1303,46 +1375,85 @@ function shouldPreserveCommittedSearchOnVisibilityRefresh() {
 }
 
 function buildDesktopHistoryResults(results) {
-  return (results || []).map((result) => ({
-    url: result.url,
-    title: result.title,
-    slug: generateSlugFromUrl(result.url),
-    timestamp: result.timestamp,
-    score: result.score || 0,
-    timestamps: [result.timestamp],
-  }));
+  if (!Array.isArray(results)) {
+    throw new Error('History search results must be an array');
+  }
+  return results.map((result, index) => {
+    if (
+      !result ||
+      typeof result.url !== 'string' ||
+      !result.url ||
+      typeof result.title !== 'string' ||
+      !Number.isFinite(result.timestamp) ||
+      !Number.isFinite(result.score)
+    ) {
+      throw new Error(`History search result ${index} has an invalid shape`);
+    }
+    return {
+      url: result.url,
+      title: result.title,
+      slug: generateSlugFromUrl(result.url),
+      timestamp: result.timestamp,
+      score: result.score,
+      timestamps: [result.timestamp],
+    };
+  });
 }
 
 function latestTimestampFromPage(page) {
-  const timestamps = Object.values(page?.timestamps || {})
-    .map(Number)
-    .filter((timestamp) => Number.isFinite(timestamp) && timestamp > 0);
+  if (
+    !page ||
+    typeof page !== 'object' ||
+    !page.timestamps ||
+    typeof page.timestamps !== 'object' ||
+    Array.isArray(page.timestamps)
+  ) {
+    throw new Error('Page search context is missing canonical timestamps');
+  }
+  const timestamps = Object.values(page.timestamps);
   if (timestamps.length > 0) return Math.max(...timestamps);
 
-  const createdAt = Number(page?.createdAt);
-  return Number.isFinite(createdAt) && createdAt > 0 ? createdAt : null;
+  return page.createdAt;
 }
 
 async function buildNoteSearchResults(results) {
-  const validResults = (results || []).filter((result) => result?.url);
-  if (validResults.length === 0) return [];
-  const slugs = validResults.map((result) => generateSlugFromUrl(result.url));
+  if (!Array.isArray(results)) {
+    throw new Error('Note search results must be an array');
+  }
+  for (const [index, result] of results.entries()) {
+    if (
+      !result ||
+      typeof result.url !== 'string' ||
+      !result.url ||
+      typeof result.noteSlug !== 'string' ||
+      !result.noteSlug ||
+      !Number.isFinite(result.score)
+    ) {
+      throw new Error(`Note search result ${index} has an invalid shape`);
+    }
+  }
+  if (results.length === 0) return [];
+  const slugs = results.map((result) => generateSlugFromUrl(result.url));
   const contexts = await loadPageContext(slugs);
   const built = [];
-  for (let i = 0; i < validResults.length; i++) {
-    const result = validResults[i];
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
     const page = contexts[slugs[i]]?.page;
-    const timestamp = Number(result.timestamp) || latestTimestampFromPage(page);
+    if (!page) {
+      throw new Error(`Note search result references missing page ${slugs[i]}`);
+    }
+    const timestamp = latestTimestampFromPage(page);
     if (!Number.isFinite(timestamp) || timestamp <= 0) {
-      logDebug('[Phase2a] Note search hit missing page timestamp:', result.url);
-      continue;
+      throw new Error(
+        `Note search page ${slugs[i]} has no canonical timestamp`,
+      );
     }
     built.push({
       url: result.url,
       title: page?.user_title || page?.title || '',
       slug: generateSlugFromUrl(result.url),
       timestamp,
-      score: Number(result.score) || NOTE_SEARCH_SCORE,
+      score: result.score,
       timestamps: [timestamp],
     });
   }
@@ -1350,59 +1461,51 @@ async function buildNoteSearchResults(results) {
 }
 
 async function buildSnapshotSearchResults(matches) {
-  const validMatches = (matches || []).filter((match) => match?.slug);
-  if (validMatches.length === 0) return [];
-  const contexts = await loadPageContext(
-    validMatches.map((match) => match.slug),
-  );
+  if (!Array.isArray(matches)) {
+    throw new Error('Snapshot search results must be an array');
+  }
+  for (const [index, match] of matches.entries()) {
+    if (
+      !match ||
+      typeof match.slug !== 'string' ||
+      !match.slug ||
+      !Number.isFinite(match.timestamp) ||
+      !Number.isFinite(match.score)
+    ) {
+      throw new Error(`Snapshot search result ${index} has an invalid shape`);
+    }
+  }
+  if (matches.length === 0) return [];
+  const contexts = await loadPageContext(matches.map((match) => match.slug));
   const results = [];
-  for (let i = 0; i < validMatches.length; i++) {
-    const match = validMatches[i];
+  for (let i = 0; i < matches.length; i++) {
+    const match = matches[i];
     const page = contexts[match.slug]?.page;
-    if (!page?.url) continue;
-    const timestamp = Number(match.timestamp);
-    if (!Number.isFinite(timestamp) || timestamp <= 0) {
-      logDebug('[Phase2b] Snapshot search hit missing timestamp:', match.slug);
-      continue;
+    if (!page?.url) {
+      throw new Error(
+        `Snapshot search result references missing page ${match.slug}`,
+      );
     }
     results.push({
       url: page.url,
       title: page.title || '',
       slug: match.slug,
-      timestamp,
-      score: Number(match.score) || SNAPSHOT_SEARCH_SCORE,
-      timestamps: [timestamp],
+      timestamp: match.timestamp,
+      score: match.score,
+      timestamps: [match.timestamp],
     });
   }
   return results;
 }
 
-// Phase 1: daemon-backed history search plus pending connector queue search.
+// Phase 1: daemon-backed history search.
 async function runPhase1(query, gen) {
   let streamingStarted = false;
   try {
-    const { desktopCommandBuffer = [] } = await chrome.storage.local.get([
-      'desktopCommandBuffer',
-    ]);
-    const pendingHistoryEntries = extractHistoryQueue(desktopCommandBuffer);
-    queueContentMap = getQueueContentMap(pendingHistoryEntries);
-    if (pendingHistoryEntries.length > 0) {
-      const engine = new SearchEngine();
-      buildHistoryForEngine(
-        HistoryEntry,
-        engine,
-        pendingHistoryEntries,
-        queueContentMap,
-      );
-      const bufferResults = await engine.search(query, 0);
-      mergeSearchResults(bufferResults, 'history', gen);
-      await renderProgressiveResults(gen);
-    }
-
     streamingStarted = await runStreamingHistorySearch(query, gen);
     if (streamingStarted) return;
-  } catch (e) {
-    logDebug('[Phase1] JSONL search failed:', e.message);
+  } catch (error) {
+    surfaceBackgroundError('History search failed', error);
   } finally {
     if (!streamingStarted) phaseComplete(gen);
   }
@@ -1418,13 +1521,14 @@ async function runDaemonContentSearch({
 }) {
   try {
     const response = await sendAction({ action, query });
-    if (Array.isArray(response.results)) {
-      const results = await buildResults(response.results);
-      mergeSearchResults(results, source, gen);
-      await renderProgressiveResults(gen);
+    if (!Array.isArray(response.results)) {
+      throw new Error(`${action} response results must be an array`);
     }
+    const results = await buildResults(response.results);
+    mergeSearchResults(results, source, gen);
+    await renderProgressiveResults(gen);
   } catch (error) {
-    logDebug(`${phaseLabel} unavailable:`, error.message);
+    surfaceBackgroundError(`${phaseLabel} failed`, error);
   } finally {
     phaseComplete(gen);
   }
@@ -1505,8 +1609,6 @@ async function runProgressiveSearch(allQueries) {
 
 async function initHistoryFiles() {
   await refreshHistoryMetadata();
-
-  queueContentMap = {};
 }
 
 async function refreshHistoryMetadata() {
@@ -1514,9 +1616,19 @@ async function refreshHistoryMetadata() {
     action: 'listHistoryFiles',
     includeSizes: true,
   });
-  historyState.files = Array.isArray(resp.files) ? resp.files : [];
-  historyState.fileSizes = resp.sizes || {};
-  historyState.devices = Array.isArray(resp.devices) ? resp.devices : [];
+  if (!Array.isArray(resp.files) || !Array.isArray(resp.devices)) {
+    throw new Error('History file response files and devices must be arrays');
+  }
+  if (
+    !resp.sizes ||
+    typeof resp.sizes !== 'object' ||
+    Array.isArray(resp.sizes)
+  ) {
+    throw new Error('History file response sizes must be an object');
+  }
+  historyState.files = resp.files;
+  historyState.fileSizes = resp.sizes;
+  historyState.devices = resp.devices;
   return resp;
 }
 
@@ -1525,7 +1637,40 @@ async function loadHistoryEntriesForDate(dateStr) {
     action: 'loadHistoryBatch',
     files: [`${dateStr}.jsonl`],
   });
-  return resp.entries || [];
+  return validateHistoryEntries(resp.entries);
+}
+
+function validateHistoryEntries(entries) {
+  if (!Array.isArray(entries)) {
+    throw new Error('History batch response entries must be an array');
+  }
+  return entries.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`History entry ${index} must be an object`);
+    }
+    if (!HISTORY_ACTIONS.has(entry.action)) {
+      throw new Error(
+        `History entry ${index} has unsupported action ${String(entry.action)}`,
+      );
+    }
+    if (!Number.isFinite(entry.timestamp)) {
+      throw new Error(`History entry ${index} has no finite timestamp`);
+    }
+    if (typeof entry.deviceId !== 'string' || !entry.deviceId) {
+      throw new Error(`History entry ${index} has no deviceId`);
+    }
+    if (entry.action === 'visit_page' || entry.action === 'leave_page') {
+      if (typeof entry.url !== 'string' || !entry.url) {
+        throw new Error(`History entry ${index} has no URL`);
+      }
+      if (entry.title !== null && typeof entry.title !== 'string') {
+        throw new Error(
+          `History entry ${index} title must be a string or null`,
+        );
+      }
+    }
+    return entry;
+  });
 }
 
 async function loadHistoryBatch() {
@@ -1543,22 +1688,14 @@ async function loadHistoryBatch() {
   try {
     const t0 = performance.now();
     const resp = await sendAction({ action: 'loadHistoryBatch', files: batch });
-    const batchEntries = resp.entries;
+    const batchEntries = validateHistoryEntries(resp.entries);
     const newItems = [];
-    // Entries within a day file arrive oldest→newest. This isn't a full replay,
-    // but we simulate replay semantics: newer values always win, and older
-    // values are only kept when the newer entry omits the field (the "omit
-    // unchanged fields" optimisation in background.js means later entries
-    // often lack a title when it hasn't changed since the previous write).
+    // Entries arrive oldest→newest. History rows consume only canonical page
+    // visit/leave records; other replay actions remain available to callers
+    // that explicitly request a raw history batch.
     for (const item of batchEntries) {
-      // Skip non-visit entries (settings, list ops, etc.)
-      if (
-        item.action &&
-        item.action !== 'visit_page' &&
-        item.action !== 'leave_page'
-      )
+      if (item.action !== 'visit_page' && item.action !== 'leave_page')
         continue;
-      if (!item.url) continue;
       if (item.timestamp > historyState._mutationWatermark) {
         historyState._mutationWatermark = item.timestamp;
       }
@@ -1579,19 +1716,26 @@ async function loadHistoryBatch() {
     if (newItems.length > 0) cachedFieldRanges = null;
     // Calibrate avg entry size from loaded file data
     historyState.batchRawCount += batchEntries.length;
-    const loadedSize = [...historyState.loadedFiles].reduce(
-      (sum, f) => sum + (historyState.fileSizes[f] || 0),
-      0,
-    );
+    const loadedSize = [...historyState.loadedFiles].reduce((sum, file) => {
+      if (!Object.prototype.hasOwnProperty.call(historyState.fileSizes, file)) {
+        throw new Error(`History file response is missing size for ${file}`);
+      }
+      return sum + historyState.fileSizes[file];
+    }, 0);
     if (loadedSize > 0 && historyState.batchRawCount > 0) {
       historyState.avgEntrySize = loadedSize / historyState.batchRawCount;
     }
     historyState.loading = false;
     return newItems;
   } catch (error) {
-    logDebug('Error loading history batch:', error.message);
     historyState.loading = false;
-    return [];
+    showErrorBubble(
+      tr('desktopErrorPrefix', `Error loading history: ${error.message}`, [
+        error.message,
+      ]),
+      { suffix: '' },
+    );
+    throw error;
   }
 }
 
@@ -1605,8 +1749,11 @@ async function loadHistoryUntilDate(dateStr) {
     .filter((file) => !historyState.loadedFiles.has(file)).length;
   const saved = historyState.fileBatch;
   historyState.fileBatch = needed;
-  await loadHistoryBatch();
-  historyState.fileBatch = saved;
+  try {
+    await loadHistoryBatch();
+  } finally {
+    historyState.fileBatch = saved;
+  }
 }
 
 function resetHistory() {
@@ -1623,7 +1770,6 @@ function resetHistory() {
   cachedFieldRanges = null;
   allListPins = {};
 
-  queueContentMap = {};
   cancelActiveHistorySearch();
   clearProgressiveSearchState();
 }
@@ -1635,7 +1781,12 @@ function getEstimatedByDay() {
   for (const filename of historyState.files) {
     if (historyState.loadedFiles.has(filename)) continue;
     const dateStr = filename.replace('.jsonl', '');
-    const size = historyState.fileSizes[filename] || 0;
+    if (
+      !Object.prototype.hasOwnProperty.call(historyState.fileSizes, filename)
+    ) {
+      throw new Error(`History file response is missing size for ${filename}`);
+    }
+    const size = historyState.fileSizes[filename];
     if (size > 0) {
       estimated.set(
         dateStr,
@@ -1651,7 +1802,6 @@ function getActivePinListId() {
   return null;
 }
 
-// Apply UI-only history title fallback to daemon-resolved list pins.
 // Returns { pinsResolved, pageSnap } — pageSnap is needed by enrichPinResult.
 async function resolvePinsForDisplay(pins) {
   const pageSnap = new Map(
@@ -1660,21 +1810,17 @@ async function resolvePinsForDisplay(pins) {
       .map((pin) => [pin.slug, { ...pin, user_title: pin.userTitle || null }]),
   );
   const pinsResolved = pins.map((p) => {
-    let title = p.title || null;
+    const title = p.title || null;
     const url = p.url || null;
-    if (!title && url) {
-      const hist = historyState.byUrl.get(url);
-      if (hist?.title) title = hist.title;
-    }
     return {
       ...p,
       url,
       title,
       user_title: p.userTitle || null,
-      isNote: p.isNote || false,
+      isNote: p.isNote,
       hasSnapshots: p.hasSnapshots === true,
       hasHighlightNotes: p.hasHighlightNotes === true,
-      listSlugs: p.listSlugs || [],
+      listSlugs: p.listSlugs,
     };
   });
   return { pinsResolved, pageSnap };
@@ -1755,6 +1901,7 @@ async function showRecycleBin() {
       ),
       { suffix: '' },
     );
+    return;
   }
   if (renderSeq !== recycleBinRenderSeq || activeView.type !== 'recycle-bin') {
     return;
@@ -1860,10 +2007,13 @@ function bindRecycleBinEmptyButton() {
 
 async function updateRecycleBinBadge() {
   const badgeSeq = ++recycleBinBadgeSeq;
-  const entries = await loadRecycleBinEntries().catch((error) => {
-    logDebug('Recycle bin badge refresh failed:', error.message);
-    return [];
-  });
+  let entries;
+  try {
+    entries = await loadRecycleBinEntries();
+  } catch (error) {
+    surfaceBackgroundError('Recycle bin badge refresh failed', error);
+    return;
+  }
   if (badgeSeq !== recycleBinBadgeSeq) return;
   const count = entries.length;
   const btn = document.getElementById('recycleBinBtn');
@@ -1923,14 +2073,76 @@ function createDefaultFilterState() {
   };
 }
 
+function validateFilterState(state, key) {
+  const expectedKeys = [
+    'firstSeen',
+    'lastSeen',
+    'devices',
+    'lists',
+    'hasHighlights',
+    'hasSnapshots',
+    'liked',
+    'visitedMultipleTimes',
+  ];
+  if (
+    !state ||
+    typeof state !== 'object' ||
+    Array.isArray(state) ||
+    Object.keys(state).length !== expectedKeys.length ||
+    expectedKeys.some(
+      (field) => !Object.prototype.hasOwnProperty.call(state, field),
+    )
+  ) {
+    throw new Error(`Stored filter state ${key} has an invalid shape`);
+  }
+  for (const rangeKey of ['firstSeen', 'lastSeen']) {
+    const range = state[rangeKey];
+    if (
+      !range ||
+      typeof range !== 'object' ||
+      Array.isArray(range) ||
+      Object.keys(range).length !== 2 ||
+      !Object.prototype.hasOwnProperty.call(range, 'lo') ||
+      !Object.prototype.hasOwnProperty.call(range, 'hi') ||
+      [range.lo, range.hi].some(
+        (value) => value !== null && !Number.isFinite(value),
+      )
+    ) {
+      throw new Error(`Stored filter state ${key}.${rangeKey} is invalid`);
+    }
+  }
+  for (const mapKey of ['devices', 'lists']) {
+    const map = state[mapKey];
+    if (
+      !map ||
+      typeof map !== 'object' ||
+      Array.isArray(map) ||
+      Object.values(map).some((value) => value !== true)
+    ) {
+      throw new Error(`Stored filter state ${key}.${mapKey} is invalid`);
+    }
+  }
+  for (const booleanKey of [
+    'hasHighlights',
+    'hasSnapshots',
+    'liked',
+    'visitedMultipleTimes',
+  ]) {
+    if (state[booleanKey] !== null && state[booleanKey] !== true) {
+      throw new Error(`Stored filter state ${key}.${booleanKey} is invalid`);
+    }
+  }
+  return state;
+}
+
 function isDefaultFilterState(state) {
   return (
     state.firstSeen.lo === null &&
     state.firstSeen.hi === null &&
     state.lastSeen.lo === null &&
     state.lastSeen.hi === null &&
-    Object.keys(state.devices || {}).length === 0 &&
-    Object.keys(state.lists || {}).length === 0 &&
+    Object.keys(state.devices).length === 0 &&
+    Object.keys(state.lists).length === 0 &&
     state.hasHighlights === null &&
     state.hasSnapshots === null &&
     state.liked === null &&
@@ -1941,10 +2153,10 @@ function isDefaultFilterState(state) {
 async function applyFilters(results) {
   if (isDefaultFilterState(filterState)) return results;
   const now = Date.now();
-  const enabledDevices = Object.entries(filterState.devices || {})
+  const enabledDevices = Object.entries(filterState.devices)
     .filter(([, v]) => v === true)
     .map(([k]) => k);
-  const enabledLists = Object.entries(filterState.lists || {})
+  const enabledLists = Object.entries(filterState.lists)
     .filter(([, v]) => v === true)
     .map(([k]) => k);
   return results.filter((item) => {
@@ -1955,14 +2167,20 @@ async function applyFilters(results) {
     }
     // List filter: when list bubbles active, only show items belonging to at least one enabled list
     if (enabledLists.length > 0) {
-      const itemListSlugs = (item.listSlugs || []).filter(
+      if (!Array.isArray(item.listSlugs)) {
+        throw new Error(`Filtered result ${item.url} has no list projection`);
+      }
+      const itemListSlugs = item.listSlugs.filter(
         (slug) => !slug.startsWith('system/'),
       );
       if (!enabledLists.some((ls) => itemListSlugs.includes(ls))) return false;
     }
     // Time filters (days ago)
     if (filterState.lastSeen.lo !== null || filterState.lastSeen.hi !== null) {
-      const lastTs = item.timestamps?.[0] || now;
+      const lastTs = item.timestamps?.[0];
+      if (!Number.isFinite(lastTs)) {
+        throw new Error(`Filtered result ${item.url} has no last timestamp`);
+      }
       const daysAgo = (now - lastTs) / 86400000;
       if (filterState.lastSeen.lo !== null && daysAgo < filterState.lastSeen.lo)
         return false;
@@ -1974,9 +2192,10 @@ async function applyFilters(results) {
       filterState.firstSeen.hi !== null
     ) {
       const firstTs =
-        item.firstTimestamp ||
-        item.timestamps?.[item.timestamps.length - 1] ||
-        now;
+        item.firstTimestamp ?? item.timestamps?.[item.timestamps.length - 1];
+      if (!Number.isFinite(firstTs)) {
+        throw new Error(`Filtered result ${item.url} has no first timestamp`);
+      }
       const daysAgo = (now - firstTs) / 86400000;
       if (
         filterState.firstSeen.lo !== null &&
@@ -2012,7 +2231,9 @@ function saveFilterState() {
     activeView.type === 'explore'
       ? 'exploreFilterState'
       : 'listFilterState:' + activeView.id;
-  chrome.storage.session.set({ [key]: filterState });
+  void chrome.storage.session.set({ [key]: filterState }).catch((error) => {
+    surfaceBackgroundError('Filter state save failed', error);
+  });
 }
 
 async function loadFilterState() {
@@ -2020,18 +2241,13 @@ async function loadFilterState() {
     activeView.type === 'explore'
       ? 'exploreFilterState'
       : 'listFilterState:' + activeView.id;
-  try {
-    const data = await chrome.storage.session.get(key);
-    if (data[key]) {
-      filterState = data[key];
-      if (!filterState.devices) filterState.devices = {};
-      if (!filterState.lists) filterState.lists = {};
-      return;
-    }
-  } catch {
-    /* session miss */
+  const data = await chrome.storage.session.get(key);
+  if (Object.prototype.hasOwnProperty.call(data, key)) {
+    filterState = validateFilterState(data[key], key);
+    return;
   }
   filterState = createDefaultFilterState();
+  await chrome.storage.session.set({ [key]: filterState });
 }
 
 // --- Sort helpers ---
@@ -2074,8 +2290,9 @@ const COLUMN_LABEL_KEYS = {
 };
 
 function columnLabel(column) {
-  const [key, fallback] = COLUMN_LABEL_KEYS[column] || [column, column];
-  return tr(key, fallback);
+  const label = COLUMN_LABEL_KEYS[column];
+  if (!label) throw new Error(`Unknown result column: ${column}`);
+  return tr(...label);
 }
 
 function applySortOrder(items, sortState) {
@@ -2486,9 +2703,11 @@ function saveSearchQuery() {
         ? listKey(activeView.id)
         : null;
   if (!viewKey) return;
-  chrome.storage.session
+  void chrome.storage.session
     .set({ [`searchQueries:${viewKey}`]: committedSearchQuery.trim() })
-    .catch(() => {});
+    .catch((error) =>
+      surfaceBackgroundError('Could not save search state', error),
+    );
 }
 
 // Load the committed search query from session storage for the current view
@@ -2499,46 +2718,45 @@ async function loadSearchQuery() {
       : activeView.type === 'list'
         ? listKey(activeView.id)
         : null;
-  if (!viewKey) return [];
+  if (!viewKey) return '';
   const data = await chrome.storage.session.get(`searchQueries:${viewKey}`);
-  return data[`searchQueries:${viewKey}`] || [];
+  const value = data[`searchQueries:${viewKey}`];
+  if (value === undefined) return '';
+  if (typeof value !== 'string') {
+    throw new Error(`Stored search query for ${viewKey} must be a string`);
+  }
+  return value;
 }
 
 function committedQueryFromSession(value) {
-  if (Array.isArray(value)) {
-    return value.find((query) => String(query || '').trim())?.trim() || '';
+  if (typeof value !== 'string') {
+    throw new Error('Stored search query must be a string');
   }
-  return String(value || '').trim();
+  return value.trim();
 }
 
 // --- Query builder: Rendering ---
 
-// Shared pin enrichment: merges cached page data, attention scores, and pin timestamps.
-// Uses historyState.byUrl fallback for attention when page entity lacks it (showList behavior).
+// Shared pin enrichment merges daemon page data, attention, and pin timestamps.
 function enrichPinResult(r, pins, pageSnap) {
   if (!r.url && !r.slug) return r;
   const slug = r.slug || generateSlugFromUrl(r.url);
   const cached = pageSnap.get(slug);
   const source = cached && cached.watermark > (r.watermark || 0) ? cached : r;
-  let attSource = source.attDetail || source;
-  // Fallback: use attention from loaded history when page lacks it
-  if (
-    attSource.scrollDepth === undefined &&
-    attSource.timeOnPage === undefined
-  ) {
-    const histEntry = historyState.byUrl.get(r.url);
-    if (histEntry) attSource = histEntry;
-  }
-  const attScore = attentionStrength(attSource) || source.attScore || 0;
+  const attSource = source.attDetail || source;
+  const attScore = attentionStrength(attSource) ?? source.attScore ?? 0;
   const rSlug = slug;
   const pin = pins.find((p) => p.slug === rSlug);
+  const displayTimestamp = [source.watermark, r.watermark, r.pinnedAt].find(
+    (timestamp) => Number.isFinite(timestamp),
+  );
   const enriched = {
     ...r,
     slug,
     attScore,
     attDetail: attSource,
     notes: source.notes || r.notes || [],
-    timestamps: [source.watermark || r.watermark || r.pinnedAt || Date.now()],
+    timestamps: displayTimestamp === undefined ? [] : [displayTimestamp],
     visitDates: cached?.visitDates || source.visitDates || r.visitDates,
     pinnedAt: pin ? pin.pinnedAt : r.pinnedAt || null,
     pinSource: pin?.source || r.pinSource || null,
@@ -2597,7 +2815,8 @@ async function refreshPins() {
     const listId = activeView.id;
     if (!allListPins[listId]) {
       const projection = await loadListDisplay(listId);
-      allListPins[listId] = projection?.pins || [];
+      if (!projection) throw new Error(`List not found: ${listId}`);
+      allListPins[listId] = projection.pins;
     }
     const pins = allListPins[listId];
     updatePinCount(listId, pins.length);
@@ -2667,7 +2886,7 @@ async function showList(list) {
     updatePinCount(listId, pins.length);
 
     // Render rules section
-    renderRulesSection(listId, listProjection.rules || []);
+    renderRulesSection(listId, listProjection.rules);
 
     if (pins.length === 0) {
       listPinsData = [];
@@ -2693,7 +2912,7 @@ async function showList(list) {
 // ─── Rules section ──────────────────────────────────────────────────
 
 function ruleDescription(rule) {
-  const c = rule.config || {};
+  const c = rule.config;
   if (rule.type === 'keyword') {
     return c.pattern || '';
   } else if (rule.type === 'function') {
@@ -2781,7 +3000,8 @@ async function refreshRulesForActiveList() {
   if (activeView.type !== 'list') return;
   const listId = activeView.id;
   const listProjection = await loadListDisplay(listId);
-  renderRulesSection(listId, listProjection?.rules || []);
+  if (!listProjection) throw new Error(`List not found: ${listId}`);
+  renderRulesSection(listId, listProjection.rules);
 }
 
 // ─── Inline rule editing state ───
@@ -3137,10 +3357,7 @@ async function runPreviewAgainstHistory(rule, signal) {
     const visits = dayEntries
       .filter(
         (e) =>
-          (!e.action || e.action === 'visit_page') &&
-          e.url &&
-          e.title &&
-          !seenUrls.has(e.url),
+          e.action === 'visit_page' && e.url && e.title && !seenUrls.has(e.url),
       )
       .reverse();
     const uniqueVisits = [];
@@ -3161,10 +3378,9 @@ async function runPreviewAgainstHistory(rule, signal) {
       if (rule?.type === 'keyword') {
         for (const entry of batch) {
           entries.push({
-            timestamp: entry.timestamp,
-            action: entry.action || 'visit_page',
             url: entry.url,
-            title: entry.title || '',
+            title: entry.title,
+            bodyPreview: null,
           });
         }
       } else {
@@ -3178,17 +3394,18 @@ async function runPreviewAgainstHistory(rule, signal) {
         for (let j = 0; j < batch.length; j++) {
           if (!bodies[j]) continue;
           entries.push({
-            timestamp: batch[j].timestamp,
-            action: batch[j].action || 'visit_page',
             url: batch[j].url,
-            title: batch[j].title || '',
+            title: batch[j].title,
             bodyPreview: bodies[j],
           });
         }
       }
       if (entries.length === 0) continue;
       const resp = await previewRuleEntries(rule, entries);
-      for (const r of resp.results || []) {
+      if (!Array.isArray(resp.results)) {
+        throw new Error('previewRule response results must be an array');
+      }
+      for (const r of resp.results) {
         previewResults.push(r);
         checked++;
         if (r.match) matchCount++;
@@ -3215,7 +3432,8 @@ async function runPreviewAgainstPins(rule, listId, signal) {
 
   if (pinMeta.length === 0) {
     const listProjection = await loadListDisplay(listId);
-    for (const pin of listProjection?.pins || []) {
+    if (!listProjection) throw new Error(`List not found: ${listId}`);
+    for (const pin of listProjection.pins) {
       if (signal?.aborted) break;
       if (!pin.url) continue;
       const title = pin.userTitle || pin.title || '';
@@ -3242,16 +3460,17 @@ async function runPreviewAgainstPins(rule, listId, signal) {
       const entry = {
         url: batch[j].url,
         title: batch[j].title,
+        bodyPreview: bodies[j] || null,
       };
-      if (bodies[j]) {
-        entry.bodyPreview = bodies[j];
-      }
       entries.push(entry);
       checked++;
     }
     if (entries.length > 0) {
       const resp = await previewRuleEntries(rule, entries);
-      for (const r of resp.results || []) {
+      if (!Array.isArray(resp.results)) {
+        throw new Error('previewRule response results must be an array');
+      }
+      for (const r of resp.results) {
         previewPinsResults.push(r);
       }
     }
@@ -3678,14 +3897,14 @@ async function enrichFromEntityStorage(entries, opts = {}) {
     if (!entry.user_title && page.user_title)
       entry.user_title = page.user_title;
     entry.hasSnapshots = page.hasSnapshots === true;
-    entry.listSlugs = (context?.lists || []).map((list) => list.slug);
+    entry.listSlugs = context.lists.map((list) => list.slug);
     if (page.likes) entry.likes = page.likes;
     if (page.createdAt && !entry.createdAt) entry.createdAt = page.createdAt;
     if (includeVisitDates && entry.dateScope !== 'row' && page.visitDates) {
       entry.visitDates = page.visitDates;
     }
     // Check if any child note is a non-deleted highlight note (excerpt !== null)
-    entry.hasHighlightNotes = (context?.notes || []).some(
+    entry.hasHighlightNotes = context.notes.some(
       (note) => note.excerpt !== null,
     );
   }
@@ -3703,10 +3922,10 @@ async function enrichForFilters(entries) {
     const page = pages[entry.slug];
     if (!page) continue;
     const context = contexts[entry.slug];
-    const notes = context?.notes || [];
+    const notes = context.notes;
     if (notes.length > 0) entry.notes = notes;
     entry.hasSnapshots = page.hasSnapshots === true;
-    entry.listSlugs = (context?.lists || []).map((list) => list.slug);
+    entry.listSlugs = context.lists.map((list) => list.slug);
     if (entry.dateScope !== 'row' && page.visitDates) {
       entry.visitDates = page.visitDates;
     }
@@ -3830,8 +4049,8 @@ function bindDetailUrlHandlers(container) {
       if (!url) return;
       try {
         await chrome.tabs.create({ url });
-      } catch {
-        window.open(url, '_blank', 'noopener,noreferrer');
+      } catch (error) {
+        surfaceBackgroundError('Could not open URL', error);
       }
     });
   });
@@ -3843,16 +4062,23 @@ async function loadExtraDetail(url) {
 
   // Load notes for this page
   const notesResp = await sendAction({ action: 'loadPageNotes', slug });
-  const notes = notesResp.notes || [];
+  if (!Array.isArray(notesResp.notes)) {
+    throw new Error('loadPageNotes response notes must be an array');
+  }
+  const notes = notesResp.notes;
 
   const snapResp = await sendAction({ action: 'listSnapshots', slug });
-  const snapshots = snapResp.snapshots || [];
+  if (!Array.isArray(snapResp.snapshots)) {
+    throw new Error('listSnapshots response snapshots must be an array');
+  }
+  const snapshots = snapResp.snapshots;
 
   const contexts = await loadPageContext([slug]);
   const context = contexts[slug];
-  const pageEntity = context?.page;
-  const likes = pageEntity?.likes || 0;
-  const belongedLists = (context?.lists || [])
+  if (!context) throw new Error(`Page context not found: ${slug}`);
+  const pageEntity = context.page;
+  const likes = pageEntity.likes ?? 0;
+  const belongedLists = context.lists
     .filter((list) => !isSystemList(listKey(list.slug)))
     .map(listDisplayName);
 
@@ -3862,7 +4088,7 @@ async function loadExtraDetail(url) {
     belongedLists,
     slug,
     likes,
-    visitDates: pageEntity?.visitDates || [],
+    visitDates: pageEntity.visitDates,
   };
 }
 
@@ -4046,32 +4272,38 @@ function openDetailNoteEditor(entry, noteSlug) {
   ta.addEventListener('input', () => {
     autoResizeTextarea(ta);
     clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(async () => {
-      try {
-        const resp = await sendAction({
-          action: 'updateNote',
-          noteSlug,
-          note: ta.value,
-        });
-        if (resp?.noteSlug && resp.noteSlug !== noteSlug) {
-          entry.dataset.noteSlug = resp.noteSlug;
-          noteSlug = resp.noteSlug;
-        }
-      } catch (err) {
-        logError('[options] Note save error:', err);
-      }
+    saveTimeout = setTimeout(() => {
+      void sendAction({
+        action: 'updateNote',
+        noteSlug,
+        note: ta.value,
+      })
+        .then((resp) => {
+          if (resp?.noteSlug && resp.noteSlug !== noteSlug) {
+            entry.dataset.noteSlug = resp.noteSlug;
+            noteSlug = resp.noteSlug;
+          }
+        })
+        .catch((error) => surfaceBackgroundError('Could not save note', error));
     }, 500);
   });
 
-  ta.addEventListener('blur', () => {
+  ta.addEventListener('blur', async () => {
     clearTimeout(saveTimeout);
-    sendAction({ action: 'updateNote', noteSlug, note: ta.value })
-      .then((resp) => {
-        if (resp?.noteSlug && resp.noteSlug !== noteSlug) {
-          entry.dataset.noteSlug = resp.noteSlug;
-        }
-      })
-      .catch(() => {});
+    let resp;
+    try {
+      resp = await sendAction({
+        action: 'updateNote',
+        noteSlug,
+        note: ta.value,
+      });
+    } catch (error) {
+      surfaceBackgroundError('Could not save note', error);
+      return;
+    }
+    if (resp?.noteSlug && resp.noteSlug !== noteSlug) {
+      entry.dataset.noteSlug = resp.noteSlug;
+    }
     const noteText = ta.value;
     const noteBody = noteText
       ? `<span class="detail-note-content">${escapeHtml(noteText)}</span>`
@@ -4166,15 +4398,17 @@ function openDetailPageNoteEditor(wrap, text, noteSlug, url) {
   ta.addEventListener('input', () => {
     autoResizeTextarea(ta);
     clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(
-      () => saveDetailPageNote(ta, wrap, pageSlug, url),
-      500,
-    );
+    saveTimeout = setTimeout(() => {
+      void saveDetailPageNote(ta, wrap, pageSlug, url).catch((error) =>
+        surfaceBackgroundError('Could not save page note', error),
+      );
+    }, 500);
   });
 
-  ta.addEventListener('blur', () => {
+  ta.addEventListener('blur', async () => {
     clearTimeout(saveTimeout);
-    saveDetailPageNote(ta, wrap, pageSlug, url).then(() => {
+    try {
+      await saveDetailPageNote(ta, wrap, pageSlug, url);
       const noteText = ta.value;
       const currentSlug = wrap.dataset.noteSlug || '';
       if (!noteText && !currentSlug) {
@@ -4199,34 +4433,33 @@ function openDetailPageNoteEditor(wrap, text, noteSlug, url) {
           url,
         );
       }
-    });
+    } catch (error) {
+      surfaceBackgroundError('Could not save page note', error);
+    }
   });
 }
 
 async function saveDetailPageNote(ta, wrap, pageSlug, url) {
   const note = ta.value;
   const noteSlug = wrap.dataset.noteSlug;
-  try {
-    if (noteSlug) {
-      const resp = await sendAction({ action: 'updateNote', noteSlug, note });
-      if (resp?.noteSlug && resp.noteSlug !== noteSlug) {
-        wrap.dataset.noteSlug = resp.noteSlug;
-      }
-    } else if (note) {
-      const resp = await sendAction({
-        action: 'createNote',
-        pageSlug,
-        url,
-        excerpt: null,
-        note,
-        cssPath: null,
-      });
-      if (resp?.noteSlug) {
-        wrap.dataset.noteSlug = resp.noteSlug;
-      }
+  if (noteSlug) {
+    const resp = await sendAction({ action: 'updateNote', noteSlug, note });
+    if (resp?.noteSlug && resp.noteSlug !== noteSlug) {
+      wrap.dataset.noteSlug = resp.noteSlug;
     }
-  } catch (err) {
-    logError('[options] Page note save error:', err);
+  } else if (note) {
+    const resp = await sendAction({
+      action: 'createNote',
+      pageSlug,
+      url,
+      excerpt: null,
+      note,
+      cssPath: null,
+    });
+    if (!resp?.noteSlug) {
+      throw new Error('createNote response missing noteSlug');
+    }
+    wrap.dataset.noteSlug = resp.noteSlug;
   }
 }
 
@@ -4238,7 +4471,10 @@ function attentionLevel(normalized) {
 }
 
 function resultRowHtml(title, url, opts = {}) {
-  const safeUrl = escapeHtml(url || '<unknown>');
+  if (typeof url !== 'string' || !url) {
+    throw new Error('Result rows require a non-empty URL');
+  }
+  const safeUrl = escapeHtml(url);
   const {
     pinned,
     deletable = false,
@@ -4264,16 +4500,13 @@ function resultRowHtml(title, url, opts = {}) {
     timestamps.length > 0 ? formatTime(Math.max(...timestamps)) : '';
   const normalized = maxAtt > 0 ? attScore / maxAtt : 0;
 
-  let site = '';
-  try {
-    const parsed = new URL(url);
-    site =
-      parsed.protocol === 'file:'
-        ? 'file'
-        : parsed.hostname.replace(/^www\./, '');
-  } catch {}
+  const parsed = new URL(url);
+  const site =
+    parsed.protocol === 'file:'
+      ? 'file'
+      : parsed.hostname.replace(/^www\./, '');
 
-  const safeTitle = escapeHtml(title || site || url || '<unknown>');
+  const safeTitle = escapeHtml(title || site || url);
 
   const dates = collectVisitDateKeys({ visitDates, timestamps }).join(',');
 
@@ -4458,6 +4691,9 @@ function openPageDetailCard(
   attDetail = null,
   cardTimestamp = null,
 ) {
+  if (typeof url !== 'string' || !url) {
+    throw new Error('Page details require a non-empty URL');
+  }
   closePageDetailCard();
 
   const overlay = document.createElement('div');
@@ -4489,29 +4725,25 @@ function openPageDetailCard(
   // Allow one frame for backdrop-filter compositing before fading in
   requestAnimationFrame(() => overlay.classList.add('visible'));
 
-  if (!url || url === '<unknown>') {
-    const body = card.querySelector('.page-detail-body');
-    body.innerHTML = `<div style="padding:16px;color:var(--text-muted)">${escapeHtml(tr('desktopPageDetailsUnavailable', 'Page details unavailable'))}</div>`;
-  } else {
-    loadExtraDetail(url)
-      .then((extra) => {
-        const body = card.querySelector('.page-detail-body');
-        let html = buildDetailHtml(url, attDetail, [], extra.likes || 0);
-        const extraHtml = renderExtraDetailHtml(extra, cardTimestamp);
-        body.innerHTML =
-          html +
-          (extraHtml ? `<div class="detail-extra">${extraHtml}</div>` : '');
-        bindDetailUrlHandlers(body);
-        bindNoteDeleteButtons(body);
-        bindSnapshotClickHandlers(body);
-        bindPageNoteHandler(body, url);
-      })
-      .catch(() => {
-        const body = card.querySelector('.page-detail-body');
-        if (body)
-          body.innerHTML = `<div style="padding:16px;color:var(--text-muted)">${escapeHtml(tr('desktopFailedToLoadPageDetails', 'Failed to load page details'))}</div>`;
-      });
-  }
+  loadExtraDetail(url)
+    .then((extra) => {
+      const body = card.querySelector('.page-detail-body');
+      const html = buildDetailHtml(url, attDetail, [], extra.likes);
+      const extraHtml = renderExtraDetailHtml(extra, cardTimestamp);
+      body.innerHTML =
+        html +
+        (extraHtml ? `<div class="detail-extra">${extraHtml}</div>` : '');
+      bindDetailUrlHandlers(body);
+      bindNoteDeleteButtons(body);
+      bindSnapshotClickHandlers(body);
+      bindPageNoteHandler(body, url);
+    })
+    .catch((error) => {
+      surfaceBackgroundError('Failed to load page details', error);
+      const body = card.querySelector('.page-detail-body');
+      if (body)
+        body.innerHTML = `<div style="padding:16px;color:var(--text-muted)">${escapeHtml(tr('desktopFailedToLoadPageDetails', 'Failed to load page details'))}</div>`;
+    });
 
   const onEsc = (e) => {
     if (e.key === 'Escape') closePageDetailCard();
@@ -4586,7 +4818,7 @@ async function openPageDetailFromRoute(url) {
     await showExplore();
   }
   const slug = generateSlugFromUrl(url);
-  const contexts = await loadPageContext([slug]).catch(() => ({}));
+  const contexts = await loadPageContext([slug]);
   const page = contexts[slug]?.page;
   const title = page?.user_title || page?.title || url;
   const timestamps = Object.values(page?.timestamps || {});
@@ -4612,7 +4844,7 @@ async function applyPendingShellRoute() {
       return;
     }
     if (path === 'open') {
-      closeSettingsModal();
+      if (!(await closeSettingsModal())) return;
       const url = params.get('url');
       if (url) {
         await openPageDetailFromRoute(url);
@@ -4823,18 +5055,29 @@ async function loadLists() {
 let listFoldState = {};
 
 async function loadFoldState() {
-  try {
-    const { listFoldState: saved } = await chrome.storage.session.get([
-      'listFoldState',
-    ]);
-    if (saved) listFoldState = saved;
-  } catch (e) {
-    /* ignore */
+  const { listFoldState: saved } = await chrome.storage.session.get([
+    'listFoldState',
+  ]);
+  if (saved === undefined) return;
+  if (!saved || typeof saved !== 'object' || Array.isArray(saved)) {
+    throw new Error('Stored list fold state must be an object');
   }
+  for (const [slug, expanded] of Object.entries(saved)) {
+    if (!slug || typeof expanded !== 'boolean') {
+      throw new Error(
+        'Stored list fold state entries must map slugs to booleans',
+      );
+    }
+  }
+  listFoldState = saved;
 }
 
 function saveFoldState() {
-  chrome.storage.session.set({ listFoldState }).catch(() => {});
+  void chrome.storage.session
+    .set({ listFoldState })
+    .catch((error) =>
+      surfaceBackgroundError('Could not save list fold state', error),
+    );
 }
 
 async function renderLists() {
@@ -5374,67 +5617,72 @@ document.getElementById('settingsBtn').addEventListener('click', async () => {
   await openSettingsModal();
 });
 
-document.getElementById('settingsClose').addEventListener('click', () => {
-  closeSettingsModal();
+document.getElementById('settingsClose').addEventListener('click', async () => {
+  await closeSettingsModal();
 });
 
-document.getElementById('settingsModal').addEventListener('click', (e) => {
-  if (e.target === e.currentTarget) {
-    closeSettingsModal();
-  }
-});
+document
+  .getElementById('settingsModal')
+  .addEventListener('click', async (e) => {
+    if (e.target === e.currentTarget) {
+      await closeSettingsModal();
+    }
+  });
 
 async function openSettingsModal() {
   document.getElementById('settingsModal').classList.add('open');
-  updateStorageStatus();
-  updateStatistics();
-  renderBlacklist();
-  renderTrimRules();
-  await refreshDesktopShellSettings();
+  try {
+    await Promise.all([
+      updateStorageStatus(),
+      updateStatistics(),
+      renderBlacklist(),
+      renderTrimRules(),
+      refreshDesktopShellSettings(),
+    ]);
+  } catch (error) {
+    showErrorBubble(error.message, { suffix: '' });
+  }
 }
 
-function closeSettingsModal() {
-  document.getElementById('settingsModal').classList.remove('open');
-  saveSyncSettings();
+async function closeSettingsModal() {
+  try {
+    if (!(await saveSyncSettings())) return false;
+    document.getElementById('settingsModal').classList.remove('open');
+    return true;
+  } catch (error) {
+    surfaceBackgroundError('Could not save sync settings', error);
+    return false;
+  }
 }
 
 async function refreshDesktopShellSettings() {
-  try {
-    const shell = await sendAction({ action: 'getDesktopShellState' });
-    const loginToggle = document.getElementById('launchAtLoginToggle');
-    const loginOption = document.getElementById('launchAtLoginOption');
-    const loginUnsupported = document.getElementById(
-      'launchAtLoginUnsupported',
-    );
-    const loginItemSupported = !!shell.loginItemSupported;
-    loginToggle.checked = !!shell.launchAtLogin;
-    loginToggle.disabled = !loginItemSupported;
-    loginOption.classList.toggle('disabled', !loginItemSupported);
-    loginUnsupported.style.display = loginItemSupported ? 'none' : 'block';
-    document.getElementById('debugLoggingToggle').checked =
-      !!shell.debugLogging;
-    await chrome.storage.session.set({ debugLogging: !!shell.debugLogging });
-    renderPairedBrowsers(shell.pairedBrowsers || []);
-  } catch (error) {
-    logDebug('[desktop-shell] failed to load shell settings:', error.message);
-  }
+  const shell = await loadDesktopShellState();
+  const loginToggle = document.getElementById('launchAtLoginToggle');
+  const loginOption = document.getElementById('launchAtLoginOption');
+  const loginUnsupported = document.getElementById('launchAtLoginUnsupported');
+  const loginItemSupported = shell.loginItemSupported;
+  loginToggle.checked = shell.launchAtLogin;
+  loginToggle.disabled = !loginItemSupported;
+  loginOption.classList.toggle('disabled', !loginItemSupported);
+  loginUnsupported.style.display = loginItemSupported ? 'none' : 'block';
+  document.getElementById('debugLoggingToggle').checked = shell.debugLogging;
+  await chrome.storage.session.set({ debugLogging: shell.debugLogging });
+  renderPairedBrowsers(shell.pairedBrowsers);
 }
 
 function renderPairedBrowsers(browsers) {
   const list = document.getElementById('pairedBrowsersList');
-  const activeToday = (browsers || []).filter(isBrowserActiveToday);
+  const activeToday = browsers.filter(isBrowserActiveToday);
   if (activeToday.length === 0) {
     list.innerHTML = `<div style="color: var(--text-muted)">${escapeHtml(tr('desktopNoBrowsersActiveToday', 'No browsers active today.'))}</div>`;
     return;
   }
   list.innerHTML = activeToday
     .map((browser) => {
-      const lastSeen = browser.lastSeen
-        ? new Date(browser.lastSeen).toLocaleString(getActiveLocale())
-        : tr('desktopUnknown', 'Unknown');
-      const profile =
-        browser.browserProfile ||
-        tr('desktopDefaultBrowserProfile', 'Default profile');
+      const lastSeen = new Date(browser.lastSeen).toLocaleString(
+        getActiveLocale(),
+      );
+      const profile = `${escapeHtml(browser.browserProfile)} · `;
       const browserName = formatBrowserName(browser.browserName);
       const connectionStatus = browser.connected
         ? tr('desktopConnected', 'Connected')
@@ -5450,7 +5698,7 @@ function renderPairedBrowsers(browsers) {
               <span class="paired-browser-status" style="color: ${connectionColor}; font-weight: 500;">· ${escapeHtml(connectionStatus)}</span>
             </div>
             <div class="paired-browser-profile" style="color:var(--text-muted);font-size:11px;">
-              ${escapeHtml(profile)} · ${escapeHtml(browser.browserId)} · ${escapeHtml(tr('desktopLastSeen', 'Last seen'))} ${escapeHtml(lastSeen)}
+              ${profile}${escapeHtml(browser.browserId)} · ${escapeHtml(tr('desktopLastSeen', 'Last seen'))} ${escapeHtml(lastSeen)}
             </div>
           </div>
           <button
@@ -5493,7 +5741,6 @@ function renderPairedBrowsers(browsers) {
 
 function isBrowserActiveToday(browser) {
   if (browser.connected) return true;
-  if (!browser.lastSeen) return false;
   const seen = new Date(browser.lastSeen);
   const now = new Date();
   return (
@@ -5504,8 +5751,7 @@ function isBrowserActiveToday(browser) {
 }
 
 function formatBrowserName(name) {
-  const value = String(name || '').trim();
-  if (!value) return 'Browser';
+  const value = name.trim();
   const normalized = value.toLowerCase();
   if (normalized === 'edg' || normalized === 'edge') return 'Microsoft Edge';
   if (normalized === 'chrome') return 'Google Chrome';
@@ -5514,48 +5760,45 @@ function formatBrowserName(name) {
 
 // --- Settings: Storage ---
 async function updateStorageStatus() {
-  let info = null;
-  let connector = null;
-  try {
-    const [dirResp, connectorResp] = await Promise.all([
-      sendAction({ action: 'getDirectoryInfo' }).catch(() => ({ info: null })),
-      sendAction({ action: 'getDesktopConnectorState' }).catch(() => null),
-    ]);
-    info = dirResp?.info || null;
-    connector = connectorResp;
-  } catch {}
+  const [info, connector] = await Promise.all([
+    loadDirectoryInfo(),
+    loadDesktopConnectorState(),
+  ]);
 
   const row = document.getElementById('storageLocation');
   const pathEl = document.getElementById('storagePath');
   const deviceNameEl = document.getElementById('storageDeviceName');
   const selectBtn = document.getElementById('selectDirBtn');
-  const paired = Boolean(connector?.deviceId || (info && info.hasPermission));
+  const paired = connector.state !== 'setup_required';
 
   if (paired) {
+    if (!info || info.hasPermission !== true) {
+      throw new Error('Configured desktop storage is not readable');
+    }
     row.classList.remove('not-configured');
-    pathEl.textContent =
-      connector?.dataFolder ||
-      info?.path ||
-      info?.name ||
-      tr('desktopDataFolderReady', 'Data folder ready');
+    pathEl.textContent = connector.dataFolder;
     if (deviceNameEl) {
-      deviceNameEl.textContent = connector?.deviceId
-        ? tr('desktopDeviceId', `Device ${connector.deviceId}`, [
-            connector.deviceId,
-          ])
-        : tr('desktopDeviceIdentityUnavailable', 'Device identity unavailable');
+      deviceNameEl.textContent = tr(
+        'desktopDeviceId',
+        `Device ${connector.deviceId}`,
+        [connector.deviceId],
+      );
     }
     if (selectBtn) {
       selectBtn.style.display =
-        connector?.state === 'connected' ? 'none' : 'inline-block';
-      selectBtn.textContent =
-        connector?.state === 'pair_pending'
-          ? tr('desktopWaitingApproval', 'Waiting for approval...')
-          : tr('desktopPairFromBrowserPopup', 'Pair from Browser Popup');
-      selectBtn.disabled =
-        desktopPairInFlight || connector?.state === 'pair_pending';
+        connector.state === 'connected' ? 'none' : 'inline-block';
+      selectBtn.textContent = tr(
+        'desktopPairFromBrowserPopup',
+        'Pair from Browser Popup',
+      );
+      selectBtn.disabled = false;
     }
   } else {
+    if (info !== null) {
+      throw new Error(
+        'Unconfigured desktop storage returned directory information',
+      );
+    }
     row.classList.add('not-configured');
     pathEl.textContent = tr(
       'desktopDeviceNotConfigured',
@@ -5566,21 +5809,28 @@ async function updateStorageStatus() {
     }
     if (selectBtn) {
       selectBtn.style.display = 'inline-block';
-      selectBtn.textContent =
-        connector?.state === 'pair_pending'
-          ? tr('desktopWaitingApproval', 'Waiting for approval...')
-          : tr('desktopPairFromBrowserPopup', 'Pair from Browser Popup');
-      selectBtn.disabled =
-        desktopPairInFlight || connector?.state === 'pair_pending';
+      selectBtn.textContent = tr(
+        'desktopPairFromBrowserPopup',
+        'Pair from Browser Popup',
+      );
+      selectBtn.disabled = false;
     }
   }
 }
 
 async function updateStatistics() {
   const result = await chrome.storage.local.get(['desktopCommandBuffer']);
-  document.getElementById('bufferSize').textContent = (
-    result.desktopCommandBuffer || []
-  ).length;
+  if (result.desktopCommandBuffer === undefined) {
+    await chrome.storage.local.set({ desktopCommandBuffer: [] });
+    document.getElementById('bufferSize').textContent = '0';
+    updateCacheSize();
+    return;
+  }
+  if (!Array.isArray(result.desktopCommandBuffer)) {
+    throw new Error('Persisted connector write queue must be an array');
+  }
+  document.getElementById('bufferSize').textContent =
+    result.desktopCommandBuffer.length;
 
   updateCacheSize();
 }
@@ -5686,14 +5936,6 @@ document.getElementById('selectDirBtn').addEventListener('click', async () => {
       );
       resetHistory();
       showCategory(activeView.type === 'category' ? activeView.value : 'all');
-    } else if (result?.state === 'pair_pending') {
-      showStatus(
-        tr(
-          'desktopApprovePairing',
-          'Approve the pairing request in Browser Recall Desktop',
-        ),
-        'success',
-      );
     } else {
       showStatus(
         tr(
@@ -5715,17 +5957,21 @@ document.getElementById('selectDirBtn').addEventListener('click', async () => {
   }
 });
 
-document.getElementById('themeSelect').addEventListener('change', async () => {
-  const theme = document.getElementById('themeSelect').value;
-  await chrome.storage.session.set({ theme });
-  await saveSettingsValue('theme', theme);
-  await applyTheme();
+document.getElementById('themeSelect').addEventListener('change', () => {
+  runSettingsChange(async () => {
+    const theme = document.getElementById('themeSelect').value;
+    await saveSettingsValue('theme', theme);
+    await chrome.storage.session.set({ theme });
+    await applyTheme();
+  });
 });
 
-document.getElementById('localeSelect').addEventListener('change', async () => {
-  const localeOverride = document.getElementById('localeSelect').value;
-  await saveSettingsValue('localeOverride', localeOverride);
-  reloadApp();
+document.getElementById('localeSelect').addEventListener('change', () => {
+  runSettingsChange(async () => {
+    const localeOverride = document.getElementById('localeSelect').value;
+    await saveSettingsValue('localeOverride', localeOverride);
+    reloadApp();
+  });
 });
 
 // Color scheme picker
@@ -5740,36 +5986,41 @@ function applyColorScheme(scheme) {
   });
 }
 
-document
-  .getElementById('colorSchemePicker')
-  .addEventListener('click', async (e) => {
-    const dot = e.target.closest('.color-dot');
-    if (!dot) return;
+document.getElementById('colorSchemePicker').addEventListener('click', (e) => {
+  const dot = e.target.closest('.color-dot');
+  if (!dot) return;
+  runSettingsChange(async () => {
     const scheme = dot.dataset.scheme;
+    await saveSettingsValue('colorScheme', scheme);
     applyColorScheme(scheme);
     await chrome.storage.session.set({ colorScheme: scheme });
-    await saveSettingsValue('colorScheme', scheme);
   });
+});
 
-document
-  .getElementById('historyFileBatch')
-  .addEventListener('change', async () => {
-    const val =
-      parseInt(document.getElementById('historyFileBatch').value) || 10;
-    historyState.fileBatch = Math.max(1, val);
-    document.getElementById('historyFileBatch').value = historyState.fileBatch;
-    await saveSettingsValue('historyFileBatch', historyState.fileBatch);
+document.getElementById('historyFileBatch').addEventListener('change', () => {
+  runSettingsChange(async () => {
+    const input = document.getElementById('historyFileBatch');
+    const val = Number.parseInt(input.value, 10);
+    if (!Number.isInteger(val) || val < 1) {
+      throw new Error('History file batch must be an integer of at least 1');
+    }
+    await saveSettingsValue('historyFileBatch', val);
+    historyState.fileBatch = val;
+    input.value = val;
     showStatus(tr('desktopSettingsSaved', 'Settings saved'), 'success');
   });
+});
 
 document
   .getElementById('captureSnapshotVideo')
-  .addEventListener('change', async () => {
-    await saveSettingsValue(
-      'captureSnapshotVideo',
-      document.getElementById('captureSnapshotVideo').checked,
-    );
-    showStatus(tr('desktopSettingsSaved', 'Settings saved'), 'success');
+  .addEventListener('change', () => {
+    runSettingsChange(async () => {
+      await saveSettingsValue(
+        'captureSnapshotVideo',
+        document.getElementById('captureSnapshotVideo').checked,
+      );
+      showStatus(tr('desktopSettingsSaved', 'Settings saved'), 'success');
+    });
   });
 
 async function saveDesktopShellSettings() {
@@ -5812,28 +6063,42 @@ document.getElementById('syncEnabled').addEventListener('change', () => {
 });
 
 // Excluded Sites toggle
-document
-  .getElementById('blacklistEnabled')
-  .addEventListener('change', async () => {
+document.getElementById('blacklistEnabled').addEventListener('change', () => {
+  runSettingsChange(async () => {
     const enabled = document.getElementById('blacklistEnabled').checked;
-    setAddonOpen(document.getElementById('blacklistBody'), enabled);
     await saveSettingsValue('blacklistEnabled', enabled);
+    setAddonOpen(document.getElementById('blacklistBody'), enabled);
   });
+});
 
 // Title Cleanup toggle
 document
   .getElementById('titleCleanupEnabled')
-  .addEventListener('change', async () => {
-    const enabled = document.getElementById('titleCleanupEnabled').checked;
-    setAddonOpen(document.getElementById('titleCleanupBody'), enabled);
-    await saveSettingsValue('titleCleanupEnabled', enabled);
+  .addEventListener('change', () => {
+    runSettingsChange(async () => {
+      const enabled = document.getElementById('titleCleanupEnabled').checked;
+      await saveSettingsValue('titleCleanupEnabled', enabled);
+      setAddonOpen(document.getElementById('titleCleanupBody'), enabled);
+    });
   });
 
 // Save current sync settings from form fields. Returns false if validation fails.
 async function saveSyncSettings() {
   const enabled = document.getElementById('syncEnabled').checked;
-  const retention =
-    parseInt(document.getElementById('syncRetentionDays').value) || 7;
+  const retention = Number.parseInt(
+    document.getElementById('syncRetentionDays').value,
+    10,
+  );
+  if (!Number.isInteger(retention) || retention < 1) {
+    showStatus(
+      tr(
+        'desktopSettingFailed',
+        'Retention days must be an integer of at least 1',
+      ),
+      'error',
+    );
+    return false;
+  }
 
   if (enabled) {
     const repoUrl = document.getElementById('syncRepoUrl').value.trim();
@@ -5860,7 +6125,7 @@ async function saveSyncSettings() {
 
   await saveSettingsValue('syncEnabled', enabled);
   await saveSettingsValue('syncMethod', 'github');
-  await saveSettingsValue('syncRetentionDays', Math.max(1, retention));
+  await saveSettingsValue('syncRetentionDays', retention);
   await sendAction({ action: 'updateSyncSettings' });
   return true;
 }
@@ -5883,12 +6148,12 @@ document.getElementById('syncNowBtn').addEventListener('click', async () => {
       return;
     }
     // Phase 1: list devices immediately so the section appears
-    try {
-      const devResp = await sendAction({ action: 'syncListDevices' });
-      if (devResp.devices?.length)
-        renderSyncDevices(devResp.devices, devResp.localDeviceId, true);
-    } catch {
-      /* best-effort */
+    const devResp = await sendAction({ action: 'syncListDevices' });
+    if (!Array.isArray(devResp.devices)) {
+      throw new Error('Sync device response devices must be an array');
+    }
+    if (devResp.devices.length > 0) {
+      renderSyncDevices(devResp.devices, devResp.localDeviceId, true);
     }
 
     // Phase 2: actual push + pull
@@ -5942,8 +6207,13 @@ document.getElementById('syncCancelBtn').addEventListener('click', async () => {
   cancelBtn.textContent = tr('desktopCancelling', 'Cancelling...');
   try {
     await sendAction({ action: 'cancelSync' });
-  } catch {
-    /* best-effort */
+  } catch (error) {
+    showStatus(
+      tr('desktopErrorPrefix', `Cancel failed: ${error.message}`, [
+        error.message,
+      ]),
+      'error',
+    );
   }
 });
 
@@ -6049,9 +6319,18 @@ function renderSyncDevices(devices, localDeviceId, syncing) {
 async function refreshSyncDevices() {
   try {
     const resp = await sendAction({ action: 'getSyncDevices' });
+    if (!Array.isArray(resp.devices)) {
+      throw new Error('Sync device response devices must be an array');
+    }
     renderSyncDevices(resp.devices, resp.localDeviceId, false);
-  } catch {
-    document.getElementById('syncDevicesSection').style.display = 'none';
+  } catch (error) {
+    const section = document.getElementById('syncDevicesSection');
+    section.style.display = '';
+    document.getElementById('syncDevicesList').textContent = tr(
+      'desktopErrorPrefix',
+      `Could not load synced devices: ${error.message}`,
+      [error.message],
+    );
   }
 }
 
@@ -6307,7 +6586,7 @@ function renderImportFailures(container, failures, getName) {
         {
           title: '(Root bookmarks)',
           bookmarks: root.bookmarks,
-          skipped: root.skipped || [],
+          skipped: root.skipped,
           children: [],
           bookmarkCount: root.bookmarks.length,
           subfolderCount: 0,
@@ -6474,7 +6753,7 @@ function renderImportFailures(container, failures, getName) {
         result.push({
           title: item.folder.title,
           bookmarks: item.folder.bookmarks,
-          skipped: item.folder.skipped || [],
+          skipped: item.folder.skipped,
           children: collectAllChildren(item.children),
         });
       } else if (item.getIndeterminate()) {
@@ -6489,13 +6768,16 @@ function renderImportFailures(container, failures, getName) {
     return items.map((item) => ({
       title: item.folder.title,
       bookmarks: item.folder.bookmarks,
-      skipped: item.folder.skipped || [],
+      skipped: item.folder.skipped,
       children: collectAllChildren(item.children),
     }));
   }
 
   importBtn.addEventListener('click', async () => {
-    const selected = collectCheckedTree(treeContainer._items || []);
+    if (!Array.isArray(treeContainer._items)) {
+      throw new Error('Bookmark import tree has not been initialized');
+    }
+    const selected = collectCheckedTree(treeContainer._items);
     if (selected.length === 0) return;
 
     importBtn.disabled = true;
@@ -6515,9 +6797,12 @@ function renderImportFailures(container, failures, getName) {
         `Done! Imported ${result.listCount} list${result.listCount !== 1 ? 's' : ''} with ${result.bookmarkCount} bookmark${result.bookmarkCount !== 1 ? 's' : ''}.`,
         [result.listCount, result.bookmarkCount],
       );
+      if (!Array.isArray(result.failures)) {
+        throw new Error('importBookmarks response failures must be an array');
+      }
       renderImportFailures(
         failuresEl,
-        result.failures || [],
+        result.failures,
         (failure) => failure.title || failure.url,
       );
     } catch (error) {
@@ -6558,58 +6843,71 @@ document
   let parseFailures = [];
 
   function normalizeHistoryTimestamp(value) {
-    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-      return Math.trunc(value);
-    }
-    if (typeof value === 'string' && value.trim()) {
-      const asNumber = Number(value);
-      if (Number.isFinite(asNumber) && asNumber > 0)
-        return Math.trunc(asNumber);
-      const parsed = Date.parse(value);
-      if (Number.isFinite(parsed) && parsed > 0) return parsed;
-    }
+    if (Number.isSafeInteger(value) && value > 0) return value;
     return null;
   }
 
   function collectHistoryImportTimestamps(rawEntry) {
     const timestamps = new Set();
-    for (const value of rawEntry.visitTimes || []) {
+    const visitTimes = rawEntry.visitTimes ?? [];
+    if (!Array.isArray(visitTimes)) {
+      throw new Error('History entry visitTimes must be an array');
+    }
+    for (const value of visitTimes) {
       const normalized = normalizeHistoryTimestamp(value);
       if (normalized) timestamps.add(normalized);
     }
-    for (const visit of rawEntry.visits || []) {
-      const normalized = normalizeHistoryTimestamp(
-        visit?.visitTime ?? visit?.timestamp ?? visit?.lastVisitTime,
-      );
-      if (normalized) timestamps.add(normalized);
-    }
-    for (const key of ['visitTime', 'timestamp', 'lastVisitTime']) {
-      const normalized = normalizeHistoryTimestamp(rawEntry[key]);
-      if (normalized) timestamps.add(normalized);
-    }
+    const normalized = normalizeHistoryTimestamp(rawEntry.lastVisitTime);
+    if (normalized) timestamps.add(normalized);
     return [...timestamps].sort((left, right) => left - right);
   }
 
   function normalizeHistoryImportPayload(payload) {
-    const rawEntries = Array.isArray(payload)
-      ? payload
-      : Array.isArray(payload?.entries)
-        ? payload.entries
-        : Array.isArray(payload?.history)
-          ? payload.history
-          : null;
-    if (!rawEntries) {
-      throw new Error('Expected a JSON array or an object with `entries`.');
+    if (!Array.isArray(payload)) {
+      throw new Error('History import must be a JSON array.');
     }
 
     const failures = [];
     const entries = [];
-    for (const rawEntry of rawEntries) {
-      const url = String(rawEntry?.url || '').trim();
+    const allowedFields = new Set([
+      'url',
+      'title',
+      'lastVisitTime',
+      'visitTimes',
+      'referrerUrl',
+    ]);
+    for (const [index, rawEntry] of payload.entries()) {
+      if (
+        !rawEntry ||
+        typeof rawEntry !== 'object' ||
+        Array.isArray(rawEntry)
+      ) {
+        throw new Error(`History entry ${index} must be an object`);
+      }
+      for (const key of Object.keys(rawEntry)) {
+        if (!allowedFields.has(key)) {
+          throw new Error(
+            `History entry ${index} has unsupported field ${key}`,
+          );
+        }
+      }
+      if (typeof rawEntry.url !== 'string') {
+        throw new Error(`History entry ${index} URL must be a string`);
+      }
+      if (rawEntry.title !== undefined && typeof rawEntry.title !== 'string') {
+        throw new Error(`History entry ${index} title must be a string`);
+      }
+      if (
+        rawEntry.referrerUrl !== undefined &&
+        typeof rawEntry.referrerUrl !== 'string'
+      ) {
+        throw new Error(`History entry ${index} referrerUrl must be a string`);
+      }
+      const url = rawEntry.url.trim();
       if (!/^https?:\/\//i.test(url)) {
         failures.push({
           url,
-          title: rawEntry?.title || '',
+          title: rawEntry.title ?? '',
           reason: url
             ? 'unsupported or invalid web address'
             : 'missing web address',
@@ -6620,7 +6918,7 @@ document
       if (visitTimes.length === 0) {
         failures.push({
           url,
-          title: rawEntry?.title || '',
+          title: rawEntry.title ?? '',
           reason: 'missing visit timestamp',
         });
         continue;
@@ -6628,17 +6926,14 @@ document
       entries.push({
         url,
         title:
-          typeof rawEntry?.title === 'string' && rawEntry.title.trim()
+          typeof rawEntry.title === 'string' && rawEntry.title.trim()
             ? rawEntry.title.trim()
             : null,
         referrerUrl:
-          typeof rawEntry?.referrerUrl === 'string' &&
+          typeof rawEntry.referrerUrl === 'string' &&
           rawEntry.referrerUrl.trim()
             ? rawEntry.referrerUrl.trim()
-            : typeof rawEntry?.referrer_url === 'string' &&
-                rawEntry.referrer_url.trim()
-              ? rawEntry.referrer_url.trim()
-              : null,
+            : null,
         visitTimes,
       });
     }
@@ -6750,8 +7045,7 @@ document
 
 // --- URL Blacklist ---
 async function loadBlacklist() {
-  const list = await loadSettingsValue('urlBlacklist', null);
-  return list ?? [...DEFAULT_URL_BLACKLIST];
+  return loadSettingsValue('urlBlacklist');
 }
 
 async function saveBlacklist(list) {
@@ -6841,12 +7135,13 @@ const TRIM_ACTION_LABEL_KEYS = {
 };
 
 function trimActionLabel(action) {
-  const [key, fallback] = TRIM_ACTION_LABEL_KEYS[action] || [];
-  return key ? tr(key, fallback) : action;
+  const label = TRIM_ACTION_LABEL_KEYS[action];
+  if (!label) throw new Error(`Unknown title trim action: ${action}`);
+  return tr(...label);
 }
 
 async function loadTrimRules() {
-  return await loadSettingsValue('titleTrimRules', []);
+  return loadSettingsValue('titleTrimRules');
 }
 
 async function saveTrimRules(rules) {
@@ -6928,7 +7223,7 @@ chrome.runtime.onMessage.addListener((request) => {
       try {
         await refreshHistoryMetadata();
       } catch (error) {
-        logDebug('history mutation file refresh failed:', error.message);
+        surfaceBackgroundError('History metadata refresh failed', error);
       }
 
       let todayEntries = [];
@@ -6937,15 +7232,12 @@ chrome.runtime.onMessage.addListener((request) => {
           new Date().toISOString().slice(0, 10),
         );
       } catch (error) {
-        logDebug('history mutation log refresh failed:', error.message);
+        surfaceBackgroundError('History mutation refresh failed', error);
         return;
       }
       const historyEntries = todayEntries.filter(
         (e) =>
-          (e.action === 'visit_page' ||
-            e.action === 'leave_page' ||
-            !e.action) &&
-          e.url,
+          (e.action === 'visit_page' || e.action === 'leave_page') && e.url,
       );
       // Only process entries newer than what we've already ingested
       const watermark = historyState._mutationWatermark || 0;
@@ -6965,7 +7257,6 @@ chrome.runtime.onMessage.addListener((request) => {
       historyState._mutationWatermark = maxTs;
       if (changed) {
         cachedFieldRanges = null;
-        queueContentMap = getQueueContentMap(historyEntries);
         if (activeView.type === 'explore' || activeView.type === 'list') {
           runSearchFilterPipeline();
         } else {
@@ -7175,7 +7466,7 @@ async function renderFilterPanelHtml() {
   }
 
   // Device bubbles
-  const deviceIds = [...new Set(historyState.devices || [])].sort();
+  const deviceIds = [...new Set(historyState.devices)].sort();
   if (deviceIds.length > 1) {
     html += `<div class="filter-section"><div class="filter-section-label">${escapeHtml(tr('desktopDevices', 'Devices'))}</div>`;
     html += '<div class="filter-bubbles">';
@@ -7580,7 +7871,6 @@ function bindFilterEvents(container) {
       const deviceId = btn.dataset.deviceId;
       const listSlug = btn.dataset.listSlug;
       if (deviceId) {
-        if (!filterState.devices) filterState.devices = {};
         if (filterState.devices[deviceId] === true) {
           delete filterState.devices[deviceId];
           btn.classList.remove('active');
@@ -7589,7 +7879,6 @@ function bindFilterEvents(container) {
           btn.classList.add('active');
         }
       } else if (listSlug) {
-        if (!filterState.lists) filterState.lists = {};
         if (filterState.lists[listSlug] === true) {
           delete filterState.lists[listSlug];
           btn.classList.remove('active');
@@ -7617,28 +7906,30 @@ async function runEntityScanFilter(pinnedSlugs) {
   const slugs = Object.keys(contexts);
 
   // Build display rows from page entities
-  const now = Date.now();
   const seenUrls = new Set();
   const results = [];
 
   for (const slug of slugs) {
     const page = pages[slug];
-    if (!page?.url || pinnedSlugs.has(slug)) continue;
+    if (pinnedSlugs.has(slug)) continue;
     if (seenUrls.has(page.url)) continue;
     seenUrls.add(page.url);
 
-    const timestamps = page.timestamps || {};
+    const timestamps = page.timestamps;
     const deviceTimestamps = Object.values(timestamps);
     const latestTs =
       deviceTimestamps.length > 0
         ? Math.max(...deviceTimestamps)
-        : page.createdAt || now;
+        : page.createdAt;
+    if (!Number.isFinite(latestTs) || latestTs <= 0) {
+      throw new Error(`Page ${slug} has no canonical timestamp`);
+    }
 
     const d = new Date(latestTs);
     const day =
       d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
 
-    const notes = contexts[slug]?.notes || [];
+    const notes = contexts[slug].notes;
 
     results.push({
       url: page.url,
@@ -7654,17 +7945,17 @@ async function runEntityScanFilter(pinnedSlugs) {
         deviceTimestamps.length > 0
           ? deviceTimestamps.sort((a, b) => b - a)
           : [latestTs],
-      visitDates: page.visitDates || [],
+      visitDates: page.visitDates,
       latestTs,
       deviceIds: new Set(Object.keys(timestamps)),
       hasSnapshots: page.hasSnapshots === true,
-      listSlugs: (contexts[slug]?.lists || []).map((list) => list.slug),
+      listSlugs: contexts[slug].lists.map((list) => list.slug),
       likes: page.likes,
       createdAt: page.createdAt,
       hasHighlightNotes: notes.some((note) => note.excerpt !== null),
-      visitCount: page.visitDates?.length || 1,
-      firstTimestamp: page.createdAt || latestTs,
-      timeOnPage: page.timeOnPage || 0,
+      visitCount: page.visitDates.length,
+      firstTimestamp: page.createdAt ?? latestTs,
+      timeOnPage: page.timeOnPage ?? 0,
       relevance: 0,
     });
   }
@@ -7726,28 +8017,9 @@ async function runSearchFilterPipeline() {
   let results;
   let entityScanUsed = false;
   if (hasActiveFilters) {
-    // Entity-scan shortcut: scan page checkpoints instead of loading all JSONL files.
+    // Page projections are the authoritative filter input.
     results = await runEntityScanFilter(pinnedSlugs);
-    if (results !== null) {
-      entityScanUsed = true;
-    } else {
-      // Fallback: load all JSONL batches (e.g. filesystem not available)
-      showSearchSpinner();
-      while (
-        historyState.loadedFiles.size <
-        Math.min(historyState.files.length, HISTORY_MAX_FILES)
-      ) {
-        await loadHistoryBatch();
-        await new Promise((r) => setTimeout(r, 0));
-      }
-      results = processHistoryForDisplay(
-        historyState.allEntries.filter(
-          (item) => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)),
-        ),
-      ).map((item) => ({ ...item, relevance: 0 }));
-      await enrichFromEntityStorage(results);
-      await enrichForFilters(results);
-    }
+    entityScanUsed = true;
     results = await applyFilters(results);
     hideSearchSpinner();
   } else {
@@ -7963,7 +8235,8 @@ async function openListFocusPanel(listId, listName) {
     let pins = allListPins[listId];
     if (!pins) {
       const projection = await loadListDisplay(listId);
-      pins = projection?.pins || [];
+      if (!projection) throw new Error(`List not found: ${listId}`);
+      pins = projection.pins;
       allListPins[listId] = pins;
     }
 
@@ -7978,7 +8251,7 @@ async function openListFocusPanel(listId, listName) {
       const { pinsResolved } = await resolvePinsForDisplay(pins);
       html += pinsResolved
         .map((r) => {
-          const title = r.user_title || r.title || '<unknown>';
+          const title = r.user_title || r.title || r.url;
           return resultRowHtml(title, r.url, {
             deletable: false,
             attScore: 0,
@@ -8147,7 +8420,9 @@ function initSidebarResize() {
       document.removeEventListener('mouseup', onUp);
       chrome.storage.session
         .set({ sidebarWidth: sidebar.offsetWidth })
-        .catch(() => {});
+        .catch((error) =>
+          surfaceBackgroundError('Could not save sidebar width', error),
+        );
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
@@ -8175,21 +8450,20 @@ function initSidebarToggle() {
 }
 
 async function restoreSidebarWidth() {
-  try {
-    const { sidebarWidth } = await chrome.storage.session.get(['sidebarWidth']);
-    if (sidebarWidth) {
-      const sidebar = document.querySelector('.sidebar');
-      sidebar.style.width = sidebarWidth + 'px';
-      sidebar.style.minWidth = sidebarWidth + 'px';
+  const { sidebarWidth } = await chrome.storage.session.get(['sidebarWidth']);
+  if (sidebarWidth !== undefined) {
+    if (!Number.isFinite(sidebarWidth) || sidebarWidth <= 0) {
+      throw new Error('Stored sidebar width must be a positive number');
     }
-  } catch (e) {
-    /* ignore */
+    const sidebar = document.querySelector('.sidebar');
+    sidebar.style.width = sidebarWidth + 'px';
+    sidebar.style.minWidth = sidebarWidth + 'px';
   }
 }
 
 // ─── Onboarding ─────────────────────────────────────────────────────
 
-function showOnboarding() {
+async function showOnboarding() {
   const el = document.getElementById('onboarding');
   el.style.display = 'flex';
   document.querySelector('.sidebar').style.display = 'none';
@@ -8211,8 +8485,8 @@ function showOnboarding() {
     dirStatus.textContent = '';
     dirStatus.style.color = 'var(--text-secondary, #5E4D3E)';
   }
-  applyDesktopConnectorUi({ state: 'offline', hasToken: false });
-  initializeOnboardingLaunchAtLogin();
+  applyDesktopConnectorUi();
+  await initializeOnboardingLaunchAtLogin();
 
   dirBtn.addEventListener('click', async () => {
     await chooseDesktopDataFolderForOnboarding();
@@ -8249,16 +8523,20 @@ function showOnboarding() {
 }
 
 async function initialize() {
+  if (typeof window.browserRecallDesktopPlatformReady?.then !== 'function') {
+    throw new Error(
+      'Desktop platform adapter did not expose its ready promise',
+    );
+  }
+  await window.browserRecallDesktopPlatformReady;
   bindWindowDragRegions();
   await initializeDesktopLocalization();
   // Apply theme before any rendering to minimize flash
   let currentTheme = await applyTheme();
 
-  const deviceResp = await sendAction({
-    action: 'getDeviceId',
-  });
-  if (!deviceResp?.deviceId) {
-    showOnboarding();
+  const deviceResp = await loadDeviceIdentity();
+  if (!deviceResp.setupComplete) {
+    await showOnboarding();
     markShellReady();
     await updateStorageStatus();
     markAppReady();
@@ -8268,58 +8546,46 @@ async function initialize() {
   await initializeMain(currentTheme, deviceResp);
 }
 
-function settingsValue(settings, key, defaultValue) {
-  const value = settings?.[key];
-  return value !== undefined ? value : defaultValue;
+function settingsValue(settings, key) {
+  if (!Object.prototype.hasOwnProperty.call(settings, key)) {
+    throw new Error(`Desktop settings response is missing ${key}`);
+  }
+  return settings[key];
 }
 
 async function hydrateStartupSettings(currentTheme) {
   const settings = await loadSettings();
   await initializeDesktopLocalization({
-    localeOverride: settingsValue(settings, 'localeOverride', 'system'),
+    localeOverride: settingsValue(settings, 'localeOverride'),
   });
-  const persistedTheme = settingsValue(settings, 'theme', 'system');
+  const persistedTheme = settingsValue(settings, 'theme');
   await chrome.storage.session.set({ theme: persistedTheme });
   currentTheme = await applyTheme();
   document.getElementById('themeSelect').value = currentTheme;
 
-  const savedScheme = settingsValue(settings, 'colorScheme', 'amber');
+  const savedScheme = settingsValue(settings, 'colorScheme');
   applyColorScheme(savedScheme);
   await chrome.storage.session.set({ colorScheme: savedScheme });
 
-  historyState.fileBatch = settingsValue(settings, 'historyFileBatch', 10);
+  historyState.fileBatch = settingsValue(settings, 'historyFileBatch');
   document.getElementById('historyFileBatch').value = historyState.fileBatch;
   document.getElementById('captureSnapshotVideo').checked = settingsValue(
     settings,
     'captureSnapshotVideo',
-    false,
   );
 
-  const blacklistEnabledRaw = settingsValue(settings, 'blacklistEnabled', null);
-  const blacklistEnabled =
-    blacklistEnabledRaw !== null
-      ? blacklistEnabledRaw
-      : settingsValue(settings, 'urlBlacklist', null) !== null || true;
+  const blacklistEnabled = settingsValue(settings, 'blacklistEnabled');
   document.getElementById('blacklistEnabled').checked = blacklistEnabled;
   setAddonOpen(document.getElementById('blacklistBody'), blacklistEnabled);
 
-  const titleTrimRules = settingsValue(settings, 'titleTrimRules', null);
-  const titleCleanupEnabledRaw = settingsValue(
-    settings,
-    'titleCleanupEnabled',
-    null,
-  );
-  const titleCleanupEnabled =
-    titleCleanupEnabledRaw !== null
-      ? titleCleanupEnabledRaw
-      : titleTrimRules !== null && titleTrimRules.length > 0;
+  const titleCleanupEnabled = settingsValue(settings, 'titleCleanupEnabled');
   document.getElementById('titleCleanupEnabled').checked = titleCleanupEnabled;
   setAddonOpen(
     document.getElementById('titleCleanupBody'),
     titleCleanupEnabled,
   );
 
-  const syncEnabled = settingsValue(settings, 'syncEnabled', false);
+  const syncEnabled = settingsValue(settings, 'syncEnabled');
   document.getElementById('syncEnabled').checked = syncEnabled;
   setAddonOpen(document.getElementById('syncConfigFields'), syncEnabled);
   document.getElementById('syncIntervalMinutes')?.closest('.option')?.remove();
@@ -8327,27 +8593,27 @@ async function hydrateStartupSettings(currentTheme) {
   document.getElementById('syncRepoUrl').value = settingsValue(
     settings,
     'syncRepoUrl',
-    '',
   );
   document.getElementById('syncRetentionDays').value = settingsValue(
     settings,
     'syncRetentionDays',
-    7,
   );
 
-  try {
-    const authState = await sendAction({ action: 'getSyncAuthState' });
-    if (authState.hasToken) {
-      const user = authState.githubUser ? `as @${authState.githubUser}` : '';
-      syncShowAuthState('connected', user);
-    } else {
-      syncShowAuthState('disconnected');
-    }
-    document.getElementById('syncRememberToken').checked =
-      authState.rememberToken;
-  } catch {
+  const authState = await sendAction({ action: 'getSyncAuthState' });
+  if (typeof authState.hasToken !== 'boolean') {
+    throw new Error('Sync auth response hasToken must be a boolean');
+  }
+  if (typeof authState.rememberToken !== 'boolean') {
+    throw new Error('Sync auth response rememberToken must be a boolean');
+  }
+  if (authState.hasToken) {
+    const user = authState.githubUser ? `as @${authState.githubUser}` : '';
+    syncShowAuthState('connected', user);
+  } else {
     syncShowAuthState('disconnected');
   }
+  document.getElementById('syncRememberToken').checked =
+    authState.rememberToken;
 
   renderBlacklist();
   renderTrimRules();
@@ -8365,20 +8631,16 @@ async function initializeMain(currentTheme, deviceResp = null) {
     );
 
   // Check for service downtime (paused state) and show error banner if set
-  try {
-    const { serviceError: svcErr } = await chrome.storage.session.get([
-      'serviceError',
-    ]);
-    if (svcErr) {
-      showServiceErrorBanner(svcErr);
-    }
-  } catch {}
+  const { serviceError: svcErr } = await chrome.storage.session.get([
+    'serviceError',
+  ]);
+  if (svcErr) {
+    showServiceErrorBanner(svcErr);
+  }
 
   // Verify device identity from daemon app config.
-  deviceResp ||= await sendAction({
-    action: 'getDeviceId',
-  });
-  if (!deviceResp?.deviceId) {
+  deviceResp ||= await loadDeviceIdentity();
+  if (!deviceResp.setupComplete) {
     throw new Error(
       tr(
         'desktopDeviceIdentityRestart',
@@ -8551,7 +8813,13 @@ document.addEventListener('keydown', async (e) => {
     let text;
     try {
       text = await navigator.clipboard.readText();
-    } catch {
+    } catch (error) {
+      showErrorBubble(
+        tr('desktopErrorPrefix', `Could not read clipboard: ${error.message}`, [
+          error.message,
+        ]),
+        { suffix: '' },
+      );
       return;
     }
     // Extract URLs from angle-bracket format: <url>

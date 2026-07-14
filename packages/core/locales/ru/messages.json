@@ -211,10 +211,6 @@
     "message": "Хранятся локально в виде удобочитаемых файлов JSONL, упорядоченных по дате. Откройте их в любом текстовом редакторе или обработайте с помощью jq.",
     "description": "Desktop local data storage help text."
   },
-  "desktopDefaultBrowserProfile": {
-    "message": "Профиль по умолчанию",
-    "description": "Fallback browser profile name."
-  },
   "desktopDebugLogging": {
     "message": "Журнал отладки (сбрасывается при перезапуске)",
     "description": "Desktop debug logging setting."

@@ -42,10 +42,11 @@ fn snapshot_path(slug: &str, timestamp: i64) -> String {
 }
 
 fn list(slug: &str, name: &str) -> ListEntity {
-    let mut list = ListEntity::new(slug.to_string());
-    list.name = name.to_string();
-    list.owner = Some("test-device".to_string());
-    list
+    ListEntity::new(
+        slug.to_string(),
+        name.to_string(),
+        "test-device".to_string(),
+    )
 }
 
 fn load_from(
@@ -210,7 +211,8 @@ fn pin_to_list_log_schema_uses_urls_and_aligned_titles() {
         "name": "Reading",
         "listOwner": "device-a",
         "urls": ["https://a.com", "https://b.com"],
-        "titles": ["A", null]
+        "titles": ["A", null],
+        "source": null
     }))
     .expect("pin schema parses");
 
@@ -240,7 +242,9 @@ fn note_log_schema_accepts_only_string_array_text_values() {
         "action": "create_note",
         "url": "https://a.com",
         "path": "objects/notes/n1.json",
+        "title": null,
         "excerpt": ["first", "second"],
+        "note": null,
         "cssPath": ["body > p:nth-of-type(1)", "body > p:nth-of-type(2)"]
     }))
     .expect("note schema parses arrays");
@@ -259,7 +263,10 @@ fn note_log_schema_accepts_only_string_array_text_values() {
         "action": "create_note",
         "url": "https://a.com",
         "path": "objects/notes/n1.json",
-        "excerpt": "first"
+        "title": null,
+        "excerpt": "first",
+        "note": null,
+        "cssPath": null
     }));
     assert!(invalid.is_err());
 }
@@ -1170,7 +1177,14 @@ async fn replace_note_links_new_note_and_deletes_old_note() {
         .expect("new note written");
     assert!(!page.child_ids.contains(&"note:n1".to_string()));
     assert!(page.child_ids.contains(&"note:n2".to_string()));
-    assert!(result.get("note:n1").expect("old note deleted").is_delete());
+    let old_note = result
+        .get("note:n1")
+        .and_then(EntityEffect::as_note)
+        .expect("old note retained as a replacement tombstone");
+    assert!(old_note.deleted);
+    assert_eq!(old_note.deleted_ts, Some(200));
+    assert_eq!(old_note.deletion_reason.as_deref(), Some("replaced"));
+    assert_eq!(old_note.replaced_by.as_deref(), Some("note:n2"));
     assert_eq!(new_note.url.as_deref(), Some("https://a.com"));
     assert_eq!(
         new_note.excerpt.as_ref(),
@@ -1245,7 +1259,14 @@ async fn replace_note_transfers_pins_and_removes_old_note_from_recycle_bin() {
     assert!(list.pins.iter().any(|pin| pin.id == "note:n2"));
     assert!(!list.pins.iter().any(|pin| pin.id == "note:n1"));
     assert!(!orphaned.entries.iter().any(|entry| entry.key == "note:n1"));
-    assert!(result.get("note:n1").expect("old note deleted").is_delete());
+    let old_note = result
+        .get("note:n1")
+        .and_then(EntityEffect::as_note)
+        .expect("old note retained as a replacement tombstone");
+    assert!(old_note.deleted);
+    assert_eq!(old_note.deleted_ts, Some(100));
+    assert_eq!(old_note.deletion_reason.as_deref(), Some("replaced"));
+    assert_eq!(old_note.replaced_by.as_deref(), Some("note:n2"));
 }
 
 #[tokio::test]
@@ -1303,7 +1324,14 @@ async fn replace_note_proceeds_when_old_note_was_already_deleted() {
         .and_then(EntityEffect::as_note)
         .expect("new note created");
     assert!(page.child_ids.contains(&"note:n2".to_string()));
-    assert!(result.get("note:n1").expect("old note deleted").is_delete());
+    let old_note = result
+        .get("note:n1")
+        .and_then(EntityEffect::as_note)
+        .expect("old note retained as a replacement tombstone");
+    assert!(old_note.deleted);
+    assert_eq!(old_note.deleted_ts, Some(100));
+    assert_eq!(old_note.deletion_reason.as_deref(), Some("replaced"));
+    assert_eq!(old_note.replaced_by.as_deref(), Some("note:n2"));
     assert_eq!(new_note.url.as_deref(), Some("https://a.com"));
 }
 
@@ -1358,7 +1386,14 @@ async fn replace_note_replay_is_idempotent() {
         1
     );
     assert!(!page.child_ids.contains(&"note:n1".to_string()));
-    assert!(!replayed.contains_key("note:n1"));
+    let old_note = match replayed.get("note:n1") {
+        Some(Entity::Note(note)) => note,
+        _ => panic!("replacement tombstone missing"),
+    };
+    assert!(old_note.deleted);
+    assert_eq!(old_note.deleted_ts, Some(100));
+    assert_eq!(old_note.deletion_reason.as_deref(), Some("replaced"));
+    assert_eq!(old_note.replaced_by.as_deref(), Some("note:n2"));
     assert!(!orphaned.entries.iter().any(|entry| entry.key == "note:n1"));
 }
 
@@ -1503,7 +1538,19 @@ async fn permanent_delete_snapshot_unlinks_page_and_deletes_unretained_checkpoin
     retained_page.child_ids = vec![snapshot_key.clone()];
     retained_page.timestamps.insert("older".to_string(), 150);
 
-    let store = BTreeMap::from([(page_key.clone(), Entity::Page(retained_page))]);
+    let store = BTreeMap::from([
+        (page_key.clone(), Entity::Page(retained_page)),
+        (
+            "manifest:orphaned".to_string(),
+            Entity::Orphaned(OrphanedManifest {
+                timestamps: Default::default(),
+                entries: vec![OrphanedEntry {
+                    key: snapshot_key.clone(),
+                    url: Some("https://snap.example/article".to_string()),
+                }],
+            }),
+        ),
+    ]);
     let result = effect_of(
         LogEntry::PermanentDelete {
             timestamp: 250,
@@ -1593,6 +1640,16 @@ async fn permanent_delete_list_cleans_pages_tree_and_name_manifest() {
             "manifest:list-order".to_string(),
             Entity::ListOrder(list_order),
         ),
+        (
+            "manifest:orphaned".to_string(),
+            Entity::Orphaned(OrphanedManifest {
+                timestamps: Default::default(),
+                entries: vec![OrphanedEntry {
+                    key: target_list_key.clone(),
+                    url: None,
+                }],
+            }),
+        ),
     ]);
 
     let result = effect_of(
@@ -1678,6 +1735,16 @@ async fn permanent_delete_page_removes_matching_list_pins() {
         (
             "manifest:name-to-id".to_string(),
             Entity::NameToId(name_map),
+        ),
+        (
+            "manifest:orphaned".to_string(),
+            Entity::Orphaned(OrphanedManifest {
+                timestamps: Default::default(),
+                entries: vec![OrphanedEntry {
+                    key: page_key.clone(),
+                    url: None,
+                }],
+            }),
         ),
     ]);
 
@@ -1808,8 +1875,8 @@ async fn update_setting_preserves_unrelated_keys_and_replay_is_idempotent() {
 }
 
 #[tokio::test]
-async fn update_setting_ignores_keys_outside_persistent_schema() {
-    let result = effect_of(
+async fn update_setting_rejects_keys_outside_persistent_schema() {
+    let error = effect_of(
         LogEntry::UpdateSetting {
             timestamp: 100,
             key: "archiveQuality".to_string(),
@@ -1819,12 +1886,28 @@ async fn update_setting_ignores_keys_outside_persistent_schema() {
         context(),
     )
     .await
-    .expect("settings replay succeeds");
+    .expect_err("unknown settings keys must stop replay");
 
-    assert!(
-        result.is_empty(),
-        "unused legacy setting keys should not affect replayed projections"
-    );
+    assert!(error.to_string().contains("Unknown settings key"));
+}
+
+#[tokio::test]
+async fn update_setting_rejects_invalid_values() {
+    let error = effect_of(
+        LogEntry::UpdateSetting {
+            timestamp: 100,
+            key: "historyFileBatch".to_string(),
+            value: json!(0),
+        },
+        |_| ready(None),
+        context(),
+    )
+    .await
+    .expect_err("invalid settings values must stop replay");
+
+    assert!(error
+        .to_string()
+        .contains("historyFileBatch must be an integer greater than or equal to 1"));
 }
 
 #[tokio::test]
@@ -1908,6 +1991,58 @@ async fn create_and_update_list_refresh_manifests() {
         Some(&"reading-list".to_string())
     );
     assert!(!renamed_map.paths.contains_key("test-device/Reading"));
+}
+
+#[tokio::test]
+async fn update_list_rename_replay_is_idempotent() {
+    let store = BTreeMap::from([
+        (
+            "manifest:name-to-id".to_string(),
+            Entity::NameToId(NameToIdManifest::new()),
+        ),
+        (
+            "manifest:list-order".to_string(),
+            Entity::ListOrder(ListOrderManifest::new()),
+        ),
+    ]);
+    let create = LogEntry::CreateList {
+        timestamp: 100,
+        name: "Reading".to_string(),
+        list_owner: "test-device".to_string(),
+        list_id: Some("reading-list".to_string()),
+        parent_list_id: None,
+    };
+    let rename = LogEntry::UpdateList {
+        timestamp: 200,
+        name: "Reading".to_string(),
+        list_owner: "test-device".to_string(),
+        new_name: Some("Reading Later".to_string()),
+    };
+
+    let replayed = replay_sequence(
+        store,
+        vec![
+            (create, context()),
+            (rename.clone(), context()),
+            (rename, context()),
+        ],
+    )
+    .await;
+
+    let list = match replayed.get("list:reading-list") {
+        Some(Entity::List(list)) => list,
+        _ => panic!("renamed list missing"),
+    };
+    assert_eq!(list.name, "Reading Later");
+    let name_map = match replayed.get("manifest:name-to-id") {
+        Some(Entity::NameToId(name_map)) => name_map,
+        _ => panic!("name-to-id manifest missing"),
+    };
+    assert_eq!(
+        name_map.paths.get("test-device/Reading Later"),
+        Some(&"reading-list".to_string())
+    );
+    assert!(!name_map.paths.contains_key("test-device/Reading"));
 }
 
 #[tokio::test]
@@ -2299,7 +2434,7 @@ async fn add_update_remove_rule_mutates_list_rules() {
 }
 
 #[tokio::test]
-async fn add_rule_is_idempotent_and_noops_for_unknown_list() {
+async fn add_rule_is_idempotent_and_rejects_unknown_list() {
     let mut store = BTreeMap::new();
     store.insert(
         "manifest:name-to-id".to_string(),
@@ -2334,7 +2469,7 @@ async fn add_rule_is_idempotent_and_noops_for_unknown_list() {
     };
     assert_eq!(list.rules.len(), 1);
 
-    let missing = effect_of(
+    let error = effect_of(
         LogEntry::AddRule {
             timestamp: 100,
             name: "Missing".to_string(),
@@ -2349,8 +2484,11 @@ async fn add_rule_is_idempotent_and_noops_for_unknown_list() {
         context(),
     )
     .await
-    .expect("missing list add rule replay succeeds");
-    assert!(missing.is_empty());
+    .expect_err("missing list add rule must fail");
+    assert_eq!(
+        error.to_string(),
+        "invalid log entry: list not found: test-device/Missing"
+    );
 }
 
 #[tokio::test]
@@ -2730,6 +2868,34 @@ async fn create_list_uses_provided_list_id() {
 }
 
 #[tokio::test]
+async fn create_list_rejects_empty_explicit_ids() {
+    for entry in [
+        LogEntry::CreateList {
+            timestamp: 100,
+            name: "Cinema".to_string(),
+            list_owner: "test-device".to_string(),
+            list_id: Some(" ".to_string()),
+            parent_list_id: None,
+        },
+        LogEntry::CreateList {
+            timestamp: 100,
+            name: "Cinema".to_string(),
+            list_owner: "test-device".to_string(),
+            list_id: Some("cinema-gfl1h7".to_string()),
+            parent_list_id: Some(" ".to_string()),
+        },
+    ] {
+        let error = effect_of(entry, load_from(BTreeMap::new()), context())
+            .await
+            .expect_err("empty explicit list IDs must fail replay");
+        assert!(
+            error.to_string().contains("must be a non-empty string"),
+            "unexpected error: {error}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn delete_list_soft_deletes_and_orphans_list() {
     let mut store = BTreeMap::new();
     store.insert(
@@ -2957,22 +3123,36 @@ async fn restore_list_readds_tree_name_map_and_unorphans() {
 
 #[tokio::test]
 async fn update_list_tree_writes_new_structure_and_timestamp() {
-    let store = BTreeMap::from([(
-        "manifest:list-order".to_string(),
-        Entity::ListOrder(ListOrderManifest {
-            timestamps: Default::default(),
-            tree: vec![
-                TreeNode {
-                    id: "list:a-id".to_string(),
-                    children: Vec::new(),
-                },
-                TreeNode {
-                    id: "list:b-id".to_string(),
-                    children: Vec::new(),
-                },
-            ],
-        }),
-    )]);
+    let store = BTreeMap::from([
+        (
+            "manifest:name-to-id".to_string(),
+            Entity::NameToId(NameToIdManifest {
+                timestamps: Default::default(),
+                paths: BTreeMap::from([
+                    ("test-device/A".to_string(), "a-id".to_string()),
+                    ("test-device/B".to_string(), "b-id".to_string()),
+                ]),
+            }),
+        ),
+        (
+            "manifest:list-order".to_string(),
+            Entity::ListOrder(ListOrderManifest {
+                timestamps: Default::default(),
+                tree: vec![
+                    TreeNode {
+                        id: "list:a-id".to_string(),
+                        children: Vec::new(),
+                    },
+                    TreeNode {
+                        id: "list:b-id".to_string(),
+                        children: Vec::new(),
+                    },
+                ],
+            }),
+        ),
+        ("list:a-id".to_string(), Entity::List(list("a-id", "A"))),
+        ("list:b-id".to_string(), Entity::List(list("b-id", "B"))),
+    ]);
     let new_tree = vec![TreeNode {
         id: "list:a-id".to_string(),
         children: vec![TreeNode {
@@ -3699,8 +3879,16 @@ async fn two_devices_replacing_same_note_preserves_both_new_notes() {
         };
         assert!(page.child_ids.contains(&"note:newY".to_string()));
         assert!(page.child_ids.contains(&"note:newZ".to_string()));
-        assert!(!state.contains_key("note:n1"));
+        let old_note = match state.get("note:n1") {
+            Some(Entity::Note(note)) => note,
+            _ => panic!("replacement tombstone missing"),
+        };
+        assert!(old_note.deleted);
+        assert_eq!(old_note.deleted_ts, Some(20));
+        assert_eq!(old_note.deletion_reason.as_deref(), Some("replaced"));
+        assert_eq!(old_note.replaced_by.as_deref(), Some("note:newZ"));
     }
+    assert_eq!(state_a, state_b);
 }
 
 #[tokio::test]
@@ -3941,10 +4129,26 @@ async fn list_restore_then_delete_converges_to_deleted_state() {
 
 #[tokio::test]
 async fn tree_updates_converge_with_newest_timestamp_winning() {
-    let base = BTreeMap::from([(
-        "manifest:list-order".to_string(),
-        Entity::ListOrder(ListOrderManifest::new()),
-    )]);
+    let base = BTreeMap::from([
+        (
+            "manifest:name-to-id".to_string(),
+            Entity::NameToId(NameToIdManifest {
+                timestamps: Default::default(),
+                paths: BTreeMap::from([
+                    ("test-device/A".to_string(), "a".to_string()),
+                    ("test-device/B".to_string(), "b".to_string()),
+                    ("test-device/C".to_string(), "c".to_string()),
+                ]),
+            }),
+        ),
+        (
+            "manifest:list-order".to_string(),
+            Entity::ListOrder(ListOrderManifest::new()),
+        ),
+        ("list:a".to_string(), Entity::List(list("a", "A"))),
+        ("list:b".to_string(), Entity::List(list("b", "B"))),
+        ("list:c".to_string(), Entity::List(list("c", "C"))),
+    ]);
     let older = LogEntry::UpdateListTree {
         timestamp: 10,
         tree: vec![

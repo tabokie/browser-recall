@@ -1,6 +1,13 @@
 import { test, expect } from './fixtures.js';
 import crypto from 'crypto';
-import { resetAndSeed, openHelperPage, getSlugForUrl } from './helpers.js';
+import {
+  resetAndSeed,
+  settingsCheckpoint,
+  openHelperPage,
+  getSlugForUrl,
+  pageEntityFixture,
+  listEntityFixture,
+} from './helpers.js';
 
 function pagePath(slug) {
   const shard = crypto
@@ -47,10 +54,10 @@ test.describe('Sync conflicts — multi-device hydration', () => {
     const slug = getSlugForUrl(PAGE_URL);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { syncEnabled: true } },
+      settingsCheckpoint({ syncEnabled: true }),
       {
         path: pagePath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: PAGE_URL,
           title: 'Conflict Page',
@@ -58,7 +65,7 @@ test.describe('Sync conflicts — multi-device hydration', () => {
           childIds: [],
           timestamps: {},
           likes: 0,
-        },
+        }),
       },
       {
         path: logPath('dev-a'),
@@ -68,6 +75,7 @@ test.describe('Sync conflicts — multi-device hydration', () => {
             action: 'rate_page',
             url: PAGE_URL,
             likes: 1,
+            title: null,
           },
         ],
       },
@@ -79,6 +87,7 @@ test.describe('Sync conflicts — multi-device hydration', () => {
             action: 'rate_page',
             url: PAGE_URL,
             likes: 1,
+            title: null,
           },
         ],
       },
@@ -109,29 +118,30 @@ test.describe('Sync conflicts — multi-device hydration', () => {
     const listName = 'Pin Target';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { syncEnabled: true } },
+      settingsCheckpoint({ syncEnabled: true }),
       {
         path: pagePath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: PAGE_URL,
           title: 'Pinned Page',
           parentIds: [],
           childIds: [],
           timestamps: {},
-        },
+        }),
       },
       {
         path: listPath(listId),
-        data: {
+        data: listEntityFixture({
           slug: listId,
           name: listName,
           owner: 'dev-local',
           timestamps: {},
           pins: [],
+          rules: [],
           deleted: true,
           deletedTs: 1774406400050,
-        },
+        }),
       },
       {
         path: 'views/manifest/list-order.json',
@@ -148,7 +158,7 @@ test.describe('Sync conflicts — multi-device hydration', () => {
         path: 'views/manifest/orphaned.json',
         data: {
           timestamps: {},
-          entries: [{ key: `list:${listId}` }],
+          entries: [{ key: `list:${listId}`, url: null }],
         },
       },
       // Remote device: pin a page (ts=200), then restore the list (ts=300)
@@ -161,6 +171,8 @@ test.describe('Sync conflicts — multi-device hydration', () => {
             name: listName,
             listOwner: 'dev-local',
             urls: [PAGE_URL],
+            titles: null,
+            source: null,
           },
           {
             timestamp: 1774406400300,

@@ -50,6 +50,16 @@ describe('generateSlugFromUrl', () => {
     expect(() => generateSlugFromUrl('not-a-url')).toThrow();
   });
 
+  it('rejects non-web URLs instead of assigning them page identity', () => {
+    for (const url of [
+      'file:///tmp/page.html',
+      'mailto:person@example.com',
+      'ftp://example.com/page',
+    ]) {
+      expect(() => generateSlugFromUrl(url)).toThrow(/HTTP or HTTPS/);
+    }
+  });
+
   it('truncates long slugs to 80 chars', () => {
     const longPath = '/a'.repeat(100);
     const slug = generateSlugFromUrl(`https://example.com${longPath}`);

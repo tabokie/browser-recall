@@ -35,11 +35,7 @@ async function handleFlushDesktopQueueForTest(request) {
     await control.clearDesktopBuffer();
   }
   await control.resetEphemeralConnectorState();
-  await control.flushDesktopBuffer().catch((error) => {
-    logDebug('[connector] test queue flush failed:', error.message);
-    return null;
-  });
-  await control.ensureDefaultLists();
+  await control.flushDesktopBuffer();
   return { success: true };
 }
 
@@ -170,10 +166,23 @@ async function handleTriggerCommandForTest(request) {
   if (!listeners.length) {
     return { success: false, error: 'No command listeners registered' };
   }
+  let commandResult = null;
   for (const listener of listeners) {
-    await listener(command);
+    const result = await listener(command);
+    if (
+      !result ||
+      typeof result !== 'object' ||
+      typeof result.success !== 'boolean'
+    ) {
+      return {
+        success: false,
+        error: 'Command listener returned an invalid completion result',
+      };
+    }
+    if (result.success !== true) return result;
+    commandResult = result;
   }
-  return { success: true };
+  return commandResult;
 }
 
 const testMessageHandlers = new Map([

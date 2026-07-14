@@ -49,13 +49,15 @@ describe('captureAndLog content validation', () => {
     ).toBe(true);
   });
 
-  it('does not ignore extension runtime failures while probing the content script', () => {
+  it('requires the PDF capability probe instead of continuing after a receiver failure', () => {
     const captureAndLogMatch = bgSource.match(
       /async function captureAndLog[\s\S]*?^}/m,
     );
     expect(captureAndLogMatch).not.toBeNull();
-    expect(captureAndLogMatch[0]).toContain('isExtensionRuntimeFailure(e)');
-    expect(captureAndLogMatch[0]).toContain('throw e');
+    expect(captureAndLogMatch[0]).toContain(
+      "throw new Error('PDF capability response is invalid')",
+    );
+    expect(captureAndLogMatch[0]).not.toContain('proceed with capture');
   });
 });
 
@@ -103,7 +105,7 @@ describe('capture paths send error notifications', () => {
 
   it('keyboard like path notifies the page when rating fails', () => {
     const likeCommandMatch = bgSource.match(
-      /else if\s*\(command === 'like-page' \|\| command === 'dislike-page'\)[\s\S]*?}\s*\}\s*\);/,
+      /else if\s*\(command === 'like-page' \|\| command === 'dislike-page'\)[\s\S]*?return \{ success: false, error: `Unknown browser command:/,
     );
     expect(likeCommandMatch).not.toBeNull();
     expect(likeCommandMatch[0]).toContain('notifyTabUserActionError');
@@ -196,7 +198,13 @@ describe('savepage bridge uses capture-scoped Desktop settings', () => {
     expect(bridgeSource).not.toContain(
       'chrome.storage.session.get("manifest:settings"',
     );
-    expect(bridgeSource).toContain('settings: settings || {}');
+    expect(bridgeSource).not.toContain('settings: settings || {}');
+    expect(bridgeSource).toContain(
+      'Snapshot capture settings must be an object',
+    );
+    expect(bridgeSource).toContain(
+      'Snapshot capture setting captureSnapshotVideo must be a boolean',
+    );
     expect(bridgeSource).toContain('captureSessions.set(tabId, session)');
     expect(bridgeSource).toContain('captureSessions.delete(tabId)');
   });

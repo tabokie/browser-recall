@@ -1,10 +1,9 @@
-use browser_recall_replay::entities::{ListEntity, RuleEntity};
+use browser_recall_replay::entities::ListEntity;
 use rquickjs::{Context, Function, Runtime};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
-use tracing::warn;
 use url::Url;
 
 const BANNED_GLOBALS: &[&str] = &[
@@ -55,29 +54,30 @@ pub struct RuleMatch {
     pub r#match: bool,
 }
 
-pub fn page_data_from_raw_entry(entry: &Value) -> Option<PageData> {
-    let object = entry.as_object()?;
-    let url = object.get("url")?.as_str()?.to_string();
+pub fn page_data_from_raw_entry(entry: &Value) -> Result<PageData, String> {
+    let object = entry
+        .as_object()
+        .ok_or_else(|| "Rule page data must be an object".to_string())?;
+    let url = object
+        .get("url")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Rule page data requires a string url".to_string())?
+        .to_string();
     let title = object
         .get("title")
         .and_then(Value::as_str)
-        .unwrap_or_default()
+        .ok_or_else(|| "Rule page data requires a string title".to_string())?
         .to_string();
-    let body = object
-        .get("bodyPreview")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .or_else(|| {
-            object
-                .get("body")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        });
-    Some(PageData { title, url, body })
-}
-
-pub fn list_matches_page(list: &ListEntity, page: &PageData) -> bool {
-    list.rules.iter().any(|rule| match_rule(rule, page))
+    if object.contains_key("body") {
+        return Err("Rule page data does not accept legacy body; use bodyPreview".to_string());
+    }
+    let body_value = object.get("bodyPreview");
+    let body = match body_value {
+        Some(Value::String(body)) => Some(body.clone()),
+        Some(Value::Null) | None => None,
+        Some(_) => return Err("Rule page body must be a string or null".to_string()),
+    };
+    Ok(PageData { title, url, body })
 }
 
 pub fn match_list_rules_strict(
@@ -154,29 +154,19 @@ pub fn validate_fn_rule_source(fn_source: &str) -> ValidationResult {
     }
 }
 
-fn match_rule(rule: &RuleEntity, page: &PageData) -> bool {
-    match rule.rule_type.as_str() {
-        "keyword" => match_keyword_rule(&rule.config, page),
-        "function" => match execute_function_rule(&rule.config, page) {
-            Ok(result) => result,
-            Err(error) => {
-                warn!(rule_id = rule.id.as_str(), error = %error, "function rule evaluation failed");
-                false
-            }
-        },
-        _ => false,
-    }
-}
-
 fn evaluate_rule_strict(
     rule_type: &str,
     config: &BTreeMap<String, Value>,
     page: &PageData,
 ) -> Result<bool, String> {
+    validate_rule(&RuleSpec {
+        rule_type: rule_type.to_string(),
+        config: config.clone(),
+    })?;
     match rule_type {
         "keyword" => Ok(match_keyword_rule(config, page)),
         "function" => execute_function_rule(config, page),
-        _ => Ok(false),
+        unknown => Err(format!("Unsupported rule type: {unknown}")),
     }
 }
 
@@ -184,10 +174,7 @@ fn match_keyword_rule(config: &BTreeMap<String, Value>, page: &PageData) -> bool
     let pattern = config
         .get("pattern")
         .and_then(Value::as_str)
-        .unwrap_or_default();
-    if pattern.is_empty() {
-        return false;
-    }
+        .expect("validated keyword rule pattern");
 
     if pattern.starts_with('/') && pattern.ends_with('/') && pattern.len() >= 2 {
         let expression = format!("(?i){}", &pattern[1..pattern.len() - 1]);
@@ -226,6 +213,7 @@ const __parseUrl = globalThis.__brParseUrl;
 class URL {{
   constructor(input) {{
     const parsed = JSON.parse(__parseUrl(String(input)));
+    if (parsed.error) throw new TypeError(parsed.error);
     this.href = String(input);
     this.pathname = parsed.pathname;
     this.search = parsed.search;
@@ -250,9 +238,9 @@ Boolean((function(page) {{
     let result = context.with(|ctx| {
         let parse_url = Function::new(ctx.clone(), |input: String| -> String {
             match ParsedUrl::parse(&input) {
-                Ok(parsed) => serde_json::to_string(&parsed).unwrap_or_else(|_| "{}".to_string()),
-                Err(_) => "{\"pathname\":\"\",\"search\":\"\",\"hash\":\"\",\"searchParams\":[]}"
-                    .to_string(),
+                Ok(parsed) => serde_json::to_string(&parsed)
+                    .expect("ParsedUrl contains only JSON-serializable fields"),
+                Err(error) => serde_json::json!({ "error": error.to_string() }).to_string(),
             }
         })?;
         ctx.globals().set("__brParseUrl", parse_url)?;
@@ -264,6 +252,12 @@ Boolean((function(page) {{
 }
 
 fn compile_function_rule(config: &BTreeMap<String, Value>) -> Result<(), String> {
+    if config.len() != 2 || !config.contains_key("description") || !config.contains_key("fnSource")
+    {
+        return Err(
+            "Function rule config must contain exactly description and fnSource".to_string(),
+        );
+    }
     let description = config
         .get("description")
         .and_then(Value::as_str)
@@ -327,7 +321,7 @@ impl ParsedUrl {
 #[cfg(test)]
 mod tests {
     use super::{
-        list_matches_page, page_data_from_raw_entry, validate_fn_rule_source, validate_rule,
+        match_list_rules_strict, page_data_from_raw_entry, validate_fn_rule_source, validate_rule,
         PageData, RuleSpec,
     };
     use browser_recall_replay::entities::{ListEntity, RuleEntity};
@@ -338,13 +332,19 @@ mod tests {
         ListEntity {
             slug: "reading".to_string(),
             name: "Reading".to_string(),
-            owner: Some("test-device".to_string()),
+            owner: "test-device".to_string(),
             pins: Vec::new(),
             rules: vec![rule],
             timestamps: HashMap::new(),
             deleted: false,
             deleted_ts: None,
         }
+    }
+
+    fn list_matches_page(list: &ListEntity, page: &PageData) -> bool {
+        !match_list_rules_strict(list, page)
+            .expect("valid test rule")
+            .is_empty()
     }
 
     #[test]
@@ -365,6 +365,18 @@ mod tests {
                 body: Some("Hello world".to_string()),
             }
         );
+    }
+
+    #[test]
+    fn rejects_legacy_rule_body_field() {
+        let error = page_data_from_raw_entry(&json!({
+            "url": "https://example.com/page",
+            "title": "Example",
+            "body": "legacy body"
+        }))
+        .expect_err("legacy body field must be rejected");
+
+        assert!(error.contains("body"));
     }
 
     #[test]

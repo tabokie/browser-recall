@@ -1,10 +1,13 @@
 import { test, expect } from './fixtures.js';
 import {
   resetAndSeed,
+  settingsCheckpoint,
   openHelperPage,
   getExtensionMessage,
   getSlugForUrl,
   pageCheckpointPath,
+  pageEntityFixture,
+  noteEntityFixture,
 } from './helpers.js';
 
 async function readPageEntity(helper, url) {
@@ -30,6 +33,7 @@ async function waitForPageEntity(helper, url, timeoutMs = 2500) {
 
 async function waitForHistoryEntry(helper, predicate, timeoutMs = 3000) {
   const deadline = Date.now() + timeoutMs;
+  let lastEntries = [];
   while (Date.now() < deadline) {
     const entries = await helper.evaluate(async () => {
       await chrome.runtime.sendMessage({ action: 'flushDesktopQueue' });
@@ -42,15 +46,21 @@ async function waitForHistoryEntry(helper, predicate, timeoutMs = 3000) {
         action: 'readDesktopValue',
         key: `log:${today}`,
       });
-      return resp?.value || [];
+      if (resp?.success !== true || !Array.isArray(resp.value)) {
+        throw new Error(`History read failed: ${JSON.stringify(resp)}`);
+      }
+      return resp.value;
     });
+    lastEntries = entries;
     const match = entries.find(predicate);
     if (match) return match;
     await helper.evaluate(
       () => new Promise((resolve) => setTimeout(resolve, 100)),
     );
   }
-  return null;
+  throw new Error(
+    `Timed out waiting for history entry: ${JSON.stringify(lastEntries)}`,
+  );
 }
 
 async function getBadgeForUrl(helper, url) {
@@ -134,9 +144,7 @@ test.describe('extension same-tab navigation regressions', () => {
       `,
     });
 
-    await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
-    ]);
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
 
     const entryUrl = localServer.url('/spa-entry');
     const firstUrl = localServer.url('/spa-a');
@@ -152,9 +160,10 @@ test.describe('extension same-tab navigation regressions', () => {
 
     await page.click('#go');
     await expect(page).toHaveURL(secondUrl);
-    await helper.evaluate(() =>
+    const flushResponse = await helper.evaluate(() =>
       chrome.runtime.sendMessage({ action: 'flushDesktopQueue' }),
     );
+    expect(flushResponse).toMatchObject({ success: true });
 
     const secondEntity = await waitForPageEntity(helper, secondUrl);
     expect(secondEntity).toMatchObject({
@@ -226,48 +235,68 @@ test.describe('extension same-tab navigation regressions', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(firstSlug),
-        data: {
+        data: pageEntityFixture({
           slug: firstSlug,
           url: firstUrl,
           title: 'SPA Highlight A',
           childIds: [`note:${firstNoteSlug}`],
           parentIds: [],
           timestamps: { 'test-device': now },
-        },
+          createdAt: now,
+          visitDates: [],
+          scrollDepth: null,
+          timeOnPage: null,
+          user_title: null,
+          likes: null,
+        }),
       },
       {
         path: `objects/notes/${firstNoteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: firstNoteSlug,
           excerpt: ['Alpha route highlighted text.'],
           note: '',
           cssPath: ['p#alpha'],
           url: firstUrl,
-        },
+          deleted: false,
+          deletedTs: null,
+          deletionReason: null,
+          replacedBy: null,
+        }),
       },
       {
         path: pageCheckpointPath(secondSlug),
-        data: {
+        data: pageEntityFixture({
           slug: secondSlug,
           url: secondUrl,
           title: 'SPA Highlight B',
           childIds: [`note:${secondNoteSlug}`],
           parentIds: [],
           timestamps: { 'test-device': now },
-        },
+          createdAt: now,
+          visitDates: [],
+          scrollDepth: null,
+          timeOnPage: null,
+          user_title: null,
+          likes: null,
+        }),
       },
       {
         path: `objects/notes/${secondNoteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: secondNoteSlug,
           excerpt: ['Beta route highlighted text.'],
           note: '',
           cssPath: ['p#beta'],
           url: secondUrl,
-        },
+          deleted: false,
+          deletedTs: null,
+          deletionReason: null,
+          replacedBy: null,
+        }),
       },
     ]);
 
@@ -333,27 +362,27 @@ test.describe('extension same-tab navigation regressions', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: pageUrl,
           title: 'SPA Highlight PDF',
           childIds: [`note:${noteSlug}`],
           parentIds: [],
           timestamps: { 'test-device': now },
-        },
+        }),
       },
       {
         path: `objects/notes/${noteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug,
           excerpt: ['Alpha route highlighted text.'],
           note: '',
           cssPath: ['p#alpha'],
           url: pageUrl,
-        },
+        }),
       },
     ]);
 
@@ -413,38 +442,38 @@ test.describe('extension same-tab navigation regressions', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(secondSlug),
-        data: {
+        data: pageEntityFixture({
           slug: secondSlug,
           url: secondUrl,
           title: 'SPA Stale Highlight B',
           childIds: [`note:${staleNoteSlug}`],
           parentIds: [],
           timestamps: { 'test-device': now },
-        },
+        }),
       },
       {
         path: `objects/notes/${staleNoteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: staleNoteSlug,
           excerpt: ['Shared stale highlighted text.'],
           note: '',
           cssPath: ['p#shared'],
           url: secondUrl,
-        },
+        }),
       },
       {
         path: pageCheckpointPath(thirdSlug),
-        data: {
+        data: pageEntityFixture({
           slug: thirdSlug,
           url: thirdUrl,
           title: 'SPA Stale Highlight C',
           childIds: [],
           parentIds: [],
           timestamps: { 'test-device': now },
-        },
+        }),
       },
     ]);
 
@@ -516,17 +545,17 @@ test.describe('extension same-tab navigation regressions', () => {
     const listedSlug = getSlugForUrl(listedUrl);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(listedSlug),
-        data: {
+        data: pageEntityFixture({
           slug: listedSlug,
           url: listedUrl,
           title: 'Listed SPA',
           childIds: [],
           parentIds: ['list:reading'],
           timestamps: { 'test-device': Date.now() },
-        },
+        }),
       },
     ]);
 
@@ -581,17 +610,17 @@ test.describe('extension same-tab navigation regressions', () => {
     const updatedSlug = getSlugForUrl(updatedUrl);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(originalSlug),
-        data: {
+        data: pageEntityFixture({
           slug: originalSlug,
           url: originalUrl,
           title: 'Query SPA',
           childIds: [],
           parentIds: ['list:reading'],
           timestamps: { 'test-device': Date.now() },
-        },
+        }),
       },
     ]);
 
@@ -670,9 +699,7 @@ test.describe('extension same-tab navigation regressions', () => {
       body: '<main><p id="target">Runtime reload highlighted text</p></main>',
     });
     const url = localServer.url('/runtime-invalidated');
-    await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
-    ]);
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
 
     const helper = await openHelperPage(extContext, extensionId);
     const reloadMessage = await getExtensionMessage(
@@ -723,9 +750,7 @@ test.describe('extension same-tab navigation regressions', () => {
       body: '<main><p id="target">Port failure highlighted text</p></main>',
     });
     const url = localServer.url('/runtime-failed-response-highlight');
-    await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
-    ]);
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
 
     const helper = await openHelperPage(extContext, extensionId);
     const reloadMessage = await getExtensionMessage(
@@ -779,9 +804,7 @@ test.describe('extension same-tab navigation regressions', () => {
       body: '<main><p>No selected text opens a page note.</p></main>',
     });
     const url = localServer.url('/runtime-invalidated-page-note');
-    await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
-    ]);
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
 
     const helper = await openHelperPage(extContext, extensionId);
     const reloadMessage = await getExtensionMessage(
@@ -828,9 +851,7 @@ test.describe('extension same-tab navigation regressions', () => {
       body: '<main><p>Passive runtime failure page</p></main>',
     });
     const url = localServer.url('/passive-runtime-failure');
-    await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
-    ]);
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
 
     const helper = await openHelperPage(extContext, extensionId);
     const reloadMessage = await getExtensionMessage(
@@ -877,9 +898,7 @@ test.describe('extension same-tab navigation regressions', () => {
     });
     const url = localServer.url('/like-runtime-failure');
     const slug = getSlugForUrl(url);
-    await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
-    ]);
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
 
     const helper = await openHelperPage(extContext, extensionId);
     const reloadMessage = await getExtensionMessage(

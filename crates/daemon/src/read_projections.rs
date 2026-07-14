@@ -106,14 +106,10 @@ pub struct PageProjection {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct NoteProjection {
     pub slug: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub excerpt: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "cssPath")]
     pub css_path: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
 }
 
@@ -299,28 +295,36 @@ impl ReadProjections {
         if let Some(page) = &page {
             for child_id in &page.child_ids {
                 if let Some(note_slug) = child_id.strip_prefix("note:") {
-                    if let Some(note) = self
+                    let note = self
                         .storage
                         .load_note_coordinated(note_slug)
                         .await
                         .map_err(|error| error.to_string())?
-                        .filter(|note| !note.deleted)
-                    {
-                        notes.push(note);
+                        .ok_or_else(|| {
+                            format!("page {slug} references missing note {note_slug}")
+                        })?;
+                    if note.deleted {
+                        return Err(format!("page {slug} references deleted note {note_slug}"));
                     }
+                    notes.push(note);
                     continue;
                 }
-                let Some(stem) = child_id.strip_prefix("snapshot:") else {
-                    continue;
-                };
-                let (Some(page_slug), Some(timestamp)) = split_snapshot_stem(stem) else {
-                    continue;
-                };
+                let stem = child_id.strip_prefix("snapshot:").ok_or_else(|| {
+                    format!("page {slug} has unsupported child reference {child_id}")
+                })?;
+                let (page_slug, timestamp) = split_snapshot_stem(stem)?;
                 let html_path = self.storage.snapshot_html_file_path(page_slug, timestamp);
+                let has_md = html_path.with_extension("md").exists();
+                let has_html = html_path.exists();
+                if !has_md && !has_html {
+                    return Err(format!(
+                        "page {slug} references missing snapshot {child_id}"
+                    ));
+                }
                 snapshots.push(SnapshotProjection {
                     timestamp,
-                    has_md: html_path.with_extension("md").exists(),
-                    has_html: html_path.exists(),
+                    has_md,
+                    has_html,
                 });
             }
         }
@@ -338,27 +342,28 @@ impl ReadProjections {
         collect_projected_list_ids(&tree.order, &mut ids);
         let mut lists = Vec::new();
         for list_id in ids {
-            if let Some(list) = self
+            let list = self
                 .storage
                 .load_list_coordinated(&list_id)
                 .await
                 .map_err(|error| error.to_string())?
-                .filter(|list| !list.deleted)
-            {
-                let mut contains_page = false;
-                let mut last_activity = 0;
-                for pin in list.pins {
-                    let (kind, slug) = parse_pin_target(&pin.id)?;
-                    contains_page |= kind == "page" && slug == page_slug;
-                    last_activity = last_activity.max(pin.pinned_at);
-                }
-                lists.push(PopupListProjection {
-                    slug: list.slug,
-                    name: list.name,
-                    contains_page,
-                    last_activity,
-                });
+                .ok_or_else(|| format!("list order references missing list {list_id}"))?;
+            if list.deleted {
+                return Err(format!("list order references deleted list {list_id}"));
             }
+            let mut contains_page = false;
+            let mut last_activity = 0;
+            for pin in list.pins {
+                let (kind, slug) = parse_pin_target(&pin.id)?;
+                contains_page |= kind == "page" && slug == page_slug;
+                last_activity = last_activity.max(pin.pinned_at);
+            }
+            lists.push(PopupListProjection {
+                slug: list.slug,
+                name: list.name,
+                contains_page,
+                last_activity,
+            });
         }
         Ok(lists)
     }
@@ -372,30 +377,26 @@ impl ReadProjections {
         {
             Some(Entity::ListOrder(order)) => order,
             Some(_) => return Err("list order has unexpected entity type".to_string()),
-            None => {
-                return Ok(ListTreeProjection {
-                    tree: Vec::new(),
-                    order: Vec::new(),
-                })
-            }
+            None => return Err("list order manifest is missing".to_string()),
         };
         let mut list_ids = Vec::new();
-        collect_list_ids(&order.tree, &mut list_ids);
+        collect_list_ids(&order.tree, &mut list_ids)?;
         let mut visible = BTreeMap::new();
         for list_id in list_ids {
-            if let Some(list) = self
+            let list = self
                 .storage
                 .load_list_coordinated(&list_id)
                 .await
                 .map_err(|error| error.to_string())?
-                .filter(|list| !list.deleted)
-            {
-                visible.insert(list_id, list.name);
+                .ok_or_else(|| format!("list order references missing list {list_id}"))?;
+            if list.deleted {
+                return Err(format!("list order references deleted list {list_id}"));
             }
+            visible.insert(list_id, list.name);
         }
         Ok(ListTreeProjection {
-            tree: project_list_tree(&order.tree, &visible),
-            order: project_list_order(&order.tree, &visible),
+            tree: project_list_tree(&order.tree, &visible)?,
+            order: project_list_order(&order.tree, &visible)?,
         })
     }
 
@@ -420,11 +421,14 @@ impl ReadProjections {
                     .await
                     .map_err(|error| error.to_string())?
                 else {
-                    continue;
+                    return Err(format!("orphaned manifest references missing note {slug}"));
                 };
-                if !note.deleted
-                    || note.deletion_reason.as_deref() == Some("replaced")
-                    || note.replaced_by.is_some()
+                if !note.deleted {
+                    return Err(format!(
+                        "orphaned manifest references non-deleted note {slug}"
+                    ));
+                }
+                if note.deletion_reason.as_deref() == Some("replaced") || note.replaced_by.is_some()
                 {
                     continue;
                 }
@@ -446,10 +450,12 @@ impl ReadProjections {
                     .await
                     .map_err(|error| error.to_string())?
                 else {
-                    continue;
+                    return Err(format!("orphaned manifest references missing list {slug}"));
                 };
                 if !list.deleted {
-                    continue;
+                    return Err(format!(
+                        "orphaned manifest references non-deleted list {slug}"
+                    ));
                 }
                 result.push(RecycleBinEntryProjection {
                     key: entry.key,
@@ -463,34 +469,33 @@ impl ReadProjections {
             }
             if let Some(stem) = entry.key.strip_prefix("snapshot:") {
                 let stem = stem.to_string();
-                let (page_slug, timestamp) = split_snapshot_stem(&stem);
-                let title = if let Some(page_slug) = page_slug {
-                    self.storage
-                        .load_page_coordinated(page_slug)
-                        .await
-                        .map_err(|error| error.to_string())?
-                        .and_then(|page| page.user_title.or(page.title))
-                } else {
-                    None
-                };
+                let (page_slug, timestamp) = split_snapshot_stem(&stem)?;
+                let html_path = self.storage.snapshot_html_file_path(page_slug, timestamp);
+                if !html_path.exists() && !html_path.with_extension("md").exists() {
+                    return Err(format!(
+                        "orphaned manifest references missing snapshot {stem}"
+                    ));
+                }
+                let title = self
+                    .storage
+                    .load_page_coordinated(page_slug)
+                    .await
+                    .map_err(|error| error.to_string())?
+                    .and_then(|page| page.user_title.or(page.title));
                 result.push(RecycleBinEntryProjection {
                     key: entry.key,
                     kind: "snapshot".to_string(),
-                    slug: page_slug.unwrap_or(&stem).to_string(),
-                    timestamp,
+                    slug: page_slug.to_string(),
+                    timestamp: Some(timestamp),
                     url: entry.url,
                     title,
                 });
                 continue;
             }
-            result.push(RecycleBinEntryProjection {
-                slug: entry.key.clone(),
-                key: entry.key,
-                kind: "unknown".to_string(),
-                timestamp: None,
-                url: entry.url,
-                title: None,
-            });
+            return Err(format!(
+                "orphaned manifest contains unsupported key {}",
+                entry.key
+            ));
         }
         Ok(result)
     }
@@ -502,7 +507,10 @@ impl ReadProjections {
             .await
             .map_err(|error| error.to_string())?
         {
-            Some(Entity::Settings(settings)) => Ok(Some(settings.values)),
+            Some(Entity::Settings(settings)) => {
+                crate::settings::validate_complete(&settings.values)?;
+                Ok(Some(settings.values))
+            }
             Some(_) => Err("settings manifest has unexpected entity type".to_string()),
             None => Ok(None),
         }
@@ -513,94 +521,81 @@ impl ReadProjections {
         let pin_kind = pin_kind.to_string();
         let pin_slug = pin_slug.to_string();
         if pin_kind == "page" {
-            if let Some(page) = self
+            let page = self
                 .storage
                 .load_page_coordinated(&pin_slug)
                 .await
                 .map_err(|error| error.to_string())?
-            {
-                let has_snapshots = page.child_ids.iter().any(|id| id.starts_with("snapshot:"));
-                let has_highlight_notes = page_has_highlight_notes(&self.storage, &page).await?;
-                let list_slugs = page
-                    .parent_ids
-                    .iter()
-                    .filter_map(|id| id.strip_prefix("list:").map(str::to_string))
-                    .collect();
-                return Ok(ListPinProjection {
-                    pinned_at: pin.pinned_at,
-                    source: pin.source,
-                    kind: "page".to_string(),
-                    slug: page.slug,
-                    url: page.url,
-                    title: page.title,
-                    user_title: page.user_title,
-                    is_note: false,
-                    has_snapshots,
-                    has_highlight_notes,
-                    list_slugs,
-                    excerpt: None,
-                    note: None,
-                    scroll_depth: page.scroll_depth,
-                    time_on_page: page.time_on_page,
-                    likes: page.likes,
-                    created_at: page.created_at,
-                    visit_dates: page.visit_dates,
-                    timestamps: page.timestamps.into_iter().collect(),
-                });
+                .ok_or_else(|| format!("list pin references missing page {pin_slug}"))?;
+            let has_snapshots = page.child_ids.iter().any(|id| id.starts_with("snapshot:"));
+            let has_highlight_notes = page_has_highlight_notes(&self.storage, &page).await?;
+            let mut list_slugs = Vec::new();
+            for parent_id in &page.parent_ids {
+                if let Some(list_slug) = parent_id.strip_prefix("list:") {
+                    list_slugs.push(list_slug.to_string());
+                } else if !parent_id.starts_with("page:") {
+                    return Err(format!(
+                        "page {pin_slug} has unsupported parent reference {parent_id}"
+                    ));
+                }
             }
+            return Ok(ListPinProjection {
+                pinned_at: pin.pinned_at,
+                source: pin.source,
+                kind: "page".to_string(),
+                slug: page.slug,
+                url: Some(
+                    page.url
+                        .ok_or_else(|| format!("pinned page {pin_slug} is missing its URL"))?,
+                ),
+                title: page.title,
+                user_title: page.user_title,
+                is_note: false,
+                has_snapshots,
+                has_highlight_notes,
+                list_slugs,
+                excerpt: None,
+                note: None,
+                scroll_depth: page.scroll_depth,
+                time_on_page: page.time_on_page,
+                likes: page.likes,
+                created_at: page.created_at,
+                visit_dates: page.visit_dates,
+                timestamps: page.timestamps.into_iter().collect(),
+            });
         } else if pin_kind == "note" {
-            if let Some(note) = self
+            let note = self
                 .storage
                 .load_note_coordinated(&pin_slug)
                 .await
                 .map_err(|error| error.to_string())?
-                .filter(|note| !note.deleted)
-            {
-                return Ok(ListPinProjection {
-                    pinned_at: pin.pinned_at,
-                    source: pin.source,
-                    kind: "note".to_string(),
-                    slug: note.slug,
-                    url: note.url,
-                    title: excerpt_title(note.excerpt.as_ref()),
-                    user_title: None,
-                    is_note: true,
-                    has_snapshots: false,
-                    has_highlight_notes: false,
-                    list_slugs: Vec::new(),
-                    excerpt: note.excerpt,
-                    note: note.note,
-                    scroll_depth: None,
-                    time_on_page: None,
-                    likes: None,
-                    created_at: None,
-                    visit_dates: Vec::new(),
-                    timestamps: BTreeMap::new(),
-                });
+                .ok_or_else(|| format!("list pin references missing note {pin_slug}"))?;
+            if note.deleted {
+                return Err(format!("list pin references deleted note {pin_slug}"));
             }
+            return Ok(ListPinProjection {
+                pinned_at: pin.pinned_at,
+                source: pin.source,
+                kind: "note".to_string(),
+                slug: note.slug,
+                url: note.url,
+                title: excerpt_title(note.excerpt.as_ref()),
+                user_title: None,
+                is_note: true,
+                has_snapshots: false,
+                has_highlight_notes: false,
+                list_slugs: Vec::new(),
+                excerpt: note.excerpt,
+                note: note.note,
+                scroll_depth: None,
+                time_on_page: None,
+                likes: None,
+                created_at: None,
+                visit_dates: Vec::new(),
+                timestamps: BTreeMap::new(),
+            });
         }
-
-        Ok(ListPinProjection {
-            slug: pin_slug,
-            pinned_at: pin.pinned_at,
-            source: pin.source,
-            kind: "missing".to_string(),
-            url: None,
-            title: None,
-            user_title: None,
-            is_note: false,
-            has_snapshots: false,
-            has_highlight_notes: false,
-            list_slugs: Vec::new(),
-            excerpt: None,
-            note: None,
-            scroll_depth: None,
-            time_on_page: None,
-            likes: None,
-            created_at: None,
-            visit_dates: Vec::new(),
-            timestamps: BTreeMap::new(),
-        })
+        unreachable!("pin kind was validated before projection")
     }
 }
 
@@ -619,13 +614,19 @@ fn parse_pin_target(id: &str) -> Result<(&str, &str), String> {
     Ok((kind, slug))
 }
 
-fn collect_list_ids(nodes: &[TreeNode], out: &mut Vec<String>) {
+fn collect_list_ids(nodes: &[TreeNode], out: &mut Vec<String>) -> Result<(), String> {
     for node in nodes {
-        if let Some(slug) = node.id.strip_prefix("list:") {
-            out.push(slug.to_string());
+        let slug = node
+            .id
+            .strip_prefix("list:")
+            .ok_or_else(|| format!("list order contains invalid entity reference {}", node.id))?;
+        if slug.is_empty() {
+            return Err("list order contains an empty list slug".to_string());
         }
-        collect_list_ids(&node.children, out);
+        out.push(slug.to_string());
+        collect_list_ids(&node.children, out)?;
     }
+    Ok(())
 }
 
 fn collect_projected_list_ids(nodes: &[ListOrderNodeProjection], out: &mut Vec<String>) {
@@ -638,16 +639,20 @@ fn collect_projected_list_ids(nodes: &[ListOrderNodeProjection], out: &mut Vec<S
 fn project_list_tree(
     nodes: &[TreeNode],
     visible: &BTreeMap<String, String>,
-) -> Vec<ListTreeNodeProjection> {
+) -> Result<Vec<ListTreeNodeProjection>, String> {
     nodes
         .iter()
-        .filter_map(|node| {
-            let slug = node.id.strip_prefix("list:")?;
-            let name = visible.get(slug)?;
-            Some(ListTreeNodeProjection {
+        .map(|node| {
+            let slug = node.id.strip_prefix("list:").ok_or_else(|| {
+                format!("list order contains invalid entity reference {}", node.id)
+            })?;
+            let name = visible
+                .get(slug)
+                .ok_or_else(|| format!("list order projection is missing visible list {slug}"))?;
+            Ok(ListTreeNodeProjection {
                 slug: slug.to_string(),
                 name: name.clone(),
-                children: project_list_tree(&node.children, visible),
+                children: project_list_tree(&node.children, visible)?,
             })
         })
         .collect()
@@ -656,28 +661,36 @@ fn project_list_tree(
 fn project_list_order(
     nodes: &[TreeNode],
     visible: &BTreeMap<String, String>,
-) -> Vec<ListOrderNodeProjection> {
+) -> Result<Vec<ListOrderNodeProjection>, String> {
     nodes
         .iter()
-        .filter_map(|node| {
-            let slug = node.id.strip_prefix("list:")?;
-            visible.get(slug)?;
-            Some(ListOrderNodeProjection {
+        .map(|node| {
+            let slug = node.id.strip_prefix("list:").ok_or_else(|| {
+                format!("list order contains invalid entity reference {}", node.id)
+            })?;
+            visible
+                .get(slug)
+                .ok_or_else(|| format!("list order projection is missing visible list {slug}"))?;
+            Ok(ListOrderNodeProjection {
                 slug: slug.to_string(),
-                children: project_list_order(&node.children, visible),
+                children: project_list_order(&node.children, visible)?,
             })
         })
         .collect()
 }
 
-fn split_snapshot_stem(stem: &str) -> (Option<&str>, Option<i64>) {
-    let Some(index) = stem.rfind('-') else {
-        return (None, None);
-    };
-    let Ok(timestamp) = stem[index + 1..].parse::<i64>() else {
-        return (None, None);
-    };
-    (Some(&stem[..index]), Some(timestamp))
+fn split_snapshot_stem(stem: &str) -> Result<(&str, i64), String> {
+    let index = stem
+        .rfind('-')
+        .ok_or_else(|| format!("snapshot reference has no timestamp: {stem}"))?;
+    let page_slug = &stem[..index];
+    if page_slug.is_empty() {
+        return Err(format!("snapshot reference has an empty page slug: {stem}"));
+    }
+    let timestamp = stem[index + 1..]
+        .parse::<i64>()
+        .map_err(|_| format!("snapshot reference has an invalid timestamp: {stem}"))?;
+    Ok((page_slug, timestamp))
 }
 
 fn excerpt_title(excerpt: Option<&Value>) -> Option<String> {

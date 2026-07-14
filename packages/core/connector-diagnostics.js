@@ -220,10 +220,34 @@ const STATE_FORMATS = {
     meta: formatOfflineMeta,
     tone: '',
   },
+  incompatible: {
+    status: () =>
+      tr(
+        'extensionDesktopVersionIncompatible',
+        'Desktop Version Incompatible',
+        undefined,
+      ),
+    meta: (connector) =>
+      appendConnectorDiagnostic(
+        tr(
+          'extensionUpdateDesktopAndExtension',
+          'Update Browser Recall Desktop and the extension to matching versions.',
+          undefined,
+        ),
+        connector,
+      ),
+    tone: 'error',
+  },
 };
 
-export function formatDesktopConnectorState(connector = {}) {
-  const state = connector.state || 'offline';
+export function formatDesktopConnectorState(connector) {
+  if (!connector || typeof connector !== 'object' || Array.isArray(connector)) {
+    throw new Error('Connector status must be an object');
+  }
+  const state = connector.state;
+  if (typeof state !== 'string' || !state) {
+    throw new Error('Connector status is missing state');
+  }
   const format = STATE_FORMATS[state];
   if (format) {
     return {
@@ -231,6 +255,9 @@ export function formatDesktopConnectorState(connector = {}) {
       meta: format.meta(connector),
       tone: format.tone,
     };
+  }
+  if (state !== 'offline') {
+    throw new Error(`Unknown connector state: ${state}`);
   }
   if (connector.refuseMode) {
     return {

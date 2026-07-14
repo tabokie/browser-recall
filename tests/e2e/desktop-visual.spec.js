@@ -40,14 +40,17 @@ function desktopVisualSeed(colorScheme = 'amber', options = {}) {
   const deletedSnapshotUrl = 'https://example.com/deleted-snapshot';
   const deletedSnapshotSlug = generateSlugFromUrl(deletedSnapshotUrl);
   const settings = {
+    theme: 'light',
     colorScheme,
     localeOverride: options.localeOverride || 'system',
     historyFileBatch: options.historyFileBatch || 10,
     captureSnapshotVideo: false,
     blacklistEnabled: true,
+    urlBlacklist: ['chrome://', 'edge://', 'about:'],
     titleCleanupEnabled: true,
     titleTrimRules: [],
     syncEnabled: false,
+    syncMethod: 'github',
     syncRetentionDays: 7,
     syncRepoUrl: '',
   };
@@ -185,72 +188,111 @@ function desktopVisualSeed(colorScheme = 'amber', options = {}) {
   if (options.includeDetailListMembership) {
     const researchListKey = listKey('research');
     const productResearchPageKey = pageKey(productResearchSlug);
-    return {
-      ...base,
-      session: {
-        ...base.session,
-        [productResearchPageKey]: {
-          slug: productResearchSlug,
-          url: productResearchUrl,
-          title: 'Product research notes',
-          parentIds: [researchListKey],
-          childIds: [],
-          visitDates: [],
-        },
-        [`detailNotes:${productResearchSlug}`]: [
-          {
+    return completeDesktopVisualPageFixtures(
+      {
+        ...base,
+        session: {
+          ...base.session,
+          [productResearchPageKey]: {
+            slug: productResearchSlug,
+            url: productResearchUrl,
+            title: 'Product research notes',
+            parentIds: [researchListKey],
+            childIds: [
+              'note:page-note-product-research',
+              'note:highlight-product-research',
+              'note:highlight-product-research-array',
+              `snapshot:${productResearchSlug}-${now - 30_000}`,
+            ],
+            timestamps: { 'test-device': now },
+            createdAt: now,
+            visitDates: [],
+            scrollDepth: null,
+            timeOnPage: null,
+            user_title: null,
+            likes: null,
+          },
+          [`detailNotes:${productResearchSlug}`]: [
+            {
+              slug: 'page-note-product-research',
+              excerpt: null,
+              note: 'Page note for product research',
+              url: productResearchUrl,
+            },
+            {
+              slug: 'highlight-product-research',
+              excerpt: [
+                'Important highlighted passage\nwith original line break',
+              ],
+              note: 'Highlight note',
+              url: productResearchUrl,
+            },
+            {
+              slug: 'highlight-product-research-array',
+              excerpt: ['Array highlighted passage', 'with grouped line break'],
+              note: 'Grouped highlight note',
+              url: productResearchUrl,
+            },
+          ],
+          'note:page-note-product-research': {
             slug: 'page-note-product-research',
             excerpt: null,
+            cssPath: null,
             note: 'Page note for product research',
             url: productResearchUrl,
+            deleted: false,
           },
-          {
+          'note:highlight-product-research': {
             slug: 'highlight-product-research',
             excerpt: [
               'Important highlighted passage\nwith original line break',
             ],
+            cssPath: [''],
             note: 'Highlight note',
             url: productResearchUrl,
+            deleted: false,
           },
-          {
+          'note:highlight-product-research-array': {
             slug: 'highlight-product-research-array',
             excerpt: ['Array highlighted passage', 'with grouped line break'],
+            cssPath: ['', ''],
             note: 'Grouped highlight note',
             url: productResearchUrl,
+            deleted: false,
           },
-        ],
-        'note:page-note-product-research': {
-          slug: 'page-note-product-research',
-          excerpt: null,
-          note: 'Page note for product research',
-          url: productResearchUrl,
-          deleted: false,
+          [`detailSnapshots:${productResearchSlug}`]: [
+            {
+              timestamp: now - 30_000,
+              hasMd: true,
+              hasHtml: true,
+            },
+          ],
         },
-        'note:highlight-product-research': {
-          slug: 'highlight-product-research',
-          excerpt: ['Important highlighted passage\nwith original line break'],
-          note: 'Highlight note',
-          url: productResearchUrl,
-          deleted: false,
-        },
-        'note:highlight-product-research-array': {
-          slug: 'highlight-product-research-array',
-          excerpt: ['Array highlighted passage', 'with grouped line break'],
-          note: 'Grouped highlight note',
-          url: productResearchUrl,
-          deleted: false,
-        },
-        [`detailSnapshots:${productResearchSlug}`]: [
-          {
-            timestamp: now - 30_000,
-            hasMd: true,
-            hasHtml: true,
-          },
-        ],
       },
+      now,
+    );
+  }
+  return completeDesktopVisualPageFixtures(base, now);
+}
+
+function completeDesktopVisualPageFixtures(seed, now) {
+  for (const [key, value] of Object.entries(seed.session)) {
+    if (!key.startsWith('page:')) continue;
+    const timestamps = value.timestamps || { 'test-device': now };
+    seed.session[key] = {
+      parentIds: [],
+      childIds: [],
+      timestamps,
+      createdAt: Math.max(now, ...Object.values(timestamps)),
+      visitDates: [],
+      scrollDepth: null,
+      timeOnPage: null,
+      user_title: null,
+      likes: null,
+      ...value,
     };
   }
-  return base;
+  return seed;
 }
 
 async function serveDesktopUi(use) {
@@ -297,6 +339,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       setupComplete,
       pairedBrowsers,
       deleteSnapshotFails,
+      saveSettingsKeyFailureKey,
       searchHistoryResults,
       searchHistoryChunks,
       searchHistoryResultsByQuery,
@@ -618,7 +661,7 @@ async function installDesktopBridgeMock(page, options = {}) {
         const devices = new Set(
           stores.session.get('manifest:log-devices') || [],
         );
-        const sizes = {};
+        const sizes = includeSizes ? {} : null;
         if (includeSizes) {
           for (const file of files) {
             const date = file.replace(/\.jsonl$/, '');
@@ -641,7 +684,15 @@ async function installDesktopBridgeMock(page, options = {}) {
         for (const file of files) {
           const date = String(file).replace(/\.jsonl$/, '');
           const dayEntries = stores.session.get(`log:${date}`) || [];
-          entries.push(...clone(dayEntries));
+          entries.push(
+            ...clone(dayEntries).map((entry) => ({
+              action: 'visit_page',
+              deviceId: 'test-device',
+              title: null,
+              referrerUrl: null,
+              ...entry,
+            })),
+          );
         }
         entries.sort((left, right) => {
           return (left.timestamp || 0) - (right.timestamp || 0);
@@ -836,7 +887,8 @@ async function installDesktopBridgeMock(page, options = {}) {
               launchAtLogin: true,
               debugLogging: false,
               setupComplete,
-              dataDir: setupComplete ? '/tmp/browser-recall-visual' : '',
+              dataDir: setupComplete ? '/tmp/browser-recall-visual' : null,
+              systemLocale,
               pairedBrowsers,
             };
           case 'getSyncAuthState':
@@ -975,6 +1027,12 @@ async function installDesktopBridgeMock(page, options = {}) {
               settings: readDesktopValue('manifest:settings'),
             };
           case 'saveSettingsKey': {
+            if (request.key === saveSettingsKeyFailureKey) {
+              return {
+                success: false,
+                error: `Could not persist ${request.key}`,
+              };
+            }
             const settings = readDesktopValue('manifest:settings') || {};
             settings[request.key] = request.value;
             stores.session.set('manifest:settings', settings);
@@ -1189,6 +1247,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       setupComplete: options.setupComplete ?? true,
       pairedBrowsers: options.pairedBrowsers || [],
       deleteSnapshotFails: Boolean(options.deleteSnapshotFails),
+      saveSettingsKeyFailureKey: options.saveSettingsKeyFailureKey || null,
       searchHistoryResults: options.searchHistoryResults || [],
       searchHistoryChunks: options.searchHistoryChunks || null,
       searchHistoryResultsByQuery: options.searchHistoryResultsByQuery || null,
@@ -1367,6 +1426,34 @@ test.describe('desktop visual regression', () => {
     });
   });
 
+  test('failed settings writes surface the platform error and restore daemon state', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        initialRoute: 'settings',
+        saveSettingsKeyFailureKey: 'captureSnapshotVideo',
+      });
+
+      const toggle = page.locator('#captureSnapshotVideo');
+      await expect(toggle).not.toBeChecked();
+      await toggle.locator('..').click();
+
+      await expect(page.locator('#errorBubble')).toContainText(
+        'Could not persist captureSnapshotVideo',
+      );
+      await expect(toggle).not.toBeChecked();
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness.sessionValue('manifest:settings'),
+          ),
+        )
+        .toMatchObject({ captureSnapshotVideo: false });
+    });
+  });
+
   test('fullscreen shell keeps the same sidebar titlebar spacing', async ({
     page,
   }) => {
@@ -1452,7 +1539,7 @@ test.describe('desktop visual regression', () => {
         title: entry.title,
         parentIds: pinned ? [listKey('research')] : [],
         childIds: [],
-        visitDates: [todayKey()],
+        visitDates: [visitDateInt(todayKey())],
         timestamps: { [entry.deviceId]: entry.timestamp },
       };
     }
@@ -1467,6 +1554,12 @@ test.describe('desktop visual regression', () => {
         setupComplete: true,
         colorScheme: 'amber',
         historyEntries,
+        searchHistoryResults: historyEntries.map((entry) => ({
+          url: entry.url,
+          title: entry.title,
+          timestamp: entry.timestamp,
+          score: 1,
+        })),
         extraSession,
       });
 
@@ -2073,14 +2166,18 @@ test.describe('desktop visual regression', () => {
           {
             browserId: 'connected-chrome',
             browserName: 'Chrome',
+            browserProfile: '默认配置文件',
             extensionId: 'abcdefghijklmnop',
+            approvedAt: now - 10 * 86400000,
             lastSeen: now - 60_000,
             connected: true,
           },
           {
             browserId: 'disconnected-brave',
             browserName: 'Brave',
+            browserProfile: '默认配置文件',
             extensionId: 'abcdefghijklmnop',
+            approvedAt: now - 10 * 86400000,
             lastSeen: now - 120_000,
             connected: false,
           },
@@ -2894,7 +2991,7 @@ test.describe('desktop visual regression', () => {
           },
         },
         searchSnapshotsResultsByQuery: {
-          'snapshot timestamp': [{ slug, timestamp: snapshotTime }],
+          'snapshot timestamp': [{ slug, timestamp: snapshotTime, score: 1 }],
         },
       });
 
@@ -2971,12 +3068,14 @@ test.describe('desktop visual regression', () => {
           },
         },
         searchNotesResultsByQuery: {
-          [query]: [{ url: noteOnlyUrl, noteSlug: 'note-only-ordering' }],
+          [query]: [
+            { url: noteOnlyUrl, noteSlug: 'note-only-ordering', score: 1 },
+          ],
         },
         searchSnapshotsResultsByQuery: {
           [query]: [
-            { slug: olderSlug, timestamp: snapshotTime },
-            { slug: snapshotOnlySlug, timestamp: snapshotOnlyTime },
+            { slug: olderSlug, timestamp: snapshotTime, score: 1 },
+            { slug: snapshotOnlySlug, timestamp: snapshotOnlyTime, score: 1 },
           ],
         },
       });
@@ -4951,7 +5050,7 @@ test.describe('desktop visual regression', () => {
         title: pinnedTitle,
         parentIds: [listKey('research')],
         childIds: [],
-        visitDates: [todayKey()],
+        visitDates: [visitDateInt(todayKey())],
         timestamps: { 'device-a': now - 2000 },
       },
       [listKey('research')]: {

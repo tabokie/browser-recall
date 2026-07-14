@@ -30,13 +30,24 @@ async function ensureLoaded() {
   const stored = await chrome.storage.local.get(
     Object.values(BUFFER_STORAGE_KEYS),
   );
-  queue = stored[BUFFER_STORAGE_KEYS.queue] || [];
-  refuseMode = Boolean(stored[BUFFER_STORAGE_KEYS.refuseMode]);
+  const storedQueue = stored[BUFFER_STORAGE_KEYS.queue];
+  if (storedQueue !== undefined && !Array.isArray(storedQueue)) {
+    throw new Error('Persisted desktop command buffer must be an array');
+  }
+  const storedRefuseMode = stored[BUFFER_STORAGE_KEYS.refuseMode];
+  if (storedRefuseMode !== undefined && typeof storedRefuseMode !== 'boolean') {
+    throw new Error('Persisted desktop refuse mode must be a boolean');
+  }
+  queue = storedQueue === undefined ? [] : storedQueue;
+  refuseMode = storedRefuseMode === undefined ? false : storedRefuseMode;
+  await persist();
   loaded = true;
 }
 
 async function withStorageOperation(fn) {
-  const run = storageOperation.catch(() => {}).then(fn);
+  const run = storageOperation.then(fn, fn);
+  // The tail exists only to serialize later operations. Each operation caller
+  // still receives `run` and therefore observes its own persistence failure.
   storageOperation = run.catch(() => {});
   return run;
 }
@@ -67,14 +78,25 @@ export async function enqueueBufferedMessage(message) {
     await ensureLoaded();
     const nextBytes = queueSize() + itemSize(message);
     if (nextBytes > MAX_BUFFER_BYTES) {
+      const previousRefuseMode = refuseMode;
       refuseMode = true;
-      await persist();
+      try {
+        await persist();
+      } catch (error) {
+        refuseMode = previousRefuseMode;
+        throw error;
+      }
       const error = new Error('Desktop buffer full');
       error.code = 'buffer_full';
       throw error;
     }
     queue.push(message);
-    await persist();
+    try {
+      await persist();
+    } catch (error) {
+      queue.pop();
+      throw error;
+    }
     return currentStats();
   });
 }
@@ -89,8 +111,13 @@ export async function shiftBufferedMessage() {
   return withStorageOperation(async () => {
     await ensureLoaded();
     if (queue.length > 0) {
-      queue.shift();
-      await persist();
+      const shifted = queue.shift();
+      try {
+        await persist();
+      } catch (error) {
+        queue.unshift(shifted);
+        throw error;
+      }
     }
     return currentStats();
   });
@@ -99,9 +126,17 @@ export async function shiftBufferedMessage() {
 export async function clearBufferedMessages() {
   return withStorageOperation(async () => {
     await ensureLoaded();
+    const previousQueue = queue;
+    const previousRefuseMode = refuseMode;
     queue = [];
     refuseMode = false;
-    await persist();
+    try {
+      await persist();
+    } catch (error) {
+      queue = previousQueue;
+      refuseMode = previousRefuseMode;
+      throw error;
+    }
     return currentStats();
   });
 }

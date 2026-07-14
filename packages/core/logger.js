@@ -10,7 +10,9 @@ if (typeof chrome !== 'undefined' && chrome.storage?.session) {
     .then(({ debugLogging }) => {
       debugEnabled = !!debugLogging;
     })
-    .catch(() => {});
+    .catch((error) => {
+      console.error('[logger] Failed to read debug logging setting:', error);
+    });
 }
 
 // Live toggle without page reload

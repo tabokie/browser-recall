@@ -211,10 +211,6 @@
     "message": "Lokal als lesbare, nach Datum sortierte JSONL-Dateien gespeichert. Öffnen Sie sie mit einem beliebigen Texteditor oder verarbeiten Sie sie mit jq.",
     "description": "Desktop local data storage help text."
   },
-  "desktopDefaultBrowserProfile": {
-    "message": "Standardprofil",
-    "description": "Fallback browser profile name."
-  },
   "desktopDebugLogging": {
     "message": "Debug-Protokollierung (wird beim Neustart zurückgesetzt)",
     "description": "Desktop debug logging setting."

@@ -107,5 +107,6 @@ pub(crate) fn test_server_options(config_store: ConfigStore) -> ServerStartOptio
         static_approver(PairingDecision::Approve),
     );
     options.port_candidates = vec![0];
+    options.test_control_enabled = true;
     options
 }

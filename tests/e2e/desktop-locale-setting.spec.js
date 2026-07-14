@@ -81,7 +81,6 @@ async function installDesktopShellBridge(page, helper, setupDir) {
 
       const request = payload.request || {};
       if (
-        request.action === 'getDeviceId' ||
         request.action === 'readDesktopValue' ||
         request.action === 'saveSettingsKey'
       ) {
@@ -94,6 +93,12 @@ async function installDesktopShellBridge(page, helper, setupDir) {
       switch (request.action) {
         case 'getDesktopSystemLocale':
           return { success: true, locale: 'zh-CN' };
+        case 'getDeviceId':
+          return {
+            success: true,
+            deviceId: 'locale-device',
+            setupComplete: true,
+          };
         case 'getDirectoryInfo':
           return {
             success: true,
@@ -103,15 +108,24 @@ async function installDesktopShellBridge(page, helper, setupDir) {
           return {
             success: true,
             state: 'connected',
+            port: 28471,
+            deviceId: 'locale-device',
+            hasToken: true,
             dataFolder: setupDir,
             pendingCommands: 0,
             pendingBytes: 0,
+            refuseMode: false,
+            lastError: null,
+            lastErrorCode: null,
+            lastDrainedAt: null,
+            daemonBufferDepth: 0,
           };
         case 'getDesktopShellState':
           return {
             success: true,
             setupComplete: true,
             dataDir: setupDir,
+            systemLocale: 'zh-CN',
             pairedBrowsers: [],
             debugLogging: false,
             launchAtLogin: false,
@@ -120,9 +134,23 @@ async function installDesktopShellBridge(page, helper, setupDir) {
         case 'getSyncAuthState':
           return { success: true, hasToken: false, rememberToken: false };
         case 'listHistoryFiles':
-          return { success: true, files: [], sizes: {}, devices: [] };
+          return { success: true, files: [], sizes: null, devices: [] };
         case 'loadHistoryBatch':
           return { success: true, entries: [] };
+        case 'getListTree':
+          return { success: true, tree: [], order: [] };
+        case 'getRecycleBin':
+          return { success: true, entries: [] };
+        case 'getSettings': {
+          const raw = JSON.parse(
+            fs.readFileSync(
+              path.join(setupDir, 'views', 'manifest', 'settings.json'),
+              'utf8',
+            ),
+          );
+          const { timestamps: _timestamps, ...settings } = raw;
+          return { success: true, settings };
+        }
         case 'searchNotes':
         case 'searchSnapshots':
           return { success: true, results: [] };
@@ -234,6 +262,13 @@ test('desktop locale choices persist across real daemon checkpoints and reloads'
     await serveDesktopUi(async (desktopUrl) => {
       await page.goto(desktopUrl);
       await page.waitForFunction(() => document.body.dataset.ready === 'true');
+      const fatalOverlayText = await page.evaluate(() =>
+        [...document.body.children]
+          .filter((element) => element.style.zIndex === '999999')
+          .map((element) => element.textContent.trim())
+          .join('\n'),
+      );
+      expect(fatalOverlayText).toBe('');
 
       await page.locator('#createListBtn').click();
       await expect(page.locator('.inline-list-create')).toHaveAttribute(
@@ -323,12 +358,19 @@ test('desktop reports an invalid persisted locale instead of masking it', async 
   extensionId,
   setupDir,
 }) => {
-  await resetAndSeed(extContext, extensionId, [
-    {
-      path: 'views/manifest/settings.json',
-      data: { localeOverride: 'xx-invalid' },
-    },
-  ]);
+  await resetAndSeed(extContext, extensionId, []);
+  const settingsPath = path.join(
+    setupDir,
+    'views',
+    'manifest',
+    'settings.json',
+  );
+  const malformedSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  malformedSettings.localeOverride = 'xx-invalid';
+  fs.writeFileSync(
+    settingsPath,
+    `${JSON.stringify(malformedSettings, null, 2)}\n`,
+  );
   const helper = await openHelperPage(extContext, extensionId);
   const page = await extContext.newPage();
 

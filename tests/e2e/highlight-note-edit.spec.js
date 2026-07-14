@@ -1,9 +1,12 @@
 import { test, expect } from './fixtures.js';
 import {
   resetAndSeed,
+  settingsCheckpoint,
   getSlugForUrl,
   openHelperPage,
   pageCheckpointPath,
+  pageEntityFixture,
+  noteEntityFixture,
   longestLeftBorderRun,
 } from './helpers.js';
 
@@ -26,27 +29,27 @@ test.describe('Highlight note edit', () => {
 
     // Seed page entity + note with excerpt but empty note text
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: pageUrl,
           title: 'Note Edit Test',
           timestamps: { 'test-device': now },
           parentIds: [],
           childIds: [`note:${noteSlug}`],
-        },
+        }),
       },
       {
         path: `objects/notes/${noteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug,
           excerpt: ['quick brown fox'],
           note: '',
           cssPath: [''],
           url: pageUrl,
-        },
+        }),
       },
     ]);
 
@@ -152,27 +155,27 @@ test.describe('Highlight note edit', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: pageUrl,
           title: 'Note Edge Test',
           timestamps: { 'test-device': now },
           parentIds: [],
           childIds: [`note:${noteSlug}`],
-        },
+        }),
       },
       {
         path: `objects/notes/${noteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug,
           excerpt: ['edge highlight phrase'],
           note: '',
           cssPath: [''],
           url: pageUrl,
-        },
+        }),
       },
     ]);
 
@@ -226,27 +229,27 @@ test.describe('Highlight note edit', () => {
 
     // Seed page with a note that has both excerpt and note text
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: pageUrl,
           title: 'Highlight Show Test',
           timestamps: { 'test-device': now },
           parentIds: [],
           childIds: [`note:${noteSlug}`],
-        },
+        }),
       },
       {
         path: `objects/notes/${noteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug,
           excerpt: ['quick brown fox'],
           note: 'my saved note',
           cssPath: [''],
           url: pageUrl,
-        },
+        }),
       },
     ]);
 
@@ -308,21 +311,21 @@ test.describe('Highlight note edit', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: pageUrl,
           title: 'Highlight Reapply Lines Test',
           timestamps: { 'test-device': now },
           parentIds: [],
           childIds: [`note:${noteSlug}`],
-        },
+        }),
       },
       {
         path: `objects/notes/${noteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug,
           excerpt: [
             '煎诸君的跳蛋',
@@ -340,7 +343,7 @@ test.describe('Highlight note edit', () => {
             'body > main > p:nth-of-type(3)',
           ],
           url: pageUrl,
-        },
+        }),
       },
     ]);
 
@@ -405,7 +408,7 @@ test.describe('Highlight note edit', () => {
   }) => {
     localServer.addPage('/pdf-panel-mark', {
       title: 'PDF Panel Mark Test',
-      body: '<embed type="application/pdf" src="about:blank" style="width:100%;height:100vh" />',
+      body: '<p id="new-highlight">new pdf highlight</p><embed type="application/pdf" src="about:blank" style="width:100%;height:100vh" />',
     });
     const pageUrl = localServer.url('/pdf-panel-mark');
     const slug = getSlugForUrl(pageUrl);
@@ -414,21 +417,21 @@ test.describe('Highlight note edit', () => {
       const noteSlug = `pdf-panel-mark-note-${index + 1}`;
       return {
         path: `objects/notes/${noteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug,
           excerpt: [`PDF panel highlight text ${index + 1}`],
           note: '',
           cssPath: [''],
           url: pageUrl,
-        },
+        }),
       };
     });
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: pageUrl,
           title: 'PDF Panel Mark Test',
@@ -437,7 +440,7 @@ test.describe('Highlight note edit', () => {
           childIds: noteEntries.map(
             (_, index) => `note:pdf-panel-mark-note-${index + 1}`,
           ),
-        },
+        }),
       },
       ...noteEntries,
     ]);
@@ -469,16 +472,18 @@ test.describe('Highlight note edit', () => {
     expect(panelState.scrollTop).toBeGreaterThan(0);
 
     const helper = await openHelperPage(extContext, extensionId);
-    const addResp = await helper.evaluate(
-      (pageUrlValue) =>
-        chrome.runtime.sendMessage({
-          action: 'contextMenuHighlight',
-          url: pageUrlValue,
-          title: 'PDF Panel Mark Test',
-          selectionText: 'new pdf highlight',
-        }),
-      pageUrl,
-    );
+    await page.evaluate(() => {
+      const paragraph = document.getElementById('new-highlight');
+      const range = document.createRange();
+      range.selectNodeContents(paragraph);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    const addResp = await helper.evaluate(async (url) => {
+      const [tab] = await chrome.tabs.query({ url });
+      return chrome.tabs.sendMessage(tab.id, { action: 'highlightSelection' });
+    }, pageUrl);
     expect(addResp.success).toBe(true);
 
     await expect
@@ -516,17 +521,17 @@ test.describe('Highlight note edit', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: pageUrl,
           title: 'Highlight Visual Block Array Test',
           timestamps: { 'test-device': now },
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
     ]);
 
@@ -591,17 +596,17 @@ test.describe('Highlight note edit', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: pageUrl,
           title: 'Highlight Single Multiline Test',
           timestamps: { 'test-device': now },
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
     ]);
 
@@ -665,21 +670,21 @@ test.describe('Highlight note edit', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: pageUrl,
           title: 'Highlight Stale Metadata Test',
           timestamps: { 'test-device': now },
           parentIds: [],
           childIds: [`note:${noteSlug}`],
-        },
+        }),
       },
       {
         path: `objects/notes/${noteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug,
           excerpt: [
             'staticshock 1 hour ago | next [–]',
@@ -695,7 +700,7 @@ test.describe('Highlight note edit', () => {
             'body > table > tbody > tr > td > table > tbody > tr > td:nth-of-type(3) > div:nth-of-type(2) > div > p:nth-of-type(2)',
           ],
           url: pageUrl,
-        },
+        }),
       },
     ]);
 
@@ -759,21 +764,21 @@ test.describe('Highlight note edit', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: pageUrl,
           title: 'Highlight HN Numeric Row Id Test',
           timestamps: { 'test-device': now },
           parentIds: [],
           childIds: [`note:${noteSlug}`],
-        },
+        }),
       },
       {
         path: `objects/notes/${noteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug,
           excerpt: [
             'staticshock 1 day ago  | next [–]',
@@ -789,7 +794,7 @@ test.describe('Highlight note edit', () => {
             'tr#\\34 8419236 > td > table > tbody > tr > td:nth-of-type(3) > div:nth-of-type(2) > div:nth-of-type(1) > p:nth-of-type(2)',
           ],
           url: pageUrl,
-        },
+        }),
       },
     ]);
 
@@ -830,27 +835,27 @@ test.describe('Highlight note edit', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: pageUrl,
           title: 'Mixed Case Highlight Path Test',
           timestamps: { 'test-device': now },
           parentIds: [],
           childIds: [`note:${noteSlug}`],
-        },
+        }),
       },
       {
         path: `objects/notes/${noteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug,
           excerpt: ['Mixed case path highlighted text.'],
           note: '',
           cssPath: ['p#block49'],
           url: pageUrl,
-        },
+        }),
       },
     ]);
 
@@ -899,27 +904,27 @@ test.describe('Highlight note edit', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: pageUrl,
           title: 'Hydration Replaces Highlight Test',
           timestamps: { 'test-device': now },
           parentIds: [],
           childIds: [`note:${noteSlug}`],
-        },
+        }),
       },
       {
         path: `objects/notes/${noteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug,
           excerpt: [excerpt],
           note: '',
           cssPath: ['p#block49'],
           url: pageUrl,
-        },
+        }),
       },
     ]);
 
@@ -963,21 +968,21 @@ test.describe('Highlight note edit', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
         path: pageCheckpointPath(slug),
-        data: {
+        data: pageEntityFixture({
           slug,
           url: pageUrl,
           title: 'Highlight Delete Grouped Reapply Test',
           timestamps: { 'test-device': now },
           parentIds: [],
           childIds: [`note:${noteSlug}`],
-        },
+        }),
       },
       {
         path: `objects/notes/${noteSlug}.json`,
-        data: {
+        data: noteEntityFixture({
           slug: noteSlug,
           excerpt: [
             '煎诸君的跳蛋',
@@ -987,7 +992,7 @@ test.describe('Highlight note edit', () => {
           note: '',
           cssPath: ['body > main > h1', 'body > main > div', 'body > main > p'],
           url: pageUrl,
-        },
+        }),
       },
     ]);
 
@@ -1029,17 +1034,17 @@ test.describe('Highlight note edit', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      settingsCheckpoint(),
       {
-        path: `pages/${slug}.json`,
-        data: {
+        path: pageCheckpointPath(slug),
+        data: pageEntityFixture({
           slug,
           url: pageUrl,
           title: 'Highlight Reclick Test',
-          timestamp: now,
+          timestamps: { 'test-device': now },
           parentIds: [],
           childIds: [],
-        },
+        }),
       },
     ]);
 

@@ -23,8 +23,11 @@ async fn list_display_resolves_page_and_note_pins_from_coordinated_disk_reads() 
     note.excerpt = Some(serde_json::json!(["Highlighted text"]));
     writer.save_note("note-a", &note).await.expect("note");
 
-    let mut list = ListEntity::new("reading".to_string());
-    list.name = "Reading".to_string();
+    let mut list = ListEntity::new(
+        "reading".to_string(),
+        "Reading".to_string(),
+        "device-a".to_string(),
+    );
     list.pins = vec![
         PinEntity {
             id: "page:page-a".to_string(),
@@ -67,12 +70,16 @@ async fn list_display_resolves_page_and_note_pins_from_coordinated_disk_reads() 
 }
 
 #[tokio::test]
-async fn list_display_hides_deleted_lists_and_marks_missing_pin_targets() {
+async fn list_display_hides_deleted_lists_and_rejects_invalid_pin_targets() {
     let dir = tempdir().expect("tempdir");
     let storage = Storage::new(dir.path());
     storage.ensure_layout("device-a").await.expect("layout");
 
-    let mut list = ListEntity::new("missing-target".to_string());
+    let mut list = ListEntity::new(
+        "missing-target".to_string(),
+        "Missing target".to_string(),
+        "device-a".to_string(),
+    );
     list.pins.push(PinEntity {
         id: "page:not-checkpointed".to_string(),
         pinned_at: 1,
@@ -83,12 +90,11 @@ async fn list_display_hides_deleted_lists_and_marks_missing_pin_targets() {
         .await
         .expect("list");
     let projections = ReadProjections::new(storage.clone());
-    let visible = projections
+    let missing_error = projections
         .list_display("missing-target")
         .await
-        .expect("projection")
-        .expect("list");
-    assert_eq!(visible.pins[0].kind, "missing");
+        .expect_err("missing pin targets must fail");
+    assert!(missing_error.contains("references missing page not-checkpointed"));
 
     list.pins[0].id = "malformed-pin".to_string();
     storage
@@ -127,13 +133,20 @@ async fn page_context_batches_pages_notes_and_visible_list_memberships() {
     let mut note = NoteEntity::new("note-a".to_string());
     note.note = Some("Context note".to_string());
     storage.save_note("note-a", &note).await.expect("note");
-    let mut reading = ListEntity::new("reading".to_string());
-    reading.name = "Reading".to_string();
+    let reading = ListEntity::new(
+        "reading".to_string(),
+        "Reading".to_string(),
+        "device-a".to_string(),
+    );
     storage
         .save_list("reading", &reading)
         .await
         .expect("reading");
-    let mut deleted = ListEntity::new("deleted".to_string());
+    let mut deleted = ListEntity::new(
+        "deleted".to_string(),
+        "Deleted".to_string(),
+        "device-a".to_string(),
+    );
     deleted.deleted = true;
     storage
         .save_list("deleted", &deleted)
@@ -158,8 +171,11 @@ async fn list_tree_and_recycle_bin_hide_storage_topology_and_restore_policy() {
     let dir = tempdir().expect("tempdir");
     let storage = Storage::new(dir.path());
     storage.ensure_layout("device-a").await.expect("layout");
-    let mut list = ListEntity::new("reading".to_string());
-    list.name = "Reading".to_string();
+    let list = ListEntity::new(
+        "reading".to_string(),
+        "Reading".to_string(),
+        "device-a".to_string(),
+    );
     storage.save_list("reading", &list).await.expect("list");
     storage
         .save_list_order(&ListOrderManifest {
@@ -214,4 +230,27 @@ async fn list_tree_and_recycle_bin_hide_storage_topology_and_restore_policy() {
     assert_eq!(recycle.len(), 1);
     assert_eq!(recycle[0].key, "note:deleted-note");
     assert_eq!(recycle[0].title.as_deref(), Some("Deleted excerpt"));
+}
+
+#[tokio::test]
+async fn list_tree_rejects_malformed_nodes_instead_of_dropping_them() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage.ensure_layout("device-a").await.expect("layout");
+    storage
+        .save_list_order(&ListOrderManifest {
+            timestamps: Default::default(),
+            tree: vec![TreeNode {
+                id: "page:not-a-list".to_string(),
+                children: vec![],
+            }],
+        })
+        .await
+        .expect("order");
+
+    let error = ReadProjections::new(storage)
+        .list_tree()
+        .await
+        .expect_err("malformed list-order nodes must fail projection");
+    assert!(error.contains("invalid entity reference page:not-a-list"));
 }

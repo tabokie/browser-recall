@@ -32,7 +32,7 @@ where
     if let Some(title_value) = title {
         page.title = Some(title_value.to_string());
     }
-    let visit_date = local_visit_date(timestamp);
+    let visit_date = local_visit_date(timestamp)?;
     if !page.visit_dates.contains(&visit_date) {
         page.visit_dates.push(visit_date);
     }
@@ -74,7 +74,9 @@ where
     let slug = crate::generate_slug_from_url(url)?;
     let page_key = format!("{PAGE_PREFIX}{slug}");
     let Some(mut page) = load_page(load, &page_key).await else {
-        return Ok(EntityMap::new());
+        return Err(ReplayError::InvalidEntry(format!(
+            "leave_page target is missing: {page_key}"
+        )));
     };
 
     let prior_device_ts = page

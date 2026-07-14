@@ -44,28 +44,3 @@ export class SearchEngine {
   >;
   [Symbol.dispose](): void;
 }
-
-export function searchBatch(
-  history_dir: any,
-  pages_dir: any,
-  query: string,
-  file_names: string[],
-): Promise<
-  Array<{
-    url: string;
-    title: string;
-    timestamp: number;
-    score: number;
-  }>
->;
-
-export function searchNotes(
-  notes_dir: any,
-  query: string,
-): Promise<Array<{ url: string; noteSlug: string; score: number }>>;
-
-export function searchSnapshots(
-  snapshots_dir: any,
-  query: string,
-  file_names: string[],
-): Promise<Array<{ slug: string; timestamp: number; score: number }>>;

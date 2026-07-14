@@ -211,10 +211,6 @@
     "message": "날짜별로 정리된 사람이 읽을 수 있는 JSONL 파일로 로컬에 저장됩니다. 텍스트 편집기로 열거나 jq로 처리할 수 있습니다.",
     "description": "Desktop local data storage help text."
   },
-  "desktopDefaultBrowserProfile": {
-    "message": "기본 프로필",
-    "description": "Fallback browser profile name."
-  },
   "desktopDebugLogging": {
     "message": "디버그 로깅(다시 시작 시 재설정)",
     "description": "Desktop debug logging setting."

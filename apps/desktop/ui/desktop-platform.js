@@ -2,9 +2,12 @@ const changeListeners = new Set();
 const runtimeMessageListeners = new Set();
 let runtimeBridgeStarted = false;
 let storageBridgeStarted = false;
-const storageBridgeInstanceId =
-  globalThis.crypto?.randomUUID?.() ||
-  `desktop-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+let runtimeBridgePromise = null;
+let storageBridgePromise = null;
+if (typeof globalThis.crypto?.randomUUID !== 'function') {
+  throw new Error('Desktop storage bridge requires crypto.randomUUID');
+}
+const storageBridgeInstanceId = globalThis.crypto.randomUUID();
 
 function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
@@ -16,7 +19,10 @@ function emitStorageChange(areaName, changes) {
     try {
       listener(changes, areaName);
     } catch (error) {
-      console.error('[desktop-shim] storage.onChanged listener failed', error);
+      console.error(
+        '[desktop-platform] storage.onChanged listener failed',
+        error,
+      );
     }
   }
 }
@@ -26,7 +32,10 @@ function dispatchRuntimeMessage(message) {
     try {
       listener(message, { id: chromeShim.runtime.id }, () => {});
     } catch (error) {
-      console.error('[desktop-shim] runtime.onMessage listener failed', error);
+      console.error(
+        '[desktop-platform] runtime.onMessage listener failed',
+        error,
+      );
     }
   }
 }
@@ -38,109 +47,60 @@ function tauriListen(eventName, handler) {
   if (window.__TAURI_INTERNALS__?.event?.listen) {
     return window.__TAURI_INTERNALS__.event.listen(eventName, handler);
   }
-  return null;
+  throw new Error(`Tauri event bridge unavailable for ${eventName}`);
 }
 
 function ensureRuntimeBridge() {
-  if (runtimeBridgeStarted) return;
+  if (runtimeBridgeStarted) return runtimeBridgePromise;
   const listenPromise = tauriListen('bridge-runtime-message', (event) => {
-    dispatchRuntimeMessage(event?.payload ?? {});
+    if (!event?.payload || typeof event.payload !== 'object') {
+      console.error('[desktop-shim] runtime bridge payload must be an object');
+      return;
+    }
+    dispatchRuntimeMessage(event.payload);
   });
-  if (!listenPromise) return;
   runtimeBridgeStarted = true;
-  Promise.resolve(listenPromise).catch((error) => {
+  runtimeBridgePromise = Promise.resolve(listenPromise).catch((error) => {
     runtimeBridgeStarted = false;
-    console.error('[desktop-shim] failed to attach runtime bridge', error);
+    throw new Error(
+      `Failed to attach desktop runtime bridge: ${error.message}`,
+    );
   });
+  return runtimeBridgePromise;
 }
 
 function ensureStorageBridge() {
-  if (storageBridgeStarted) return;
+  if (storageBridgeStarted) return storageBridgePromise;
   const listenPromise = tauriListen('bridge-storage-change', (event) => {
-    const payload = event?.payload ?? {};
+    const payload = event?.payload;
+    if (!payload || typeof payload !== 'object') {
+      console.error('[desktop-shim] storage bridge payload must be an object');
+      return;
+    }
     if (payload?.sourceId === storageBridgeInstanceId) return;
     const area = payload?.areaName;
     const changes = payload?.changes;
-    if (!changes || typeof changes !== 'object') return;
+    if (!changes || typeof changes !== 'object' || Array.isArray(changes)) {
+      throw new Error('Desktop storage bridge changes must be an object');
+    }
     if (area === 'session') {
       sessionArea.applyExternalChanges(changes);
     } else if (area === 'local') {
       localArea.applyExternalChanges(changes);
+    } else {
+      throw new Error(
+        `Desktop storage bridge area is invalid: ${String(area)}`,
+      );
     }
   });
-  if (!listenPromise) return;
   storageBridgeStarted = true;
-  Promise.resolve(listenPromise).catch((error) => {
+  storageBridgePromise = Promise.resolve(listenPromise).catch((error) => {
     storageBridgeStarted = false;
-    console.error('[desktop-shim] failed to attach storage bridge', error);
+    throw new Error(
+      `Failed to attach desktop storage bridge: ${error.message}`,
+    );
   });
-}
-
-function createUnsupportedPort(name) {
-  const messageListeners = new Set();
-  const disconnectListeners = new Set();
-
-  function emitMessage(payload) {
-    for (const listener of messageListeners) {
-      try {
-        listener(payload);
-      } catch (error) {
-        console.error('[desktop-shim] runtime.connect listener failed', error);
-      }
-    }
-  }
-
-  function emitDisconnect() {
-    for (const listener of disconnectListeners) {
-      try {
-        listener();
-      } catch (error) {
-        console.error(
-          '[desktop-shim] runtime.connect disconnect listener failed',
-          error,
-        );
-      }
-    }
-  }
-
-  return {
-    name,
-    onMessage: {
-      addListener(listener) {
-        messageListeners.add(listener);
-      },
-      removeListener(listener) {
-        messageListeners.delete(listener);
-      },
-      hasListener(listener) {
-        return messageListeners.has(listener);
-      },
-    },
-    onDisconnect: {
-      addListener(listener) {
-        disconnectListeners.add(listener);
-      },
-      removeListener(listener) {
-        disconnectListeners.delete(listener);
-      },
-      hasListener(listener) {
-        return disconnectListeners.has(listener);
-      },
-    },
-    postMessage(message) {
-      const action = message?.action || name || 'request';
-      queueMicrotask(() => {
-        emitMessage({
-          type: 'error',
-          message: `${action} is not available in the desktop app yet`,
-        });
-        emitDisconnect();
-      });
-    },
-    disconnect() {
-      emitDisconnect();
-    },
-  };
+  return storageBridgePromise;
 }
 
 function normalizeChanges(changes = {}) {
@@ -227,28 +187,43 @@ function createStorageArea(storage, areaName, keyPrefix, options = {}) {
   }
 
   function syncAll(values) {
-    const snapshot = values || {};
+    syncAllResponse(values);
+    const snapshot = values;
     const keys = new Set([...allKeys(), ...Object.keys(snapshot)]);
     return syncSubset([...keys], snapshot);
+  }
+
+  function syncAllResponse(values) {
+    if (!values || typeof values !== 'object' || Array.isArray(values)) {
+      throw new Error('Desktop storage response must be an object');
+    }
   }
 
   return {
     async get(keys) {
       if (backendBacked) {
-        let remoteValues = {};
+        let remoteValues;
         if (keys == null) {
           remoteValues = await tauriInvoke('bridge_storage_get', {
             request: { areaName, keys: null },
           });
+          if (
+            !remoteValues ||
+            typeof remoteValues !== 'object' ||
+            Array.isArray(remoteValues)
+          ) {
+            throw new Error('Desktop storage response must be an object');
+          }
           syncAll(remoteValues);
-          return remoteValues || {};
+          return remoteValues;
         }
         if (typeof keys === 'string') {
           remoteValues = await tauriInvoke('bridge_storage_get', {
             request: { areaName, keys: [keys] },
           });
-          syncSubset([keys], remoteValues || {});
-          return Object.prototype.hasOwnProperty.call(remoteValues || {}, keys)
+          syncAllResponse(remoteValues);
+          syncSubset([keys], remoteValues);
+          return Object.prototype.hasOwnProperty.call(remoteValues, keys)
             ? { [keys]: remoteValues[keys] }
             : {};
         }
@@ -256,25 +231,16 @@ function createStorageArea(storage, areaName, keyPrefix, options = {}) {
           remoteValues = await tauriInvoke('bridge_storage_get', {
             request: { areaName, keys },
           });
-          syncSubset(keys, remoteValues || {});
-          return remoteValues || {};
+          syncAllResponse(remoteValues);
+          syncSubset(keys, remoteValues);
+          return remoteValues;
         }
         if (typeof keys === 'object') {
-          const keyList = Object.keys(keys);
-          remoteValues = await tauriInvoke('bridge_storage_get', {
-            request: { areaName, keys: keyList },
-          });
-          syncSubset(keyList, remoteValues || {});
-          return Object.fromEntries(
-            keyList.map((key) => [
-              key,
-              Object.prototype.hasOwnProperty.call(remoteValues || {}, key)
-                ? remoteValues[key]
-                : keys[key],
-            ]),
+          throw new Error(
+            'storage.get does not accept default-value objects; callers must handle absent keys explicitly',
           );
         }
-        return {};
+        throw new Error('storage.get keys must be null, a string, or an array');
       }
       if (keys == null) {
         return Object.fromEntries(allKeys().map((key) => [key, readRaw(key)]));
@@ -291,17 +257,17 @@ function createStorageArea(storage, areaName, keyPrefix, options = {}) {
         );
       }
       if (typeof keys === 'object') {
-        return Object.fromEntries(
-          Object.entries(keys).map(([key, fallback]) => {
-            const value = readRaw(key);
-            return [key, value === undefined ? fallback : value];
-          }),
+        throw new Error(
+          'storage.get does not accept default-value objects; callers must handle absent keys explicitly',
         );
       }
-      return {};
+      throw new Error('storage.get keys must be null, a string, or an array');
     },
 
     async set(items) {
+      if (!items || typeof items !== 'object' || Array.isArray(items)) {
+        throw new Error('storage.set items must be an object');
+      }
       if (backendBacked) {
         const changes = await tauriInvoke('bridge_storage_set', {
           request: {
@@ -314,7 +280,7 @@ function createStorageArea(storage, areaName, keyPrefix, options = {}) {
         return;
       }
       const changes = {};
-      for (const [key, value] of Object.entries(items || {})) {
+      for (const [key, value] of Object.entries(items)) {
         const oldValue = readRaw(key);
         changes[key] = {
           oldValue: clone(oldValue),
@@ -330,7 +296,7 @@ function createStorageArea(storage, areaName, keyPrefix, options = {}) {
         },
       }).catch((error) => {
         console.error(
-          '[desktop-shim] failed to broadcast local storage set',
+          '[desktop-platform] failed to broadcast local storage set',
           error,
         );
       });
@@ -367,7 +333,7 @@ function createStorageArea(storage, areaName, keyPrefix, options = {}) {
         },
       }).catch((error) => {
         console.error(
-          '[desktop-shim] failed to broadcast local storage remove',
+          '[desktop-platform] failed to broadcast local storage remove',
           error,
         );
       });
@@ -400,7 +366,7 @@ function createStorageArea(storage, areaName, keyPrefix, options = {}) {
         },
       }).catch((error) => {
         console.error(
-          '[desktop-shim] failed to broadcast local storage clear',
+          '[desktop-platform] failed to broadcast local storage clear',
           error,
         );
       });
@@ -435,9 +401,6 @@ const localArea = createStorageArea(window.localStorage, 'local', 'br:local:');
 const chromeShim = {
   runtime: {
     id: 'browser-recall-desktop',
-    getURL(path = '') {
-      return String(path).replace(/^\.\//, '');
-    },
     async sendMessage(message) {
       if (message && typeof message === 'object' && message.action) {
         return tauriInvoke('bridge_action', { request: message });
@@ -446,9 +409,6 @@ const chromeShim = {
     },
     reload() {
       window.location.reload();
-    },
-    connect(connectInfo = {}) {
-      return createUnsupportedPort(connectInfo?.name || '');
     },
     onMessage: {
       addListener(listener) {
@@ -480,29 +440,33 @@ const chromeShim = {
   },
   tabs: {
     async create({ url }) {
-      if (url) {
-        await tauriInvoke('bridge_action', {
-          request: { action: 'openExternalUrl', url },
-        });
+      if (typeof url !== 'string' || !url) {
+        throw new Error('Desktop external URL must be a non-empty string');
       }
-      return { id: Date.now(), url };
+      const response = await tauriInvoke('bridge_action', {
+        request: { action: 'openExternalUrl', url },
+      });
+      if (!response || response.success !== true) {
+        throw new Error(
+          response?.error || 'Desktop failed to open external URL',
+        );
+      }
+      return response;
     },
-  },
-  contextMenus: {
-    create() {},
-    removeAll() {},
   },
 };
 
-ensureRuntimeBridge();
-ensureStorageBridge();
+window.browserRecallDesktopPlatformReady = Promise.all([
+  ensureRuntimeBridge(),
+  ensureStorageBridge(),
+]);
 
-window.chrome = window.chrome || chromeShim;
-window.chrome.runtime = window.chrome.runtime || chromeShim.runtime;
-window.chrome.storage = window.chrome.storage || chromeShim.storage;
-window.chrome.tabs = window.chrome.tabs || chromeShim.tabs;
-window.chrome.contextMenus =
-  window.chrome.contextMenus || chromeShim.contextMenus;
-window.chrome.runtime.onMessage =
-  window.chrome.runtime.onMessage || chromeShim.runtime.onMessage;
+const hostChrome = window.chrome ?? {};
+for (const surface of ['runtime', 'storage', 'tabs']) {
+  if (Object.prototype.hasOwnProperty.call(hostChrome, surface)) {
+    throw new Error(`Desktop host already defines chrome.${surface}`);
+  }
+  hostChrome[surface] = chromeShim[surface];
+}
+window.chrome = hostChrome;
 window.__BROWSER_RECALL_DESKTOP__ = true;

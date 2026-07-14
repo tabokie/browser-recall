@@ -58,6 +58,7 @@ async function pairOnce(port) {
       browserId: 'browser-install-1',
       browserName: 'Chrome',
       extensionId: 'abcdefghijklmnop',
+      browserProfile: null,
     }),
   );
   const [, approved] = await pairingMessages;
@@ -124,6 +125,7 @@ describe.sequential('phase 1 daemon pairing integration', () => {
         browserId: 'browser-install-1',
         browserName: 'Chrome',
         extensionId: 'abcdefghijklmnop',
+        browserProfile: null,
       }),
     );
     const messages = await pairingMessages;

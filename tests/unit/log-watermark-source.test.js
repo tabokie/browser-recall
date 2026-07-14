@@ -77,17 +77,9 @@ describe('extension write queue invariants', () => {
     expect(createNote[0]).not.toContain('enqueueReportCommand');
   });
 
-  it('bootstraps default lists through Desktop instead of queued list events', () => {
-    const ensureDefaults = bgSource.match(
-      /async function ensureDefaultLists[\s\S]*?^}/m,
-    );
-    expect(ensureDefaults).not.toBeNull();
-    expect(ensureDefaults[0]).toContain(
-      "await runDesktopCommand('ensureDefaultLists'",
-    );
-    expect(ensureDefaults[0]).not.toContain('enqueueReportCommand');
-    expect(ensureDefaults[0]).not.toContain('create_list');
-    expect(ensureDefaults[0]).not.toContain('add_rule');
+  it('leaves default-list initialization entirely to Desktop startup', () => {
+    expect(bgSource).not.toContain('ensureDefaultLists');
+    expect(bgSource).not.toContain("runDesktopCommand('ensureDefaultLists'");
   });
 
   it('sends snapshots over the live Desktop bridge instead of storage.local queue', () => {

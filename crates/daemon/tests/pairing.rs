@@ -94,7 +94,7 @@ async fn pairing_rejects_a_client_without_a_protocol_version() {
         .send(Message::Text(
             serde_json::json!({
                 "type": "pair_request",
-                "browserId": "legacy-browser-install",
+                "browserId": "missing-version-browser-install",
                 "browserName": "Chrome",
                 "extensionId": "abcdefghijklmnop",
                 "browserProfile": "Default profile"
@@ -102,13 +102,13 @@ async fn pairing_rejects_a_client_without_a_protocol_version() {
             .to_string(),
         ))
         .await
-        .expect("send legacy pair request");
+        .expect("send pair request without a protocol version");
 
     let response = next_text_message(&mut socket).await;
     let response: DaemonMessage = serde_json::from_str(&response).expect("error json");
     assert!(matches!(
         response,
-        DaemonMessage::Error { ref code, .. } if code == "incompatible_protocol"
+        DaemonMessage::Error { ref code, .. } if code == "invalid_message"
     ));
     assert!(config_store
         .load_or_create()

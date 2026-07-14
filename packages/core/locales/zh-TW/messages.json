@@ -211,10 +211,6 @@
     "message": "以人類可讀的 JSONL 檔案儲存在本機，並按日期整理。可使用任何文字編輯器開啟，或使用 jq 處理。",
     "description": "Desktop local data storage help text."
   },
-  "desktopDefaultBrowserProfile": {
-    "message": "預設設定檔",
-    "description": "Fallback browser profile name."
-  },
   "desktopDebugLogging": {
     "message": "調試日誌記錄（重啟時重置）",
     "description": "Desktop debug logging setting."

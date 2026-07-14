@@ -11,7 +11,6 @@
     "./entity-types": "./entity-types.js",
     "./highlight-lifecycle": "./highlight-lifecycle.js",
     "./logger": "./logger.js",
-    "./search-helpers": "./search-helpers.js",
     "./search-runtime": "./search-runtime.js",
     "./theme": "./theme.js",
     "./time-chart": "./time-chart.js",

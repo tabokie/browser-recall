@@ -1,6 +1,8 @@
 use browser_recall_daemon::command_authority::CommandAuthority;
 use browser_recall_daemon::commands;
+use browser_recall_daemon::read_projections::ReadProjections;
 use browser_recall_daemon::storage::Storage;
+use browser_recall_replay::entities::ListEntity;
 use browser_recall_replay::{generate_slug_from_url, LogEntry};
 use serde_json::json;
 use tempfile::tempdir;
@@ -32,11 +34,12 @@ async fn note_command_returns_committed_response_and_mutation_together() {
         .await
         .expect("create note");
 
-    let note_slug = outcome.response["noteSlug"]
+    let response = outcome.response();
+    let note_slug = response["noteSlug"]
         .as_str()
         .expect("note slug")
         .to_string();
-    let response_page_slug = outcome.response["pageSlug"].as_str().expect("page slug");
+    let response_page_slug = response["pageSlug"].as_str().expect("page slug");
     assert_eq!(outcome.mutations.len(), 1);
     assert_eq!(outcome.mutations[0].mutation_type, "note");
     assert_eq!(
@@ -66,7 +69,8 @@ async fn note_command_returns_committed_response_and_mutation_together() {
         )
         .await
         .expect("update note");
-    let updated_slug = updated.response["noteSlug"]
+    let updated_response = updated.response();
+    let updated_slug = updated_response["noteSlug"]
         .as_str()
         .expect("updated note slug")
         .to_string();
@@ -97,6 +101,48 @@ async fn note_command_returns_committed_response_and_mutation_together() {
             .expect("deleted note checkpoint")
             .deleted
     );
+}
+
+#[tokio::test]
+async fn invalid_add_rule_preserves_the_validation_error() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("storage layout");
+    let authority = CommandAuthority::new(storage.clone(), "device-a".to_string());
+    let created = authority
+        .execute("saveListMeta", json!({ "name": "Rules" }))
+        .await
+        .expect("create list");
+    let list_id = created.response()["listId"]
+        .as_str()
+        .expect("list id")
+        .to_string();
+
+    let error = authority
+        .execute(
+            "addRule",
+            json!({
+                "listId": list_id,
+                "rule": {
+                    "type": "keyword",
+                    "config": { "case_sensitive": true }
+                }
+            }),
+        )
+        .await
+        .expect_err("invalid rule must fail");
+
+    assert_eq!(error, "Unsupported keyword rule field: case_sensitive");
+    assert!(storage
+        .load_list(&list_id)
+        .await
+        .expect("load list")
+        .expect("list checkpoint")
+        .rules
+        .is_empty());
 }
 
 #[tokio::test]
@@ -138,7 +184,8 @@ async fn page_list_and_snapshot_commands_report_their_committed_meaning() {
         .execute("saveListMeta", json!({ "name": "Authority List" }))
         .await
         .expect("create list");
-    let list_id = list.response["listId"]
+    let list_response = list.response();
+    let list_id = list_response["listId"]
         .as_str()
         .expect("list id")
         .to_string();
@@ -149,7 +196,7 @@ async fn page_list_and_snapshot_commands_report_their_committed_meaning() {
         )
         .await
         .expect("toggle pin");
-    assert_eq!(pin.response["pinned"].as_bool(), Some(true));
+    assert_eq!(pin.response()["pinned"].as_bool(), Some(true));
     assert_eq!(pin.mutations[0].mutation_type, "pins");
     assert_eq!(pin.mutations[0].list_id.as_deref(), Some(list_id.as_str()));
     assert_eq!(pin.mutations[0].url.as_deref(), Some(url));
@@ -222,9 +269,10 @@ async fn create_list_and_pin_commits_one_semantic_command() {
         .await
         .expect("create list and pin");
 
-    assert_eq!(outcome.response["success"].as_bool(), Some(true));
-    assert_eq!(outcome.response["pinned"].as_bool(), Some(true));
-    let list_id = outcome.response["listId"].as_str().expect("list id");
+    let response = outcome.response();
+    assert_eq!(response["success"].as_bool(), Some(true));
+    assert_eq!(response["pinned"].as_bool(), Some(true));
+    let list_id = response["listId"].as_str().expect("list id");
     assert_eq!(
         outcome
             .mutations
@@ -268,12 +316,14 @@ async fn note_pin_toggle_does_not_require_a_page_url() {
         )
         .await
         .expect("create note");
-    let note_slug = created.response["noteSlug"].as_str().expect("note slug");
+    let created_response = created.response();
+    let note_slug = created_response["noteSlug"].as_str().expect("note slug");
     let list = authority
         .execute("saveListMeta", json!({ "name": "Notes" }))
         .await
         .expect("create list");
-    let list_id = list.response["listId"].as_str().expect("list id");
+    let list_response = list.response();
+    let list_id = list_response["listId"].as_str().expect("list id");
 
     let pin = authority
         .execute(
@@ -283,7 +333,7 @@ async fn note_pin_toggle_does_not_require_a_page_url() {
         .await
         .expect("toggle note pin");
 
-    assert_eq!(pin.response["pinned"].as_bool(), Some(true));
+    assert_eq!(pin.response()["pinned"].as_bool(), Some(true));
     assert_eq!(pin.mutations.len(), 1);
     assert_eq!(pin.mutations[0].mutation_type, "pins");
     assert_eq!(pin.mutations[0].list_id.as_deref(), Some(list_id));
@@ -323,4 +373,122 @@ async fn command_validation_and_ownership_are_explicit() {
     assert!(CommandAuthority::supports("createListAndPin"));
     assert!(!CommandAuthority::supports("openExternalUrl"));
     assert!(!CommandAuthority::supports("reportVisit"));
+}
+
+#[tokio::test]
+async fn settings_values_are_validated_before_replay() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("storage layout");
+    let authority = CommandAuthority::new(storage, "device-a".to_string());
+
+    assert_eq!(
+        authority
+            .execute(
+                "saveSettingsKey",
+                json!({ "key": "blacklistEnabled", "value": "yes" }),
+            )
+            .await
+            .expect_err("wrong setting type fails"),
+        "blacklistEnabled must be a boolean"
+    );
+    assert_eq!(
+        authority
+            .execute(
+                "saveSettingsKey",
+                json!({ "key": "urlBlacklist", "value": ["https://ok.example", 4] }),
+            )
+            .await
+            .expect_err("mixed blacklist fails"),
+        "urlBlacklist must contain strings only"
+    );
+    assert_eq!(
+        authority
+            .execute(
+                "saveSettingsKey",
+                json!({ "key": "syncRetentionDays", "value": 0 }),
+            )
+            .await
+            .expect_err("invalid retention fails"),
+        "syncRetentionDays must be an integer greater than or equal to 1"
+    );
+    assert_eq!(
+        authority
+            .execute(
+                "saveSettingsKey",
+                json!({ "key": "theme", "value": "sepia" }),
+            )
+            .await
+            .expect_err("unsupported theme fails"),
+        "theme has an unsupported value"
+    );
+}
+
+#[tokio::test]
+async fn clearing_data_recreates_the_complete_authoritative_settings_schema() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("storage layout");
+    commands::ensure_default_settings(&storage, "device-a")
+        .await
+        .expect("default settings");
+    let authority = CommandAuthority::new(storage.clone(), "device-a".to_string());
+    authority
+        .execute(
+            "saveSettingsKey",
+            json!({ "key": "theme", "value": "dark" }),
+        )
+        .await
+        .expect("save changed theme");
+
+    authority
+        .execute("clearAllData", json!({}))
+        .await
+        .expect("clear data");
+
+    let settings = ReadProjections::new(storage)
+        .settings()
+        .await
+        .expect("complete settings projection")
+        .expect("settings checkpoint");
+    assert_eq!(settings.get("theme"), Some(&json!("system")));
+    assert_eq!(
+        settings.len(),
+        browser_recall_replay::PERSISTENT_SETTINGS_KEYS.len()
+    );
+}
+
+#[tokio::test]
+async fn ownerless_persisted_lists_cannot_be_deserialized() {
+    let error = serde_json::from_value::<ListEntity>(json!({
+        "slug": "ownerless",
+        "name": "Ownerless",
+        "pins": [],
+        "rules": [],
+        "timestamps": {},
+        "deleted": false,
+        "deletedTs": null
+    }))
+    .expect_err("persisted lists require an owner");
+
+    assert!(error.to_string().contains("owner"));
+
+    let error = serde_json::from_value::<ListEntity>(json!({
+        "slug": "ownerless",
+        "name": "Ownerless",
+        "owner": " ",
+        "pins": [],
+        "rules": [],
+        "timestamps": {},
+        "deleted": false,
+        "deletedTs": null
+    }))
+    .expect_err("persisted list owners must be non-empty");
+    assert!(error.to_string().contains("non-empty string"));
 }

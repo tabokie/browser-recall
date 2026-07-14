@@ -46,6 +46,20 @@ pub struct HistoryFileListing {
 }
 
 #[derive(Debug)]
+struct LogFile {
+    device_id: String,
+    name: String,
+    path: PathBuf,
+    size: u64,
+}
+
+#[derive(Debug)]
+struct LogCatalog {
+    devices: Vec<String>,
+    files: Vec<LogFile>,
+}
+
+#[derive(Debug)]
 pub struct CheckpointBatchWork {
     pub effects: CheckpointBatch,
     pub replay_progress: ReplayProgress,
@@ -228,12 +242,28 @@ impl Storage {
         match entity {
             Entity::Page(page) => self.persist_page_checkpoint_effect(key, page).await,
             Entity::Note(note) => {
-                self.write_note_checkpoint(key.strip_prefix("note:").unwrap_or(&note.slug), note)
-                    .await
+                let slug = key
+                    .strip_prefix("note:")
+                    .ok_or_else(|| invalid_data(format!("invalid note effect key: {key}")))?;
+                if slug != note.slug {
+                    return Err(invalid_data(format!(
+                        "note effect key {key} does not match entity slug {}",
+                        note.slug
+                    )));
+                }
+                self.write_note_checkpoint(slug, note).await
             }
             Entity::List(list) => {
-                self.write_list_checkpoint(key.strip_prefix("list:").unwrap_or(&list.slug), list)
-                    .await
+                let slug = key
+                    .strip_prefix("list:")
+                    .ok_or_else(|| invalid_data(format!("invalid list effect key: {key}")))?;
+                if slug != list.slug {
+                    return Err(invalid_data(format!(
+                        "list effect key {key} does not match entity slug {}",
+                        list.slug
+                    )));
+                }
+                self.write_list_checkpoint(slug, list).await
             }
             Entity::Settings(settings) => self.write_settings_checkpoint(settings).await,
             Entity::NameToId(manifest) => self.write_name_to_id_checkpoint(manifest).await,
@@ -295,9 +325,10 @@ impl Storage {
     }
 
     pub async fn load_replay_progress(&self) -> io::Result<ReplayProgress> {
-        Ok(load_json(self.manifest_path(REPLAY_PROGRESS_FILE))
-            .await?
-            .unwrap_or_default())
+        match load_json(self.manifest_path(REPLAY_PROGRESS_FILE)).await? {
+            Some(progress) => Ok(progress),
+            None => Ok(ReplayProgress::new()),
+        }
     }
 
     async fn save_replay_progress(&self, replay_progress: &ReplayProgress) -> io::Result<()> {
@@ -308,48 +339,26 @@ impl Storage {
         &self,
     ) -> io::Result<Vec<(String, LogEntry)>> {
         let replay_progress = self.load_replay_progress().await?;
-        let logs_root = self.root().join("logs");
         let mut result = Vec::new();
-        let mut devices = match fs::read_dir(&logs_root).await {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(result),
-            Err(error) => return Err(error),
-        };
-
-        while let Some(device_entry) = devices.next_entry().await? {
-            if !device_entry.file_type().await?.is_dir() {
-                continue;
-            }
-            let Some(device_id) = device_entry.file_name().to_str().map(str::to_string) else {
-                continue;
-            };
-            let progress = replay_progress.get(&device_id).copied().unwrap_or(i64::MIN);
-            let mut files = fs::read_dir(device_entry.path()).await?;
-            while let Some(file_entry) = files.next_entry().await? {
-                if !file_entry.file_type().await?.is_file() {
-                    continue;
+        for file in self.scan_log_catalog().await?.files {
+            let progress = replay_progress
+                .get(&file.device_id)
+                .copied()
+                .unwrap_or(i64::MIN);
+            let raw = fs::read_to_string(&file.path).await?;
+            for (index, line) in raw.lines().enumerate() {
+                if line.trim().is_empty() {
+                    return Err(invalid_data(format!(
+                        "{}:{}: blank JSONL records are not allowed",
+                        file.path.display(),
+                        index + 1
+                    )));
                 }
-                let Some(name) = file_entry.file_name().to_str().map(str::to_string) else {
-                    continue;
-                };
-                if !name.ends_with(".jsonl") {
-                    continue;
-                }
-                let raw = fs::read_to_string(file_entry.path()).await?;
-                for (index, line) in raw.lines().enumerate() {
-                    if line.trim().is_empty() {
-                        continue;
-                    }
-                    let entry: LogEntry = serde_json::from_str(line).map_err(|error| {
-                        invalid_data(format!(
-                            "{}:{}: {error}",
-                            file_entry.path().display(),
-                            index + 1
-                        ))
-                    })?;
-                    if entry.timestamp() > progress {
-                        result.push((device_id.clone(), entry));
-                    }
+                let entry: LogEntry = serde_json::from_str(line).map_err(|error| {
+                    invalid_data(format!("{}:{}: {error}", file.path.display(), index + 1))
+                })?;
+                if entry.timestamp() > progress {
+                    result.push((file.device_id.clone(), entry));
                 }
             }
         }
@@ -534,12 +543,14 @@ impl Storage {
             return remove_if_exists(self.list_path(slug)).await;
         }
         if let Some(snapshot_stem) = key.strip_prefix("snapshot:") {
-            if let Some((slug, timestamp)) = split_snapshot_stem(snapshot_stem) {
-                remove_if_exists(self.snapshot_html_path(&slug, timestamp)).await?;
-                remove_if_exists(self.snapshot_markdown_path(&slug, timestamp)).await?;
-            }
+            let (slug, timestamp) = split_snapshot_stem(snapshot_stem)?;
+            remove_if_exists(self.snapshot_html_path(&slug, timestamp)).await?;
+            remove_if_exists(self.snapshot_markdown_path(&slug, timestamp)).await?;
+            return Ok(());
         }
-        Ok(())
+        Err(invalid_data(format!(
+            "unsupported checkpoint deletion key: {key}"
+        )))
     }
 
     pub async fn append_log_entry(
@@ -550,7 +561,7 @@ impl Storage {
     ) -> io::Result<PathBuf> {
         let directory = self.root().join("logs").join(device_id);
         fs::create_dir_all(&directory).await?;
-        let filename = format!("{}.jsonl", local_date(timestamp));
+        let filename = format!("{}.jsonl", local_date(timestamp)?);
         let path = directory.join(filename);
         let mut file = fs::OpenOptions::new()
             .create(true)
@@ -617,11 +628,7 @@ impl Storage {
         let mut total = 0u64;
         let mut stack = vec![self.root().to_path_buf()];
         while let Some(dir) = stack.pop() {
-            let mut entries = match fs::read_dir(&dir).await {
-                Ok(entries) => entries,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-                Err(error) => return Err(error),
-            };
+            let mut entries = fs::read_dir(&dir).await?;
             while let Some(entry) = entries.next_entry().await? {
                 let file_type = entry.file_type().await?;
                 if file_type.is_dir() {
@@ -636,15 +643,7 @@ impl Storage {
 
     pub async fn clear_all_data(&self, device_id: &str) -> io::Result<usize> {
         let mut deleted_count = 0usize;
-        let mut entries = match fs::read_dir(self.root()).await {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                self.clear_cache();
-                self.ensure_layout(device_id).await?;
-                return Ok(0);
-            }
-            Err(error) => return Err(error),
-        };
+        let mut entries = fs::read_dir(self.root()).await?;
 
         while let Some(entry) = entries.next_entry().await? {
             deleted_count += remove_path(entry.path()).await?;
@@ -668,8 +667,13 @@ impl Storage {
         device_id: &str,
         retention_days: i64,
     ) -> io::Result<Vec<(String, String)>> {
+        if retention_days < 1 {
+            return Err(invalid_data(
+                "sync retention days must be greater than or equal to 1",
+            ));
+        }
         let mut files = Vec::new();
-        let cutoff = chrono::Local::now() - chrono::Duration::days(retention_days.max(0));
+        let cutoff = chrono::Local::now() - chrono::Duration::days(retention_days);
         let cutoff_str = format!(
             "{:04}-{:02}-{:02}",
             chrono::Datelike::year(&cutoff),
@@ -678,49 +682,40 @@ impl Storage {
         );
 
         let logs_dir = self.root().join("logs").join(device_id);
-        let mut log_entries = match fs::read_dir(&logs_dir).await {
-            Ok(entries) => Some(entries),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-            Err(error) => return Err(error),
-        };
-        if let Some(entries) = log_entries.as_mut() {
-            while let Some(entry) = entries.next_entry().await? {
-                if !entry.file_type().await?.is_file() {
-                    continue;
-                }
-                let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-                    continue;
-                };
-                if !name.ends_with(".jsonl") {
-                    continue;
-                }
-                let date_str = name.trim_end_matches(".jsonl");
-                if date_str < cutoff_str.as_str() {
-                    continue;
-                }
-                files.push((
-                    format!("logs/{device_id}/{name}"),
-                    fs::read_to_string(entry.path()).await?,
-                ));
+        for log_file in scan_device_log_files(device_id, &logs_dir).await? {
+            let date_str = log_file
+                .name
+                .strip_suffix(".jsonl")
+                .expect("log filenames validated by catalog scan");
+            if date_str < cutoff_str.as_str() {
+                continue;
             }
+            files.push((
+                format!("logs/{device_id}/{}", log_file.name),
+                fs::read_to_string(log_file.path).await?,
+            ));
         }
 
         let notes_dir = self.root().join("objects").join("notes");
-        let mut note_entries = match fs::read_dir(&notes_dir).await {
-            Ok(entries) => Some(entries),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-            Err(error) => return Err(error),
-        };
-        if let Some(entries) = note_entries.as_mut() {
+        let mut note_entries = fs::read_dir(&notes_dir).await?;
+        {
+            let entries = &mut note_entries;
             while let Some(entry) = entries.next_entry().await? {
                 if !entry.file_type().await?.is_file() {
-                    continue;
+                    return Err(invalid_data(format!(
+                        "unexpected directory in notes storage: {}",
+                        entry.path().display()
+                    )));
                 }
-                let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-                    continue;
-                };
+                let name = entry
+                    .file_name()
+                    .to_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| invalid_data("note filename is not UTF-8"))?;
                 if !name.ends_with(".json") {
-                    continue;
+                    return Err(invalid_data(format!(
+                        "unexpected non-JSON note file: {name}"
+                    )));
                 }
                 files.push((
                     format!("objects/notes/{name}"),
@@ -733,6 +728,34 @@ impl Storage {
     }
 
     pub async fn write_sync_files(&self, files: &[(String, String)]) -> io::Result<()> {
+        for (path, _) in files {
+            let relative = Path::new(path);
+            if relative.as_os_str().is_empty()
+                || relative.is_absolute()
+                || relative
+                    .components()
+                    .any(|component| !matches!(component, std::path::Component::Normal(_)))
+            {
+                return Err(invalid_data(format!(
+                    "sync file path must be a non-empty relative path: {path}"
+                )));
+            }
+            let Some(root) = relative
+                .components()
+                .next()
+                .and_then(|component| match component {
+                    std::path::Component::Normal(value) => value.to_str(),
+                    _ => None,
+                })
+            else {
+                return Err(invalid_data(format!("sync file path is not UTF-8: {path}")));
+            };
+            if !matches!(root, "logs" | "objects" | "views" | "manifest") {
+                return Err(invalid_data(format!(
+                    "sync file path has unsupported root: {path}"
+                )));
+            }
+        }
         for (path, content) in files {
             let path = self.root().join(path);
             if let Some(parent) = path.parent() {
@@ -745,110 +768,116 @@ impl Storage {
     }
 
     pub async fn list_history_files(&self, include_sizes: bool) -> io::Result<HistoryFileListing> {
-        let logs_root = self.root().join("logs");
         let mut names = BTreeMap::new();
-        let mut device_ids = Vec::new();
-        let mut devices = match fs::read_dir(&logs_root).await {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                return Ok(HistoryFileListing {
-                    files: Vec::new(),
-                    sizes: include_sizes.then(BTreeMap::new),
-                    devices: Vec::new(),
-                });
-            }
-            Err(error) => return Err(error),
-        };
-
-        while let Some(device_entry) = devices.next_entry().await? {
-            if !device_entry.file_type().await?.is_dir() {
-                continue;
-            }
-            let Some(device_id) = device_entry.file_name().to_str().map(str::to_string) else {
-                continue;
-            };
-            device_ids.push(device_id);
-            let mut files = fs::read_dir(device_entry.path()).await?;
-            while let Some(file_entry) = files.next_entry().await? {
-                if !file_entry.file_type().await?.is_file() {
-                    continue;
-                }
-                let Some(name) = file_entry.file_name().to_str().map(str::to_string) else {
-                    continue;
-                };
-                if !name.ends_with(".jsonl") {
-                    continue;
-                }
-                let size = file_entry.metadata().await?.len();
-                *names.entry(name).or_insert(0) += size;
-            }
+        let catalog = self.scan_log_catalog().await?;
+        for file in catalog.files {
+            *names.entry(file.name).or_insert(0) += file.size;
         }
 
         let mut files: Vec<_> = names.keys().cloned().collect();
         files.reverse();
-        device_ids.sort();
         let sizes = include_sizes.then_some(names);
         Ok(HistoryFileListing {
             files,
             sizes,
-            devices: device_ids,
+            devices: catalog.devices,
         })
     }
 
     pub async fn load_history_batch(&self, filenames: &[String]) -> io::Result<Vec<Value>> {
-        let logs_root = self.root().join("logs");
         let wanted: std::collections::HashSet<&str> =
             filenames.iter().map(String::as_str).collect();
         let mut results = Vec::new();
-
-        let mut devices = match fs::read_dir(&logs_root).await {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(results),
-            Err(error) => return Err(error),
-        };
-
-        while let Some(device_entry) = devices.next_entry().await? {
-            if !device_entry.file_type().await?.is_dir() {
+        for file in self.scan_log_catalog().await?.files {
+            if !wanted.contains(file.name.as_str()) {
                 continue;
             }
-            let Some(device_id) = device_entry.file_name().to_str().map(str::to_string) else {
-                continue;
-            };
-            let mut files = fs::read_dir(device_entry.path()).await?;
-            while let Some(file_entry) = files.next_entry().await? {
-                if !file_entry.file_type().await?.is_file() {
-                    continue;
+            let raw = fs::read_to_string(&file.path).await?;
+            for (line_index, line) in raw.lines().enumerate() {
+                if line.trim().is_empty() {
+                    return Err(invalid_data(format!(
+                        "blank JSONL record in {} at line {}",
+                        file.name,
+                        line_index + 1
+                    )));
                 }
-                let Some(name) = file_entry.file_name().to_str().map(str::to_string) else {
-                    continue;
-                };
-                if !wanted.contains(name.as_str()) {
-                    continue;
+                let mut value: Value = serde_json::from_str(line).map_err(|error| {
+                    invalid_data(format!(
+                        "invalid JSONL in {} at line {}: {error}",
+                        file.name,
+                        line_index + 1
+                    ))
+                })?;
+                let object = value.as_object().ok_or_else(|| {
+                    invalid_data(format!(
+                        "log entry in {} at line {} must be an object",
+                        file.name,
+                        line_index + 1
+                    ))
+                })?;
+                if object.get("timestamp").and_then(Value::as_i64).is_none() {
+                    return Err(invalid_data(format!(
+                        "log entry in {} at line {} is missing an integer timestamp",
+                        file.name,
+                        line_index + 1
+                    )));
                 }
-                let raw = fs::read_to_string(file_entry.path()).await?;
-                for line in raw.lines() {
-                    if line.trim().is_empty() {
-                        continue;
-                    }
-                    let mut value: Value = match serde_json::from_str(line) {
-                        Ok(value) => value,
-                        Err(_) => continue,
-                    };
-                    if let Value::Object(object) = &mut value {
-                        object.insert("deviceId".to_string(), Value::String(device_id.clone()));
-                    }
-                    results.push(value);
-                }
+                serde_json::from_value::<LogEntry>(value.clone()).map_err(|error| {
+                    invalid_data(format!(
+                        "invalid log schema in {} at line {}: {error}",
+                        file.name,
+                        line_index + 1
+                    ))
+                })?;
+                value
+                    .as_object_mut()
+                    .expect("log object validated before schema parsing")
+                    .insert(
+                        "deviceId".to_string(),
+                        Value::String(file.device_id.clone()),
+                    );
+                results.push(value);
             }
         }
 
-        results.sort_by(|left, right| {
-            let left_ts = left.get("timestamp").and_then(Value::as_i64).unwrap_or(0);
-            let right_ts = right.get("timestamp").and_then(Value::as_i64).unwrap_or(0);
-            left_ts.cmp(&right_ts)
+        results.sort_by_key(|entry| {
+            entry
+                .get("timestamp")
+                .and_then(Value::as_i64)
+                .expect("timestamps validated before sorting")
         });
 
         Ok(results)
+    }
+
+    async fn scan_log_catalog(&self) -> io::Result<LogCatalog> {
+        let logs_root = self.root().join("logs");
+        let mut devices = fs::read_dir(&logs_root).await?;
+        let mut device_ids = Vec::new();
+        let mut files = Vec::new();
+        while let Some(device_entry) = devices.next_entry().await? {
+            if !device_entry.file_type().await?.is_dir() {
+                return Err(invalid_data(format!(
+                    "unexpected file in logs directory: {}",
+                    device_entry.path().display()
+                )));
+            }
+            let device_id = device_entry
+                .file_name()
+                .to_str()
+                .map(str::to_string)
+                .ok_or_else(|| invalid_data("log device directory name is not UTF-8"))?;
+            device_ids.push(device_id.clone());
+            files.extend(scan_device_log_files(&device_id, &device_entry.path()).await?);
+        }
+        device_ids.sort();
+        files.sort_by(|left, right| {
+            (&left.device_id, &left.name).cmp(&(&right.device_id, &right.name))
+        });
+        Ok(LogCatalog {
+            devices: device_ids,
+            files,
+        })
     }
 
     pub async fn load_all_pages(&self) -> io::Result<BTreeMap<String, PageEntity>> {
@@ -858,26 +887,52 @@ impl Storage {
             Ok(mut entries) => {
                 while let Some(entry) = entries.next_entry().await? {
                     if !entry.file_type().await?.is_dir() {
-                        continue;
+                        return Err(invalid_data(format!(
+                            "unexpected file in page checkpoint directory: {}",
+                            entry.path().display()
+                        )));
+                    }
+                    let shard = entry
+                        .file_name()
+                        .to_str()
+                        .map(str::to_string)
+                        .ok_or_else(|| invalid_data("page shard name is not UTF-8"))?;
+                    if shard.len() != 2 || !shard.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                        return Err(invalid_data(format!(
+                            "invalid page shard directory: {shard}"
+                        )));
                     }
                     let mut files = fs::read_dir(entry.path()).await?;
                     while let Some(file) = files.next_entry().await? {
                         if !file.file_type().await?.is_file() {
-                            continue;
+                            return Err(invalid_data(format!(
+                                "unexpected directory in page shard: {}",
+                                file.path().display()
+                            )));
                         }
-                        let Some(name) = file.file_name().to_str().map(str::to_string) else {
-                            continue;
-                        };
-                        let Some(slug) = name.strip_suffix(".json").map(str::to_string) else {
-                            continue;
-                        };
+                        let name = file
+                            .file_name()
+                            .to_str()
+                            .map(str::to_string)
+                            .ok_or_else(|| invalid_data("page checkpoint filename is not UTF-8"))?;
+                        let slug = name.strip_suffix(".json").ok_or_else(|| {
+                            invalid_data(format!("unexpected page checkpoint file: {name}"))
+                        })?;
+                        if slug.is_empty() || shard_for(slug) != shard {
+                            return Err(invalid_data(format!(
+                                "page checkpoint {name} is stored in the wrong shard {shard}"
+                            )));
+                        }
                         let raw = fs::read_to_string(file.path()).await?;
                         let page: PageEntity = serde_json::from_str(&raw).map_err(invalid_data)?;
-                        result.insert(slug, page);
+                        if result.insert(slug.to_string(), page).is_some() {
+                            return Err(invalid_data(format!(
+                                "duplicate page checkpoint slug: {slug}"
+                            )));
+                        }
                     }
                 }
             }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
         }
 
@@ -918,28 +973,70 @@ impl Storage {
     pub async fn load_all_lists(&self) -> io::Result<BTreeMap<String, ListEntity>> {
         let lists_dir = self.root().join("views").join("lists");
         let mut result = BTreeMap::new();
-        let mut entries = match fs::read_dir(&lists_dir).await {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(result),
-            Err(error) => return Err(error),
-        };
-
-        while let Some(entry) = entries.next_entry().await? {
-            if !entry.file_type().await?.is_file() {
-                continue;
+        match fs::read_dir(&lists_dir).await {
+            Ok(mut entries) => {
+                while let Some(entry) = entries.next_entry().await? {
+                    if !entry.file_type().await?.is_file() {
+                        return Err(invalid_data(format!(
+                            "unexpected directory in list checkpoints: {}",
+                            entry.path().display()
+                        )));
+                    }
+                    let name = entry
+                        .file_name()
+                        .to_str()
+                        .map(str::to_string)
+                        .ok_or_else(|| invalid_data("list checkpoint filename is not UTF-8"))?;
+                    let slug = name.strip_suffix(".json").ok_or_else(|| {
+                        invalid_data(format!("unexpected list checkpoint file: {name}"))
+                    })?;
+                    if slug.is_empty() {
+                        return Err(invalid_data("list checkpoint slug must not be empty"));
+                    }
+                    let raw = fs::read_to_string(entry.path()).await?;
+                    let list: ListEntity = serde_json::from_str(&raw).map_err(invalid_data)?;
+                    if result.insert(slug.to_string(), list).is_some() {
+                        return Err(invalid_data(format!(
+                            "duplicate list checkpoint slug: {slug}"
+                        )));
+                    }
+                }
             }
-            let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-                continue;
-            };
-            let Some(slug) = name.strip_suffix(".json").map(str::to_string) else {
-                continue;
-            };
-            let raw = fs::read_to_string(entry.path()).await?;
-            let list: ListEntity = serde_json::from_str(&raw).map_err(invalid_data)?;
-            result.insert(slug, list);
+            Err(error) => return Err(error),
+        }
+
+        for (slug, cached) in self.cached_list_overlay() {
+            match cached {
+                Some(list) => {
+                    result.insert(slug, list);
+                }
+                None => {
+                    result.remove(&slug);
+                }
+            }
         }
 
         Ok(result)
+    }
+
+    fn cached_list_overlay(&self) -> BTreeMap<String, Option<ListEntity>> {
+        let cache = self
+            .inner
+            .cache
+            .lock()
+            .expect("storage cache mutex poisoned");
+        cache
+            .entries
+            .iter()
+            .filter_map(|(key, value)| {
+                let slug = key.strip_prefix("list:")?;
+                let list = match value {
+                    Some(Entity::List(list)) => Some(list.clone()),
+                    _ => None,
+                };
+                Some((slug.to_string(), list))
+            })
+            .collect()
     }
 
     async fn remove_page_child_references(&self, child_key: &str) -> io::Result<()> {
@@ -980,7 +1077,15 @@ impl Storage {
     }
 
     async fn persist_page_checkpoint_effect(&self, key: &str, page: &PageEntity) -> io::Result<()> {
-        let slug = key.strip_prefix("page:").unwrap_or(&page.slug);
+        let slug = key
+            .strip_prefix("page:")
+            .ok_or_else(|| invalid_data(format!("invalid page effect key: {key}")))?;
+        if slug != page.slug {
+            return Err(invalid_data(format!(
+                "page effect key {key} does not match entity slug {}",
+                page.slug
+            )));
+        }
         if page_retains_checkpoint(page) {
             self.write_page_checkpoint(slug, page).await
         } else {
@@ -1149,22 +1254,48 @@ fn snapshot_stem(slug: &str, timestamp: i64) -> String {
     format!("{slug}-{timestamp}")
 }
 
-fn local_date(timestamp: i64) -> String {
+fn local_date(timestamp: i64) -> io::Result<String> {
     let datetime = Local
         .timestamp_millis_opt(timestamp)
         .single()
-        .unwrap_or_else(|| {
-            Local
-                .with_ymd_and_hms(1970, 1, 1, 0, 0, 0)
-                .earliest()
-                .expect("epoch exists")
-        });
-    format!(
+        .ok_or_else(|| invalid_data("timestamp is out of range"))?;
+    Ok(format!(
         "{:04}-{:02}-{:02}",
         chrono::Datelike::year(&datetime),
         chrono::Datelike::month(&datetime),
         chrono::Datelike::day(&datetime)
-    )
+    ))
+}
+
+async fn scan_device_log_files(device_id: &str, directory: &Path) -> io::Result<Vec<LogFile>> {
+    let mut entries = fs::read_dir(directory).await?;
+    let mut files = Vec::new();
+    while let Some(entry) = entries.next_entry().await? {
+        if !entry.file_type().await?.is_file() {
+            return Err(invalid_data(format!(
+                "unexpected directory in device logs: {}",
+                entry.path().display()
+            )));
+        }
+        let name = entry
+            .file_name()
+            .to_str()
+            .map(str::to_string)
+            .ok_or_else(|| invalid_data("log filename is not UTF-8"))?;
+        let date = name
+            .strip_suffix(".jsonl")
+            .ok_or_else(|| invalid_data(format!("unexpected non-JSONL log file: {name}")))?;
+        chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+            .map_err(|_| invalid_data(format!("log filename must be YYYY-MM-DD.jsonl: {name}")))?;
+        files.push(LogFile {
+            device_id: device_id.to_string(),
+            name,
+            path: entry.path(),
+            size: entry.metadata().await?.len(),
+        });
+    }
+    files.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(files)
 }
 
 fn invalid_data(error: impl ToString) -> io::Error {
@@ -1180,7 +1311,14 @@ async fn remove_if_exists(path: PathBuf) -> io::Result<()> {
 }
 
 async fn checkpoint_worker(storage: Storage, mut rx: mpsc::Receiver<CheckpointWork>) {
-    let mut durable_progress = storage.load_replay_progress().await.unwrap_or_default();
+    let mut durable_progress = match storage.load_replay_progress().await {
+        Ok(progress) => progress,
+        Err(error) => {
+            warn!(error = %error, "checkpoint worker could not load replay progress");
+            storage.set_checkpoint_error(error.to_string());
+            return;
+        }
+    };
     while let Some(work) = rx.recv().await {
         match work {
             CheckpointWork::Batch(batch) => {
@@ -1274,13 +1412,27 @@ async fn remove_path(path: PathBuf) -> io::Result<usize> {
         return Ok(removed);
     }
 
-    Ok(0)
+    Err(invalid_data(format!(
+        "unsupported filesystem entry cannot be removed: {}",
+        path.display()
+    )))
 }
 
-fn split_snapshot_stem(snapshot_stem: &str) -> Option<(String, i64)> {
-    let (slug, timestamp) = snapshot_stem.rsplit_once('-')?;
-    let timestamp = timestamp.parse::<i64>().ok()?;
-    Some((slug.to_string(), timestamp))
+fn split_snapshot_stem(snapshot_stem: &str) -> io::Result<(String, i64)> {
+    let (slug, timestamp) = snapshot_stem
+        .rsplit_once('-')
+        .ok_or_else(|| invalid_data(format!("invalid snapshot checkpoint key: {snapshot_stem}")))?;
+    if slug.is_empty() {
+        return Err(invalid_data(format!(
+            "invalid snapshot checkpoint key: {snapshot_stem}"
+        )));
+    }
+    let timestamp = timestamp.parse::<i64>().map_err(|error| {
+        invalid_data(format!(
+            "invalid snapshot checkpoint timestamp in {snapshot_stem}: {error}"
+        ))
+    })?;
+    Ok((slug.to_string(), timestamp))
 }
 
 async fn load_json<T>(path: PathBuf) -> io::Result<Option<T>>
@@ -1306,7 +1458,12 @@ where
     let filename = path
         .file_name()
         .and_then(|value| value.to_str())
-        .unwrap_or("checkpoint");
+        .ok_or_else(|| {
+            invalid_data(format!(
+                "checkpoint path has no UTF-8 filename: {}",
+                path.display()
+            ))
+        })?;
     let counter = ATOMIC_WRITE_COUNTER.fetch_add(1, Ordering::Relaxed);
     let tmp_path = path.with_file_name(format!(
         ".{filename}.{}.{}.tmp",

@@ -173,7 +173,16 @@ export async function waitForDesktopConnector(
           'connectorAuthToken',
         ]);
         await chrome.storage.local.set({ connectorDaemonPort: port });
-        await chrome.runtime.sendMessage({ action: 'connectDesktopBridge' });
+        const request = chrome.runtime
+          .sendMessage({ action: 'connectDesktopBridge' })
+          .catch((error) => ({
+            success: false,
+            error: error?.message || String(error),
+          }));
+        const timeout = new Promise((resolve) =>
+          setTimeout(() => resolve({ success: false, state: 'timeout' }), 1000),
+        );
+        return Promise.race([request, timeout]);
       }, expectedPort);
       connectTriggered = true;
     }
@@ -191,7 +200,28 @@ export async function waitForDesktopConnector(
         const timeout = new Promise((resolve) =>
           setTimeout(() => resolve({ success: false, state: 'timeout' }), 1000),
         );
-        return Promise.race([request, timeout]);
+        const response = await Promise.race([request, timeout]);
+        if (response?.state !== 'timeout' && response !== undefined) {
+          return response;
+        }
+        const stored = await chrome.storage.local.get([
+          'connectorState',
+          'connectorDaemonPort',
+          'connectorDeviceId',
+          'connectorLastError',
+          'connectorLastErrorCode',
+          'connectorLastDiagnostic',
+        ]);
+        return {
+          success: false,
+          state: stored.connectorState || 'missing',
+          port: stored.connectorDaemonPort ?? null,
+          deviceId: stored.connectorDeviceId ?? null,
+          lastError: stored.connectorLastError ?? null,
+          lastErrorCode: stored.connectorLastErrorCode ?? null,
+          lastDiagnostic: stored.connectorLastDiagnostic ?? null,
+          probeTimedOut: true,
+        };
       });
       lastState = state;
       const onExpectedPort = !expectedPort || state?.port === expectedPort;
@@ -225,8 +255,53 @@ export async function waitForDesktopConnector(
       }
       await page.waitForTimeout(200);
     }
+    const serviceWorkers = extContext.serviceWorkers();
+    const workerDiagnostics = await Promise.all(
+      serviceWorkers.map((worker) =>
+        worker
+          .evaluate(() => ({
+            location: globalThis.location?.href || null,
+            userAgent: globalThis.navigator?.userAgent || null,
+            hasChrome: Boolean(globalThis.chrome),
+            hasBrowser: Boolean(globalThis.browser),
+            chromeEqualsBrowser: globalThis.chrome === globalThis.browser,
+            engine: globalThis.browserRecallWebExtension?.engine || null,
+            hasBackgroundControl: Boolean(
+              globalThis.browserRecallBackgroundTestControl,
+            ),
+            hasTestActions: Boolean(
+              globalThis.browserRecallBackgroundTestActions,
+            ),
+            loadError: globalThis.browserRecallBackgroundLoadError || null,
+          }))
+          .catch((error) => ({ error: error?.message || String(error) })),
+      ),
+    );
+    const extensionsPage = await extContext.newPage();
+    let extensionDiagnostics;
+    try {
+      await extensionsPage.goto('chrome://extensions');
+      await extensionsPage.waitForTimeout(250);
+      extensionDiagnostics = await extensionsPage.evaluate(() => {
+        const manager = document.querySelector('extensions-manager');
+        const itemList = manager?.shadowRoot?.querySelector(
+          'extensions-item-list',
+        );
+        const items = itemList?.shadowRoot?.querySelectorAll('extensions-item');
+        return [...(items || [])].map((item) => ({
+          id: item.data?.id || null,
+          name: item.data?.name || null,
+          manifestErrors: item.data?.manifestErrors || [],
+          runtimeErrors: item.data?.runtimeErrors || [],
+        }));
+      });
+    } catch (error) {
+      extensionDiagnostics = [{ error: error?.message || String(error) }];
+    } finally {
+      await extensionsPage.close().catch(() => {});
+    }
     throw new Error(
-      `Timed out waiting for desktop connector: ${JSON.stringify(lastState)}`,
+      `Timed out waiting for desktop connector: ${JSON.stringify({ lastState, workerDiagnostics, extensionDiagnostics })}`,
     );
   } finally {
     await page.close().catch(() => {});

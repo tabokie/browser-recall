@@ -11,11 +11,12 @@ use crate::protocol::{
     ConnectorMessage, DaemonMessage, DirectoryInfoPayload, MutationPayload, NoteSearchResult,
     PopupAccessResult, PopupAttentionResult, PopupListResult, PopupNoteResult, PopupPageInfoEntry,
     PopupSnapshotResult, PreviewRuleHit, RuleBatchEntry, RuleBatchHit, RuleMatchResult,
-    RulePayload, SnapshotSearchResult, TestSeedFilePayload, CONNECTOR_PROTOCOL_VERSION,
+    RulePayload, SnapshotSearchResult, TestControlMessage, TestSeedFilePayload,
+    CONNECTOR_PROTOCOL_VERSION,
 };
 use crate::rules::{
-    list_matches_page, match_list_rules_strict, page_data_from_raw_entry, preview_rule,
-    validate_rule, PageData, RuleSpec,
+    match_list_rules_strict, page_data_from_raw_entry, preview_rule, validate_rule, PageData,
+    RuleSpec,
 };
 use crate::runtime::{self, EntityMapView, ReplayTransaction};
 use crate::search::{search_notes_in_data_dir, search_snapshots_in_data_dir};
@@ -23,6 +24,7 @@ use crate::storage::Storage;
 use browser_recall_replay::entities::{Entity, ListOrderManifest, TreeNode};
 use browser_recall_replay::{generate_slug_from_url, EntityEffect, LogEntry};
 use futures_util::{FutureExt, SinkExt, StreamExt};
+use serde::{Deserialize, Deserializer};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -41,6 +43,42 @@ use tracing::{info, warn};
 const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
 const CONNECTOR_SOURCE_EXTENSION: &str = "extension";
 const UNAUTHENTICATED_IDLE_TIMEOUT: Duration = Duration::from_secs(3);
+
+fn deserialize_required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::deserialize(deserializer)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReportVisitRequest {
+    timestamp: i64,
+    url: String,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    title: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    referrer: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    body_preview: Option<String>,
+    bypass_blacklist: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReportLeaveRequest {
+    timestamp: i64,
+    url: String,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    title: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    scroll_depth: Option<i64>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    time_on_page: Option<i64>,
+}
+
 #[derive(Debug)]
 pub enum WsServerError {
     Io(std::io::Error),
@@ -218,8 +256,12 @@ impl ServerHandle {
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
         }
-        let _ = self.task.await;
-        let _ = storage.flush_checkpoints().await;
+        if let Err(error) = self.task.await {
+            tracing::error!(%error, "daemon server task failed during shutdown");
+        }
+        if let Err(error) = storage.flush_checkpoints().await {
+            tracing::error!(%error, "checkpoint flush failed during shutdown");
+        }
     }
 }
 
@@ -278,6 +320,12 @@ pub async fn start_server(options: ServerStartOptions) -> Result<ServerHandle, W
     commands::recover_checkpoint_tail(&storage)
         .await
         .map_err(WsServerError::Ingest)?;
+    commands::ensure_default_settings(&storage, &config.device_id)
+        .await
+        .map_err(WsServerError::Configuration)?;
+    commands::ensure_default_lists(&storage, &config.device_id)
+        .await
+        .map_err(WsServerError::Configuration)?;
     let (listener, port) = bind_first_available(&options.port_candidates).await?;
     config.last_port = Some(port);
     options.config_store.save(&config)?;
@@ -321,8 +369,12 @@ pub async fn start_server(options: ServerStartOptions) -> Result<ServerHandle, W
                 tokio::select! {
                     _ = &mut shutdown_rx => break,
                     accept_result = listener.accept() => {
-                        let Ok((stream, _)) = accept_result else {
-                            continue;
+                        let (stream, _) = match accept_result {
+                            Ok(connection) => connection,
+                            Err(error) => {
+                                warn!(error = %error, "daemon listener accept failed");
+                                continue;
+                            }
                         };
                         let shared = task_shared.clone();
                         tokio::spawn(async move {
@@ -398,10 +450,7 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
     .map_err(|error| WsServerError::Handshake(error.to_string()))?;
 
     let origin = origin_slot.lock().expect("origin mutex poisoned").clone();
-    info!(
-        origin = origin.as_deref().unwrap_or("unknown"),
-        "accepted websocket connection"
-    );
+    info!(?origin, "accepted websocket connection");
     let (mut write, mut read) = ws_stream.split();
     let connection_id = shared.next_connection_id.fetch_add(1, Ordering::Relaxed);
     let mut revoke_rx = shared.revoke_tx.subscribe();
@@ -490,6 +539,10 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                 }
             }
         }
+        if message_requires_test_control(&incoming) && !shared.test_control_enabled {
+            send_json(&mut write, &test_control_disabled_error()).await?;
+            continue;
+        }
         match incoming {
             ConnectorMessage::Ping => {
                 send_json(&mut write, &DaemonMessage::Pong).await?;
@@ -503,29 +556,33 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
             ConnectorMessage::GetDirectorySize => {
                 send_json(&mut write, &handle_get_directory_size(&shared).await).await?;
             }
-            ConnectorMessage::ClearAllData => {
+            ConnectorMessage::TestControl {
+                request: TestControlMessage::ClearAllData,
+            } => {
                 send_json(&mut write, &handle_clear_all_data(&shared).await).await?;
             }
-            ConnectorMessage::ReplayRemoteEntries { device_id, entries } => {
-                match handle_replay_remote_entries(&shared, device_id, entries).await {
-                    Ok((result, mutations)) => {
-                        send_json(&mut write, &result).await?;
-                        broadcast_mutations(&shared, mutations);
-                    }
-                    Err(error) => {
-                        send_json(
-                            &mut write,
-                            &DaemonMessage::RemoteReplayResult {
-                                success: false,
-                                replayed_entries: 0,
-                                error: Some(error.to_string()),
-                            },
-                        )
-                        .await?;
-                    }
+            ConnectorMessage::TestControl {
+                request: TestControlMessage::ReplayRemoteEntries { device_id, entries },
+            } => match handle_replay_remote_entries(&shared, device_id, entries).await {
+                Ok((result, mutations)) => {
+                    send_json(&mut write, &result).await?;
+                    broadcast_mutations(&shared, mutations);
                 }
-            }
-            ConnectorMessage::SetDeviceId { device_id } => {
+                Err(error) => {
+                    send_json(
+                        &mut write,
+                        &DaemonMessage::RemoteReplayResult {
+                            success: false,
+                            replayed_entries: 0,
+                            error: Some(error.to_string()),
+                        },
+                    )
+                    .await?;
+                }
+            },
+            ConnectorMessage::TestControl {
+                request: TestControlMessage::SetDeviceId { device_id },
+            } => {
                 send_json(&mut write, &handle_set_device_id(&shared, device_id).await).await?;
             }
             ConnectorMessage::ListHistoryFiles { include_sizes } => {
@@ -538,13 +595,10 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
             ConnectorMessage::LoadHistoryBatch { files } => {
                 send_json(&mut write, &handle_load_history_batch(&shared, files).await).await?;
             }
-            ConnectorMessage::GetAllPages => {
-                let message = if shared.test_control_enabled {
-                    handle_get_all_pages(&shared).await
-                } else {
-                    test_control_disabled_error()
-                };
-                send_json(&mut write, &message).await?;
+            ConnectorMessage::TestControl {
+                request: TestControlMessage::GetAllPages,
+            } => {
+                send_json(&mut write, &handle_get_all_pages(&shared).await).await?;
             }
             ConnectorMessage::GetPageInfo { slug } => {
                 send_json(&mut write, &handle_get_page_info(&shared, slug).await).await?;
@@ -582,27 +636,24 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                 )
                 .await?;
             }
-            ConnectorMessage::GetEntity { key } => {
-                let message = if shared.test_control_enabled {
-                    handle_get_entity(&shared, key).await
-                } else {
-                    test_control_disabled_error()
-                };
-                send_json(&mut write, &message).await?;
+            ConnectorMessage::TestControl {
+                request: TestControlMessage::GetEntity { key },
+            } => {
+                send_json(&mut write, &handle_get_entity(&shared, key).await).await?;
             }
-            ConnectorMessage::PermanentDelete { keys } => {
-                match handle_permanent_delete(&shared, keys).await {
-                    Ok(result) => send_json(&mut write, &result).await?,
-                    Err(error) => {
-                        warn!(error = %error, "permanent delete failed");
-                        let message = format!("Permanent delete failed: {error}");
-                        pause_service(&shared, ErrorCode::FsError, message).await;
-                        if let Some(message) = paused_error(&shared).await {
-                            send_json(&mut write, &message).await?;
-                        }
+            ConnectorMessage::TestControl {
+                request: TestControlMessage::PermanentDelete { keys },
+            } => match handle_permanent_delete(&shared, keys).await {
+                Ok(result) => send_json(&mut write, &result).await?,
+                Err(error) => {
+                    warn!(error = %error, "permanent delete failed");
+                    let message = format!("Permanent delete failed: {error}");
+                    pause_service(&shared, ErrorCode::FsError, message).await;
+                    if let Some(message) = paused_error(&shared).await {
+                        send_json(&mut write, &message).await?;
                     }
                 }
-            }
+            },
             ConnectorMessage::RunCommand {
                 action,
                 request,
@@ -611,16 +662,46 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
             } => match run_connector_command(&shared, &action, request).await {
                 Ok(response) => {
                     record_connector_buffer(&shared, buffer_depth, buffer_bytes).await;
-                    let success = response
-                        .get("success")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(true);
+                    let Some(mut payload) = response.as_object().cloned() else {
+                        send_json(
+                            &mut write,
+                            &DaemonMessage::CommandResult {
+                                success: false,
+                                response: None,
+                                error: Some(format!("{action} returned a non-object response")),
+                            },
+                        )
+                        .await?;
+                        continue;
+                    };
+                    let Some(success) = payload.remove("success").and_then(|value| value.as_bool())
+                    else {
+                        send_json(
+                            &mut write,
+                            &DaemonMessage::CommandResult {
+                                success: false,
+                                response: None,
+                                error: Some(format!(
+                                    "{action} returned an invalid response without boolean success"
+                                )),
+                            },
+                        )
+                        .await?;
+                        continue;
+                    };
+                    let error = (!success).then(|| {
+                        payload
+                            .get("error")
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                            .unwrap_or_else(|| format!("{action} failed without an error message"))
+                    });
                     send_json(
                         &mut write,
                         &DaemonMessage::CommandResult {
                             success,
-                            response: Some(response),
-                            error: None,
+                            response: success.then_some(Value::Object(payload)),
+                            error,
                         },
                     )
                     .await?;
@@ -637,24 +718,32 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                     .await?;
                 }
             },
-            ConnectorMessage::SearchNotes { query, limit } => {
+            ConnectorMessage::TestControl {
+                request: TestControlMessage::SearchNotes { query, limit },
+            } => {
                 send_json(
                     &mut write,
                     &handle_search_notes(&shared, query, limit).await,
                 )
                 .await?;
             }
-            ConnectorMessage::SearchSnapshots { query, limit } => {
+            ConnectorMessage::TestControl {
+                request: TestControlMessage::SearchSnapshots { query, limit },
+            } => {
                 send_json(
                     &mut write,
                     &handle_search_snapshots(&shared, query, limit).await,
                 )
                 .await?;
             }
-            ConnectorMessage::TestResetData => {
+            ConnectorMessage::TestControl {
+                request: TestControlMessage::ResetData,
+            } => {
                 send_json(&mut write, &handle_test_reset_data(&shared).await).await?;
             }
-            ConnectorMessage::TestSeedData { files } => {
+            ConnectorMessage::TestControl {
+                request: TestControlMessage::SeedData { files },
+            } => {
                 send_json(&mut write, &handle_test_seed_data(&shared, files).await).await?;
             }
             ConnectorMessage::Auth {
@@ -683,8 +772,8 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                             connector.browser_id == active_connector.browser_id
                                 && connector.extension_id == active_connector.extension_id
                         }) {
-                            connector.last_seen_at = Some(unix_timestamp());
-                            let _ = shared.config_store.save(&config);
+                            connector.last_seen_at = Some(unix_timestamp()?);
+                            shared.config_store.save(&config)?;
                         }
                     }
                     connected_connector = Some(active_connector.clone());
@@ -721,6 +810,57 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                     send_json(&mut write, &incompatible_protocol_error(protocol_version)).await?;
                     break;
                 }
+                let identity_fields = [
+                    ("browserId", browser_id.as_str()),
+                    ("browserName", browser_name.as_str()),
+                    ("extensionId", extension_id.as_str()),
+                ];
+                if let Some((field, _)) = identity_fields
+                    .iter()
+                    .find(|(_, value)| value.trim().is_empty() || value.len() > 256)
+                {
+                    send_json(
+                        &mut write,
+                        &DaemonMessage::Error {
+                            error: "invalid_message".to_string(),
+                            code: "invalid_message".to_string(),
+                            message: format!("{field} must be 1 to 256 characters"),
+                        },
+                    )
+                    .await?;
+                    break;
+                }
+                if browser_profile
+                    .as_deref()
+                    .is_some_and(|profile| profile.trim().is_empty() || profile.len() > 256)
+                {
+                    send_json(
+                        &mut write,
+                        &DaemonMessage::Error {
+                            error: "invalid_message".to_string(),
+                            code: "invalid_message".to_string(),
+                            message: "browserProfile must be 1 to 256 characters when present"
+                                .to_string(),
+                        },
+                    )
+                    .await?;
+                    break;
+                }
+                if !matches!(
+                    browser_name.as_str(),
+                    "Brave" | "Firefox" | "Edge" | "Arc" | "Chrome" | "Chromium"
+                ) {
+                    send_json(
+                        &mut write,
+                        &DaemonMessage::Error {
+                            error: "invalid_message".to_string(),
+                            code: "invalid_message".to_string(),
+                            message: format!("unsupported browserName: {browser_name}"),
+                        },
+                    )
+                    .await?;
+                    break;
+                }
                 let request = PairingRequest {
                     request_id: random_string(12),
                     browser_id,
@@ -745,9 +885,9 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                 let decision =
                     with_timeout(&shared.approver, request.clone(), shared.pair_timeout).await;
                 match decision {
-                    PairingDecision::Approve => {
+                    Ok(PairingDecision::Approve) => {
                         let token = Token(random_string(32));
-                        let now = unix_timestamp();
+                        let now = unix_timestamp()?;
                         let active = {
                             let active_connections = shared.active_connections.lock().await;
                             active_connector_keys(&active_connections)
@@ -769,7 +909,8 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                             prune_inactive_connectors(
                                 &mut config.connectors,
                                 &active,
-                                current_local_day_start_unix(),
+                                current_local_day_start_unix()
+                                    .map_err(WsServerError::Configuration)?,
                             );
                             shared.config_store.save(&config)?;
                             config.device_id.clone()
@@ -793,18 +934,34 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                         )
                         .await?;
                     }
-                    PairingDecision::Deny => {
+                    Ok(PairingDecision::Deny) => {
                         warn!("pairing denied");
                         send_json(&mut write, &DaemonMessage::PairDenied).await?;
                         break;
                     }
+                    Err(_) => {
+                        warn!("pairing approval timed out");
+                        send_json(
+                            &mut write,
+                            &DaemonMessage::Error {
+                                error: "pair_timeout".to_string(),
+                                code: "pair_timeout".to_string(),
+                                message: "Desktop pairing approval timed out".to_string(),
+                            },
+                        )
+                        .await?;
+                        break;
+                    }
                 }
             }
-            ConnectorMessage::Event {
-                entry,
-                source,
-                buffer_depth,
-                buffer_bytes,
+            ConnectorMessage::TestControl {
+                request:
+                    TestControlMessage::Event {
+                        entry,
+                        source,
+                        buffer_depth,
+                        buffer_bytes,
+                    },
             } => {
                 if let Err(error) = validate_connector_source(&source) {
                     send_json(&mut write, &invalid_message_error(error.to_string())).await?;
@@ -834,40 +991,40 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                     }
                 }
             }
-            ConnectorMessage::RunRuleBatch { list_ids, entries } => {
-                match run_rule_batch(&shared, list_ids, entries).await {
-                    Ok(result) => send_json(&mut write, &result).await?,
-                    Err(error) => {
-                        warn!(error = %error, "rule batch failed");
-                        send_json(
-                            &mut write,
-                            &DaemonMessage::RuleBatchResult {
-                                success: false,
-                                results: Vec::new(),
-                                error: Some(error.to_string()),
-                            },
-                        )
-                        .await?;
-                    }
+            ConnectorMessage::TestControl {
+                request: TestControlMessage::RunRuleBatch { list_ids, entries },
+            } => match run_rule_batch(&shared, list_ids, entries).await {
+                Ok(result) => send_json(&mut write, &result).await?,
+                Err(error) => {
+                    warn!(error = %error, "rule batch failed");
+                    send_json(
+                        &mut write,
+                        &DaemonMessage::RuleBatchResult {
+                            success: false,
+                            results: Vec::new(),
+                            error: Some(error.to_string()),
+                        },
+                    )
+                    .await?;
                 }
-            }
-            ConnectorMessage::PreviewRule { rule, entries } => {
-                match preview_rule_batch(rule, entries).await {
-                    Ok(result) => send_json(&mut write, &result).await?,
-                    Err(error) => {
-                        warn!(error = %error, "rule preview failed");
-                        send_json(
-                            &mut write,
-                            &DaemonMessage::PreviewRuleResult {
-                                success: false,
-                                results: Vec::new(),
-                                error: Some(error.to_string()),
-                            },
-                        )
-                        .await?;
-                    }
+            },
+            ConnectorMessage::TestControl {
+                request: TestControlMessage::PreviewRule { rule, entries },
+            } => match preview_rule_batch(rule, entries).await {
+                Ok(result) => send_json(&mut write, &result).await?,
+                Err(error) => {
+                    warn!(error = %error, "rule preview failed");
+                    send_json(
+                        &mut write,
+                        &DaemonMessage::PreviewRuleResult {
+                            success: false,
+                            results: Vec::new(),
+                            error: Some(error.to_string()),
+                        },
+                    )
+                    .await?;
                 }
-            }
+            },
             ConnectorMessage::Snapshot {
                 slug,
                 ts,
@@ -899,18 +1056,21 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                     }
                 }
             }
-            ConnectorMessage::Note {
-                slug,
-                excerpt,
-                note,
-                css_path,
-                old_slug,
-                url,
-                title,
-                ts,
-                source,
-                buffer_depth,
-                buffer_bytes,
+            ConnectorMessage::TestControl {
+                request:
+                    TestControlMessage::Note {
+                        slug,
+                        excerpt,
+                        note,
+                        css_path,
+                        old_slug,
+                        url,
+                        title,
+                        ts,
+                        source,
+                        buffer_depth,
+                        buffer_bytes,
+                    },
             } => {
                 if let Err(error) = validate_connector_source(&source) {
                     send_json(&mut write, &invalid_message_error(error.to_string())).await?;
@@ -951,24 +1111,30 @@ fn message_requires_authentication(message: &ConnectorMessage) -> bool {
         ConnectorMessage::Ping
             | ConnectorMessage::Auth { .. }
             | ConnectorMessage::PairRequest { .. }
-            | ConnectorMessage::TestResetData
-            | ConnectorMessage::TestSeedData { .. }
+            | ConnectorMessage::TestControl {
+                request: TestControlMessage::ResetData | TestControlMessage::SeedData { .. },
+            }
     )
 }
 
 fn message_requires_running_service(message: &ConnectorMessage) -> bool {
     matches!(
         message,
-        ConnectorMessage::ClearAllData
-            | ConnectorMessage::ReplayRemoteEntries { .. }
-            | ConnectorMessage::SetDeviceId { .. }
-            | ConnectorMessage::PermanentDelete { .. }
-            | ConnectorMessage::RunCommand { .. }
-            | ConnectorMessage::Event { .. }
-            | ConnectorMessage::RunRuleBatch { .. }
+        ConnectorMessage::TestControl {
+            request: TestControlMessage::ClearAllData
+                | TestControlMessage::ReplayRemoteEntries { .. }
+                | TestControlMessage::SetDeviceId { .. }
+                | TestControlMessage::PermanentDelete { .. }
+                | TestControlMessage::Event { .. }
+                | TestControlMessage::RunRuleBatch { .. }
+                | TestControlMessage::Note { .. },
+        } | ConnectorMessage::RunCommand { .. }
             | ConnectorMessage::Snapshot { .. }
-            | ConnectorMessage::Note { .. }
     )
+}
+
+fn message_requires_test_control(message: &ConnectorMessage) -> bool {
+    matches!(message, ConnectorMessage::TestControl { .. })
 }
 
 async fn connector_is_approved(shared: &SharedState, active: &ConnectedConnector) -> bool {
@@ -1078,6 +1244,11 @@ async fn ingest_note(
     title: Option<String>,
     ts: i64,
 ) -> Result<IngestSuccess, WsServerError> {
+    let excerpt =
+        commands::note_text_value("excerpt", excerpt.as_ref()).map_err(WsServerError::Ingest)?;
+    let css_path =
+        commands::note_css_path_value(css_path.as_ref()).map_err(WsServerError::Ingest)?;
+    commands::validate_note_anchor(&excerpt, &css_path).map_err(WsServerError::Ingest)?;
     let mut entry = json!({
         "timestamp": ts,
         "action": if old_slug.is_some() { "replace_note" } else { "create_note" },
@@ -1122,17 +1293,13 @@ async fn ingest_typed_entry(
         let transaction = ReplayTransaction::begin(&shared.storage, &device_id)
             .await
             .map_err(WsServerError::Ingest)?;
-        let effects = commit_entry_with_auto_pins(
-            shared,
-            &device_id,
-            transaction,
-            entry.clone(),
-            raw_entry.clone(),
-        )
-        .await?;
+        let effects =
+            commit_entry_with_auto_pins(shared, transaction, entry.clone(), raw_entry.clone())
+                .await?;
 
-        let mutations = build_mutations(&entry, &raw_entry, &effects);
-        let acked_at = current_timestamp_millis();
+        let mutations =
+            build_mutations(&entry, &raw_entry, &effects).map_err(WsServerError::Ingest)?;
+        let acked_at = current_timestamp_millis()?;
         let last_drained_at = entry.timestamp();
         let mut ingest = shared.ingest_status.lock().await;
         ingest.last_drained_at = Some(last_drained_at);
@@ -1154,7 +1321,6 @@ async fn ingest_typed_entry(
 
 async fn commit_entry_with_auto_pins(
     shared: &SharedState,
-    device_id: &str,
     mut transaction: ReplayTransaction<'_>,
     entry: LogEntry,
     raw_entry: Value,
@@ -1163,15 +1329,10 @@ async fn commit_entry_with_auto_pins(
         .apply(entry.clone())
         .await
         .map_err(WsServerError::Ingest)?;
-    let synthetic_entries = synthesize_auto_pin_entries(
-        &entry,
-        &raw_entry,
-        &shared.storage,
-        transaction.effects(),
-        device_id,
-    )
-    .await
-    .map_err(|error| WsServerError::Ingest(error.to_string()))?;
+    let synthetic_entries =
+        synthesize_auto_pin_entries(&entry, &raw_entry, &shared.storage, transaction.effects())
+            .await
+            .map_err(|error| WsServerError::Ingest(error.to_string()))?;
 
     for synthetic in &synthetic_entries {
         transaction
@@ -1188,7 +1349,6 @@ async fn synthesize_auto_pin_entries(
     raw_entry: &Value,
     storage: &Storage,
     overlay: &EntityMapView,
-    device_id: &str,
 ) -> Result<Vec<SyntheticLogEntry>, browser_recall_replay::ReplayError> {
     let LogEntry::VisitPage {
         timestamp,
@@ -1199,11 +1359,10 @@ async fn synthesize_auto_pin_entries(
     else {
         return Ok(Vec::new());
     };
-    let Some(page_data) = page_data_from_raw_entry(raw_entry) else {
-        return Ok(Vec::new());
-    };
+    let page_data = page_data_from_raw_entry(raw_entry)
+        .map_err(browser_recall_replay::ReplayError::InvalidEntry)?;
     let Some(Entity::ListOrder(list_order)) =
-        load_entity_with_overlay(storage, overlay, "manifest:list-order").await
+        load_entity_with_overlay(storage, overlay, "manifest:list-order").await?
     else {
         return Ok(Vec::new());
     };
@@ -1212,17 +1371,22 @@ async fn synthesize_auto_pin_entries(
     let mut synthetic = Vec::new();
     for list_key in flatten_tree_ids(&list_order) {
         let Some(Entity::List(list)) =
-            load_entity_with_overlay(storage, overlay, list_key.as_str()).await
+            load_entity_with_overlay(storage, overlay, list_key.as_str()).await?
         else {
             continue;
         };
-        if list.deleted || list.rules.is_empty() || !list_matches_page(&list, &page_data) {
+        if list.deleted || list.rules.is_empty() {
+            continue;
+        }
+        let matches = match_list_rules_strict(&list, &page_data)
+            .map_err(browser_recall_replay::ReplayError::InvalidEntry)?;
+        if matches.is_empty() {
             continue;
         }
         if list.pins.iter().any(|pin| pin.id == page_key) {
             continue;
         }
-        let list_owner = list.owner.clone().unwrap_or_else(|| device_id.to_string());
+        let list_owner = list.owner.clone();
         synthetic.push(build_auto_pin_entry(
             *timestamp,
             url,
@@ -1239,14 +1403,17 @@ async fn load_entity_with_overlay(
     storage: &Storage,
     overlay: &EntityMapView,
     key: &str,
-) -> Option<Entity> {
+) -> Result<Option<Entity>, browser_recall_replay::ReplayError> {
     if let Some(effect) = overlay.get(key) {
-        return match effect {
+        return Ok(match effect {
             EntityEffect::Upsert(entity) => Some(entity.clone()),
             EntityEffect::Delete => None,
-        };
+        });
     }
-    storage.load_entity(key).await.ok().flatten()
+    storage
+        .load_entity(key)
+        .await
+        .map_err(|error| browser_recall_replay::ReplayError::Load(error.to_string()))
 }
 
 fn flatten_tree_ids(list_order: &ListOrderManifest) -> Vec<String> {
@@ -1300,7 +1467,9 @@ async fn run_rule_batch(
         for list_id in list_ids {
             let list_key = format!("list:{list_id}");
             let Some(Entity::List(list)) =
-                load_entity_with_overlay(&shared.storage, transaction.effects(), &list_key).await
+                load_entity_with_overlay(&shared.storage, transaction.effects(), &list_key)
+                    .await
+                    .map_err(|error| WsServerError::Ingest(error.to_string()))?
             else {
                 continue;
             };
@@ -1335,6 +1504,7 @@ async fn run_rule_batch(
                     &list_key,
                 )
                 .await
+                .map_err(|error| WsServerError::Ingest(error.to_string()))?
                 {
                     Some(Entity::List(list)) => list,
                     _ => continue,
@@ -1343,13 +1513,14 @@ async fn run_rule_batch(
                     continue;
                 }
 
-                let pinned_at = current_timestamp_millis();
+                let pinned_at = current_timestamp_millis()?;
+                let list_owner = current_list.owner.as_str();
                 let synthetic = build_auto_pin_entry(
                     pinned_at,
                     &entry.url,
-                    entry.title.as_deref(),
+                    Some(entry.title.as_str()),
                     &current_list.name,
-                    current_list.owner.as_deref().unwrap_or(&device_id),
+                    list_owner,
                 );
                 transaction
                     .apply(synthetic.parsed)
@@ -1358,7 +1529,7 @@ async fn run_rule_batch(
                 results.push(RuleBatchHit {
                     list_id: list_id.clone(),
                     url: entry.url.clone(),
-                    title: entry.title.clone(),
+                    title: Some(entry.title.clone()),
                     matches: matches
                         .into_iter()
                         .map(|item| RuleMatchResult {
@@ -1400,7 +1571,7 @@ async fn preview_rule_batch(
 
     let mut results = Vec::new();
     for entry in entries {
-        let title = entry.title.clone().unwrap_or_default();
+        let title = entry.title.clone();
         let page_data = page_data_from_batch_entry(&entry);
         let matched = match preview_rule(&rule_spec, &page_data) {
             Ok(matched) => matched,
@@ -1428,9 +1599,9 @@ async fn preview_rule_batch(
 
 fn page_data_from_batch_entry(entry: &RuleBatchEntry) -> PageData {
     PageData {
-        title: entry.title.clone().unwrap_or_default(),
+        title: entry.title.clone(),
         url: entry.url.clone(),
-        body: entry.body_preview.clone().or_else(|| entry.body.clone()),
+        body: entry.body_preview.clone(),
     }
 }
 
@@ -1443,35 +1614,24 @@ fn validate_connector_source(source: &str) -> Result<(), WsServerError> {
     Ok(())
 }
 
-async fn record_connector_buffer(
-    shared: &SharedState,
-    buffer_depth: Option<usize>,
-    buffer_bytes: Option<usize>,
-) {
+async fn record_connector_buffer(shared: &SharedState, buffer_depth: usize, buffer_bytes: usize) {
     let mut status = shared.connector_buffer_status.lock().await;
-    status.buffer_depth = buffer_depth.unwrap_or(0);
-    status.buffer_bytes = buffer_bytes.unwrap_or(0);
+    status.buffer_depth = buffer_depth;
+    status.buffer_bytes = buffer_bytes;
 }
 
 async fn commit_report_entry(
     shared: &SharedState,
-    device_id: &str,
     transaction: ReplayTransaction<'_>,
     entry: LogEntry,
     raw_entry: Value,
 ) -> Result<(Value, Vec<MutationPayload>), WsServerError> {
-    let effects = commit_entry_with_auto_pins(
-        shared,
-        device_id,
-        transaction,
-        entry.clone(),
-        raw_entry.clone(),
-    )
-    .await?;
+    let effects =
+        commit_entry_with_auto_pins(shared, transaction, entry.clone(), raw_entry.clone()).await?;
 
     Ok((
         json!({ "success": true, "timestamp": entry.timestamp() }),
-        build_mutations(&entry, &raw_entry, &effects),
+        build_mutations(&entry, &raw_entry, &effects).map_err(WsServerError::Ingest)?,
     ))
 }
 
@@ -1479,6 +1639,8 @@ async fn report_visit_command(
     shared: &SharedState,
     request: &Value,
 ) -> Result<(Value, Vec<MutationPayload>), WsServerError> {
+    let request: ReportVisitRequest = serde_json::from_value(request.clone())
+        .map_err(|error| WsServerError::Ingest(format!("invalid reportVisit request: {error}")))?;
     let device_id = {
         let config = shared.config.lock().await;
         config.device_id.clone()
@@ -1486,25 +1648,15 @@ async fn report_visit_command(
     let transaction = ReplayTransaction::begin(&shared.storage, &device_id)
         .await
         .map_err(WsServerError::Ingest)?;
-    let url = request
-        .get("url")
-        .and_then(Value::as_str)
-        .ok_or_else(|| WsServerError::Ingest("reportVisit missing url".into()))?;
-    let timestamp = request
-        .get("timestamp")
-        .or_else(|| request.get("observedAt"))
-        .and_then(Value::as_i64)
-        .unwrap_or_else(current_timestamp_millis);
+    let url = request.url.as_str();
+    let timestamp = validate_observation_timestamp(request.timestamp, "reportVisit")?;
     let settings = shared.storage.load_entity("manifest:settings").await?;
     if !should_record_visit(
         &shared.storage,
         settings.as_ref(),
         url,
         timestamp,
-        request
-            .get("bypassBlacklist")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
+        request.bypass_blacklist,
     )
     .await
     .map_err(WsServerError::Ingest)?
@@ -1516,18 +1668,23 @@ async fn report_visit_command(
     }
 
     let title = request
-        .get("title")
-        .and_then(Value::as_str)
+        .title
+        .as_deref()
         .map(|title| trim_title_from_settings(settings.as_ref(), title, url))
+        .transpose()
+        .map_err(WsServerError::Ingest)?
         .filter(|title| !title.is_empty());
     let mut referrer_url = request
-        .get("referrer")
-        .or_else(|| request.get("referrerUrl"))
-        .and_then(Value::as_str)
+        .referrer
+        .as_deref()
         .filter(|value| !value.is_empty())
         .map(str::to_string);
     if let Some(referrer) = &referrer_url {
-        if generate_slug_from_url(referrer).ok() == generate_slug_from_url(url).ok() {
+        let referrer_slug = generate_slug_from_url(referrer)
+            .map_err(|error| WsServerError::Ingest(error.to_string()))?;
+        let page_slug = generate_slug_from_url(url)
+            .map_err(|error| WsServerError::Ingest(error.to_string()))?;
+        if referrer_slug == page_slug {
             referrer_url = None;
         }
     }
@@ -1540,21 +1697,20 @@ async fn report_visit_command(
     };
     let mut raw_entry =
         serde_json::to_value(&entry).map_err(|error| WsServerError::Ingest(error.to_string()))?;
-    if let Some(body_preview) = request.get("bodyPreview").and_then(Value::as_str) {
+    if let Some(body_preview) = request.body_preview {
         if let Some(object) = raw_entry.as_object_mut() {
-            object.insert(
-                "bodyPreview".to_string(),
-                Value::String(body_preview.to_string()),
-            );
+            object.insert("bodyPreview".to_string(), Value::String(body_preview));
         }
     }
-    commit_report_entry(shared, &device_id, transaction, entry, raw_entry).await
+    commit_report_entry(shared, transaction, entry, raw_entry).await
 }
 
 async fn report_leave_command(
     shared: &SharedState,
     request: &Value,
 ) -> Result<(Value, Vec<MutationPayload>), WsServerError> {
+    let request: ReportLeaveRequest = serde_json::from_value(request.clone())
+        .map_err(|error| WsServerError::Ingest(format!("invalid reportLeave request: {error}")))?;
     let device_id = {
         let config = shared.config.lock().await;
         config.device_id.clone()
@@ -1562,31 +1718,26 @@ async fn report_leave_command(
     let transaction = ReplayTransaction::begin(&shared.storage, &device_id)
         .await
         .map_err(WsServerError::Ingest)?;
-    let url = request
-        .get("url")
-        .and_then(Value::as_str)
-        .ok_or_else(|| WsServerError::Ingest("reportLeave missing url".into()))?;
-    let timestamp = request
-        .get("timestamp")
-        .or_else(|| request.get("observedAt"))
-        .and_then(Value::as_i64)
-        .unwrap_or_else(current_timestamp_millis);
+    let url = request.url.as_str();
+    let timestamp = validate_observation_timestamp(request.timestamp, "reportLeave")?;
     let settings = shared.storage.load_entity("manifest:settings").await?;
     let title = request
-        .get("title")
-        .and_then(Value::as_str)
+        .title
+        .as_deref()
         .map(|title| trim_title_from_settings(settings.as_ref(), title, url))
+        .transpose()
+        .map_err(WsServerError::Ingest)?
         .filter(|title| !title.is_empty());
     let entry = LogEntry::LeavePage {
         timestamp,
         url: url.to_string(),
         title,
-        scroll_depth: request.get("scrollDepth").and_then(Value::as_i64),
-        time_on_page: request.get("timeOnPage").and_then(Value::as_i64),
+        scroll_depth: request.scroll_depth,
+        time_on_page: request.time_on_page,
     };
     let raw_entry =
         serde_json::to_value(&entry).map_err(|error| WsServerError::Ingest(error.to_string()))?;
-    commit_report_entry(shared, &device_id, transaction, entry, raw_entry).await
+    commit_report_entry(shared, transaction, entry, raw_entry).await
 }
 
 async fn run_shared_command(
@@ -1602,20 +1753,14 @@ async fn run_shared_command(
         .execute(action, request)
         .await
         .map_err(WsServerError::Ingest)?;
-    let success = outcome
-        .response
-        .get("success")
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
-    if success {
-        broadcast_mutations(shared, outcome.mutations);
-    }
+    let response = outcome.response();
+    broadcast_mutations(shared, outcome.mutations);
     if action == "clearAllData" {
         let mut status = shared.ingest_status.lock().await;
         status.buffer_depth = 0;
         status.last_drained_at = None;
     }
-    Ok(outcome.response)
+    Ok(response)
 }
 
 async fn run_connector_command(
@@ -1639,7 +1784,9 @@ async fn run_connector_command(
     let success = response
         .get("success")
         .and_then(Value::as_bool)
-        .unwrap_or(true);
+        .ok_or_else(|| {
+            WsServerError::Ingest(format!("{action} response missing boolean success"))
+        })?;
     if success {
         broadcast_mutations(shared, mutations);
     }
@@ -1776,83 +1923,38 @@ async fn handle_get_page_summary(
     url: String,
     requested_title: Option<String>,
 ) -> DaemonMessage {
-    let fallback_title = requested_title
-        .as_deref()
-        .filter(|title| !title.is_empty())
-        .unwrap_or("<unknown>")
-        .to_string();
     let slug = match generate_slug_from_url(&url) {
         Ok(slug) => slug,
-        Err(error) => {
-            return DaemonMessage::PageSummaryResult {
-                success: false,
-                url,
-                display_title: fallback_title,
-                access: PopupAccessResult {
-                    blacklisted: false,
-                    has_visit_history: false,
-                },
-                page: None,
-                notes: Vec::new(),
-                snapshots: Vec::new(),
-                lists: Vec::new(),
-                attention: None,
-                error: Some(error.to_string()),
-            };
-        }
+        Err(error) => return page_summary_error(url, error.to_string()),
     };
 
     let (page, notes, snapshots) = match load_page_info_parts(shared, &slug).await {
         Ok(parts) => parts,
-        Err((page, notes, snapshots, error)) => {
-            return DaemonMessage::PageSummaryResult {
-                success: false,
-                url,
-                display_title: fallback_title,
-                access: PopupAccessResult {
-                    blacklisted: false,
-                    has_visit_history: page.is_some(),
-                },
-                page: page.as_ref().map(map_popup_page_entry),
-                notes,
-                snapshots,
-                lists: Vec::new(),
-                attention: None,
-                error: Some(error),
-            };
-        }
+        Err((_, _, _, error)) => return page_summary_error(url, error),
     };
 
     let settings = match shared.storage.load_entity("manifest:settings").await {
         Ok(settings) => settings,
-        Err(error) => {
-            return DaemonMessage::PageSummaryResult {
-                success: false,
-                url,
-                display_title: fallback_title,
-                access: PopupAccessResult {
-                    blacklisted: false,
-                    has_visit_history: page.is_some(),
-                },
-                page: page.as_ref().map(map_popup_page_entry),
-                notes,
-                snapshots,
-                lists: Vec::new(),
-                attention: None,
-                error: Some(error.to_string()),
-            };
-        }
+        Err(error) => return page_summary_error(url, error.to_string()),
     };
-    let title = page
+    let Some(title) = page
         .as_ref()
         .and_then(|page| page.title.as_deref())
         .or_else(|| requested_title.as_deref().filter(|title| !title.is_empty()))
-        .unwrap_or("<unknown>");
-    let display_title = trim_title_from_settings(settings.as_ref(), title, &url);
+    else {
+        return page_summary_error(url, "page summary requires a title".to_string());
+    };
     let has_visit_history = page.is_some();
-    let blacklisted = blacklist_prefixes(settings.as_ref())
-        .iter()
-        .any(|prefix| url.starts_with(prefix))
+    let display_title = match trim_title_from_settings(settings.as_ref(), title, &url) {
+        Ok(title) => title,
+        Err(error) => return page_summary_error(url, error),
+    };
+    let blacklisted = match blacklist_prefixes(settings.as_ref()) {
+        Ok(prefixes) => prefixes,
+        Err(error) => return page_summary_error(url, error),
+    }
+    .iter()
+    .any(|prefix| url.starts_with(prefix))
         && !has_visit_history;
     let access = PopupAccessResult {
         blacklisted,
@@ -1863,8 +1965,8 @@ async fn handle_get_page_summary(
         return DaemonMessage::PageSummaryResult {
             success: true,
             url,
-            display_title,
-            access,
+            display_title: Some(display_title),
+            access: Some(access),
             page: page.as_ref().map(map_popup_page_entry),
             notes,
             snapshots,
@@ -1876,38 +1978,40 @@ async fn handle_get_page_summary(
 
     let lists = match load_popup_lists(shared, &slug).await {
         Ok(lists) => lists,
-        Err(error) => {
-            return DaemonMessage::PageSummaryResult {
-                success: false,
-                url,
-                display_title,
-                access,
-                page: page.as_ref().map(map_popup_page_entry),
-                notes,
-                snapshots,
-                lists: Vec::new(),
-                attention: None,
-                error: Some(error),
-            };
-        }
+        Err(error) => return page_summary_error(url, error),
     };
 
     let attention = page.as_ref().map(|page| PopupAttentionResult {
-        total_seconds: page.time_on_page.unwrap_or(0) / 1000,
+        total_seconds: page.time_on_page.map(|milliseconds| milliseconds / 1000),
         last_visit: page.timestamps.values().copied().max(),
     });
 
     DaemonMessage::PageSummaryResult {
         success: true,
         url,
-        display_title,
-        access,
+        display_title: Some(display_title),
+        access: Some(access),
         page: page.as_ref().map(map_popup_page_entry),
         notes,
         snapshots,
         lists,
         attention,
         error: None,
+    }
+}
+
+fn page_summary_error(url: String, error: String) -> DaemonMessage {
+    DaemonMessage::PageSummaryResult {
+        success: false,
+        url,
+        display_title: None,
+        access: None,
+        page: None,
+        notes: Vec::new(),
+        snapshots: Vec::new(),
+        lists: Vec::new(),
+        attention: None,
+        error: Some(error),
     }
 }
 
@@ -1955,14 +2059,26 @@ async fn handle_get_entity(shared: &SharedState, key: String) -> DaemonMessage {
 }
 
 async fn handle_get_directory_info(shared: &SharedState) -> DaemonMessage {
-    let data_folder = shared.storage.root().to_string_lossy().to_string();
-    let name = shared
+    let Some(name) = shared
         .storage
         .root()
         .file_name()
         .and_then(|value| value.to_str())
         .map(str::to_string)
-        .unwrap_or(data_folder);
+    else {
+        return DaemonMessage::DirectoryInfoResult {
+            success: false,
+            info: None,
+            error: Some("data directory has no UTF-8 folder name".to_string()),
+        };
+    };
+    if let Err(error) = tokio::fs::read_dir(shared.storage.root()).await {
+        return DaemonMessage::DirectoryInfoResult {
+            success: false,
+            info: None,
+            error: Some(format!("data directory is not readable: {error}")),
+        };
+    }
     DaemonMessage::DirectoryInfoResult {
         success: true,
         info: Some(DirectoryInfoPayload {
@@ -1974,6 +2090,13 @@ async fn handle_get_directory_info(shared: &SharedState) -> DaemonMessage {
 }
 
 async fn handle_get_directory_size(shared: &SharedState) -> DaemonMessage {
+    if let Err(error) = shared.storage.flush_checkpoints().await {
+        return DaemonMessage::DirectorySizeResult {
+            success: false,
+            size: 0,
+            error: Some(error.to_string()),
+        };
+    }
     match shared.storage.directory_size().await {
         Ok(size) => DaemonMessage::DirectorySizeResult {
             success: true,
@@ -2035,7 +2158,9 @@ async fn handle_replay_remote_entries(
                 .await
                 .map_err(WsServerError::Ingest)?;
 
-            mutations.extend(build_mutations(&parsed, raw_entry, &effects));
+            mutations.extend(
+                build_mutations(&parsed, raw_entry, &effects).map_err(WsServerError::Ingest)?,
+            );
         }
 
         transaction.commit().await.map_err(WsServerError::Ingest)?;
@@ -2105,6 +2230,12 @@ async fn handle_test_reset_data(shared: &SharedState) -> DaemonMessage {
         runtime::clear_all_data(&shared.storage, &device_id)
             .await
             .map_err(WsServerError::Ingest)?;
+        commands::ensure_default_settings(&shared.storage, &device_id)
+            .await
+            .map_err(WsServerError::Ingest)?;
+        commands::ensure_default_lists(&shared.storage, &device_id)
+            .await
+            .map_err(WsServerError::Ingest)?;
         set_device_id_internal(shared, device_id.clone()).await?;
         shared.storage.reset_cache();
         {
@@ -2144,7 +2275,11 @@ async fn handle_test_seed_data(
 
     let files = match files
         .into_iter()
-        .map(|file| validate_test_seed_path(file.path).map(|path| (path, file.content)))
+        .map(|file| {
+            let path = validate_test_seed_path(file.path)?;
+            let content = validate_test_seed_content(&path, file.content)?;
+            Ok((path, content))
+        })
         .collect::<Result<Vec<_>, WsServerError>>()
     {
         Ok(files) => files,
@@ -2177,6 +2312,46 @@ async fn handle_test_seed_data(
             error: Some(error.to_string()),
         },
     }
+}
+
+fn validate_test_seed_content(path: &str, content: String) -> Result<String, WsServerError> {
+    use browser_recall_replay::entities::{
+        ListEntity, ListOrderManifest, NameToIdManifest, NoteEntity, OrphanedManifest, PageEntity,
+        SettingsEntity,
+    };
+
+    if path.starts_with("views/pages/") && path.ends_with(".json") {
+        parse_test_seed_entity::<PageEntity>(path, "page", &content)?;
+    } else if path.starts_with("objects/notes/") && path.ends_with(".json") {
+        parse_test_seed_entity::<NoteEntity>(path, "note", &content)?;
+    } else if path.starts_with("views/lists/") && path.ends_with(".json") {
+        parse_test_seed_entity::<ListEntity>(path, "list", &content)?;
+    } else if path == "views/manifest/list-order.json" {
+        parse_test_seed_entity::<ListOrderManifest>(path, "list order", &content)?;
+    } else if path == "views/manifest/list-name-to-id.json" {
+        parse_test_seed_entity::<NameToIdManifest>(path, "list name-to-id", &content)?;
+    } else if path == "views/manifest/orphaned.json" {
+        parse_test_seed_entity::<OrphanedManifest>(path, "orphaned", &content)?;
+    } else if path == "views/manifest/settings.json" {
+        let seeded = parse_test_seed_entity::<SettingsEntity>(path, "settings", &content)?;
+        crate::settings::validate_complete(&seeded.values).map_err(WsServerError::Ingest)?;
+    }
+    Ok(content)
+}
+
+fn parse_test_seed_entity<T>(
+    path: &str,
+    entity_name: &str,
+    content: &str,
+) -> Result<T, WsServerError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    serde_json::from_str(content).map_err(|error| {
+        WsServerError::Ingest(format!(
+            "invalid {entity_name} test seed at {path}: {error}"
+        ))
+    })
 }
 
 fn validate_test_seed_path(path: String) -> Result<String, WsServerError> {
@@ -2254,10 +2429,10 @@ async fn handle_permanent_delete(
     shared: &SharedState,
     keys: Vec<String>,
 ) -> Result<DaemonMessage, WsServerError> {
-    let deleted_keys = permanent_delete_candidates(&keys);
+    let deleted_keys = permanent_delete_candidates(&keys).map_err(WsServerError::Ingest)?;
     if !deleted_keys.is_empty() {
         let raw = json!({
-            "timestamp": current_timestamp_millis(),
+            "timestamp": current_timestamp_millis()?,
             "action": "permanent_delete",
             "keys": deleted_keys.clone(),
         });
@@ -2485,7 +2660,7 @@ async fn revoke_connector(
         prune_inactive_connectors(
             &mut config.connectors,
             &active,
-            current_local_day_start_unix(),
+            current_local_day_start_unix().map_err(WsServerError::Configuration)?,
         );
         let changed = config.connectors.len() != before;
         if changed {
@@ -2558,18 +2733,34 @@ async fn resume_service(shared: &SharedState) {
     let _ = shared.snapshot_tx.send(snapshot.clone());
 }
 
-fn unix_timestamp() -> u64 {
+fn unix_timestamp() -> Result<u64, WsServerError> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+        .map(|duration| duration.as_secs())
+        .map_err(|error| {
+            WsServerError::Configuration(format!("system clock is before Unix epoch: {error}"))
+        })
 }
 
-fn current_timestamp_millis() -> i64 {
-    SystemTime::now()
+fn current_timestamp_millis() -> Result<i64, WsServerError> {
+    let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
+        .map_err(|error| {
+            WsServerError::Configuration(format!("system clock is before Unix epoch: {error}"))
+        })?
+        .as_millis();
+    i64::try_from(millis).map_err(|_| {
+        WsServerError::Configuration("system clock exceeds supported timestamp range".to_string())
+    })
+}
+
+fn validate_observation_timestamp(timestamp: i64, action: &str) -> Result<i64, WsServerError> {
+    if chrono::DateTime::<chrono::Utc>::from_timestamp_millis(timestamp).is_none() {
+        return Err(WsServerError::Ingest(format!(
+            "{action} timestamp is out of range"
+        )));
+    }
+    Ok(timestamp)
 }
 
 #[cfg(test)]

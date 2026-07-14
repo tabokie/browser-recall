@@ -48,7 +48,7 @@ describe('Save Page capture sessions', () => {
   }
 
   function startCapture(captureSavePage) {
-    const promise = captureSavePage(42);
+    const promise = captureSavePage(42, { captureSnapshotVideo: false });
     messageListener({ type: 'scriptLoaded' }, { tab: { id: 42 } }, vi.fn());
     const performAction = chrome.tabs.sendMessage.mock.calls
       .map(([, message]) => message)
@@ -79,7 +79,7 @@ describe('Save Page capture sessions', () => {
   it('rejects an overlapping capture instead of replacing its session', async () => {
     const { captureSavePage } = await loadBridge();
     const first = startCapture(captureSavePage);
-    const second = captureSavePage(42);
+    const second = captureSavePage(42, { captureSnapshotVideo: false });
     let overlapError;
     void second.catch((error) => {
       overlapError = error;

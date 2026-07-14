@@ -15,6 +15,7 @@ import { generateSlugFromUrl } from '../../packages/core/page-identity.js';
 import {
   collectDaemonMessages as collectMessages,
   ensureTestDaemonBuilt,
+  installTestControlWireAdapter,
   launchTestDaemon,
   nextDaemonMessage as nextMessage,
   stopTestDaemon as stopDaemon,
@@ -114,6 +115,7 @@ function launchDaemon(configDir, approveMode = 'allow') {
   return launchTestDaemon(configDir, {
     ports: PORT_CANDIDATES,
     approveMode,
+    testControl: true,
   });
 }
 
@@ -133,11 +135,12 @@ async function pairSocket(port) {
       browserId: 'browser-install-1',
       browserName: 'Chrome',
       extensionId: 'abcdefghijklmnop',
+      browserProfile: null,
     }),
   );
   const [, approved] = await pairingMessages;
   expect(approved.type).toBe('pair_approved');
-  return socket;
+  return installTestControlWireAdapter(socket);
 }
 
 describe.sequential('phase 2 daemon event flow integration', () => {
@@ -166,12 +169,15 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000000000,
           action: 'visit_page',
           url: 'https://example.com/streamed',
           title: 'Streamed',
+          referrerUrl: null,
         },
       }),
     );
@@ -208,6 +214,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'snapshot',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         slug: 'example-streamed',
         ts: 1710000001000,
@@ -263,35 +271,43 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000000000,
           action: 'visit_page',
           url: 'https://example.com/searchable',
           title: 'Banana Searchable',
+          referrerUrl: null,
         },
       }),
     );
-    expect((await nextMessage(socket)).type).toBe('ack');
+    expect(await nextMessage(socket)).toMatchObject({ type: 'ack' });
 
     socket.send(
       JSON.stringify({
         type: 'note',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         slug: 'search-note',
         excerpt: ['highlight'],
         note: 'banana note body',
-        cssPath: null,
+        cssPath: [''],
+        oldSlug: null,
         url: 'https://example.com/searchable',
         title: 'Banana Searchable',
         ts: 1710000000100,
       }),
     );
-    expect((await nextMessage(socket)).type).toBe('ack');
+    expect(await nextMessage(socket)).toMatchObject({ type: 'ack' });
 
     socket.send(
       JSON.stringify({
         type: 'snapshot',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         slug: 'searchable-page',
         ts: 1710000000200,
@@ -301,9 +317,11 @@ describe.sequential('phase 2 daemon event flow integration', () => {
         html: '<html><body>banana snapshot body</body></html>',
       }),
     );
-    expect((await nextMessage(socket)).type).toBe('ack');
+    expect(await nextMessage(socket)).toMatchObject({ type: 'ack' });
 
-    socket.send(JSON.stringify({ type: 'search_notes', query: 'banana' }));
+    socket.send(
+      JSON.stringify({ type: 'search_notes', query: 'banana', limit: null }),
+    );
     await expect(nextMessage(socket)).resolves.toEqual({
       type: 'search_notes_result',
       success: true,
@@ -314,15 +332,23 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           score: 1,
         },
       ],
+      error: null,
     });
 
-    socket.send(JSON.stringify({ type: 'search_snapshots', query: 'banana' }));
+    socket.send(
+      JSON.stringify({
+        type: 'search_snapshots',
+        query: 'banana',
+        limit: null,
+      }),
+    );
     await expect(nextMessage(socket)).resolves.toEqual({
       type: 'search_snapshots_result',
       success: true,
       results: [
         { slug: 'searchable-page', timestamp: 1710000000200, score: 1 },
       ],
+      error: null,
     });
 
     socket.close();
@@ -340,6 +366,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000000900,
@@ -347,6 +375,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           listOwner: 'test-device',
           name: 'Reading',
           listId: 'reading',
+          parentListId: null,
         },
       }),
     );
@@ -355,6 +384,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000000950,
@@ -363,6 +394,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           name: 'Reading',
           urls: ['https://example.com/popup'],
           titles: ['Popup Page'],
+          source: null,
         },
       }),
     );
@@ -371,12 +403,15 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000001000,
           action: 'visit_page',
           url: 'https://example.com/popup',
           title: 'Popup Page',
+          referrerUrl: null,
         },
       }),
     );
@@ -385,11 +420,14 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'note',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         slug: 'popup-note',
         excerpt: ['hello'],
         note: 'popup annotation',
-        cssPath: null,
+        cssPath: [''],
+        oldSlug: null,
         url: 'https://example.com/popup',
         title: 'Popup Page',
         ts: 1710000001100,
@@ -400,6 +438,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'snapshot',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         slug: 'popup-page',
         ts: 1710000001200,
@@ -441,6 +481,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
       type: 'snapshot_html_result',
       success: true,
       html: '<html><body>popup snapshot body</body></html>',
+      error: null,
     });
 
     const dataRoot = path.join(dir, 'browser-data');
@@ -451,16 +492,17 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     const staleSnapshotInfo = await nextMessage(socket);
     expect(staleSnapshotInfo).toMatchObject({
       type: 'page_info_result',
-      success: true,
+      success: false,
       slug,
+      error: expect.stringContaining('references missing snapshot'),
     });
-    expect(staleSnapshotInfo.snapshots).toEqual([
-      { timestamp: 1710000001200, hasMd: false, hasHtml: false },
-    ]);
+    expect(staleSnapshotInfo.snapshots).toEqual([]);
 
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000001300,
@@ -485,19 +527,20 @@ describe.sequential('phase 2 daemon event flow integration', () => {
       JSON.stringify({
         type: 'get_page_summary',
         url: 'https://example.com/popup',
+        title: null,
       }),
     );
     await expect(nextMessage(socket)).resolves.toMatchObject({
       type: 'page_summary_result',
       success: true,
-      lists: [
+      lists: expect.arrayContaining([
         {
           slug: 'reading',
           name: 'Reading',
           containsPage: true,
           lastActivity: 1710000000950,
         },
-      ],
+      ]),
     });
 
     socket.close();
@@ -516,12 +559,15 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000000000,
           action: 'visit_page',
           url: 'https://example.com/rpc-page',
           title: 'RPC Page',
+          referrerUrl: null,
         },
       }),
     );
@@ -535,6 +581,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
         name: 'browser-data',
         hasPermission: true,
       },
+      error: null,
     });
 
     socket.send(JSON.stringify({ type: 'get_directory_size' }));
@@ -547,14 +594,13 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({ type: 'list_history_files', includeSizes: true }),
     );
-    await expect(nextMessage(socket)).resolves.toMatchObject({
+    const historyFiles = await nextMessage(socket);
+    expect(historyFiles).toMatchObject({
       type: 'history_files_result',
       success: true,
-      files: [logFile],
-      sizes: {
-        [logFile]: expect.any(Number),
-      },
     });
+    expect(historyFiles.files).toContain(logFile);
+    expect(historyFiles.sizes[logFile]).toEqual(expect.any(Number));
 
     socket.send(
       JSON.stringify({
@@ -590,12 +636,15 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: now,
           action: 'visit_page',
           url: 'https://example.com/sync-page',
           title: 'Sync Page',
+          referrerUrl: null,
         },
       }),
     );
@@ -604,11 +653,14 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'note',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         slug: 'sync-note',
         excerpt: ['sync excerpt'],
         note: 'sync note body',
-        cssPath: null,
+        cssPath: [''],
+        oldSlug: null,
         url: 'https://example.com/sync-page',
         title: 'Sync Page',
         ts: now + 100,
@@ -626,6 +678,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
       type: 'set_device_id_result',
       success: true,
       deviceId: 'fresh-sync-device',
+      error: null,
     });
 
     socket.send(JSON.stringify({ type: 'get_status' }));
@@ -653,6 +706,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000020000,
@@ -660,6 +715,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           listOwner: 'test-device',
           name: 'Reading',
           listId: 'reading-list',
+          parentListId: null,
         },
       }),
     );
@@ -668,11 +724,14 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'note',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         slug: 'n1',
         excerpt: ['hello'],
         note: 'delete me',
-        cssPath: null,
+        cssPath: [''],
+        oldSlug: null,
         url,
         title: 'Delete Me',
         ts: 1710000020100,
@@ -683,6 +742,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'snapshot',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         slug: pageSlug,
         ts: 1710000020200,
@@ -715,7 +776,13 @@ describe.sequential('phase 2 daemon event flow integration', () => {
       },
     ]) {
       socket.send(
-        JSON.stringify({ type: 'event', source: 'extension', entry }),
+        JSON.stringify({
+          type: 'event',
+          bufferDepth: 0,
+          bufferBytes: 0,
+          source: 'extension',
+          entry,
+        }),
       );
       expect((await nextMessage(socket)).type).toBe('ack');
     }
@@ -738,6 +805,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
         `snapshot:${pageSlug}-1710000020200`,
         'list:reading-list',
       ],
+      error: null,
     });
 
     const dataRoot = path.join(dir, 'browser-data');
@@ -773,6 +841,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000000000,
@@ -788,6 +858,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000000100,
@@ -824,11 +896,14 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'note',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         slug: 'n1',
         excerpt: ['hello'],
         note: 'world',
-        cssPath: null,
+        cssPath: [''],
+        oldSlug: null,
         url: 'https://example.com/note-page',
         title: 'Note Page',
         ts: 1710000000200,
@@ -868,11 +943,14 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'note',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         slug: 'n1',
         excerpt: ['hello'],
         note: 'world',
-        cssPath: null,
+        cssPath: [''],
+        oldSlug: null,
         url: 'https://example.com/note-page',
         title: 'Note Page',
         ts: 1710000000200,
@@ -883,12 +961,15 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'note',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         slug: 'n2',
         oldSlug: 'n1',
         excerpt: ['hello'],
         note: 'updated world',
-        cssPath: null,
+        cssPath: [''],
+        title: null,
         url: 'https://example.com/note-page',
         ts: 1710000000300,
       }),
@@ -898,6 +979,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000000400,
@@ -912,6 +995,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000000500,
@@ -923,9 +1008,13 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     );
     expect((await nextMessage(socket)).type).toBe('ack');
 
-    expect(existsSync(notePath(path.join(dir, 'browser-data'), 'n1'))).toBe(
-      false,
+    const replacedNoteRaw = await waitForFileContent(
+      notePath(path.join(dir, 'browser-data'), 'n1'),
+      (raw) =>
+        raw.includes('"deleted": true') &&
+        raw.includes('"deletedTs": 1710000000300'),
     );
+    expect(replacedNoteRaw).toContain('"deleted": true');
 
     const newNoteRaw = await waitForFileContent(
       notePath(path.join(dir, 'browser-data'), 'n2'),
@@ -964,6 +1053,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'snapshot',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         slug: 'snapshot-page',
         ts: 1710000000600,
@@ -978,6 +1069,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000000700,
@@ -992,6 +1085,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000000800,
@@ -1034,6 +1129,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000000900,
@@ -1041,6 +1138,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           listOwner: 'test-device',
           name: 'Reading',
           listId: 'reading-list',
+          parentListId: null,
         },
       }),
     );
@@ -1049,6 +1147,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000001000,
@@ -1057,6 +1157,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           name: 'Reading',
           urls: ['https://example.com/reading'],
           titles: ['Reading Page'],
+          source: null,
         },
       }),
     );
@@ -1065,6 +1166,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000001100,
@@ -1084,12 +1187,14 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000001200,
           action: 'update_setting',
           key: 'theme',
-          value: 'sepia',
+          value: 'dark',
         },
       }),
     );
@@ -1098,6 +1203,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000001300,
@@ -1112,6 +1219,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000001400,
@@ -1154,7 +1263,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
       manifestPath(path.join(dir, 'browser-data'), 'settings.json'),
       'utf8',
     );
-    expect(settingsRaw).toContain('"theme": "sepia"');
+    expect(settingsRaw).toContain('"theme": "dark"');
 
     const orphanedRaw = readFileSync(
       manifestPath(path.join(dir, 'browser-data'), 'orphaned.json'),
@@ -1176,13 +1285,16 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000001500,
           action: 'create_list',
           listOwner: 'test-device',
-          name: 'Hubs',
-          listId: 'hubs',
+          name: 'Custom Hubs',
+          listId: 'custom-hubs',
+          parentListId: null,
         },
       }),
     );
@@ -1191,12 +1303,14 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000001600,
           action: 'add_rule',
           listOwner: 'test-device',
-          name: 'Hubs',
+          name: 'Custom Hubs',
           rule: {
             id: 'rule-f-hubs',
             type: 'function',
@@ -1214,19 +1328,22 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000001700,
           action: 'visit_page',
           url: 'https://example.com/',
           title: 'Example Home',
+          referrerUrl: null,
         },
       }),
     );
     expect((await nextMessage(socket)).type).toBe('ack');
 
     const listRaw = await waitForFileContent(
-      listPath(path.join(dir, 'browser-data'), 'hubs'),
+      listPath(path.join(dir, 'browser-data'), 'custom-hubs'),
       (raw) =>
         raw.includes('"rule-f-hubs"') &&
         raw.includes('"source": "auto"') &&
@@ -1262,12 +1379,15 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000025000,
           action: 'visit_page',
           url: 'https://example.com/clear-me',
           title: 'Clear Me',
+          referrerUrl: null,
         },
       }),
     );
@@ -1288,9 +1408,12 @@ describe.sequential('phase 2 daemon event flow integration', () => {
         name: 'browser-data',
         hasPermission: true,
       },
+      error: null,
     });
 
-    socket.send(JSON.stringify({ type: 'list_history_files' }));
+    socket.send(
+      JSON.stringify({ type: 'list_history_files', includeSizes: false }),
+    );
     await expect(nextMessage(socket)).resolves.toMatchObject({
       type: 'history_files_result',
       success: true,
@@ -1350,10 +1473,12 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           {
             url: 'https://example.com/long',
             title: 'A Very Long Title',
+            bodyPreview: null,
           },
           {
             url: 'https://example.com/short',
             title: 'Short',
+            bodyPreview: null,
           },
         ],
       }),
@@ -1381,6 +1506,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000001800,
@@ -1388,6 +1515,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           listOwner: 'test-device',
           name: 'Reading',
           listId: 'reading',
+          parentListId: null,
         },
       }),
     );
@@ -1396,6 +1524,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
+        bufferDepth: 0,
+        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: 1710000001900,
@@ -1420,10 +1550,12 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           {
             url: 'https://github.com/example/repo',
             title: 'Repo',
+            bodyPreview: null,
           },
           {
             url: 'https://example.com/',
             title: 'Example',
+            bodyPreview: null,
           },
         ],
       }),

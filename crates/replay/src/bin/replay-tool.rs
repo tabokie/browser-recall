@@ -6,14 +6,15 @@ use std::future::ready;
 use std::io::{self, Read, Write};
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ReplayStep {
     entry: LogEntry,
     device_id: String,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ReplayRequest {
-    #[serde(default)]
     base_store: BTreeMap<String, Entity>,
     steps: Vec<ReplayStep>,
 }

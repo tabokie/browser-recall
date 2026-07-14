@@ -211,10 +211,6 @@
     "message": "تُخزَّن محليًا كملفات JSONL قابلة للقراءة ومنظمة حسب التاريخ. افتحها بأي محرر نصوص أو عالجها باستخدام jq.",
     "description": "Desktop local data storage help text."
   },
-  "desktopDefaultBrowserProfile": {
-    "message": "الملف الشخصي الافتراضي",
-    "description": "Fallback browser profile name."
-  },
   "desktopDebugLogging": {
     "message": "تسجيل التصحيح (إعادة التعيين عند إعادة التشغيل)",
     "description": "Desktop debug logging setting."

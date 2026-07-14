@@ -248,8 +248,10 @@ export function createHighlightLifecycle(options) {
       }
       onMark(mark);
       return mark;
-    } catch {
-      return null;
+    } catch (error) {
+      throw new Error('Could not wrap the saved highlight range', {
+        cause: error,
+      });
     }
   }
 
@@ -272,24 +274,33 @@ export function createHighlightLifecycle(options) {
 
   function resolvePath(path, root) {
     if (!path) return root;
-    try {
-      return doc.querySelector(path);
-    } catch {
-      return null;
-    }
+    return doc.querySelector(path);
   }
 
   function excerptParts(note) {
-    if (!Array.isArray(note?.excerpt)) return [];
-    return note.excerpt.map((part) => String(part || '')).filter(Boolean);
+    if (note?.excerpt === null) return [];
+    if (!Array.isArray(note?.excerpt)) {
+      throw new Error('Saved note excerpt must be a string array or null');
+    }
+    if (!note.excerpt.every((part) => typeof part === 'string' && part)) {
+      throw new Error('Saved note excerpt must contain non-empty strings');
+    }
+    return note.excerpt;
   }
 
   function markSavedNote(note, root = doc.body) {
     const excerpts = excerptParts(note);
     if (excerpts.length === 0) return [];
-    const paths = Array.isArray(note.cssPath)
-      ? note.cssPath.map((path) => String(path || ''))
-      : [];
+    if (
+      !Array.isArray(note.cssPath) ||
+      note.cssPath.length !== excerpts.length ||
+      !note.cssPath.every((path) => typeof path === 'string')
+    ) {
+      throw new Error(
+        'Saved highlight cssPath must be a string array aligned with excerpt',
+      );
+    }
+    const paths = note.cssPath;
     const marks = [];
     for (let index = 0; index < excerpts.length; index += 1) {
       const scopedRoot = resolvePath(paths[index] || '', root);

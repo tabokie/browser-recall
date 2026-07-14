@@ -47,13 +47,8 @@ where
         note_body,
         css_path,
     } = request;
-    let mut result = EntityMap::new();
-    let (page_key, mut page) =
-        ensure_page_with_overlay(&mut result, load, url, timestamp, title, context).await?;
-
-    let note_slug = note_slug_from_path(path);
+    let note_slug = note_slug_from_path(path)?;
     let note_key = format!("{NOTE_PREFIX}{note_slug}");
-    append_unique(&mut page.child_ids, note_key.clone());
 
     let mut note = load_note(load, &note_key)
         .await
@@ -62,12 +57,20 @@ where
     note.note = note_body.map(str::to_string).or(note.note);
     note.css_path = css_path.or(note.css_path);
     note.url = Some(url.to_string());
-    note.deleted = false;
-    note.deleted_ts = None;
-    note.deletion_reason = None;
-    note.replaced_by = None;
+    if note.deleted_ts.unwrap_or(i64::MIN) < timestamp {
+        note.deleted = false;
+        note.deleted_ts = None;
+        note.deletion_reason = None;
+        note.replaced_by = None;
+    }
 
-    result.insert(page_key, EntityEffect::Upsert(Entity::Page(page)));
+    let mut result = EntityMap::new();
+    if !note.deleted {
+        let (page_key, mut page) =
+            ensure_page_with_overlay(&mut result, load, url, timestamp, title, context).await?;
+        append_unique(&mut page.child_ids, note_key.clone());
+        result.insert(page_key, EntityEffect::Upsert(Entity::Page(page)));
+    }
     result.insert(note_key, EntityEffect::Upsert(Entity::Note(note)));
     Ok(result)
 }
@@ -83,7 +86,7 @@ where
     L: Fn(&str) -> Fut,
     Fut: Future<Output = Option<Entity>>,
 {
-    let note_slug = note_slug_from_path(path);
+    let note_slug = note_slug_from_path(path)?;
     let note_key = format!("{NOTE_PREFIX}{note_slug}");
     let mut note = load_note(load, &note_key)
         .await
@@ -100,26 +103,26 @@ where
     let mut result = EntityMap::new();
     result.insert(note_key.clone(), EntityEffect::Upsert(Entity::Note(note)));
 
-    if let Some(note_url) = note_url {
-        let (page_key, mut page) = ensure_page(load, &note_url, timestamp).await?;
+    if let Some(note_url) = note_url.as_deref() {
+        let (page_key, mut page) = ensure_page(load, note_url, timestamp).await?;
         page.child_ids.retain(|child| child != &note_key);
         retain_page_or_delete(&mut result, page_key, page);
-
-        for (list_key, mut list) in find_lists_with_pin(&result, load, &note_key).await {
-            list.pins.retain(|pin| pin.id != note_key);
-            result.insert(list_key, EntityEffect::Upsert(Entity::List(list)));
-        }
-
-        orphan_key(
-            &mut result,
-            load,
-            &context.device_id,
-            &note_key,
-            timestamp,
-            Some(note_url),
-        )
-        .await;
     }
+
+    for (list_key, mut list) in find_lists_with_pin(&result, load, &note_key).await? {
+        list.pins.retain(|pin| pin.id != note_key);
+        result.insert(list_key, EntityEffect::Upsert(Entity::List(list)));
+    }
+
+    orphan_key(
+        &mut result,
+        load,
+        &context.device_id,
+        &note_key,
+        timestamp,
+        note_url,
+    )
+    .await;
 
     Ok(result)
 }
@@ -135,7 +138,7 @@ where
     L: Fn(&str) -> Fut,
     Fut: Future<Output = Option<Entity>>,
 {
-    let note_slug = note_slug_from_path(path);
+    let note_slug = note_slug_from_path(path)?;
     let note_key = format!("{NOTE_PREFIX}{note_slug}");
     let mut note = load_note(load, &note_key)
         .await
@@ -145,13 +148,10 @@ where
         return Ok(EntityMap::new());
     }
 
-    let orphaned = get_orphaned(&EntityMap::new(), load, ORPHANED_KEY)
-        .await
-        .unwrap_or_else(crate::default_orphaned);
+    let orphaned = get_orphaned(&EntityMap::new(), load, ORPHANED_KEY).await;
     let note_url = orphaned
-        .entries
-        .iter()
-        .find(|entry| entry.key == note_key)
+        .as_ref()
+        .and_then(|manifest| manifest.entries.iter().find(|entry| entry.key == note_key))
         .and_then(|entry| entry.url.clone())
         .or_else(|| note.url.clone())
         .or_else(|| url.map(str::to_string));
@@ -190,32 +190,37 @@ where
         note_body,
         css_path,
     } = request;
-    let old_note_slug = note_slug_from_path(old_path);
-    let new_note_slug = note_slug_from_path(path);
+    let old_note_slug = note_slug_from_path(old_path)?;
+    let new_note_slug = note_slug_from_path(path)?;
     let old_note_key = format!("{NOTE_PREFIX}{old_note_slug}");
     let new_note_key = format!("{NOTE_PREFIX}{new_note_slug}");
 
-    let old_note = load_note(load, &old_note_key)
+    let mut old_note = load_note(load, &old_note_key)
         .await
         .unwrap_or_else(|| default_note(old_note_slug));
     let note_url = old_note.url.clone().or_else(|| url.map(str::to_string));
+    let replacement_is_current = old_note.deleted_ts.unwrap_or(i64::MIN) < timestamp;
 
     let mut result = EntityMap::new();
 
-    if let Some(note_url) = note_url.clone() {
-        let (page_key, mut page) = ensure_page(load, &note_url, timestamp).await?;
+    if replacement_is_current {
+        let note_url = note_url.as_deref().ok_or_else(|| {
+            ReplayError::InvalidEntry(format!("replacement source note {old_note_key} has no URL"))
+        })?;
+        let (page_key, mut page) = ensure_page(load, note_url, timestamp).await?;
         page.child_ids.retain(|child| child != &old_note_key);
-        append_unique(&mut page.child_ids, new_note_key.clone());
         result.insert(page_key, EntityEffect::Upsert(Entity::Page(page)));
     }
 
-    for (list_key, mut list) in find_lists_with_pin(&result, load, &old_note_key).await {
-        for pin in &mut list.pins {
-            if pin.id == old_note_key {
-                pin.id = new_note_key.clone();
+    if replacement_is_current {
+        for (list_key, mut list) in find_lists_with_pin(&result, load, &old_note_key).await? {
+            for pin in &mut list.pins {
+                if pin.id == old_note_key {
+                    pin.id = new_note_key.clone();
+                }
             }
+            result.insert(list_key, EntityEffect::Upsert(Entity::List(list)));
         }
-        result.insert(list_key, EntityEffect::Upsert(Entity::List(list)));
     }
 
     let mut new_note = load_note(load, &new_note_key)
@@ -225,26 +230,47 @@ where
     new_note.note = note_body.map(str::to_string).or(new_note.note);
     new_note.css_path = css_path.or(new_note.css_path);
     new_note.url = note_url.clone();
-    new_note.deleted = false;
-    new_note.deleted_ts = None;
-    new_note.deletion_reason = None;
-    new_note.replaced_by = None;
+    if new_note.deleted_ts.unwrap_or(i64::MIN) < timestamp {
+        new_note.deleted = false;
+        new_note.deleted_ts = None;
+        new_note.deletion_reason = None;
+        new_note.replaced_by = None;
+    }
+    if !new_note.deleted {
+        let note_url = new_note.url.as_deref().ok_or_else(|| {
+            ReplayError::InvalidEntry(format!("replacement note {new_note_key} has no source URL"))
+        })?;
+        let (page_key, mut page) =
+            ensure_page_with_overlay(&mut result, load, note_url, timestamp, None, context).await?;
+        append_unique(&mut page.child_ids, new_note_key.clone());
+        result.insert(page_key, EntityEffect::Upsert(Entity::Page(page)));
+    }
     result.insert(
         new_note_key.clone(),
         EntityEffect::Upsert(Entity::Note(new_note)),
     );
 
-    if timestamp > old_note.deleted_ts.unwrap_or(0) {
-        result.insert(old_note_key.clone(), EntityEffect::Delete);
+    if replacement_is_current {
+        old_note.url = note_url;
+        old_note.deleted = true;
+        old_note.deleted_ts = Some(timestamp);
+        old_note.deletion_reason = Some("replaced".to_string());
+        old_note.replaced_by = Some(new_note_key.clone());
+        result.insert(
+            old_note_key.clone(),
+            EntityEffect::Upsert(Entity::Note(old_note)),
+        );
     }
-    unorphan_key(
-        &mut result,
-        load,
-        &context.device_id,
-        &old_note_key,
-        timestamp,
-    )
-    .await;
+    if replacement_is_current {
+        unorphan_key(
+            &mut result,
+            load,
+            &context.device_id,
+            &old_note_key,
+            timestamp,
+        )
+        .await;
+    }
 
     Ok(result)
 }

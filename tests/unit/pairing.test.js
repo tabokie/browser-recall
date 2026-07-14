@@ -40,7 +40,7 @@ describe('connector pairing browser detection', () => {
     await expect(detectBrowserName()).resolves.toBe('Firefox');
   });
 
-  it('builds a Firefox pair request from the runtime extension id', async () => {
+  it('builds a Firefox pair request from the canonical adapter runtime id', async () => {
     const store = {};
     vi.stubGlobal('navigator', {
       userAgent:
@@ -49,17 +49,18 @@ describe('connector pairing browser detection', () => {
     vi.stubGlobal('crypto', {
       randomUUID: () => 'browser-install-firefox',
     });
-    vi.stubGlobal('browser', {
-      runtime: {
-        id: 'browser-recall@example.invalid',
-      },
-    });
     vi.stubGlobal('chrome', {
-      runtime: {},
+      runtime: { id: 'browser-recall@example.invalid' },
       storage: {
         local: {
           async get(keys) {
-            return Object.fromEntries(keys.map((key) => [key, store[key]]));
+            return Object.fromEntries(
+              keys
+                .filter((key) =>
+                  Object.prototype.hasOwnProperty.call(store, key),
+                )
+                .map((key) => [key, store[key]]),
+            );
           },
           async set(patch) {
             Object.assign(store, patch);
@@ -68,12 +69,14 @@ describe('connector pairing browser detection', () => {
       },
     });
 
-    await expect(buildPairRequest()).resolves.toMatchObject({
+    const request = await buildPairRequest();
+    expect(request).toMatchObject({
       type: 'pair_request',
       protocolVersion: 2,
       browserId: 'browser-install-firefox',
       browserName: 'Firefox',
       extensionId: 'browser-recall@example.invalid',
+      browserProfile: null,
     });
   });
 });

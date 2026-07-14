@@ -12,7 +12,7 @@
     "apps/desktop": {
       "entry": ["ui/index.js"],
       "project": ["ui/**/*.{js,d.ts}"],
-      "ignore": ["ui/extension-api-shim.js", "ui/search-runtime.d.ts"]
+      "ignore": ["ui/desktop-platform.js", "ui/search-runtime.d.ts"]
     },
     "apps/extension": {
       "entry": [

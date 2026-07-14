@@ -2,12 +2,13 @@ use std::collections::HashSet;
 use std::future::Future;
 
 use crate::{
-    append_to_tree, append_unique, collect_tree_ids, default_list, ensure_page_with_overlay,
-    entities::Entity, entity_slug, generate_list_id, get_list, get_list_order, get_name_to_id,
-    get_page, is_system_list, note_slug_from_path, orphan_key, remove_from_tree, resolve_list_key,
-    retain_page_or_delete, touch_timestamp_map, unorphan_key, Context, EntityEffect, EntityMap,
-    ListOrderManifest, NameToIdManifest, PinEntity, ReplayError, TreeNode, LIST_ORDER_KEY,
-    LIST_PREFIX, NAME_TO_ID_KEY, NOTE_PREFIX, PAGE_PREFIX,
+    append_to_tree, append_unique, collect_tree_ids, ensure_page_with_overlay,
+    entities::{Entity, ListEntity},
+    entity_slug, generate_list_id, get_list, get_list_order, get_name_to_id, get_page,
+    is_system_list, note_slug_from_path, orphan_key, remove_from_tree, resolve_list_key,
+    retain_page_or_delete, touch_timestamp_map, unorphan_key, validate_list_identity, Context,
+    EntityEffect, EntityMap, ListOrderManifest, NameToIdManifest, PinEntity, ReplayError, TreeNode,
+    LIST_ORDER_KEY, LIST_PREFIX, NAME_TO_ID_KEY, NOTE_PREFIX, PAGE_PREFIX,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -33,19 +34,20 @@ where
             ));
         }
     }
-    let Some(list_key) = resolve_list_key(&mut result, load, name, list_owner).await? else {
-        return Ok(result);
-    };
-    let Some(mut list) = get_list(&result, load, &list_key).await else {
-        return Ok(result);
-    };
+    let list_key = resolve_list_key(&mut result, load, name, list_owner)
+        .await?
+        .ok_or_else(|| ReplayError::InvalidEntry(format!("list not found: {list_owner}/{name}")))?;
+    let mut list = get_list(&result, load, &list_key)
+        .await
+        .ok_or_else(|| ReplayError::InvalidEntry(format!("list entity is missing: {list_key}")))?;
+    validate_list_identity(&list_key, &list, list_owner)?;
 
     for (index, item) in urls.iter().enumerate() {
         if item.is_empty() {
             continue;
         }
         let pin_id = if item.starts_with("objects/notes/") {
-            format!("{NOTE_PREFIX}{}", note_slug_from_path(item))
+            format!("{NOTE_PREFIX}{}", note_slug_from_path(item)?)
         } else {
             let title = titles
                 .and_then(|values| values.get(index))
@@ -86,12 +88,13 @@ where
     Fut: Future<Output = Option<Entity>>,
 {
     let mut result = EntityMap::new();
-    let Some(list_key) = resolve_list_key(&mut result, load, name, list_owner).await? else {
-        return Ok(result);
-    };
-    let Some(mut list) = get_list(&result, load, &list_key).await else {
-        return Ok(result);
-    };
+    let list_key = resolve_list_key(&mut result, load, name, list_owner)
+        .await?
+        .ok_or_else(|| ReplayError::InvalidEntry(format!("list not found: {list_owner}/{name}")))?;
+    let mut list = get_list(&result, load, &list_key)
+        .await
+        .ok_or_else(|| ReplayError::InvalidEntry(format!("list entity is missing: {list_key}")))?;
+    validate_list_identity(&list_key, &list, list_owner)?;
 
     let mut remove_ids = HashSet::new();
     for item in urls {
@@ -99,7 +102,7 @@ where
             continue;
         }
         let pin_id = if item.starts_with("objects/notes/") {
-            format!("{NOTE_PREFIX}{}", note_slug_from_path(item))
+            format!("{NOTE_PREFIX}{}", note_slug_from_path(item)?)
         } else {
             format!("{PAGE_PREFIX}{}", crate::generate_slug_from_url(item)?)
         };
@@ -136,6 +139,26 @@ where
     L: Fn(&str) -> Fut,
     Fut: Future<Output = Option<Entity>>,
 {
+    if name.trim().is_empty() {
+        return Err(ReplayError::InvalidEntry(
+            "create_list name must be a non-empty string".to_string(),
+        ));
+    }
+    if list_owner.trim().is_empty() {
+        return Err(ReplayError::InvalidEntry(
+            "create_list listOwner must be a non-empty string".to_string(),
+        ));
+    }
+    if list_id.is_some_and(|value| value.trim().is_empty()) {
+        return Err(ReplayError::InvalidEntry(
+            "create_list listId must be a non-empty string when provided".to_string(),
+        ));
+    }
+    if parent_list_id.is_some_and(|value| value.trim().is_empty()) {
+        return Err(ReplayError::InvalidEntry(
+            "create_list parentListId must be a non-empty string when provided".to_string(),
+        ));
+    }
     let mut result = EntityMap::new();
     let mut name_map = get_name_to_id(&result, load, NAME_TO_ID_KEY)
         .await
@@ -149,14 +172,19 @@ where
         .unwrap_or_else(|| generate_list_id(name, timestamp));
     let list_key = format!("{LIST_PREFIX}{list_id}");
 
-    if get_list(&result, load, &list_key).await.is_some() {
+    if let Some(existing) = get_list(&result, load, &list_key).await {
+        validate_list_identity(&list_key, &existing, list_owner)?;
+        if existing.name != name {
+            return Err(ReplayError::InvalidEntry(format!(
+                "{list_key} name {:?} does not match create_list name {name:?}",
+                existing.name
+            )));
+        }
         return Ok(result);
     }
 
     let parent_key = parent_list_id.map(|value| format!("{LIST_PREFIX}{value}"));
-    let mut list = default_list(&list_id);
-    list.name = name.to_string();
-    list.owner = Some(list_owner.to_string());
+    let mut list = ListEntity::new(list_id.clone(), name.to_string(), list_owner.to_string());
     touch_timestamp_map(&mut list.timestamps, &context.device_id, timestamp);
     touch_timestamp_map(&mut name_map.timestamps, &context.device_id, timestamp);
     touch_timestamp_map(&mut list_order.timestamps, &context.device_id, timestamp);
@@ -190,12 +218,44 @@ where
     Fut: Future<Output = Option<Entity>>,
 {
     let mut result = EntityMap::new();
-    let Some(list_key) = resolve_list_key(&mut result, load, name, list_owner).await? else {
-        return Ok(result);
+    let list_key = match resolve_list_key(&mut result, load, name, list_owner).await? {
+        Some(list_key) => list_key,
+        None => {
+            let already_renamed = if let Some(new_name) = new_name {
+                if let Some(list_key) =
+                    resolve_list_key(&mut result, load, new_name, list_owner).await?
+                {
+                    let list = get_list(&result, load, &list_key).await.ok_or_else(|| {
+                        ReplayError::InvalidEntry(format!("list entity is missing: {list_key}"))
+                    })?;
+                    validate_list_identity(&list_key, &list, list_owner)?;
+                    if list.name != new_name {
+                        return Err(ReplayError::InvalidEntry(format!(
+                            "name-to-id entry for {list_owner}/{new_name} references {list_key} with name {:?}",
+                            list.name
+                        )));
+                    }
+                    list.timestamps
+                        .get(&context.device_id)
+                        .is_some_and(|applied_at| *applied_at >= timestamp)
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            if already_renamed {
+                return Ok(result);
+            }
+            return Err(ReplayError::InvalidEntry(format!(
+                "list not found: {list_owner}/{name}"
+            )));
+        }
     };
-    let Some(mut list) = get_list(&result, load, &list_key).await else {
-        return Ok(result);
-    };
+    let mut list = get_list(&result, load, &list_key)
+        .await
+        .ok_or_else(|| ReplayError::InvalidEntry(format!("list entity is missing: {list_key}")))?;
+    validate_list_identity(&list_key, &list, list_owner)?;
     touch_timestamp_map(&mut list.timestamps, &context.device_id, timestamp);
 
     if let Some(new_name) = new_name {
@@ -204,9 +264,11 @@ where
         if old_name != new_name {
             let mut name_map = get_name_to_id(&result, load, NAME_TO_ID_KEY)
                 .await
-                .unwrap_or_else(NameToIdManifest::new);
+                .ok_or_else(|| {
+                    ReplayError::InvalidEntry("name-to-id manifest is missing".to_string())
+                })?;
             touch_timestamp_map(&mut name_map.timestamps, &context.device_id, timestamp);
-            let owner = list.owner.clone().unwrap_or_default();
+            let owner = list.owner.clone();
             name_map.paths.remove(&format!("{owner}/{old_name}"));
             name_map.paths.insert(
                 format!("{owner}/{new_name}"),
@@ -236,7 +298,7 @@ where
     let mut result = EntityMap::new();
     let current = get_list_order(&result, load, LIST_ORDER_KEY)
         .await
-        .unwrap_or_else(ListOrderManifest::new);
+        .ok_or_else(|| ReplayError::InvalidEntry("list-order manifest is missing".to_string()))?;
     if current
         .timestamps
         .get(&context.device_id)
@@ -262,7 +324,7 @@ where
     let mut present = collect_tree_ids(&reconciled);
     let name_map = get_name_to_id(&result, load, NAME_TO_ID_KEY)
         .await
-        .unwrap_or_else(NameToIdManifest::new);
+        .ok_or_else(|| ReplayError::InvalidEntry("name-to-id manifest is missing".to_string()))?;
     for list_id in name_map.paths.values() {
         let list_key = format!("{LIST_PREFIX}{list_id}");
         if present.contains(&list_key) || is_system_list(&list_key) {
@@ -301,15 +363,16 @@ where
     Fut: Future<Output = Option<Entity>>,
 {
     let mut result = EntityMap::new();
-    let Some(list_key) = resolve_list_key(&mut result, load, name, list_owner).await? else {
-        return Ok(result);
-    };
+    let list_key = resolve_list_key(&mut result, load, name, list_owner)
+        .await?
+        .ok_or_else(|| ReplayError::InvalidEntry(format!("list not found: {list_owner}/{name}")))?;
     if is_system_list(&list_key) {
         return Ok(result);
     }
     let mut list = get_list(&result, load, &list_key)
         .await
-        .unwrap_or_else(|| default_list(entity_slug(&list_key)));
+        .ok_or_else(|| ReplayError::InvalidEntry(format!("list entity is missing: {list_key}")))?;
+    validate_list_identity(&list_key, &list, list_owner)?;
     if list.deleted_ts.unwrap_or(0) >= timestamp {
         return Ok(result);
     }
@@ -318,17 +381,13 @@ where
     list.deleted = true;
     list.deleted_ts = Some(timestamp);
     let pins = list.pins.clone();
-    let list_name = if list.name.is_empty() {
-        name.to_string()
-    } else {
-        list.name.clone()
-    };
-    let list_owner_value = list.owner.clone().unwrap_or_else(|| list_owner.to_string());
+    let list_name = list.name.clone();
+    let list_owner_value = list.owner.clone();
     result.insert(list_key.clone(), EntityEffect::Upsert(Entity::List(list)));
 
     let mut list_order = get_list_order(&result, load, LIST_ORDER_KEY)
         .await
-        .unwrap_or_else(ListOrderManifest::new);
+        .ok_or_else(|| ReplayError::InvalidEntry("list-order manifest is missing".to_string()))?;
     touch_timestamp_map(&mut list_order.timestamps, &context.device_id, timestamp);
     list_order.tree = remove_from_tree(&list_order.tree, &list_key);
     result.insert(
@@ -348,7 +407,7 @@ where
 
     let mut name_map = get_name_to_id(&result, load, NAME_TO_ID_KEY)
         .await
-        .unwrap_or_else(NameToIdManifest::new);
+        .ok_or_else(|| ReplayError::InvalidEntry("name-to-id manifest is missing".to_string()))?;
     touch_timestamp_map(&mut name_map.timestamps, &context.device_id, timestamp);
     name_map
         .paths
@@ -382,12 +441,13 @@ where
     Fut: Future<Output = Option<Entity>>,
 {
     let mut result = EntityMap::new();
-    let Some(list_key) = resolve_list_key(&mut result, load, name, list_owner).await? else {
-        return Ok(result);
-    };
+    let list_key = resolve_list_key(&mut result, load, name, list_owner)
+        .await?
+        .ok_or_else(|| ReplayError::InvalidEntry(format!("list not found: {list_owner}/{name}")))?;
     let mut list = get_list(&result, load, &list_key)
         .await
-        .unwrap_or_else(|| default_list(entity_slug(&list_key)));
+        .ok_or_else(|| ReplayError::InvalidEntry(format!("list entity is missing: {list_key}")))?;
+    validate_list_identity(&list_key, &list, list_owner)?;
     if list.deleted_ts.unwrap_or(0) >= timestamp {
         return Ok(result);
     }
@@ -396,17 +456,13 @@ where
     list.deleted = false;
     list.deleted_ts = Some(timestamp);
     let pins = list.pins.clone();
-    let list_name = if list.name.is_empty() {
-        name.to_string()
-    } else {
-        list.name.clone()
-    };
-    let list_owner_value = list.owner.clone().unwrap_or_else(|| list_owner.to_string());
+    let list_name = list.name.clone();
+    let list_owner_value = list.owner.clone();
     result.insert(list_key.clone(), EntityEffect::Upsert(Entity::List(list)));
 
     let mut list_order = get_list_order(&result, load, LIST_ORDER_KEY)
         .await
-        .unwrap_or_else(ListOrderManifest::new);
+        .ok_or_else(|| ReplayError::InvalidEntry("list-order manifest is missing".to_string()))?;
     if !collect_tree_ids(&list_order.tree).contains(&list_key) {
         touch_timestamp_map(&mut list_order.timestamps, &context.device_id, timestamp);
         list_order.tree.push(TreeNode {
@@ -431,7 +487,7 @@ where
 
     let mut name_map = get_name_to_id(&result, load, NAME_TO_ID_KEY)
         .await
-        .unwrap_or_else(NameToIdManifest::new);
+        .ok_or_else(|| ReplayError::InvalidEntry("name-to-id manifest is missing".to_string()))?;
     touch_timestamp_map(&mut name_map.timestamps, &context.device_id, timestamp);
     name_map.paths.insert(
         format!("{list_owner_value}/{list_name}"),

@@ -211,10 +211,6 @@
     "message": "दिनांक के अनुसार व्यवस्थित, मानव-पठनीय JSONL फ़ाइलों के रूप में स्थानीय रूप से संग्रहीत। इन्हें किसी भी टेक्स्ट एडिटर में खोलें या jq से प्रोसेस करें।",
     "description": "Desktop local data storage help text."
   },
-  "desktopDefaultBrowserProfile": {
-    "message": "डिफ़ॉल्ट प्रोफ़ाइल",
-    "description": "Fallback browser profile name."
-  },
   "desktopDebugLogging": {
     "message": "डीबग लॉगिंग (पुनः आरंभ करने पर रीसेट)",
     "description": "Desktop debug logging setting."

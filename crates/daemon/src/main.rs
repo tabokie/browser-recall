@@ -14,17 +14,17 @@ async fn main() {
         }
     };
 
-    let config_store = ConfigStore::new(
-        args.config_dir
-            .unwrap_or_else(|| env::temp_dir().join("browser-recall-daemon")),
-    );
+    let config_store = ConfigStore::new(args.config_dir);
     if let Err(message) = configure_data_directory(&config_store, args.data_dir) {
         eprintln!("{message}");
         std::process::exit(2);
     }
     let mut options =
         ServerStartOptions::phase1_defaults(config_store, static_approver(args.approve_mode));
-    if let Some(port_candidates) = port_candidates_from_env() {
+    if let Some(port_candidates) = port_candidates_from_env().unwrap_or_else(|message| {
+        eprintln!("{message}");
+        std::process::exit(2);
+    }) {
         options.port_candidates = port_candidates;
     }
     options.test_control_enabled = args.test_control_enabled;
@@ -40,7 +40,7 @@ async fn main() {
 
 #[derive(Debug)]
 struct CliArgs {
-    config_dir: Option<PathBuf>,
+    config_dir: PathBuf,
     data_dir: Option<PathBuf>,
     approve_mode: PairingDecision,
     test_control_enabled: bool,
@@ -86,7 +86,7 @@ fn parse_cli_args(args: impl IntoIterator<Item = String>) -> Result<CliArgs, Str
     }
 
     Ok(CliArgs {
-        config_dir,
+        config_dir: config_dir.ok_or_else(|| "--config-dir is required".to_string())?,
         data_dir,
         approve_mode,
         test_control_enabled,
@@ -112,7 +112,8 @@ fn configure_data_directory(
             return Err("--data-dir is required when creating daemon configuration".to_string());
         }
         (false, Some(data_dir)) => {
-            let config = DaemonConfig::new_configured(data_dir).map_err(str::to_string)?;
+            let config =
+                DaemonConfig::new_configured(data_dir).map_err(|error| error.to_string())?;
             config_store
                 .save(&config)
                 .map_err(|error| format!("failed to create daemon configuration: {error}"))?;
@@ -152,18 +153,35 @@ fn configure_data_directory(
     Ok(())
 }
 
-fn port_candidates_from_env() -> Option<Vec<u16>> {
-    let raw = env::var("BROWSER_RECALL_PORTS").ok()?;
+fn port_candidates_from_env() -> Result<Option<Vec<u16>>, String> {
+    let raw = match env::var("BROWSER_RECALL_PORTS") {
+        Ok(raw) => raw,
+        Err(env::VarError::NotPresent) => return Ok(None),
+        Err(error) => return Err(format!("BROWSER_RECALL_PORTS is not valid UTF-8: {error}")),
+    };
     let ports = raw
         .split(',')
         .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.parse::<u16>().ok())
-        .collect::<Option<Vec<_>>>()?;
+        .map(|value| {
+            if value.is_empty() {
+                return Err("BROWSER_RECALL_PORTS contains an empty port".to_string());
+            }
+            value
+                .parse::<u16>()
+                .map_err(|_| format!("BROWSER_RECALL_PORTS contains invalid port `{value}`"))
+                .and_then(|port| {
+                    if port == 0 {
+                        Err("BROWSER_RECALL_PORTS must not contain port 0".to_string())
+                    } else {
+                        Ok(port)
+                    }
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     if ports.is_empty() {
-        return None;
+        return Err("BROWSER_RECALL_PORTS must contain at least one port".to_string());
     }
-    Some(ports)
+    Ok(Some(ports))
 }
 
 #[cfg(test)]
@@ -201,7 +219,7 @@ mod tests {
         let root = tempdir().expect("config root");
         let store = ConfigStore::new(root.path());
         store
-            .save(&DaemonConfig::new_unconfigured())
+            .save(&DaemonConfig::new_unconfigured().expect("platform device identity"))
             .expect("save incomplete config");
 
         let error = configure_data_directory(&store, None)

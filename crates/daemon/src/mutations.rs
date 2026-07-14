@@ -66,8 +66,10 @@ fn snapshot_slug_from_path(path: &str) -> Option<String> {
         .and_then(|value| value.rsplit_once('-').map(|(slug, _)| slug.to_string()))
 }
 
-fn page_slug_from_url(url: Option<&str>) -> Option<String> {
-    url.and_then(|value| generate_slug_from_url(value).ok())
+fn page_slug_from_url(url: Option<&str>) -> Result<Option<String>, String> {
+    url.map(generate_slug_from_url)
+        .transpose()
+        .map_err(|error| error.to_string())
 }
 
 fn first_list_id_from_effects(effects: &EntityMapView) -> Option<String> {
@@ -80,7 +82,7 @@ pub fn build_mutations(
     entry: &LogEntry,
     raw_entry: &Value,
     effects: &EntityMapView,
-) -> Vec<MutationPayload> {
+) -> Result<Vec<MutationPayload>, String> {
     let mut mutations = Vec::new();
 
     match entry {
@@ -123,7 +125,7 @@ pub fn build_mutations(
         }
         LogEntry::CreateNote { path, url, .. } => {
             mutations.push(MutationPayload {
-                page_slug: page_slug_from_url(Some(url.as_str())),
+                page_slug: page_slug_from_url(Some(url.as_str()))?,
                 note_slug: note_slug_from_path(path),
                 url: Some(url.clone()),
                 ..mutation("note")
@@ -131,7 +133,7 @@ pub fn build_mutations(
         }
         LogEntry::DeleteNote { url, path, .. } | LogEntry::RestoreNote { url, path, .. } => {
             mutations.push(MutationPayload {
-                page_slug: page_slug_from_url(url.as_deref()),
+                page_slug: page_slug_from_url(url.as_deref())?,
                 note_slug: note_slug_from_path(path),
                 url: url.clone(),
                 ..mutation("note")
@@ -144,7 +146,7 @@ pub fn build_mutations(
             ..
         } => {
             mutations.push(MutationPayload {
-                page_slug: page_slug_from_url(url.as_deref()),
+                page_slug: page_slug_from_url(url.as_deref())?,
                 note_slug: note_slug_from_path(path),
                 old_note_slug: note_slug_from_path(old_path),
                 url: url.clone(),
@@ -155,7 +157,7 @@ pub fn build_mutations(
         | LogEntry::DeleteSnapshot { url, path, .. }
         | LogEntry::RestoreSnapshot { url, path, .. } => {
             mutations.push(MutationPayload {
-                page_slug: page_slug_from_url(Some(url.as_str())),
+                page_slug: page_slug_from_url(Some(url.as_str()))?,
                 slug: snapshot_slug_from_path(path),
                 url: Some(url.clone()),
                 ..mutation("snapshot")
@@ -196,5 +198,5 @@ pub fn build_mutations(
         });
     }
 
-    dedupe_mutations(mutations)
+    Ok(dedupe_mutations(mutations))
 }

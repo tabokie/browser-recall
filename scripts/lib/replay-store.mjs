@@ -16,5 +16,15 @@ export function replayStore({ steps, baseStore = {} }) {
     );
   }
   const parsed = JSON.parse(result.stdout);
-  return parsed.store || {};
+  if (
+    !parsed ||
+    typeof parsed !== 'object' ||
+    Array.isArray(parsed) ||
+    !parsed.store ||
+    typeof parsed.store !== 'object' ||
+    Array.isArray(parsed.store)
+  ) {
+    throw new Error('replay-tool returned an invalid store response');
+  }
+  return parsed.store;
 }

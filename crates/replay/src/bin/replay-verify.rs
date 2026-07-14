@@ -144,17 +144,28 @@ fn load_log_steps(data_dir: &Path) -> Result<Vec<ReplayStep>, Box<dyn Error>> {
 
     for device_path in sorted_entries(&logs_dir)? {
         if !device_path.is_dir() {
-            continue;
+            return Err(format!(
+                "unexpected file in logs directory: {}",
+                device_path.display()
+            )
+            .into());
         }
         let device_id = file_name(&device_path)?;
         for file_path in sorted_entries(&device_path)? {
             if file_path.extension().and_then(|value| value.to_str()) != Some("jsonl") {
-                continue;
+                return Err(
+                    format!("unexpected non-JSONL log file: {}", file_path.display()).into(),
+                );
             }
             let raw = fs::read_to_string(&file_path)?;
             for (index, line) in raw.lines().enumerate() {
                 if line.trim().is_empty() {
-                    continue;
+                    return Err(format!(
+                        "{}:{}: blank JSONL records are not allowed",
+                        file_path.display(),
+                        index + 1
+                    )
+                    .into());
                 }
                 let entry: LogEntry = serde_json::from_str(line)
                     .map_err(|error| format!("{}:{}: {error}", file_path.display(), index + 1))?;
@@ -546,35 +557,48 @@ fn classify_field_diff(
 }
 
 fn relationship_diff_is_page_only(replayed: Option<&Value>, existing: Option<&Value>) -> bool {
-    let replayed_set: BTreeSet<_> = replayed
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .collect();
-    let existing_set: BTreeSet<_> = existing
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .collect();
+    let (Some(replayed), Some(existing)) = (
+        replayed.and_then(Value::as_array),
+        existing.and_then(Value::as_array),
+    ) else {
+        return false;
+    };
+    let Some(replayed_set): Option<BTreeSet<_>> = replayed.iter().map(Value::as_str).collect()
+    else {
+        return false;
+    };
+    let Some(existing_set): Option<BTreeSet<_>> = existing.iter().map(Value::as_str).collect()
+    else {
+        return false;
+    };
     replayed_set
         .symmetric_difference(&existing_set)
         .all(|value| value.starts_with("page:"))
 }
 
 fn same_pins_ignoring_order(replayed: Option<&Value>, existing: Option<&Value>) -> bool {
-    fn sorted(value: Option<&Value>) -> Vec<Value> {
-        let mut pins = value.and_then(Value::as_array).cloned().unwrap_or_default();
+    fn sorted(value: Option<&Value>) -> Option<Vec<Value>> {
+        let mut pins = value?.as_array()?.clone();
+        if pins
+            .iter()
+            .any(|pin| pin.get("id").and_then(Value::as_str).is_none())
+        {
+            return None;
+        }
         pins.sort_by(|left, right| {
             left.get("id")
                 .and_then(Value::as_str)
-                .unwrap_or("")
-                .cmp(right.get("id").and_then(Value::as_str).unwrap_or(""))
+                .expect("pin IDs validated before sorting")
+                .cmp(
+                    right
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .expect("pin IDs validated before sorting"),
+                )
         });
-        pins
+        Some(pins)
     }
-    sorted(replayed) == sorted(existing)
+    matches!((sorted(replayed), sorted(existing)), (Some(left), Some(right)) if left == right)
 }
 
 fn print_report(report: &CompareReport, verbose: bool) {

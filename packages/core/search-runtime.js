@@ -8,14 +8,17 @@ export const RankingAlgorithm = Object.freeze({
 function normalizeText(value) {
   if (typeof value === 'string') return value;
   if (value == null) return '';
-  return String(value);
+  throw new Error(
+    `Search text must be a string or null, received ${typeof value}`,
+  );
 }
 
 function toTimestampNumber(value) {
-  if (typeof value === 'bigint') return Number(value);
-  if (typeof value === 'number') return value;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
+  const timestamp = typeof value === 'bigint' ? Number(value) : value;
+  if (!Number.isSafeInteger(timestamp) || timestamp < 0) {
+    throw new Error('Search timestamps must be non-negative safe integers');
+  }
+  return timestamp;
 }
 
 function isAsciiAlphanumeric(char) {
@@ -29,8 +32,11 @@ function isAsciiAlphanumeric(char) {
 }
 
 export function parseSearchQueryWords(query) {
+  if (typeof query !== 'string') {
+    throw new Error('Search query must be a string');
+  }
   const words = [];
-  const input = normalizeText(query);
+  const input = query;
   let index = 0;
 
   while (index < input.length) {
@@ -160,13 +166,20 @@ function matchQualityScore(quality) {
 
 export function scoreSearchFields(words, fields) {
   if (!Array.isArray(words) || words.length === 0) return null;
+  if (!Array.isArray(fields)) throw new Error('Search fields must be an array');
 
   let total = 0;
   for (const word of words) {
     let best = null;
-    for (const field of fields) {
-      const text = normalizeText(field?.text);
-      const weight = Number(field?.weight || 0);
+    for (const [index, field] of fields.entries()) {
+      if (!field || typeof field !== 'object' || Array.isArray(field)) {
+        throw new Error(`Search field ${index} must be an object`);
+      }
+      const text = normalizeText(field.text);
+      const weight = field.weight;
+      if (!Number.isFinite(weight)) {
+        throw new Error(`Search field ${index} weight must be finite`);
+      }
       if (!text || weight <= 0) continue;
       const quality = wordMatchQuality(word, text);
       if (!quality) continue;
@@ -183,7 +196,7 @@ export function scoreSearchFields(words, fields) {
 function identityFields(entry) {
   return [
     { text: entry.title, weight: 2 },
-    { text: entry.userTitle || entry.user_title, weight: 2 },
+    { text: entry.userTitle, weight: 2 },
     { text: entry.url, weight: 0.5 },
   ];
 }
@@ -211,89 +224,22 @@ function buildSearchResults(entries, query) {
 
   results.sort(
     (left, right) =>
-      right.score - left.score ||
-      (right.timestamp || 0) - (left.timestamp || 0),
+      right.score - left.score || right.timestamp - left.timestamp,
   );
   return results;
 }
 
-async function readFileText(fileHandle) {
-  const file = await fileHandle.getFile();
-  return file.text();
-}
-
-async function readNamedFileText(directory, name) {
-  try {
-    const fileHandle = await directory.getFileHandle(name);
-    return await readFileText(fileHandle);
-  } catch {
-    return null;
-  }
-}
-
-async function sha256Shard(value) {
-  const subtle = globalThis.crypto?.subtle;
-  if (!subtle) return null;
-  const bytes = new TextEncoder().encode(value);
-  const digest = await subtle.digest('SHA-256', bytes);
-  const first = new Uint8Array(digest)[0];
-  return first.toString(16).padStart(2, '0');
-}
-
-async function readPageUserTitle(pagesDir, slug) {
-  try {
-    const shard = await sha256Shard(slug);
-    if (!shard) return '';
-    const shardDir = await pagesDir.getDirectoryHandle(shard);
-    const fileHandle = await shardDir.getFileHandle(`${slug}.json`);
-    const text = await readFileText(fileHandle);
-    const page = JSON.parse(text);
-    return typeof page.user_title === 'string' ? page.user_title.trim() : '';
-  } catch {
-    return '';
-  }
-}
-
-function parseHistoryLine(line) {
-  try {
-    const item = JSON.parse(line);
-    if (!item || typeof item.url !== 'string') return null;
-    return {
-      timestamp: toTimestampNumber(item.timestamp),
-      url: item.url,
-      title: normalizeText(item.title),
-      user_title: normalizeText(item.user_title),
-      slug: typeof item.slug === 'string' ? item.slug : null,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function extractNoteFields(note) {
-  const fields = [];
-
-  if (Array.isArray(note.excerpt)) {
-    for (const item of note.excerpt) {
-      if (typeof item === 'string') fields.push(item);
-    }
-  }
-
-  if (typeof note.note === 'string') fields.push(note.note);
-
-  return fields;
-}
-
-function extractSnapshotPartsFromName(name) {
-  const match = /^(.+)-(\d{13})\.(?:md|html)$/.exec(name);
-  return match ? { slug: match[1], timestamp: Number(match[2]) } : null;
-}
-
 export class HistoryEntry {
   constructor(url, title) {
+    if (typeof url !== 'string' || !url) {
+      throw new Error('HistoryEntry URL must be a non-empty string');
+    }
+    if (typeof title !== 'string') {
+      throw new Error('HistoryEntry title must be a string');
+    }
     this.timestamp = BigInt(Date.now());
-    this.url = normalizeText(url);
-    this.title = normalizeText(title);
+    this.url = url;
+    this.title = title;
     this.userTitle = '';
     this.content = '';
   }
@@ -301,7 +247,10 @@ export class HistoryEntry {
   free() {}
 
   setContent(content) {
-    this.content = normalizeText(content);
+    if (typeof content !== 'string') {
+      throw new Error('HistoryEntry content must be a string');
+    }
+    this.content = content;
   }
 }
 
@@ -327,104 +276,4 @@ export class SearchEngine {
 
 if (typeof Symbol.dispose === 'symbol') {
   SearchEngine.prototype[Symbol.dispose] = SearchEngine.prototype.free;
-}
-
-export function main() {
-  noop();
-}
-
-export function initSync() {
-  noop();
-}
-
-export async function searchBatch(historyDir, pagesDir, query, fileNames) {
-  const seenUrls = new Set();
-  const entries = [];
-
-  for (const name of fileNames) {
-    const text = await readNamedFileText(historyDir, name);
-    if (text == null) continue;
-    for (const line of text.split('\n')) {
-      const item = parseHistoryLine(line.trim());
-      if (!item || seenUrls.has(item.url)) continue;
-      seenUrls.add(item.url);
-      entries.push(item);
-    }
-  }
-
-  const userTitleBySlug = new Map();
-  for (const slug of new Set(
-    entries.map((entry) => entry.slug).filter(Boolean),
-  )) {
-    userTitleBySlug.set(slug, await readPageUserTitle(pagesDir, slug));
-  }
-
-  const engine = new SearchEngine();
-  for (const entry of entries) {
-    const historyEntry = new HistoryEntry(entry.url, entry.title);
-    historyEntry.timestamp = BigInt(entry.timestamp);
-    historyEntry.userTitle =
-      entry.user_title || (entry.slug ? userTitleBySlug.get(entry.slug) : '');
-    engine.addEntry(historyEntry);
-  }
-
-  return engine.search(query, RankingAlgorithm.Content);
-}
-
-export async function searchNotes(notesDir, query) {
-  const words = parseSearchQueryWords(query);
-  if (words.length === 0) return [];
-
-  const matches = [];
-  for await (const entry of notesDir.values()) {
-    if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue;
-
-    const text = await readNamedFileText(notesDir, entry.name);
-    if (text == null) continue;
-    let note;
-    try {
-      note = JSON.parse(text);
-    } catch {
-      continue;
-    }
-
-    const fields = extractNoteFields(note);
-    const score = scoreSearchFields(
-      words,
-      fields.map((field) => ({ text: field, weight: 1 })),
-    );
-    if (score == null) continue;
-    if (typeof note.url !== 'string' || !note.url) continue;
-
-    matches.push({
-      url: note.url,
-      noteSlug:
-        typeof note.slug === 'string' && note.slug
-          ? note.slug
-          : entry.name.replace(/\.json$/, ''),
-      score,
-    });
-  }
-
-  return matches;
-}
-
-export async function searchSnapshots(snapshotsDir, query, fileNames) {
-  const words = parseSearchQueryWords(query);
-  if (words.length === 0) return [];
-
-  const matches = [];
-  for (const name of fileNames) {
-    const parts = extractSnapshotPartsFromName(name);
-    if (!parts) continue;
-
-    const text = await readNamedFileText(snapshotsDir, name);
-    if (text == null) continue;
-    const score = scoreSearchFields(words, [{ text, weight: 1 }]);
-    if (score != null) {
-      matches.push({ ...parts, score });
-    }
-  }
-
-  return matches;
 }

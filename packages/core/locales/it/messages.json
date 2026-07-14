@@ -211,10 +211,6 @@
     "message": "Archiviati localmente come file JSONL leggibili e organizzati per data. Aprili con un editor di testo oppure elaborali con jq.",
     "description": "Desktop local data storage help text."
   },
-  "desktopDefaultBrowserProfile": {
-    "message": "Profilo predefinito",
-    "description": "Fallback browser profile name."
-  },
   "desktopDebugLogging": {
     "message": "Registrazione debug (si ripristina al riavvio)",
     "description": "Desktop debug logging setting."

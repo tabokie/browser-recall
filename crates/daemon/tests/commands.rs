@@ -1,24 +1,74 @@
 use browser_recall_daemon::commands::{
-    add_list_pins, add_rule, create_note, delete_list, delete_note, delete_snapshot,
-    ensure_default_lists, get_snapshot_html, import_bookmarks, import_history, list_event_fields,
-    list_history_files, list_paired_browsers, load_history_batch, page_relations_payload,
-    pair_browser_revoke, permanent_delete_candidates, permanent_delete_keys, preview_rule_payload,
+    self, add_rule, delete_list, delete_note, delete_snapshot, ensure_default_lists,
+    get_snapshot_html, import_bookmarks, import_history, list_event_fields, list_history_files,
+    list_paired_browsers, load_history_batch, page_relations_payload, pair_browser_revoke,
+    permanent_delete_candidates, permanent_delete_keys, preview_rule_payload,
     recover_checkpoint_tail, remove_rule, rename_page, replay_entries, replay_entry, restore_list,
-    restore_note, restore_snapshot, save_list_meta, save_settings_key, search_notes,
-    search_snapshots, submit_event, toggle_list_pin, update_note, update_rule, BookmarkImportEntry,
-    BookmarkImportNode, BookmarkImportSkipped, HistoryImportEntry,
+    restore_note, restore_snapshot, save_settings_key, search_notes, search_snapshots,
+    submit_event, update_note, update_rule, BookmarkImportEntry, BookmarkImportNode,
+    BookmarkImportSkipped, HistoryImportEntry,
 };
 use browser_recall_daemon::protocol::{RuleBatchEntry, RulePayload};
 use browser_recall_daemon::read_projections::ReadProjections;
 use browser_recall_daemon::storage::Storage;
 use browser_recall_daemon::{ApprovedConnector, ConfigStore, Token};
 use browser_recall_replay::entities::{
-    ListEntity, ListOrderManifest, NameToIdManifest, PageEntity, PinEntity, TreeNode,
+    ListEntity, ListOrderManifest, NameToIdManifest, OrphanedEntry, OrphanedManifest, PageEntity,
+    PinEntity, TreeNode,
 };
 use browser_recall_replay::{generate_slug_from_url, LogEntry, RuleInput};
 use std::collections::BTreeMap;
 use std::path::Path;
 use tempfile::tempdir;
+
+fn command_input<T: serde::de::DeserializeOwned>(
+    action: &str,
+    request: &serde_json::Value,
+) -> Result<T, String> {
+    serde_json::from_value(request.clone()).map_err(|error| {
+        let message = error.to_string();
+        if let Some(field) = message
+            .strip_prefix("missing field `")
+            .and_then(|rest| rest.split_once('`').map(|(field, _)| field))
+        {
+            format!("{action} missing {field}")
+        } else {
+            format!("{action} request: {message}")
+        }
+    })
+}
+
+async fn create_note(
+    storage: &Storage,
+    device_id: &str,
+    request: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    commands::create_note(storage, device_id, command_input("createNote", request)?).await
+}
+
+async fn toggle_list_pin(
+    storage: &Storage,
+    device_id: &str,
+    request: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    commands::toggle_list_pin(storage, device_id, command_input("toggleListPin", request)?).await
+}
+
+async fn add_list_pins(
+    storage: &Storage,
+    device_id: &str,
+    request: &serde_json::Value,
+) -> Result<(), String> {
+    commands::add_list_pins(storage, device_id, command_input("addListPins", request)?).await
+}
+
+async fn save_list_meta(
+    storage: &Storage,
+    device_id: &str,
+    request: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    commands::save_list_meta(storage, device_id, command_input("saveListMeta", request)?).await
+}
 
 async fn load_page_notes_payload(
     storage: &Storage,
@@ -183,6 +233,7 @@ async fn concurrent_toggle_list_pin_serializes_against_current_cache() {
             "action": "visit_page",
             "url": "https://example.com/toggle",
             "title": "Toggle Page",
+            "referrerUrl": null,
         }),
     )
     .await
@@ -237,7 +288,11 @@ async fn raw_sync_file_write_clears_cached_misses() {
         .expect("load missing list")
         .is_none());
 
-    let mut list = ListEntity::new("synced".to_string());
+    let mut list = ListEntity::new(
+        "synced".to_string(),
+        "Synced".to_string(),
+        "device-a".to_string(),
+    );
     list.name = "Synced".to_string();
     let payload = serde_json::to_string(&list).expect("serialize list");
     storage
@@ -310,6 +365,7 @@ async fn startup_recovery_replays_logs_after_replay_progress() {
         "action": "visit_page",
         "url": "https://example.com/recovered",
         "title": "Recovered Page",
+        "referrerUrl": null,
     });
     storage
         .append_log_entry("device-a", 1_710_000_000_000, &raw)
@@ -469,20 +525,10 @@ async fn note_and_snapshot_payloads_reflect_storage_state() {
         .await
         .expect("remove markdown backing file");
 
-    let snapshots = load_page_snapshot_payload(&storage, &slug)
+    let error = load_page_snapshot_payload(&storage, &slug)
         .await
-        .expect("reload snapshots with missing files");
-    assert_eq!(snapshots.len(), 1);
-    assert_eq!(
-        snapshots[0].get("hasMd").and_then(|value| value.as_bool()),
-        Some(false)
-    );
-    assert_eq!(
-        snapshots[0]
-            .get("hasHtml")
-            .and_then(|value| value.as_bool()),
-        Some(false)
-    );
+        .expect_err("missing snapshot sidecars must invalidate the projection");
+    assert!(error.contains("references missing snapshot"));
 
     delete_snapshot(&storage, "device-a", &slug, 1_710_000_200_000)
         .await
@@ -544,9 +590,11 @@ async fn permanent_delete_repairs_note_and_list_relationship_metadata() {
     .await
     .expect("create note");
 
-    let mut list = ListEntity::new("reading".to_string());
-    list.name = "Reading".to_string();
-    list.owner = Some("device-a".to_string());
+    let mut list = ListEntity::new(
+        "reading".to_string(),
+        "Reading".to_string(),
+        "device-a".to_string(),
+    );
     list.pins = vec![
         PinEntity {
             id: format!("page:{page_slug}"),
@@ -580,6 +628,22 @@ async fn permanent_delete_repairs_note_and_list_relationship_metadata() {
         })
         .await
         .expect("save list order");
+    storage
+        .save_orphaned(&OrphanedManifest {
+            timestamps: Default::default(),
+            entries: vec![
+                OrphanedEntry {
+                    key: "note:n1".to_string(),
+                    url: Some("https://example.com/persist".to_string()),
+                },
+                OrphanedEntry {
+                    key: "list:reading".to_string(),
+                    url: None,
+                },
+            ],
+        })
+        .await
+        .expect("save orphaned manifest");
 
     let deleted = permanent_delete_keys(&storage, "device-a", &["note:n1".to_string()])
         .await
@@ -801,6 +865,7 @@ async fn migrated_note_and_list_commands_replay_entities() {
         &serde_json::json!({
             "pageSlug": page_slug,
             "excerpt": ["selected text"],
+            "cssPath": [""],
             "note": "first note",
         }),
     )
@@ -935,6 +1000,45 @@ async fn create_note_preserves_structural_excerpt_and_css_path_arrays() {
 }
 
 #[tokio::test]
+async fn create_note_rejects_incomplete_highlight_anchors() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("storage layout");
+
+    for request in [
+        serde_json::json!({
+            "url": "https://example.com/missing-css-path",
+            "excerpt": ["highlight"],
+            "cssPath": null,
+            "note": "note",
+        }),
+        serde_json::json!({
+            "url": "https://example.com/missing-excerpt",
+            "excerpt": null,
+            "cssPath": ["body > p"],
+            "note": "note",
+        }),
+        serde_json::json!({
+            "url": "https://example.com/misaligned-anchor",
+            "excerpt": ["one", "two"],
+            "cssPath": ["body > p"],
+            "note": "note",
+        }),
+    ] {
+        let error = create_note(&storage, "device-a", &request)
+            .await
+            .expect_err("incomplete highlight anchor must fail");
+        assert!(
+            error.contains("excerpt and cssPath"),
+            "unexpected error: {error}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn save_settings_key_replays_update_setting() {
     let dir = tempdir().expect("tempdir");
     let storage = Storage::new(dir.path());
@@ -1001,11 +1105,8 @@ async fn rule_and_rename_commands_replay_entities() {
         rule.clone(),
         vec![RuleBatchEntry {
             url: "https://example.com/rules".to_string(),
-            title: Some("Example Rules".to_string()),
+            title: "Example Rules".to_string(),
             body_preview: None,
-            body: None,
-            timestamp: None,
-            action: None,
         }],
     )
     .expect("preview rule");
@@ -1488,16 +1589,22 @@ async fn command_error_and_normalization_paths_are_explicit() {
                 visit_times: vec![0, -1],
             },
             HistoryImportEntry {
+                url: "https://example.com/bad-referrer".to_string(),
+                title: Some("Bad Referrer".to_string()),
+                referrer_url: Some(" file:///tmp/local ".to_string()),
+                visit_times: vec![1_710_001_000_000],
+            },
+            HistoryImportEntry {
                 url: "https://example.com/trimmed".to_string(),
                 title: Some("  Trimmed Title  ".to_string()),
-                referrer_url: Some(" file:///tmp/local ".to_string()),
+                referrer_url: Some(" https://referrer.example/source ".to_string()),
                 visit_times: vec![1_710_002_000_000, 1_710_002_000_000],
             },
         ],
     )
     .await
     .expect("history import with skips");
-    assert_eq!((page_count, visit_count, skipped_count), (1, 1, 3));
+    assert_eq!((page_count, visit_count, skipped_count), (1, 1, 4));
     let trimmed_slug = generate_slug_from_url("https://example.com/trimmed").expect("slug");
     let trimmed_page = storage
         .load_page(&trimmed_slug)
@@ -1505,10 +1612,12 @@ async fn command_error_and_normalization_paths_are_explicit() {
         .expect("load trimmed page")
         .expect("trimmed page exists");
     assert_eq!(trimmed_page.title.as_deref(), Some("Trimmed Title"));
-    assert!(
-        trimmed_page.parent_ids.is_empty(),
-        "non-http referrer should be ignored during import"
-    );
+    assert_eq!(trimmed_page.parent_ids.len(), 1);
+    assert!(storage
+        .load_page(&generate_slug_from_url("https://example.com/bad-referrer").expect("slug"))
+        .await
+        .expect("load bad referrer page")
+        .is_none());
 
     assert_eq!(
         save_settings_key(
@@ -1524,8 +1633,8 @@ async fn command_error_and_normalization_paths_are_explicit() {
     assert_eq!(
         create_note(&storage, "device-a", &serde_json::json!({"excerpt": [" "]}))
             .await
-            .expect_err("missing note URL fails"),
-        "Cannot determine page URL for note"
+            .expect_err("non-canonical excerpt fails"),
+        "excerpt array must contain canonical non-empty strings"
     );
     assert_eq!(
         create_note(
@@ -1591,9 +1700,9 @@ async fn command_error_and_normalization_paths_are_explicit() {
         &serde_json::json!({
             "url": "https://example.com/direct-note",
             "title": "Direct Note",
-            "excerpt": [" Alpha ", "", "Beta"],
+            "excerpt": ["Alpha", "Beta"],
             "note": "body",
-            "cssPath": [".content"]
+            "cssPath": [".content", ""]
         }),
     )
     .await
@@ -1754,17 +1863,58 @@ async fn command_error_and_normalization_paths_are_explicit() {
         .expect_err("bulk pins missing urls fails"),
         "addListPins missing urls"
     );
+    assert_eq!(
+        add_list_pins(
+            &storage,
+            "device-a",
+            &serde_json::json!({
+                "listId": child_list_id,
+                "urls": ["https://example.com/a", 17, "https://example.com/b"]
+            }),
+        )
+        .await
+        .expect_err("non-string bulk pin URL fails"),
+        "addListPins request: invalid type: integer `17`, expected a string"
+    );
+    assert_eq!(
+        add_list_pins(
+            &storage,
+            "device-a",
+            &serde_json::json!({
+                "listId": child_list_id,
+                "urls": ["https://example.com/a", "https://example.com/b"],
+                "titles": ["Only one"]
+            }),
+        )
+        .await
+        .expect_err("misaligned bulk pin titles fail"),
+        "addListPins titles length must match urls length"
+    );
+    assert_eq!(
+        add_list_pins(
+            &storage,
+            "device-a",
+            &serde_json::json!({
+                "listId": child_list_id,
+                "urls": ["https://example.com/no-title-a", "https://example.com/no-title-b"],
+                "titles": []
+            }),
+        )
+        .await
+        .expect_err("empty titles cannot stand in for omitted titles"),
+        "addListPins titles length must match urls length"
+    );
+
     add_list_pins(
         &storage,
         "device-a",
         &serde_json::json!({
             "listId": child_list_id,
-            "urls": ["https://example.com/no-title-a", "https://example.com/no-title-b"],
-            "titles": []
+            "urls": ["https://example.com/no-title-a", "https://example.com/no-title-b"]
         }),
     )
     .await
-    .expect("bulk pins with resized empty titles");
+    .expect("omitted titles are explicit no-title pins");
 
     assert_eq!(
         delete_list(&storage, "device-a", "missing-list")
@@ -1799,26 +1949,18 @@ async fn command_error_and_normalization_paths_are_explicit() {
         "Page entity missing URL for snapshot"
     );
 
-    assert_eq!(
-        permanent_delete_candidates(&[
-            "note:n1".to_string(),
-            "list:l1".to_string(),
-            "page:p1".to_string(),
-            "snapshot:s1-1".to_string(),
-            "manifest:orphaned".to_string(),
-        ]),
-        vec![
-            "note:n1".to_string(),
-            "list:l1".to_string(),
-            "page:p1".to_string(),
-            "snapshot:s1-1".to_string(),
-        ]
-    );
+    assert!(permanent_delete_candidates(&[
+        "note:n1".to_string(),
+        "list:l1".to_string(),
+        "page:p1".to_string(),
+        "snapshot:s1-1".to_string(),
+        "manifest:orphaned".to_string(),
+    ])
+    .is_err());
     assert!(
         permanent_delete_keys(&storage, "device-a", &["manifest:orphaned".to_string()])
             .await
-            .expect("no permanent candidates")
-            .is_empty()
+            .is_err()
     );
 
     let invalid_rule = RulePayload {
@@ -1829,11 +1971,8 @@ async fn command_error_and_normalization_paths_are_explicit() {
         invalid_rule.clone(),
         vec![RuleBatchEntry {
             url: "https://example.com/rule".to_string(),
-            title: Some("Rule Page".to_string()),
-            body_preview: None,
-            body: Some("body text".to_string()),
-            timestamp: None,
-            action: None,
+            title: "Rule Page".to_string(),
+            body_preview: Some("body text".to_string()),
         }],
     )
     .expect("invalid preview returns payload");
@@ -1841,14 +1980,11 @@ async fn command_error_and_normalization_paths_are_explicit() {
         preview.get("success").and_then(|value| value.as_bool()),
         Some(false)
     );
-    let add_rule_result = add_rule(&storage, "device-a", &child_list_id, invalid_rule)
-        .await
-        .expect("invalid add rule returns payload");
     assert_eq!(
-        add_rule_result
-            .get("success")
-            .and_then(|value| value.as_bool()),
-        Some(false)
+        add_rule(&storage, "device-a", &child_list_id, invalid_rule)
+            .await
+            .expect_err("invalid add rule fails"),
+        "Unsupported keyword rule field: case_sensitive"
     );
     assert_eq!(
         remove_rule(&storage, "device-a", "missing-list", "rule")

@@ -23,10 +23,16 @@
  * @property {string} [reason]
  */
 
-const WEB_PROTOCOL_RE = /^https?:\/\//i;
-
 function isWebUrl(url) {
-  return WEB_PROTOCOL_RE.test(url);
+  try {
+    const parsed = new URL(url);
+    return (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      Boolean(parsed.hostname)
+    );
+  } catch {
+    return false;
+  }
 }
 
 function skippedReason(url) {
@@ -97,7 +103,7 @@ export function parseBookmarkHtml(html) {
 
   const rootDL = doc.querySelector('dl');
   if (!rootDL) {
-    return { title, bookmarks: [], skipped: [], children: [] };
+    throw new Error('Bookmark file is missing its root DL element');
   }
 
   const result = parseDL(rootDL);

@@ -1,8 +1,11 @@
 mod support;
 
-use browser_recall_daemon::protocol::{ConnectorMessage, DaemonMessage, TestSeedFilePayload};
+use browser_recall_daemon::protocol::{
+    ConnectorMessage, DaemonMessage, TestControlMessage, TestSeedFilePayload,
+};
 use browser_recall_daemon::ws_server::{start_server, ServerStartOptions};
 use browser_recall_daemon::ConfigStore;
+use browser_recall_replay::entities::SettingsEntity;
 use futures_util::{SinkExt, StreamExt};
 use tempfile::tempdir;
 use tokio_tungstenite::connect_async;
@@ -47,9 +50,20 @@ async fn test_control_can_reset_and_seed_daemon_data() {
         .insert("Origin", "http://127.0.0.1:4173".parse().expect("origin"));
     let (mut socket, _) = connect_async(request).await.expect("ws connect");
 
+    let mut settings = browser_recall_daemon::settings::default_values();
+    settings.insert("theme".into(), serde_json::json!("dark"));
+    let settings_content = serde_json::to_string_pretty(&SettingsEntity {
+        timestamps: std::collections::HashMap::new(),
+        values: settings,
+    })
+    .expect("serialize settings seed");
+
     socket
         .send(Message::Text(
-            serde_json::to_string(&ConnectorMessage::TestResetData).expect("serialize reset"),
+            serde_json::to_string(&ConnectorMessage::TestControl {
+                request: TestControlMessage::ResetData,
+            })
+            .expect("serialize reset"),
         ))
         .await
         .expect("send reset");
@@ -68,11 +82,13 @@ async fn test_control_can_reset_and_seed_daemon_data() {
 
     socket
         .send(Message::Text(
-            serde_json::to_string(&ConnectorMessage::TestSeedData {
-                files: vec![TestSeedFilePayload {
-                    path: "manifest/settings.json".into(),
-                    content: "{\n  \"trimRules\": []\n}\n".into(),
-                }],
+            serde_json::to_string(&ConnectorMessage::TestControl {
+                request: TestControlMessage::SeedData {
+                    files: vec![TestSeedFilePayload {
+                        path: "views/manifest/settings.json".into(),
+                        content: settings_content,
+                    }],
+                },
             })
             .expect("serialize seed"),
         ))
@@ -91,12 +107,44 @@ async fn test_control_can_reset_and_seed_daemon_data() {
         .load_or_create()
         .expect("config")
         .data_dir
+        .join("views")
         .join("manifest")
         .join("settings.json");
     let settings_raw = tokio::fs::read_to_string(settings_path)
         .await
         .expect("settings written");
-    assert!(settings_raw.contains("\"trimRules\""));
+    assert!(settings_raw.contains("\"theme\": \"dark\""));
+    assert!(settings_raw.contains("\"captureSnapshotVideo\": false"));
+
+    socket
+        .send(Message::Text(
+            serde_json::to_string(&ConnectorMessage::TestControl {
+                request: TestControlMessage::SeedData {
+                    files: vec![TestSeedFilePayload {
+                        path: "views/pages/00/incomplete.json".into(),
+                        content: serde_json::json!({
+                            "slug": "incomplete",
+                            "url": "https://example.com/incomplete"
+                        })
+                        .to_string(),
+                    }],
+                },
+            })
+            .expect("serialize invalid page seed"),
+        ))
+        .await
+        .expect("send invalid page seed");
+    let invalid_page: DaemonMessage = serde_json::from_str(&next_text_message(&mut socket).await)
+        .expect("invalid page seed json");
+    match invalid_page {
+        DaemonMessage::TestSeedDataResult { success, error } => {
+            assert!(!success, "incomplete page entity must be rejected");
+            assert!(error
+                .expect("invalid page seed error")
+                .contains("invalid page test seed"));
+        }
+        other => panic!("expected invalid page seed result, got {other:?}"),
+    }
 
     handle.shutdown().await;
 }

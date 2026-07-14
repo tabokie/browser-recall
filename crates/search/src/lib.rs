@@ -1,36 +1,39 @@
-use serde::{Deserialize, Serialize};
+use browser_recall_replay::entities::{NoteEntity, PageEntity};
+use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Represents a history entry (webpage visit, document read, etc.)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct HistoryEntry {
     pub timestamp: i64,
     pub url: String,
     pub title: String,
-    #[serde(default)]
     pub user_title: Option<String>,
     pub content: String,
 }
 
 impl HistoryEntry {
-    pub fn new(url: String, title: String) -> Self {
+    pub fn new(url: String, title: String) -> io::Result<Self> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_millis() as i64)
-            .unwrap_or_default();
-        Self {
+            .map_err(|error| {
+                io::Error::other(format!("system clock is before UNIX epoch: {error}"))
+            })?
+            .as_millis();
+        let timestamp = i64::try_from(timestamp)
+            .map_err(|_| io::Error::other("system timestamp exceeds i64 milliseconds"))?;
+        Ok(Self {
             timestamp,
             url,
             title,
             user_title: None,
             content: String::new(),
-        }
+        })
     }
 
     pub fn set_content(&mut self, content: String) {
@@ -47,27 +50,13 @@ pub struct SearchResult {
     pub score: f64,
 }
 
-/// Raw history data from JSONL files.
-#[derive(Debug, Deserialize)]
-struct HistoryData {
-    timestamp: i64,
-    url: String,
-    title: String,
-    #[serde(default)]
-    user_title: Option<String>,
-    #[serde(default)]
-    slug: Option<String>,
-}
-
 /// Deduplicated history record prepared by a storage/query adapter.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SearchRecord {
     pub timestamp: i64,
     pub url: String,
     pub title: String,
-    #[serde(default)]
     pub user_title: Option<String>,
-    #[serde(default)]
     pub slug: Option<String>,
 }
 
@@ -157,24 +146,6 @@ pub struct SnapshotMatch {
     pub slug: String,
     pub timestamp: i64,
     pub score: f64,
-}
-
-#[derive(Debug, Deserialize)]
-struct NoteData {
-    #[serde(default)]
-    slug: Option<String>,
-    #[serde(default)]
-    excerpt: Value,
-    #[serde(default)]
-    note: Option<String>,
-    #[serde(default)]
-    url: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PageData {
-    #[serde(default)]
-    user_title: Option<String>,
 }
 
 /// Parse a query string into words, matching JS `parseSearchWords` semantics.
@@ -416,27 +387,32 @@ fn identity_score(entry: &HistoryEntry, words: &[QueryWord]) -> f64 {
     identity_score_opt(entry, words).unwrap_or(0.0)
 }
 
-fn read_dir_if_exists(path: &Path) -> io::Result<Option<fs::ReadDir>> {
-    match fs::read_dir(path) {
-        Ok(entries) => Ok(Some(entries)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error),
-    }
-}
-
-fn extract_note_fields(note: &NoteData) -> Vec<String> {
+fn extract_note_fields(note: &NoteEntity) -> io::Result<Vec<String>> {
     let mut fields = Vec::new();
-    if let Value::Array(items) = &note.excerpt {
-        for value in items {
-            if let Some(text) = value.as_str() {
+    match &note.excerpt {
+        Some(Value::Array(items)) => {
+            for value in items {
+                let text = value.as_str().ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("note {} excerpt must contain strings only", note.slug),
+                    )
+                })?;
                 fields.push(text.to_string());
             }
+        }
+        None => {}
+        Some(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("note {} excerpt must be a string array", note.slug),
+            ))
         }
     }
     if let Some(note_text) = &note.note {
         fields.push(note_text.clone());
     }
-    fields
+    Ok(fields)
 }
 
 fn shard_for(value: &str) -> String {
@@ -451,7 +427,7 @@ fn read_page_user_title(pages_dir: &Path, slug: &str) -> io::Result<Option<Strin
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
-    let page: PageData = serde_json::from_str(&text).map_err(|error| {
+    let page: PageEntity = serde_json::from_str(&text).map_err(|error| {
         io::Error::new(
             io::ErrorKind::InvalidData,
             format!("invalid page checkpoint: {error}"),
@@ -460,62 +436,80 @@ fn read_page_user_title(pages_dir: &Path, slug: &str) -> io::Result<Option<Strin
     Ok(page.user_title.filter(|title| !title.trim().is_empty()))
 }
 
-fn extract_snapshot_parts_from_name(name: &str) -> Option<(String, i64)> {
-    let basename = Path::new(name)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(name);
-    let name = basename
-        .strip_suffix(".md")
-        .or_else(|| basename.strip_suffix(".html"))?;
-    let last_dash = name.rfind('-')?;
-    let timestamp = &name[last_dash + 1..];
-    if timestamp.len() == 13 && timestamp.chars().all(|char| char.is_ascii_digit()) {
-        Some((name[..last_dash].to_string(), timestamp.parse().ok()?))
-    } else {
-        None
+fn extract_snapshot_parts_from_name(name: &str) -> io::Result<(String, i64)> {
+    let path = Path::new(name);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("snapshot path must be relative and traversal-free: {name}"),
+        ));
     }
-}
-
-/// Search a batch of JSONL files by page identity fields.
-pub fn search_batch<P1, P2, S>(
-    history_dir: P1,
-    pages_dir: P2,
-    query: &str,
-    file_names: &[S],
-) -> io::Result<Vec<SearchResult>>
-where
-    P1: AsRef<Path>,
-    P2: AsRef<Path>,
-    S: AsRef<str>,
-{
-    let history_dir = history_dir.as_ref();
-    let mut seen_urls = HashSet::new();
-    let mut entries = Vec::new();
-
-    for file_name in file_names {
-        let path = history_dir.join(file_name.as_ref());
-        let Ok(text) = fs::read_to_string(path) else {
-            continue;
-        };
-        for line in text.lines() {
-            if line.trim().is_empty() {
-                continue;
-            }
-            let Ok(item) = serde_json::from_str::<HistoryData>(line) else {
-                continue;
-            };
-            if seen_urls.insert(item.url.clone()) {
-                entries.push(item);
-            }
+    let components: Vec<_> = path.components().collect();
+    if components.len() > 2 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("snapshot path must be <file> or <shard>/<file>: {name}"),
+        ));
+    }
+    if let [std::path::Component::Normal(shard), _] = components.as_slice() {
+        let shard = shard.to_str().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "snapshot shard is not UTF-8")
+        })?;
+        if shard.len() != 2 || !shard.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("snapshot shard must be two hexadecimal characters: {shard}"),
+            ));
         }
     }
-
-    search_records(
-        pages_dir,
-        query,
-        entries.into_iter().map(SearchRecord::from).collect(),
-    )
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "snapshot filename is not UTF-8")
+        })?;
+    let name = file_name
+        .strip_suffix(".md")
+        .or_else(|| file_name.strip_suffix(".html"))
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("snapshot filename must end in .md or .html: {name}"),
+            )
+        })?;
+    let last_dash = name.rfind('-').ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("snapshot filename is missing timestamp: {name}"),
+        )
+    })?;
+    if last_dash == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("snapshot filename is missing slug: {name}"),
+        ));
+    }
+    let timestamp = &name[last_dash + 1..];
+    if timestamp.len() == 13 && timestamp.chars().all(|char| char.is_ascii_digit()) {
+        Ok((
+            name[..last_dash].to_string(),
+            timestamp.parse().map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("invalid snapshot timestamp in {name}: {error}"),
+                )
+            })?,
+        ))
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("snapshot filename must end with a 13-digit timestamp: {name}"),
+        ))
+    }
 }
 
 /// Search prepared history records by title, user title, and URL.
@@ -552,23 +546,9 @@ where
     Ok(engine.search(query, RankingAlgorithm::Content))
 }
 
-impl From<HistoryData> for SearchRecord {
-    fn from(value: HistoryData) -> Self {
-        Self {
-            timestamp: value.timestamp,
-            url: value.url,
-            title: value.title,
-            user_title: value.user_title,
-            slug: value.slug,
-        }
-    }
-}
-
 /// Search all note JSON files in a directory for query matches.
 pub fn search_notes<P: AsRef<Path>>(notes_dir: P, query: &str) -> io::Result<Vec<NoteMatch>> {
-    let Some(entries) = read_dir_if_exists(notes_dir.as_ref())? else {
-        return Ok(Vec::new());
-    };
+    let entries = fs::read_dir(notes_dir.as_ref())?;
 
     let words = parse_query_words(query);
     if words.is_empty() {
@@ -577,42 +557,67 @@ pub fn search_notes<P: AsRef<Path>>(notes_dir: P, query: &str) -> io::Result<Vec
 
     let mut matches = Vec::new();
     for entry in entries {
-        let Ok(entry) = entry else {
-            continue;
-        };
+        let entry = entry?;
         let path = entry.path();
         if !path.is_file() {
-            continue;
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unexpected directory in note storage: {}", path.display()),
+            ));
         }
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "note filename is not UTF-8")
+            })?;
         if !name.ends_with(".json") {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unexpected non-JSON note file: {name}"),
+            ));
+        }
+        let text = fs::read_to_string(&path)?;
+        let note = serde_json::from_str::<NoteEntity>(&text).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("invalid note checkpoint {}: {error}", path.display()),
+            )
+        })?;
+        let filename_slug = name.trim_end_matches(".json");
+        if note.slug != filename_slug {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "note checkpoint filename {filename_slug} does not match entity slug {}",
+                    note.slug
+                ),
+            ));
+        }
+        if note.deleted {
             continue;
         }
-        let Ok(text) = fs::read_to_string(&path) else {
-            continue;
-        };
-        let Ok(note) = serde_json::from_str::<NoteData>(&text) else {
-            continue;
-        };
+        let url = note
+            .url
+            .clone()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("active note {} is missing its URL", note.slug),
+                )
+            })?;
 
-        let fields = extract_note_fields(&note);
+        let fields = extract_note_fields(&note)?;
         let field_refs: Vec<(&str, f64)> =
             fields.iter().map(|field| (field.as_str(), 1.0)).collect();
         let Some(score) = weighted_fields_score(&words, &field_refs) else {
             continue;
         };
 
-        let Some(url) = note.url else {
-            continue;
-        };
-        let note_slug = note
-            .slug
-            .unwrap_or_else(|| name.trim_end_matches(".json").to_string());
         matches.push(NoteMatch {
             url,
-            note_slug,
+            note_slug: note.slug,
             score,
         });
     }
@@ -634,13 +639,9 @@ pub fn search_snapshots<P: AsRef<Path>, S: AsRef<str>>(
     let mut matches = Vec::new();
     for file_name in file_names {
         let file_name = file_name.as_ref();
-        let Some((slug, timestamp)) = extract_snapshot_parts_from_name(file_name) else {
-            continue;
-        };
+        let (slug, timestamp) = extract_snapshot_parts_from_name(file_name)?;
         let path = snapshots_dir.as_ref().join(file_name);
-        let Ok(content) = fs::read_to_string(path) else {
-            continue;
-        };
+        let content = fs::read_to_string(path)?;
         if let Some(score) = weighted_fields_score(&words, &[(&content, 1.0)]) {
             matches.push(SnapshotMatch {
                 slug,
@@ -912,82 +913,6 @@ mod tests {
     }
 
     #[test]
-    fn search_batch_dedupes_urls_without_matching_page_markdown() {
-        let temp_dir = tempdir().unwrap();
-        let history_dir = temp_dir.path().join("logs");
-        let pages_dir = temp_dir.path().join("pages");
-        let page_slug_dir = pages_dir.join("example-article");
-        fs::create_dir_all(&history_dir).unwrap();
-        fs::create_dir_all(&page_slug_dir).unwrap();
-
-        fs::write(
-            history_dir.join("2026-04-18.jsonl"),
-            [
-                json!({
-                    "timestamp": 200,
-                    "url": "https://example.com/article",
-                    "title": "Unread title",
-                    "slug": "example-article"
-                })
-                .to_string(),
-                json!({
-                    "timestamp": 180,
-                    "url": "https://example.com/other",
-                    "title": "Other page"
-                })
-                .to_string(),
-            ]
-            .join("\n"),
-        )
-        .unwrap();
-        fs::write(
-            history_dir.join("2026-04-17.jsonl"),
-            json!({
-                "timestamp": 100,
-                "url": "https://example.com/article",
-                "title": "Older duplicate",
-                "slug": "example-article"
-            })
-            .to_string(),
-        )
-        .unwrap();
-        fs::write(page_slug_dir.join("100.md"), "stale content").unwrap();
-        fs::write(
-            page_slug_dir.join("200.md"),
-            "banana match from markdown body",
-        )
-        .unwrap();
-
-        let results = search_batch(
-            &history_dir,
-            &pages_dir,
-            "banana",
-            &["2026-04-18.jsonl", "2026-04-17.jsonl"],
-        )
-        .unwrap();
-
-        assert!(results.is_empty());
-
-        let results = search_batch(
-            &history_dir,
-            &pages_dir,
-            "article",
-            &["2026-04-18.jsonl", "2026-04-17.jsonl"],
-        )
-        .unwrap();
-
-        assert_eq!(
-            results,
-            vec![SearchResult {
-                url: "https://example.com/article".into(),
-                title: "Unread title".into(),
-                timestamp: 200,
-                score: 0.5,
-            }]
-        );
-    }
-
-    #[test]
     fn search_records_matches_user_title_and_url() {
         let temp_dir = tempdir().unwrap();
         let results = search_records(
@@ -1024,40 +949,34 @@ mod tests {
     }
 
     #[test]
-    fn search_batch_matches_page_checkpoint_user_title() {
+    fn search_records_matches_page_checkpoint_user_title() {
         let temp_dir = tempdir().unwrap();
-        let history_dir = temp_dir.path().join("logs");
         let pages_dir = temp_dir.path().join("pages");
         let slug = "renamed-page";
         let page_dir = pages_dir.join(shard_for(slug));
-        fs::create_dir_all(&history_dir).unwrap();
         fs::create_dir_all(&page_dir).unwrap();
-
-        fs::write(
-            history_dir.join("2026-04-18.jsonl"),
-            json!({
-                "timestamp": 200,
-                "url": "https://example.com/renamed",
-                "title": "Original title",
-                "slug": slug
-            })
-            .to_string(),
-        )
-        .unwrap();
+        let mut page = PageEntity::new(slug.to_string());
+        page.url = Some("https://example.com/renamed".to_string());
+        page.title = Some("Original title".to_string());
+        page.user_title = Some("Custom banana title".to_string());
         fs::write(
             page_dir.join(format!("{slug}.json")),
-            json!({
-                "slug": slug,
-                "url": "https://example.com/renamed",
-                "title": "Original title",
-                "user_title": "Custom banana title"
-            })
-            .to_string(),
+            serde_json::to_string(&page).unwrap(),
         )
         .unwrap();
 
-        let results =
-            search_batch(&history_dir, &pages_dir, "banana", &["2026-04-18.jsonl"]).unwrap();
+        let results = search_records(
+            &pages_dir,
+            "banana",
+            vec![SearchRecord {
+                timestamp: 200,
+                url: "https://example.com/renamed".into(),
+                title: "Original title".into(),
+                user_title: None,
+                slug: Some(slug.into()),
+            }],
+        )
+        .unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].url, "https://example.com/renamed");
@@ -1069,24 +988,21 @@ mod tests {
         let notes_dir = temp_dir.path().join("notes");
         fs::create_dir_all(&notes_dir).unwrap();
 
+        let mut react_note = NoteEntity::new("react-note".to_string());
+        react_note.url = Some("https://example.com/react".to_string());
+        react_note.excerpt = Some(json!(["first match", "second excerpt"]));
+        react_note.note = Some("Remember the batching caveat".to_string());
         fs::write(
             notes_dir.join("react-note.json"),
-            json!({
-                "slug": "react-note",
-                "url": "https://example.com/react",
-                "excerpt": ["first match", "second excerpt"],
-                "note": "Remember the batching caveat"
-            })
-            .to_string(),
+            serde_json::to_string(&react_note).unwrap(),
         )
         .unwrap();
+        let mut other_note = NoteEntity::new("other".to_string());
+        other_note.url = Some("https://example.com/other".to_string());
+        other_note.excerpt = Some(json!(["nothing relevant here"]));
         fs::write(
             notes_dir.join("other.json"),
-            json!({
-                "url": "https://example.com/other",
-                "excerpt": "nothing relevant here"
-            })
-            .to_string(),
+            serde_json::to_string(&other_note).unwrap(),
         )
         .unwrap();
 

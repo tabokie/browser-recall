@@ -317,6 +317,7 @@ dependencies = [
 name = "browser-recall"
 version = "0.1.0"
 dependencies = [
+ "browser-recall-replay",
  "serde",
  "serde_json",
  "sha2",

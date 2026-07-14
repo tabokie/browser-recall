@@ -5,6 +5,7 @@ import {
   getSlugForUrl,
   openHelperPage,
   resetAndSeed,
+  settingsCheckpoint,
   waitForVisitRecorded,
 } from './helpers.js';
 
@@ -15,27 +16,28 @@ function slugPart(value) {
 }
 
 async function openPopupForUrl(extContext, extensionId, { url, title }) {
-  const popup = await extContext.newPage();
-  await popup.addInitScript(
-    ({ url, title }) => {
-      const patchTabsQuery = () => {
-        if (!globalThis.chrome?.tabs?.query) {
-          setTimeout(patchTabsQuery, 0);
-          return;
-        }
-        const originalQuery = chrome.tabs.query.bind(chrome.tabs);
-        chrome.tabs.query = async (queryInfo) => {
-          if (queryInfo?.active && queryInfo?.currentWindow) {
-            return [{ id: 51001, url, title }];
-          }
-          return originalQuery(queryInfo);
-        };
+  const helper = await openHelperPage(extContext, extensionId);
+  const prepared = await helper.evaluate(async (pageUrl) => {
+    const tabs = await chrome.tabs.query({ url: pageUrl });
+    if (tabs.length !== 1) {
+      return {
+        success: false,
+        error: `Expected one tab, found ${tabs.length}`,
       };
-      patchTabsQuery();
-    },
-    { url, title },
-  );
-  await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+    }
+    return chrome.runtime.sendMessage({
+      action: 'preparePopupBootstrapForTest',
+      tabId: tabs[0].id,
+    });
+  }, url);
+  await helper.close();
+  if (!prepared?.success) {
+    throw new Error(
+      `preparePopupBootstrapForTest failed for ${title}: ${JSON.stringify(prepared)}`,
+    );
+  }
+  const popup = await extContext.newPage();
+  await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
   await expect(popup.locator('#dashboard')).toBeVisible();
   return popup;
 }
@@ -74,9 +76,7 @@ test.describe('seeded randomized workflow combinations', () => {
       page.slug = getSlugForUrl(page.url);
     }
 
-    await resetAndSeed(extContext, extensionId, [
-      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
-    ]);
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
 
     const helper = await openHelperPage(extContext, extensionId);
     const listIds = [];
@@ -113,7 +113,7 @@ test.describe('seeded randomized workflow combinations', () => {
           }),
         pageInfo,
       );
-      expect(noteResponse.success).toBe(true);
+      expect(noteResponse.success, JSON.stringify(noteResponse)).toBe(true);
       expect(noteResponse.noteSlug).toBeTruthy();
 
       const pinResponse = await helper.evaluate(
@@ -171,6 +171,12 @@ test.describe('seeded randomized workflow combinations', () => {
     }
 
     const popupPage = pages[2];
+    const sourcePage = await extContext.newPage();
+    await sourcePage.goto(popupPage.url);
+    const flushResult = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'flushDesktopQueueForTest' }),
+    );
+    expect(flushResult.success).toBe(true);
     const popup = await openPopupForUrl(extContext, extensionId, popupPage);
     await expect(popup.locator('#pageTitle')).toHaveText(popupPage.title);
     await expect(popup.locator('#listChips .list-chip.selected')).toContainText(
@@ -182,6 +188,7 @@ test.describe('seeded randomized workflow combinations', () => {
     await expect(popup.locator('#highlightList')).toContainText(popupPage.note);
 
     await popup.close();
+    await sourcePage.close();
     await helper.close();
   });
 });

@@ -19,6 +19,9 @@ pub enum PairingDecision {
     Deny,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PairingTimeout;
+
 pub type ApprovalFuture = Pin<Box<dyn Future<Output = PairingDecision> + Send + 'static>>;
 pub type PairingApprover = Arc<dyn Fn(PairingRequest) -> ApprovalFuture + Send + Sync + 'static>;
 
@@ -30,9 +33,9 @@ pub async fn with_timeout(
     approver: &PairingApprover,
     request: PairingRequest,
     timeout: Duration,
-) -> PairingDecision {
+) -> Result<PairingDecision, PairingTimeout> {
     match tokio::time::timeout(timeout, approver(request)).await {
-        Ok(decision) => decision,
-        Err(_) => PairingDecision::Deny,
+        Ok(decision) => Ok(decision),
+        Err(_) => Err(PairingTimeout),
     }
 }

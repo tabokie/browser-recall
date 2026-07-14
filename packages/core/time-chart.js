@@ -21,12 +21,18 @@ export function renderTimeChartInto(
   label,
   estimatedByDay,
 ) {
+  if (!Array.isArray(entries)) {
+    throw new Error('Time chart entries must be an array');
+  }
+  if (estimatedByDay !== undefined && !(estimatedByDay instanceof Map)) {
+    throw new Error('Time chart estimates must be a Map when provided');
+  }
   if (label !== undefined) {
     const labelEl = chartEl.querySelector('.chart-label');
     if (labelEl) labelEl.textContent = label;
   }
 
-  const data = aggregateVisitsByDay(entries || []);
+  const data = aggregateVisitsByDay(entries);
   const scoreMap = new Map(data);
   const hasEstimates = estimatedByDay && estimatedByDay.size > 0;
 

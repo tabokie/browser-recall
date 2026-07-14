@@ -11,67 +11,116 @@ use browser_recall_replay::{
     generate_slug_from_url, LogEntry, RuleInput, PERSISTENT_SETTINGS_KEYS,
 };
 use chrono::TimeZone;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
+fn deserialize_required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::deserialize(deserializer)
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PairedBrowserInfo {
     pub browser_id: String,
     pub browser_name: String,
-    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub browser_profile: Option<String>,
     pub extension_id: String,
-    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub approved_at: Option<i64>,
-    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub last_seen: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BookmarkImportNode {
     pub title: String,
-    #[serde(default)]
     pub bookmarks: Vec<BookmarkImportEntry>,
-    #[serde(default)]
     pub skipped: Vec<BookmarkImportSkipped>,
-    #[serde(default)]
     pub children: Vec<BookmarkImportNode>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct BookmarkImportEntry {
     pub url: String,
-    #[serde(default)]
     pub title: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct BookmarkImportSkipped {
-    #[serde(default)]
     pub url: String,
-    #[serde(default)]
     pub title: String,
-    #[serde(default)]
     pub reason: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HistoryImportEntry {
     pub url: String,
-    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub title: Option<String>,
-    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub referrer_url: Option<String>,
-    #[serde(default)]
     pub visit_times: Vec<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateNoteInput {
+    pub page_slug: Option<String>,
+    pub url: Option<String>,
+    pub title: Option<String>,
+    pub excerpt: Option<Value>,
+    pub note: Option<String>,
+    pub css_path: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ToggleListPinInput {
+    pub list_id: String,
+    pub url: Option<String>,
+    pub title: Option<String>,
+    pub id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AddListPinsInput {
+    pub list_id: String,
+    pub urls: Vec<String>,
+    pub titles: Option<Vec<Option<String>>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SaveListMetaInput {
+    pub list_id: Option<String>,
+    pub name: Option<String>,
+    pub parent_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateListAndPinInput {
+    pub name: String,
+    pub url: String,
+    pub title: Option<String>,
 }
 
 pub async fn page_relations_payload(storage: &Storage, url: &str) -> Result<Value, String> {
     let slug = generate_slug_from_url(url).map_err(|error| error.to_string())?;
+    crate::read_projections::ReadProjections::new(storage.clone())
+        .page_info(&slug)
+        .await?;
     let page = storage
         .load_page_coordinated(&slug)
         .await
@@ -87,47 +136,58 @@ pub async fn page_relations_payload(storage: &Storage, url: &str) -> Result<Valu
     let mut parent_lists = Vec::new();
     for parent_id in &page.parent_ids {
         if let Some(parent_slug) = parent_id.strip_prefix("page:") {
-            if let Some(parent_page) = storage
+            let parent_page = storage
                 .load_page_coordinated(parent_slug)
                 .await
                 .map_err(|error| error.to_string())?
-            {
-                if let Some(parent_url) = parent_page.url {
-                    parent_referrers.push(parent_url);
-                }
-            }
+                .ok_or_else(|| {
+                    format!("page {slug} references missing parent page {parent_slug}")
+                })?;
+            let parent_url = parent_page.url.ok_or_else(|| {
+                format!("parent page {parent_slug} referenced by {slug} is missing its URL")
+            })?;
+            parent_referrers.push(parent_url);
             continue;
         }
 
         if let Some(list_slug) = parent_id.strip_prefix("list:") {
-            if let Some(list_entity) = storage
+            let list_entity = storage
                 .load_list_coordinated(list_slug)
                 .await
                 .map_err(|error| error.to_string())?
-            {
-                parent_lists.push(json!({
-                    "slug": list_slug,
-                    "name": list_entity.name,
-                    "type": "pin",
-                }));
-            }
+                .ok_or_else(|| format!("page {slug} references missing list {list_slug}"))?;
+            parent_lists.push(json!({
+                "slug": list_slug,
+                "name": list_entity.name,
+                "type": "pin",
+            }));
+            continue;
         }
+
+        return Err(format!(
+            "page {slug} has unsupported parent reference {parent_id}"
+        ));
     }
 
     let mut children = Vec::new();
     for child_id in &page.child_ids {
         let Some(child_slug) = child_id.strip_prefix("page:") else {
-            continue;
+            if child_id.starts_with("note:") || child_id.starts_with("snapshot:") {
+                continue;
+            }
+            return Err(format!(
+                "page {slug} has unsupported child reference {child_id}"
+            ));
         };
-        if let Some(child_page) = storage
+        let child_page = storage
             .load_page_coordinated(child_slug)
             .await
             .map_err(|error| error.to_string())?
-        {
-            if let Some(child_url) = child_page.url {
-                children.push(Value::String(child_url));
-            }
-        }
+            .ok_or_else(|| format!("page {slug} references missing child page {child_slug}"))?;
+        let child_url = child_page.url.ok_or_else(|| {
+            format!("child page {child_slug} referenced by {slug} is missing its URL")
+        })?;
+        children.push(Value::String(child_url));
     }
 
     Ok(json!({
@@ -233,7 +293,7 @@ pub async fn submit_event(
 
 pub async fn list_event_fields(
     storage: &Storage,
-    device_id: &str,
+    _device_id: &str,
     list_id: &str,
 ) -> Result<Option<(String, String)>, String> {
     let Some(list) = storage
@@ -243,56 +303,84 @@ pub async fn list_event_fields(
     else {
         return Ok(None);
     };
-    Ok(Some(list_event_fields_from_list(&list, device_id)))
+    Ok(Some(list_event_fields_from_list(&list)?))
 }
 
-fn list_event_fields_from_list(list: &ListEntity, device_id: &str) -> (String, String) {
-    (
-        list.name.clone(),
-        list.owner.clone().unwrap_or_else(|| device_id.to_string()),
-    )
+fn list_event_fields_from_list(list: &ListEntity) -> Result<(String, String), String> {
+    if list.name.trim().is_empty() {
+        return Err("List name is missing; migrate browser data before continuing".to_string());
+    }
+    Ok((list.name.clone(), list.owner.clone()))
 }
 
-fn note_text_value(field_name: &str, value: Option<&Value>) -> Result<Option<Value>, String> {
+fn validate_list_pin_urls(urls: Vec<String>) -> Result<Vec<String>, String> {
+    urls.into_iter()
+        .map(|url| {
+            if url.is_empty() {
+                Err("addListPins urls must not contain empty strings".to_string())
+            } else {
+                Ok(url)
+            }
+        })
+        .collect()
+}
+
+fn add_list_pin_titles(
+    titles: Option<Vec<Option<String>>>,
+    url_count: usize,
+) -> Result<Vec<Option<String>>, String> {
+    let Some(titles) = titles else {
+        return Ok(vec![None; url_count]);
+    };
+    if titles.len() != url_count {
+        return Err("addListPins titles length must match urls length".to_string());
+    }
+    Ok(titles)
+}
+
+pub(crate) fn note_text_value(
+    field_name: &str,
+    value: Option<&Value>,
+) -> Result<Option<Value>, String> {
     match value {
         Some(Value::Array(values)) => {
             if !values.iter().all(Value::is_string) {
                 return Err(format!("{field_name} array must contain strings only"));
             }
-            let parts = values
-                .iter()
-                .map(|value| value.as_str().expect("string array member"))
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(|value| Value::String(value.to_string()))
-                .collect::<Vec<_>>();
-            if parts.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(Value::Array(parts)))
+            if values.iter().any(|value| {
+                let text = value.as_str().expect("string array member");
+                text.is_empty() || text != text.trim()
+            }) {
+                return Err(format!(
+                    "{field_name} array must contain canonical non-empty strings"
+                ));
             }
+            Ok(Some(Value::Array(values.clone())))
         }
         Some(Value::Null) | None => Ok(None),
         Some(_) => Err(format!("{field_name} must be a string array or null")),
     }
 }
 
-fn note_css_path_value(value: Option<&Value>) -> Result<Option<Value>, String> {
+pub(crate) fn note_css_path_value(value: Option<&Value>) -> Result<Option<Value>, String> {
     match value {
         Some(Value::Array(values)) => {
             if !values.iter().all(Value::is_string) {
                 return Err("cssPath array must contain strings only".to_string());
             }
-            let parts = values
-                .iter()
-                .map(|value| value.as_str().expect("string array member"))
-                .map(str::trim)
-                .map(|value| Value::String(value.to_string()))
-                .collect::<Vec<_>>();
-            if parts.is_empty() {
+            if values.is_empty() {
                 Ok(None)
             } else {
-                Ok(Some(Value::Array(parts)))
+                if values.iter().any(|value| {
+                    let path = value.as_str().expect("string array member");
+                    !path.is_empty() && path != path.trim()
+                }) {
+                    return Err(
+                        "cssPath array must contain canonical strings without outer whitespace"
+                            .to_string(),
+                    );
+                }
+                Ok(Some(Value::Array(values.clone())))
             }
         }
         Some(Value::Null) | None => Ok(None),
@@ -300,26 +388,48 @@ fn note_css_path_value(value: Option<&Value>) -> Result<Option<Value>, String> {
     }
 }
 
-fn note_slug_text(value: Option<&Value>) -> Option<String> {
+pub(crate) fn validate_note_anchor(
+    excerpt: &Option<Value>,
+    css_path: &Option<Value>,
+) -> Result<(), String> {
+    match (excerpt, css_path) {
+        (None, None) => Ok(()),
+        (Some(Value::Array(excerpts)), Some(Value::Array(paths)))
+            if excerpts.len() == paths.len() =>
+        {
+            Ok(())
+        }
+        _ => Err(
+            "Highlight excerpt and cssPath must both be arrays with the same length, or both null"
+                .to_string(),
+        ),
+    }
+}
+
+fn note_slug_text(value: Option<&Value>) -> Result<Option<String>, String> {
     match value {
         Some(Value::Array(values)) => {
+            if !values.iter().all(Value::is_string) {
+                return Err("Persisted note excerpt must contain strings only".to_string());
+            }
             let parts = values
                 .iter()
-                .filter_map(Value::as_str)
+                .map(|value| value.as_str().expect("validated string member"))
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .collect::<Vec<_>>();
             if parts.is_empty() {
-                None
+                Ok(None)
             } else {
-                Some(parts.join(" "))
+                Ok(Some(parts.join(" ")))
             }
         }
-        _ => None,
+        Some(Value::Null) | None => Ok(None),
+        Some(_) => Err("Persisted note excerpt must be a string array or null".to_string()),
     }
 }
 
-fn normalized_slug_base(text: &str, fallback: &str) -> String {
+fn normalized_slug_base(text: &str, empty_base: &str) -> String {
     let mut base = String::new();
     let mut pending_dash = false;
     for character in text.chars().flat_map(char::to_lowercase) {
@@ -338,7 +448,7 @@ fn normalized_slug_base(text: &str, fallback: &str) -> String {
         base.pop();
     }
     if base.is_empty() {
-        base = fallback.to_string();
+        base = empty_base.to_string();
     }
     base
 }
@@ -361,26 +471,32 @@ fn generate_slug_like_js(text: &str, hash_input: &str) -> String {
     slug.chars().take(80).collect()
 }
 
-fn generate_note_slug(timestamp: i64, excerpt: Option<&str>) -> String {
+fn generate_note_slug(timestamp: i64, excerpt: Option<&str>) -> Result<String, String> {
     let datetime = chrono::Local
         .timestamp_millis_opt(timestamp)
         .single()
-        .unwrap_or_else(chrono::Local::now);
+        .ok_or_else(|| format!("note timestamp is outside the supported range: {timestamp}"))?;
     let text = excerpt.unwrap_or("note");
     let yy = datetime.format("%y%m%d").to_string();
     let hash_input = format!("{text}{timestamp}");
-    format!("{yy}-{}", generate_slug_like_js(text, &hash_input))
+    Ok(format!("{yy}-{}", generate_slug_like_js(text, &hash_input)))
 }
 
-fn parse_parent_list_id(parent_path: Option<&str>) -> Option<String> {
-    let path = parent_path?;
+fn parse_parent_list_id(parent_path: Option<&str>) -> Result<Option<String>, String> {
+    let Some(path) = parent_path else {
+        return Ok(None);
+    };
     if path == "root" {
-        return None;
+        return Ok(None);
     }
-    path.split('/')
-        .next_back()?
+    let list_id = path
+        .split('/')
+        .next_back()
+        .ok_or_else(|| format!("invalid parentPath: {path}"))?
         .strip_prefix("list:")
-        .map(str::to_string)
+        .filter(|list_id| !list_id.is_empty())
+        .ok_or_else(|| format!("invalid parentPath: {path}"))?;
+    Ok(Some(list_id.to_string()))
 }
 
 pub fn split_snapshot_stem(snapshot_stem: &str) -> Option<(String, i64)> {
@@ -399,6 +515,7 @@ pub async fn save_settings_key(
     if !PERSISTENT_SETTINGS_KEYS.contains(&key) {
         return Err(format!("Unknown settings key: {key}"));
     }
+    crate::settings::validate_value(key, &value)?;
     replay_entry(
         storage,
         device_id,
@@ -417,6 +534,26 @@ pub async fn ensure_default_lists(storage: &Storage, device_id: &str) -> Result<
         .load_name_to_id()
         .await
         .map_err(|error| error.to_string())?;
+    let list_order = storage
+        .load_list_order()
+        .await
+        .map_err(|error| error.to_string())?;
+    let lists = storage
+        .load_all_lists()
+        .await
+        .map_err(|error| error.to_string())?;
+    match (&name_map, &list_order) {
+        (None, None) if lists.is_empty() => {}
+        (None, None) => return Err(
+            "list checkpoints exist without list manifests; rebuild browser data before continuing"
+                .to_string(),
+        ),
+        (None, Some(_)) => return Err("list name-to-id manifest is missing".to_string()),
+        (Some(_), None) => return Err("list order manifest is missing".to_string()),
+        (Some(name_map), Some(list_order)) => {
+            validate_list_manifests(name_map, list_order, &lists)?;
+        }
+    }
     let paths = name_map.as_ref().map(|manifest| &manifest.paths);
     let has_user_lists = paths
         .map(|paths| paths.keys().any(|key| !key.starts_with("system/")))
@@ -482,20 +619,111 @@ pub async fn ensure_default_lists(storage: &Storage, device_id: &str) -> Result<
     Ok(true)
 }
 
+fn validate_list_manifests(
+    name_map: &browser_recall_replay::entities::NameToIdManifest,
+    list_order: &browser_recall_replay::entities::ListOrderManifest,
+    lists: &BTreeMap<String, ListEntity>,
+) -> Result<(), String> {
+    let mut active_ids = HashSet::new();
+    for (list_id, list) in lists {
+        if list.slug != *list_id {
+            return Err(format!(
+                "list checkpoint filename {list_id} does not match entity slug {}",
+                list.slug
+            ));
+        }
+        let path = format!("{}/{}", list.owner, list.name);
+        if list.deleted {
+            if name_map.paths.values().any(|value| value == list_id) {
+                return Err(format!(
+                    "deleted list {list_id} remains in name-to-id manifest"
+                ));
+            }
+            continue;
+        }
+        match name_map.paths.get(&path) {
+            Some(mapped_id) if mapped_id == list_id => {}
+            Some(mapped_id) => {
+                return Err(format!(
+                    "list path {path} maps to {mapped_id}, expected {list_id}"
+                ))
+            }
+            None => {
+                return Err(format!(
+                    "active list {list_id} is missing from name-to-id manifest"
+                ))
+            }
+        }
+        active_ids.insert(list_id.clone());
+    }
+    for (path, list_id) in &name_map.paths {
+        if !active_ids.contains(list_id) {
+            return Err(format!(
+                "name-to-id path {path} references missing or deleted list {list_id}"
+            ));
+        }
+    }
+    let mut ordered_ids = HashSet::new();
+    collect_list_order_ids(&list_order.tree, &mut ordered_ids)?;
+    if ordered_ids != active_ids {
+        return Err(format!(
+            "list order IDs do not match active lists: order={ordered_ids:?}, active={active_ids:?}"
+        ));
+    }
+    Ok(())
+}
+
+fn collect_list_order_ids(nodes: &[TreeNode], ids: &mut HashSet<String>) -> Result<(), String> {
+    for node in nodes {
+        let list_id = node
+            .id
+            .strip_prefix("list:")
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| format!("list order contains invalid ID {}", node.id))?;
+        if !ids.insert(list_id.to_string()) {
+            return Err(format!("list order contains duplicate list {list_id}"));
+        }
+        collect_list_order_ids(&node.children, ids)?;
+    }
+    Ok(())
+}
+
+pub async fn ensure_default_settings(storage: &Storage, device_id: &str) -> Result<bool, String> {
+    if let Some(settings) = storage
+        .load_settings()
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        crate::settings::validate_complete(&settings.values)?;
+        return Ok(false);
+    }
+
+    let mut transaction = ReplayTransaction::begin(storage, device_id).await?;
+    for (key, value) in crate::settings::default_values() {
+        transaction
+            .apply(LogEntry::UpdateSetting {
+                timestamp: storage.next_command_timestamp_millis(),
+                key,
+                value,
+            })
+            .await?;
+    }
+    transaction.commit().await?;
+    Ok(true)
+}
+
 pub async fn create_note(
     storage: &Storage,
     device_id: &str,
-    request: &Value,
+    input: CreateNoteInput,
 ) -> Result<Value, String> {
     let (page_slug, note_slug) = {
         let transaction = ReplayTransaction::begin(storage, device_id).await?;
         let timestamp = storage.next_command_timestamp_millis();
-        let page_slug = request
-            .get("pageSlug")
-            .and_then(Value::as_str)
-            .map(str::to_string);
-        let excerpt = note_text_value("excerpt", request.get("excerpt"))?;
-        let css_path = note_css_path_value(request.get("cssPath"))?;
+        let page_slug = input.page_slug;
+        let excerpt = note_text_value("excerpt", input.excerpt.as_ref())?;
+        let css_path = note_css_path_value(input.css_path.as_ref())?;
+        validate_note_anchor(&excerpt, &css_path)?;
         let page = if let Some(slug) = page_slug.as_deref() {
             storage
                 .load_page(slug)
@@ -504,24 +732,14 @@ pub async fn create_note(
         } else {
             None
         };
-        let slug_text = note_slug_text(excerpt.as_ref());
-        let note_slug = generate_note_slug(timestamp, slug_text.as_deref());
+        let slug_text = note_slug_text(excerpt.as_ref())?;
+        let note_slug = generate_note_slug(timestamp, slug_text.as_deref())?;
         let page_url = page
             .as_ref()
             .and_then(|value| value.url.clone())
-            .or_else(|| {
-                request
-                    .get("url")
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            })
+            .or(input.url)
             .ok_or_else(|| "Cannot determine page URL for note".to_string())?;
-        let page_title = page.and_then(|value| value.title).or_else(|| {
-            request
-                .get("title")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        });
+        let page_title = page.and_then(|value| value.title).or(input.title);
 
         replay_entries_in_transaction(
             transaction,
@@ -531,10 +749,7 @@ pub async fn create_note(
                 path: format!("objects/notes/{note_slug}.json"),
                 title: page_title,
                 excerpt: excerpt.clone(),
-                note: request
-                    .get("note")
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
+                note: input.note,
                 css_path,
             }],
         )
@@ -566,11 +781,14 @@ pub async fn delete_note(
     let note = storage
         .load_note(note_slug)
         .await
-        .map_err(|error| error.to_string())?;
-    let note_url = note.as_ref().and_then(|value| value.url.clone());
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("Note not found: {note_slug}"))?;
+    let note_url = note.url.clone();
     let page_slug = note_url
         .as_deref()
-        .and_then(|url| generate_slug_from_url(url).ok());
+        .map(generate_slug_from_url)
+        .transpose()
+        .map_err(|error| error.to_string())?;
     replay_entries_in_transaction(
         transaction,
         vec![LogEntry::DeleteNote {
@@ -600,7 +818,9 @@ pub async fn update_note(
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "Note not found".to_string())?;
-    if old_note.note.as_deref().unwrap_or_default() == note_value {
+    if matches!(old_note.note.as_deref(), Some(existing) if existing == note_value)
+        || (old_note.note.is_none() && note_value.is_empty())
+    {
         return Ok(json!({
             "success": true,
             "noteSlug": note_slug,
@@ -608,11 +828,11 @@ pub async fn update_note(
     }
 
     let mut timestamp = storage.next_command_timestamp_millis();
-    let slug_text = note_slug_text(old_note.excerpt.as_ref());
-    let mut new_note_slug = generate_note_slug(timestamp, slug_text.as_deref());
+    let slug_text = note_slug_text(old_note.excerpt.as_ref())?;
+    let mut new_note_slug = generate_note_slug(timestamp, slug_text.as_deref())?;
     while new_note_slug == note_slug {
         timestamp += 1;
-        new_note_slug = generate_note_slug(timestamp, slug_text.as_deref());
+        new_note_slug = generate_note_slug(timestamp, slug_text.as_deref())?;
     }
     replay_entries_in_transaction(
         transaction,
@@ -637,27 +857,22 @@ pub async fn update_note(
 pub async fn toggle_list_pin(
     storage: &Storage,
     device_id: &str,
-    request: &Value,
+    input: ToggleListPinInput,
 ) -> Result<Value, String> {
     let transaction = ReplayTransaction::begin(storage, device_id).await?;
-    let list_id = request
-        .get("listId")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "toggleListPin missing listId".to_string())?;
     let list = storage
-        .load_list(list_id)
+        .load_list(&input.list_id)
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "List not found".to_string())?;
-    let (list_name, list_owner) = list_event_fields_from_list(&list, device_id);
-    let note_id = request.get("id").and_then(Value::as_str);
+    let (list_name, list_owner) = list_event_fields_from_list(&list)?;
+    let note_id = input.id.as_deref();
     let pin_item = if let Some(note_id) = note_id.filter(|value| value.starts_with("note:")) {
         format!("objects/notes/{}.json", &note_id["note:".len()..])
     } else {
-        request
-            .get("url")
-            .and_then(Value::as_str)
-            .map(str::to_string)
+        input
+            .url
+            .clone()
             .ok_or_else(|| "toggleListPin missing url".to_string())?
     };
     let pin_key = if let Some(note_id) = note_id.filter(|value| value.starts_with("note:")) {
@@ -678,12 +893,7 @@ pub async fn toggle_list_pin(
                 Entity::Page(page) => page.title,
                 _ => None,
             })
-            .or_else(|| {
-                request
-                    .get("title")
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            })
+            .or(input.title)
     } else {
         None
     };
@@ -717,32 +927,14 @@ pub async fn toggle_list_pin(
 pub async fn add_list_pins(
     storage: &Storage,
     device_id: &str,
-    request: &Value,
+    input: AddListPinsInput,
 ) -> Result<(), String> {
     let transaction = ReplayTransaction::begin(storage, device_id).await?;
-    let list_id = request
-        .get("listId")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "addListPins missing listId".to_string())?;
-    let urls = request
-        .get("urls")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "addListPins missing urls".to_string())?
-        .iter()
-        .filter_map(Value::as_str)
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    let (list_name, list_owner) = list_event_fields(storage, device_id, list_id)
+    let urls = validate_list_pin_urls(input.urls)?;
+    let (list_name, list_owner) = list_event_fields(storage, device_id, &input.list_id)
         .await?
         .ok_or_else(|| "List not found".to_string())?;
-    let mut titles = request
-        .get("titles")
-        .cloned()
-        .map(serde_json::from_value::<Vec<Option<String>>>)
-        .transpose()
-        .map_err(|error| error.to_string())?
-        .unwrap_or_else(|| vec![None; urls.len()]);
-    titles.resize(urls.len(), None);
+    let mut titles = add_list_pin_titles(input.titles, urls.len())?;
     for (index, url) in urls.iter().enumerate() {
         if titles[index].is_some() {
             continue;
@@ -778,19 +970,18 @@ pub async fn add_list_pins(
 pub async fn save_list_meta(
     storage: &Storage,
     device_id: &str,
-    request: &Value,
+    input: SaveListMetaInput,
 ) -> Result<Value, String> {
     let transaction = ReplayTransaction::begin(storage, device_id).await?;
-    let list_id = request.get("listId").and_then(Value::as_str);
-    let name = request
-        .get("name")
-        .and_then(Value::as_str)
+    let name = input
+        .name
+        .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    if let Some(list_id) = list_id {
+    if let Some(list_id) = input.list_id {
         let list = storage
-            .load_list(list_id)
+            .load_list(&list_id)
             .await
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "List not found".to_string())?;
@@ -805,7 +996,7 @@ pub async fn save_list_meta(
             vec![LogEntry::UpdateList {
                 timestamp: storage.next_command_timestamp_millis(),
                 name: list.name,
-                list_owner: list.owner.unwrap_or_else(|| device_id.to_string()),
+                list_owner: list.owner,
                 new_name: Some(new_name),
             }],
         )
@@ -822,9 +1013,7 @@ pub async fn save_list_meta(
                 name,
                 list_owner: device_id.to_string(),
                 list_id: Some(generated_list_id.clone()),
-                parent_list_id: parse_parent_list_id(
-                    request.get("parentPath").and_then(Value::as_str),
-                ),
+                parent_list_id: parse_parent_list_id(input.parent_path.as_deref())?,
             }],
         )
         .await?;
@@ -838,26 +1027,18 @@ pub async fn save_list_meta(
 pub async fn create_list_and_pin(
     storage: &Storage,
     device_id: &str,
-    request: &Value,
+    input: CreateListAndPinInput,
 ) -> Result<Value, String> {
-    let name = request
-        .get("name")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "createListAndPin missing name".to_string())?
-        .to_string();
-    let url = request
-        .get("url")
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "createListAndPin missing url".to_string())?
-        .to_string();
-    let title = request
-        .get("title")
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
+    let name = input.name.trim();
+    if name.is_empty() {
+        return Err("createListAndPin missing name".to_string());
+    }
+    let name = name.to_string();
+    if input.url.is_empty() {
+        return Err("createListAndPin missing url".to_string());
+    }
+    let url = input.url;
+    let title = input.title.filter(|value| !value.is_empty());
     let transaction = ReplayTransaction::begin(storage, device_id).await?;
     let create_timestamp = storage.next_command_timestamp_millis();
     let list_id = generate_list_id(&name, create_timestamp);
@@ -915,7 +1096,7 @@ pub async fn delete_list(
             }
         }
     }
-    let (list_name, list_owner) = list_event_fields_from_list(&list, device_id);
+    let (list_name, list_owner) = list_event_fields_from_list(&list)?;
     replay_entries_in_transaction(
         transaction,
         vec![LogEntry::DeleteList {
@@ -961,7 +1142,8 @@ pub async fn restore_note(
     let note = storage
         .load_note(note_slug)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("Note not found: {note_slug}"))?;
     let page_url = orphaned
         .as_ref()
         .and_then(|value| {
@@ -971,7 +1153,7 @@ pub async fn restore_note(
                 .find(|entry| entry.key == format!("note:{note_slug}"))
                 .and_then(|entry| entry.url.clone())
         })
-        .or_else(|| note.and_then(|value| value.url));
+        .or(note.url);
     replay_entries_in_transaction(
         transaction,
         vec![LogEntry::RestoreNote {
@@ -1034,7 +1216,7 @@ pub async fn restore_list(storage: &Storage, device_id: &str, list_id: &str) -> 
         vec![LogEntry::RestoreList {
             timestamp: storage.next_command_timestamp_millis(),
             name: list.name,
-            list_owner: list.owner.unwrap_or_else(|| device_id.to_string()),
+            list_owner: list.owner,
         }],
     )
     .await
@@ -1073,9 +1255,25 @@ pub async fn permanent_delete_keys(
     keys: &[String],
 ) -> Result<Vec<String>, String> {
     let transaction = ReplayTransaction::begin(storage, device_id).await?;
-    let deleted_keys = permanent_delete_candidates(keys);
+    let deleted_keys = permanent_delete_candidates(keys)?;
     if deleted_keys.is_empty() {
         return Ok(deleted_keys);
+    }
+    let orphaned = storage
+        .load_orphaned()
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "orphaned manifest is missing".to_string())?;
+    let orphaned_keys = orphaned
+        .entries
+        .iter()
+        .map(|entry| entry.key.as_str())
+        .collect::<HashSet<_>>();
+    if let Some(key) = deleted_keys
+        .iter()
+        .find(|key| !orphaned_keys.contains(key.as_str()))
+    {
+        return Err(format!("permanent-delete target is not orphaned: {key}"));
     }
     replay_entries_in_transaction(
         transaction,
@@ -1088,18 +1286,22 @@ pub async fn permanent_delete_keys(
     Ok(deleted_keys)
 }
 
-pub fn permanent_delete_candidates(keys: &[String]) -> Vec<String> {
-    keys.iter()
-        .filter(|key| is_permanent_delete_candidate(key))
-        .cloned()
-        .collect()
+pub fn permanent_delete_candidates(keys: &[String]) -> Result<Vec<String>, String> {
+    let mut candidates = Vec::with_capacity(keys.len());
+    for key in keys {
+        if !is_permanent_delete_candidate(key) {
+            return Err(format!("unsupported permanent-delete key: {key}"));
+        }
+        candidates.push(key.clone());
+    }
+    Ok(candidates)
 }
 
 fn is_permanent_delete_candidate(key: &str) -> bool {
-    key.starts_with("note:")
-        || key.starts_with("list:")
-        || key.starts_with("page:")
-        || key.starts_with("snapshot:")
+    let Some((prefix, slug)) = key.split_once(':') else {
+        return false;
+    };
+    !slug.is_empty() && matches!(prefix, "note" | "list" | "page" | "snapshot")
 }
 
 pub fn list_paired_browsers(
@@ -1148,7 +1350,7 @@ pub fn pair_browser_revoke(
     prune_inactive_connectors(
         &mut config.connectors,
         &HashSet::new(),
-        current_local_day_start_unix(),
+        current_local_day_start_unix()?,
     );
     if config.connectors.len() != before {
         config_store
@@ -1177,13 +1379,13 @@ pub fn preview_rule_payload(
 
     let mut results = Vec::new();
     for entry in entries {
-        let title = entry.title.clone().unwrap_or_default();
+        let title = entry.title.clone();
         let matched = preview_rule(
             &rule_spec,
             &PageData {
                 title: title.clone(),
                 url: entry.url.clone(),
-                body: entry.body_preview.clone().or(entry.body.clone()),
+                body: entry.body_preview.clone(),
             },
         )
         .map_err(|error| error.to_string())?;
@@ -1213,12 +1415,7 @@ pub async fn add_rule(
         rule_type: rule.rule_type.clone(),
         config: rule.config.clone(),
     };
-    if let Err(error) = validate_rule(&rule_spec) {
-        return Ok(json!({
-            "success": false,
-            "error": error,
-        }));
-    }
+    validate_rule(&rule_spec)?;
 
     replay_entries_in_transaction(
         transaction,
@@ -1422,7 +1619,7 @@ pub async fn import_bookmarks(
 }
 
 fn is_history_importable_url(url: &str) -> bool {
-    url.starts_with("http://") || url.starts_with("https://")
+    generate_slug_from_url(url).is_ok()
 }
 
 pub async fn import_history(
@@ -1447,22 +1644,21 @@ pub async fn import_history(
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string);
-        let referrer_url = entry
-            .referrer_url
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| is_history_importable_url(value))
-            .map(str::to_string);
+        let referrer_url = match entry.referrer_url.as_deref().map(str::trim) {
+            None | Some("") => None,
+            Some(value) if is_history_importable_url(value) => Some(value.to_string()),
+            Some(_) => {
+                skipped += 1;
+                continue;
+            }
+        };
 
-        let visit_times = entry
-            .visit_times
-            .into_iter()
-            .filter(|timestamp| *timestamp > 0)
-            .collect::<BTreeSet<_>>();
-        if visit_times.is_empty() {
+        if entry.visit_times.is_empty() || entry.visit_times.iter().any(|timestamp| *timestamp <= 0)
+        {
             skipped += 1;
             continue;
         }
+        let visit_times = entry.visit_times.into_iter().collect::<BTreeSet<_>>();
 
         imported_pages.insert(url.clone());
         for timestamp in visit_times {

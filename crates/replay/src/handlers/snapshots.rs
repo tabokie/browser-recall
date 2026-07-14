@@ -23,7 +23,7 @@ where
         ensure_page_with_overlay(&mut result, load, url, timestamp, title, context).await?;
     append_unique(
         &mut page.child_ids,
-        format!("{SNAPSHOT_PREFIX}{}", snapshot_stem_from_path(path)),
+        format!("{SNAPSHOT_PREFIX}{}", snapshot_stem_from_path(path)?),
     );
 
     result.insert(page_key, EntityEffect::Upsert(Entity::Page(page)));
@@ -42,7 +42,7 @@ where
     Fut: Future<Output = Option<Entity>>,
 {
     let (page_key, mut page) = ensure_page(load, url, 0).await?;
-    let snapshot_key = format!("{SNAPSHOT_PREFIX}{}", snapshot_stem_from_path(path));
+    let snapshot_key = format!("{SNAPSHOT_PREFIX}{}", snapshot_stem_from_path(path)?);
     page.child_ids.retain(|child| child != &snapshot_key);
 
     let mut result = EntityMap::new();
@@ -71,7 +71,7 @@ where
     Fut: Future<Output = Option<Entity>>,
 {
     let (page_key, mut page) = ensure_page(load, url, timestamp).await?;
-    let snapshot_key = format!("{SNAPSHOT_PREFIX}{}", snapshot_stem_from_path(path));
+    let snapshot_key = format!("{SNAPSHOT_PREFIX}{}", snapshot_stem_from_path(path)?);
     append_unique(&mut page.child_ids, snapshot_key.clone());
 
     let mut result = EntityMap::new();
