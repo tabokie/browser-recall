@@ -2350,6 +2350,75 @@ async fn search_messages_return_note_and_snapshot_hits() {
 }
 
 #[tokio::test]
+async fn page_info_accepts_navigation_children_created_by_reported_visits() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(test_control_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+
+    let (mut socket, _data_dir, _device_id) = paired_socket(handle.port(), &config_store).await;
+    for (timestamp, url, referrer) in [
+        (
+            1_710_000_009_000i64,
+            "https://example.com/from-new-tab",
+            None,
+        ),
+        (
+            1_710_000_009_100i64,
+            "https://example.com/destination",
+            Some("https://example.com/from-new-tab"),
+        ),
+    ] {
+        send_raw(
+            &mut socket,
+            json!({
+                "type": "run_command",
+                "bufferDepth": 0,
+                "bufferBytes": 0,
+                "action": "reportVisit",
+                "request": {
+                    "timestamp": timestamp,
+                    "url": url,
+                    "title": null,
+                    "referrer": referrer,
+                    "bodyPreview": null,
+                    "bypassBlacklist": false
+                }
+            }),
+        )
+        .await;
+        assert!(matches!(
+            next_daemon(&mut socket).await,
+            DaemonMessage::CommandResult { success: true, .. }
+        ));
+    }
+
+    let referrer_slug =
+        generate_slug_from_url("https://example.com/from-new-tab").expect("referrer slug");
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "get_page_info",
+            "slug": referrer_slug
+        }),
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::PageInfoResult { success, error, .. } => {
+            assert!(
+                success,
+                "normal navigation must not break page info: {error:?}"
+            );
+            assert!(error.is_none());
+        }
+        other => panic!("expected page info result, got {other:?}"),
+    }
+
+    handle.shutdown().await;
+}
+
+#[tokio::test]
 async fn popup_summary_returns_page_info_and_compact_lists() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());

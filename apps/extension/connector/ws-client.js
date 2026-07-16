@@ -109,6 +109,7 @@ function broadcastDaemonMutations(mutations) {
       'url',
       'urls',
       'key',
+      'historyEntry',
     ];
     if (
       !mutation ||
@@ -141,9 +142,51 @@ function broadcastDaemonMutations(mutations) {
     ) {
       throw new Error('Desktop mutation urls must be a string array or null');
     }
+    let historyEntry = null;
+    if (mutation.historyEntry !== null) {
+      const entry = mutation.historyEntry;
+      const requiredEntryKeys = [
+        'action',
+        'timestamp',
+        'url',
+        'title',
+        'userTitle',
+        'scrollDepth',
+        'timeOnPage',
+        'likes',
+        'deviceId',
+      ];
+      if (
+        !entry ||
+        typeof entry !== 'object' ||
+        Array.isArray(entry) ||
+        requiredEntryKeys.some(
+          (key) => !Object.prototype.hasOwnProperty.call(entry, key),
+        ) ||
+        !['visit_page', 'leave_page', 'rename_page', 'rate_page'].includes(
+          entry.action,
+        ) ||
+        !Number.isFinite(entry.timestamp) ||
+        typeof entry.url !== 'string' ||
+        !entry.url ||
+        (entry.title !== null && typeof entry.title !== 'string') ||
+        (entry.userTitle !== null && typeof entry.userTitle !== 'string') ||
+        (entry.scrollDepth !== null && !Number.isFinite(entry.scrollDepth)) ||
+        (entry.timeOnPage !== null && !Number.isFinite(entry.timeOnPage)) ||
+        (entry.likes !== null && !Number.isFinite(entry.likes)) ||
+        typeof entry.deviceId !== 'string' ||
+        !entry.deviceId
+      ) {
+        throw new Error('Desktop history mutation entry is invalid');
+      }
+      historyEntry = Object.fromEntries(
+        requiredEntryKeys.map((key) => [key, entry[key]]),
+      );
+    }
     const canonicalMutation = Object.fromEntries(
       expectedKeys.map((key) => [key, mutation[key]]),
     );
+    canonicalMutation.historyEntry = historyEntry;
     for (const listener of [...daemonMutationListeners]) {
       try {
         listener(canonicalMutation);

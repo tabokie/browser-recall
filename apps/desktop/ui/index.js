@@ -1016,6 +1016,7 @@ const searchState = {
   results: [],
   resultIndex: new Map(),
   pendingPhases: 0,
+  loadingRenderCommitted: false,
 };
 let resetRelatedScrollOnNextRender = false;
 let preserveRelatedScrollOnNextRender = false;
@@ -1119,7 +1120,7 @@ async function runStreamingHistorySearch(query, gen) {
         'history',
         gen,
       );
-      await renderProgressiveResults(gen);
+      await renderFirstAvailableSearchResults(gen);
       return;
     }
     if (payload.type === 'historySearchDone') {
@@ -1312,6 +1313,18 @@ async function renderProgressiveResults(gen) {
   renderDirectSearchResults(sorted);
 }
 
+async function renderFirstAvailableSearchResults(gen) {
+  if (
+    gen !== searchState.generation ||
+    searchState.loadingRenderCommitted ||
+    searchState.results.length === 0
+  ) {
+    return;
+  }
+  searchState.loadingRenderCommitted = true;
+  await renderProgressiveResults(gen);
+}
+
 function showSearchSpinner() {
   const el = document.getElementById('contentSearchSpinner');
   if (el) el.style.display = '';
@@ -1344,6 +1357,7 @@ function clearProgressiveSearchState() {
   searchState.results = [];
   searchState.resultIndex.clear();
   searchState.pendingPhases = 0;
+  searchState.loadingRenderCommitted = false;
   hideSearchSpinner();
 }
 
@@ -1522,7 +1536,7 @@ async function runDaemonContentSearch({
     }
     const results = await buildResults(response.results);
     mergeSearchResults(results, source, gen);
-    await renderProgressiveResults(gen);
+    await renderFirstAvailableSearchResults(gen);
   } catch (error) {
     surfaceBackgroundError(`${phaseLabel} failed`, error);
   } finally {
@@ -1563,6 +1577,116 @@ function phase0Score(item, words) {
   ]);
 }
 
+async function mergeHistoryMutationsIntoActiveSearch(entries) {
+  const query = committedSearchQuery.trim();
+  if (
+    activeView.type !== 'explore' ||
+    !query ||
+    !Array.isArray(entries) ||
+    entries.length === 0
+  ) {
+    return false;
+  }
+
+  const gen = searchState.generation;
+  const words = parseSearchQueryWords(query);
+  const matchingEntries = new Map();
+  const removedTitleMatches = new Set();
+  let changed = false;
+
+  for (const entry of entries) {
+    if (!entry?.url || !Number.isFinite(entry.timestamp)) continue;
+    const existingIndex = searchState.resultIndex.get(entry.url);
+    const isVisitObservation =
+      entry.action === 'visit_page' || entry.action === 'leave_page';
+    if (existingIndex !== undefined) {
+      const existing = searchState.results[existingIndex];
+      if (isVisitObservation && entry.timestamp > (existing.timestamp || 0)) {
+        existing.timestamp = entry.timestamp;
+        existing.latestTs = entry.timestamp;
+        existing.timestamps = [
+          ...new Set([entry.timestamp, ...(existing.timestamps || [])]),
+        ].sort((left, right) => right - left);
+        if (entry.title) existing.title = entry.title;
+        if (entry.user_title) existing.user_title = entry.user_title;
+        delete existing._maxTs;
+        delete existing._minTs;
+        changed = true;
+      }
+      if (entry.action === 'rename_page') {
+        existing.user_title = entry.user_title;
+        changed = true;
+      }
+      if (entry.deviceId) {
+        if (!existing.deviceIds) existing.deviceIds = new Set();
+        existing.deviceIds.add(entry.deviceId);
+      }
+      delete existing._enriched;
+      delete existing._filterEnriched;
+      delete existing.visitCount;
+    }
+
+    const latestVisit = historyState.byUrl.get(entry.url);
+    const existingResult =
+      existingIndex === undefined ? null : searchState.results[existingIndex];
+    const candidate = latestVisit
+      ? { ...latestVisit }
+      : existingResult
+        ? { ...existingResult }
+        : null;
+    if (candidate && entry.action === 'rename_page') {
+      candidate.user_title = entry.user_title;
+    }
+    if (candidate && isVisitObservation && entry.title) {
+      candidate.title = entry.title;
+    }
+    const score = candidate ? phase0Score(candidate, words) : null;
+    if (score != null && Number.isFinite(candidate.timestamp)) {
+      removedTitleMatches.delete(entry.url);
+      matchingEntries.set(entry.url, { ...candidate, score });
+    } else {
+      matchingEntries.delete(entry.url);
+      if (existingResult?.matchSources?.has('title')) {
+        existingResult.matchSources.delete('title');
+        if (existingResult.matchSources.size === 0) {
+          removedTitleMatches.add(entry.url);
+        }
+        changed = true;
+      }
+    }
+  }
+
+  if (removedTitleMatches.size > 0) {
+    searchState.results = searchState.results.filter(
+      (result) => !removedTitleMatches.has(result.url),
+    );
+    searchState.resultIndex.clear();
+    searchState.results.forEach((result, index) => {
+      searchState.resultIndex.set(result.url, index);
+    });
+  }
+
+  const matchingResults = processHistoryForDisplay(
+    [...matchingEntries.values()],
+    {
+      globalDedup: true,
+    },
+  ).map((item) => ({
+    ...item,
+    matchSources: new Set(['title']),
+  }));
+  if (matchingResults.length > 0) {
+    mergeSearchResults(matchingResults, 'title', gen);
+    changed = true;
+  }
+
+  if (changed) {
+    preserveRelatedScrollOnNextRender = true;
+    await renderProgressiveResults(gen);
+  }
+  return true;
+}
+
 // Four-phase progressive search orchestrator.
 // Phase 0: instant exact/substring in-memory matching. Phase 1: JSONL streaming.
 // Phase 2a: notes. Phase 2b: snapshots streaming.
@@ -1574,6 +1698,7 @@ async function runProgressiveSearch(allQueries) {
   searchState.results = [];
   searchState.resultIndex.clear();
   searchState.pendingPhases = 3;
+  searchState.loadingRenderCommitted = false;
   showSearchSpinner();
   const query = allQueries.join(' ');
 
@@ -1594,6 +1719,7 @@ async function runProgressiveSearch(allQueries) {
   }));
   mergeSearchResults(phase0Results, 'title', gen);
   await renderProgressiveResults(gen);
+  searchState.loadingRenderCommitted = phase0Results.length > 0;
 
   // Fire Phase 1, 2a, 2b concurrently (with per-type concurrency limits)
   runPhase1(query, gen);
@@ -3674,6 +3800,15 @@ function renderDirectSearchResults(results) {
     : null;
   if (renderAtTop && main) main.scrollTop = 0;
   const previousScrollTop = main?.scrollTop || 0;
+  const selectedUrls = new Set(
+    [...relatedContainer.querySelectorAll('.result-row.selected')].map(
+      (row) => row.dataset.url,
+    ),
+  );
+  const lastClickedUrl =
+    lastClickedRow && relatedContainer.contains(lastClickedRow)
+      ? lastClickedRow.dataset.url
+      : null;
 
   relatedContainer.innerHTML = results
     .map((r) =>
@@ -3693,6 +3828,14 @@ function renderDirectSearchResults(results) {
       }),
     )
     .join('');
+  for (const row of relatedContainer.querySelectorAll('.result-row')) {
+    if (selectedUrls.has(row.dataset.url)) row.classList.add('selected');
+  }
+  lastClickedRow = lastClickedUrl
+    ? [...relatedContainer.querySelectorAll('.result-row')].find(
+        (row) => row.dataset.url === lastClickedUrl,
+      ) || null
+    : null;
   if (preserveScroll && main) {
     if (!restoreRelatedDomScrollAnchor(relatedContainer, anchor)) {
       main.scrollTop = previousScrollTop;
@@ -3718,6 +3861,7 @@ function renderDirectSearchResults(results) {
   );
   bindChartBarClick(relatedChart, relatedContainer);
   applyPersistedRelatedDateFilter();
+  syncChartHighlights();
 }
 
 // Render filtered pin results directly so list selection can operate on every row.
@@ -3890,11 +4034,12 @@ async function enrichFromEntityStorage(entries, opts = {}) {
     if (!page) continue;
     const context = contexts[entry.slug];
     if (!entry.title && page.title) entry.title = page.title;
-    if (!entry.user_title && page.user_title)
-      entry.user_title = page.user_title;
+    entry.user_title = page.user_title ?? null;
     entry.hasSnapshots = page.hasSnapshots === true;
     entry.listSlugs = context.lists.map((list) => list.slug);
-    if (page.likes) entry.likes = page.likes;
+    entry.likes = page.likes ?? 0;
+    entry.attScore = attentionStrength(page);
+    entry.attDetail = page;
     if (page.createdAt && !entry.createdAt) entry.createdAt = page.createdAt;
     if (includeVisitDates && entry.dateScope !== 'row' && page.visitDates) {
       entry.visitDates = page.visitDates;
@@ -7205,7 +7350,47 @@ function mergeHistoryEntry(entry, existing) {
   return { entry: existing, updated: patched };
 }
 
+function parsePreciseHistoryMutation(request) {
+  if (request.historyEntry == null) return null;
+  const entry = request.historyEntry;
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    throw new Error('History mutation entry must be an object');
+  }
+  if (
+    !['visit_page', 'leave_page', 'rename_page', 'rate_page'].includes(
+      entry.action,
+    ) ||
+    !Number.isFinite(entry.timestamp) ||
+    typeof entry.url !== 'string' ||
+    !entry.url ||
+    (entry.title !== null && typeof entry.title !== 'string') ||
+    (entry.userTitle !== null && typeof entry.userTitle !== 'string') ||
+    (entry.scrollDepth !== null && !Number.isFinite(entry.scrollDepth)) ||
+    (entry.timeOnPage !== null && !Number.isFinite(entry.timeOnPage)) ||
+    (entry.likes !== null && !Number.isFinite(entry.likes)) ||
+    typeof entry.deviceId !== 'string' ||
+    !entry.deviceId
+  ) {
+    throw new Error('History mutation entry is incomplete');
+  }
+  if (request.url !== entry.url) {
+    throw new Error('History mutation URL does not match its entry');
+  }
+  return {
+    action: entry.action,
+    timestamp: entry.timestamp,
+    url: entry.url,
+    title: entry.title,
+    user_title: entry.userTitle,
+    scrollDepth: entry.scrollDepth,
+    timeOnPage: entry.timeOnPage,
+    likes: entry.likes,
+    deviceId: entry.deviceId,
+  };
+}
+
 let mutationRefreshTimer = null;
+const pendingHistoryMutationRequests = [];
 
 chrome.runtime.onMessage.addListener((request) => {
   if (request.action !== 'mutation') return;
@@ -7213,47 +7398,92 @@ chrome.runtime.onMessage.addListener((request) => {
   const { type } = request;
 
   if (type === 'history') {
+    pendingHistoryMutationRequests.push(request);
     // New page visit — merge into historyState.byUrl and historyState.allEntries
     clearTimeout(mutationRefreshTimer);
     mutationRefreshTimer = setTimeout(async () => {
+      const pendingMutations = pendingHistoryMutationRequests.splice(0);
       try {
         await refreshHistoryMetadata();
       } catch (error) {
         surfaceBackgroundError('History metadata refresh failed', error);
       }
 
-      let todayEntries = [];
+      const preciseEntries = [];
+      let requiresHistoryRefresh = false;
       try {
-        todayEntries = await loadHistoryEntriesForDate(
-          new Date().toISOString().slice(0, 10),
-        );
+        for (const mutation of pendingMutations) {
+          const entry = parsePreciseHistoryMutation(mutation);
+          if (entry) preciseEntries.push(entry);
+          else requiresHistoryRefresh = true;
+        }
       } catch (error) {
-        surfaceBackgroundError('History mutation refresh failed', error);
+        surfaceBackgroundError('History mutation validation failed', error);
         return;
       }
-      const historyEntries = todayEntries.filter(
-        (e) =>
-          (e.action === 'visit_page' || e.action === 'leave_page') && e.url,
-      );
+      let historyEntries;
+      if (!requiresHistoryRefresh && preciseEntries.length > 0) {
+        historyEntries = preciseEntries;
+      } else {
+        let todayEntries = [];
+        try {
+          todayEntries = await loadHistoryEntriesForDate(
+            new Date().toISOString().slice(0, 10),
+          );
+        } catch (error) {
+          surfaceBackgroundError('History mutation refresh failed', error);
+          return;
+        }
+        historyEntries = todayEntries.filter(
+          (entry) =>
+            (entry.action === 'visit_page' || entry.action === 'leave_page') &&
+            entry.url,
+        );
+        historyEntries.push(
+          ...preciseEntries.filter(
+            (entry) =>
+              entry.action !== 'visit_page' && entry.action !== 'leave_page',
+          ),
+        );
+      }
       // Only process entries newer than what we've already ingested
       const watermark = historyState._mutationWatermark || 0;
       let maxTs = watermark;
       let changed = false;
+      const changedEntries = [];
       for (const entry of historyEntries) {
-        if (entry.timestamp <= watermark) continue;
-        if (entry.timestamp > maxTs) maxTs = entry.timestamp;
+        const isVisitObservation =
+          entry.action === 'visit_page' || entry.action === 'leave_page';
+        if (isVisitObservation && entry.timestamp <= watermark) continue;
+        if (isVisitObservation && entry.timestamp > maxTs) {
+          maxTs = entry.timestamp;
+        }
+        if (!isVisitObservation) {
+          changed = true;
+          changedEntries.push(entry);
+          const existing = historyState.byUrl.get(entry.url);
+          if (existing && entry.action === 'rename_page') {
+            existing.user_title = entry.user_title;
+          }
+          continue;
+        }
         const existing = historyState.byUrl.get(entry.url);
         const { entry: merged, updated } = mergeHistoryEntry(entry, existing);
         if (updated) {
           historyState.byUrl.set(entry.url, merged);
           changed = true;
+          changedEntries.push(merged);
         }
         historyState.allEntries.push(entry);
       }
       historyState._mutationWatermark = maxTs;
       if (changed) {
         cachedFieldRanges = null;
-        if (activeView.type === 'explore' || activeView.type === 'list') {
+        if (activeView.type === 'explore') {
+          const mergedIntoSearch =
+            await mergeHistoryMutationsIntoActiveSearch(changedEntries);
+          if (!mergedIntoSearch) runSearchFilterPipeline();
+        } else if (activeView.type === 'list') {
           runSearchFilterPipeline();
         } else {
           refreshCurrentView();

@@ -1,6 +1,6 @@
 use crate::commands;
 use crate::mutations::{mutation_batch as mutation, mutation_batch_with as mutation_with};
-use crate::protocol::{MutationPayload, RulePayload};
+use crate::protocol::{HistoryMutationEntry, MutationPayload, RulePayload};
 use crate::runtime;
 use crate::storage::Storage;
 use browser_recall_replay::{entities::TreeNode, LogEntry};
@@ -195,27 +195,56 @@ impl CommandAuthority {
                 )
             }
             CommandRequest::RenamePage { url, user_title } => {
-                commands::rename_page(&self.storage, &self.device_id, &url, &user_title).await?;
+                let timestamp =
+                    commands::rename_page(&self.storage, &self.device_id, &url, &user_title)
+                        .await?;
                 CommandOutcome::new(
                     json!({ "success": true }),
-                    mutation_with("history", |fields| fields.url = Some(url)),
+                    mutation_with("history", |fields| {
+                        fields.url = Some(url.clone());
+                        fields.history_entry = Some(HistoryMutationEntry {
+                            action: "rename_page".to_string(),
+                            timestamp,
+                            url,
+                            title: None,
+                            user_title: Some(user_title),
+                            scroll_depth: None,
+                            time_on_page: None,
+                            likes: None,
+                            device_id: self.device_id.clone(),
+                        });
+                    }),
                 )
             }
             CommandRequest::RatePage { url, likes, title } => {
+                let timestamp = self.storage.next_command_timestamp_millis();
                 commands::replay_entry(
                     &self.storage,
                     &self.device_id,
                     LogEntry::RatePage {
-                        timestamp: self.storage.next_command_timestamp_millis(),
+                        timestamp,
                         url: url.clone(),
                         likes,
-                        title,
+                        title: title.clone(),
                     },
                 )
                 .await?;
                 CommandOutcome::new(
                     json!({ "success": true }),
-                    mutation_with("history", |fields| fields.url = Some(url)),
+                    mutation_with("history", |fields| {
+                        fields.url = Some(url.clone());
+                        fields.history_entry = Some(HistoryMutationEntry {
+                            action: "rate_page".to_string(),
+                            timestamp,
+                            url,
+                            title,
+                            user_title: None,
+                            scroll_depth: None,
+                            time_on_page: None,
+                            likes: Some(likes),
+                            device_id: self.device_id.clone(),
+                        });
+                    }),
                 )
             }
             CommandRequest::CreateNote {

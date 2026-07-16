@@ -61,6 +61,7 @@ Optional references may be omitted only when they are valid non-page URLs; malfo
 
 ## Refactoring Lessons
 
+- Incremental mutation payloads must be lossless for every action they replace: distinguish observations from metadata, include semantic payloads in deduplication identity, and test batched same-entity updates.
 - After bulk renames, grep for the old term, alternate casing, comments, string literals, tests, and docs.
 - Format changes require non-empty test data for every consumer. When changing a structure's shape, grep for all readers and verify each has coverage with non-empty data.
 - Multi-line objects evade single-line transforms; verify multi-line schema and payload construction separately.

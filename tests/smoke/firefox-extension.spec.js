@@ -576,6 +576,7 @@ class SuccessfulWebSocket {
                 url: payload.url,
                 urls: null,
                 key: null,
+                historyEntry: null,
               },
             ],
           }),

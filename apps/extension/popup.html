@@ -701,9 +701,8 @@
       }
 
       .list-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
+        display: block;
+        max-width: 100%;
         padding: 5px 9px;
         border-radius: 2px;
         font-size: 11px;
@@ -713,6 +712,9 @@
         cursor: pointer;
         border: 1px solid var(--border-glass);
         box-shadow: none;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
         transition:
           border-color 0.16s var(--ease-smooth),
           background 0.16s var(--ease-smooth),

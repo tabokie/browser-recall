@@ -279,13 +279,40 @@ export function createBadgeController({
     await api.action.setIcon({ path: iconPaths, tabId });
   }
 
+  async function applyPageMarkerErrorBadge(tabId, error) {
+    await hydrateRecordingPauseState();
+    if (recordingPaused) {
+      await applyRecordingPausedBadge(tabId);
+      return;
+    }
+    if (servicePaused) {
+      await applyServicePausedBadge(tabId);
+      return;
+    }
+    const unavailableTitle = tr(
+      'extensionDesktopPageDataUnavailable',
+      'Browser Recall page state unavailable',
+    );
+    const message = error?.message || unavailableTitle;
+    await api.action.setTitle({
+      title: `${unavailableTitle}: ${message}`,
+      tabId,
+    });
+    await api.action.setBadgeBackgroundColor({
+      color: '#B85040',
+      tabId,
+    });
+    await api.action.setBadgeText({ text: '!', tabId });
+    await api.action.setIcon({ path: normalIconPaths, tabId });
+  }
+
   function isPageBadgeUrl(url) {
     return typeof url === 'string' && url.startsWith('http');
   }
 
   async function updateBadgeForTab(tabId, url) {
     try {
-      const badgeUrl = resolveTabUrl(tabId, url);
+      const badgeUrl = await resolveTabUrl(tabId, url);
       if (!isPageBadgeUrl(badgeUrl)) {
         await clearPageMarkerBadge(tabId, {
           inheritGlobalBadge: globalConnectorBadgeActive,
@@ -317,6 +344,11 @@ export function createBadgeController({
       );
     } catch (error) {
       logDebug('[badge] page badge update failed:', error.message);
+      try {
+        await applyPageMarkerErrorBadge(tabId, error);
+      } catch (badgeError) {
+        logDebug('[badge] page badge error state failed:', badgeError.message);
+      }
     }
   }
 

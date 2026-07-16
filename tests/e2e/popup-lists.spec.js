@@ -137,6 +137,130 @@ async function waitForContentScript(helper, page, url) {
 }
 
 test.describe('Popup list chip behavior', () => {
+  for (const scenario of [
+    {
+      label: 'multi-word',
+      path: '/popup-long-list-name-multi-word',
+      listId: 'long-multi-word-list',
+      listName:
+        'Research references collected for the browser recall public launch review',
+    },
+    {
+      label: 'unbroken',
+      path: '/popup-long-list-name-unbroken',
+      listId: 'long-unbroken-list',
+      listName:
+        'ResearchReferencesCollectedForTheBrowserRecallPublicLaunchReview',
+    },
+  ]) {
+    test(`truncates a ${scenario.label} list membership name to the popup width`, async ({
+      extContext,
+      extensionId,
+      setupDir,
+      localServer,
+    }) => {
+      void setupDir;
+      const now = Date.now();
+      const title = `Long ${scenario.label} list membership`;
+      localServer.addPage(scenario.path, {
+        title,
+        body: `<main>${title}</main>`,
+      });
+      const url = localServer.url(scenario.path);
+      const slug = getSlugForUrl(url);
+
+      await resetAndSeed(extContext, extensionId, [
+        settingsCheckpoint(),
+        {
+          path: 'views/manifest/list-order.json',
+          data: listOrderFixture({
+            deviceTimestamp: now,
+            tree: [{ id: `list:${scenario.listId}`, children: [] }],
+          }),
+        },
+        {
+          path: `views/lists/${scenario.listId}.json`,
+          data: listEntityFixture({
+            slug: scenario.listId,
+            name: scenario.listName,
+            owner: 'test-device',
+            deviceTimestamp: now,
+            pins: [{ id: `page:${slug}`, pinnedAt: now, source: null }],
+          }),
+        },
+        {
+          path: 'views/manifest/list-name-to-id.json',
+          data: listNameToIdFixture({
+            deviceTimestamp: now,
+            paths: {
+              [`test-device/${scenario.listName}`]: scenario.listId,
+            },
+          }),
+        },
+        {
+          path: pageCheckpointPath(slug),
+          data: pageEntityFixture({
+            slug,
+            url,
+            title,
+            deviceTimestamp: now,
+            parentIds: [`list:${scenario.listId}`],
+            childIds: [],
+          }),
+        },
+      ]);
+
+      const page = await extContext.newPage();
+      await page.goto(url);
+      await page.waitForLoadState('domcontentloaded');
+      const helper = await openHelperPage(extContext, extensionId);
+      await waitForContentScript(helper, page, url);
+      const flushed = await helper.evaluate(() =>
+        chrome.runtime.sendMessage({ action: 'flushDesktopQueueForTest' }),
+      );
+      expect(flushed.success).toBe(true);
+      await helper.close();
+      const popup = await openPopupForUrl(extContext, extensionId, {
+        url,
+        title,
+      });
+      const chip = popup.locator(
+        `#listChips .list-chip[data-list-id="${scenario.listId}"]`,
+      );
+      await expect(chip).toHaveText(scenario.listName);
+
+      const layout = await chip.evaluate((node) => {
+        const chipBox = node.getBoundingClientRect();
+        const containerBox = node.parentElement.getBoundingClientRect();
+        const addButtonBox = document
+          .getElementById('listAddBtn')
+          .getBoundingClientRect();
+        const style = getComputedStyle(node);
+        return {
+          chipRight: chipBox.right,
+          containerRight: containerBox.right,
+          chipHeight: chipBox.height,
+          addButtonHeight: addButtonBox.height,
+          clientWidth: node.clientWidth,
+          scrollWidth: node.scrollWidth,
+          overflow: style.overflow,
+          textOverflow: style.textOverflow,
+          whiteSpace: style.whiteSpace,
+        };
+      });
+
+      expect(layout.chipRight).toBeLessThanOrEqual(layout.containerRight + 0.5);
+      expect(layout.scrollWidth).toBeGreaterThan(layout.clientWidth);
+      expect(layout.overflow).toBe('hidden');
+      expect(layout.textOverflow).toBe('ellipsis');
+      expect(layout.whiteSpace).toBe('nowrap');
+      expect(layout.chipHeight).toBeCloseTo(layout.addButtonHeight, 1);
+
+      await popup.close();
+      await page.close();
+    });
+  }
+
   test('localizes the dynamically rendered add page note button', async ({
     extContext,
     extensionId,

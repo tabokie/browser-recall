@@ -49,6 +49,32 @@ async function openPopupForUrl(extContext, extensionId, { url, title }) {
   return popup;
 }
 
+async function getActionIconForUrl(helper, url) {
+  return helper.evaluate(async (pageUrl) => {
+    const tabs = await chrome.tabs.query({ url: pageUrl });
+    if (tabs.length !== 1 || !Number.isFinite(tabs[0].id)) return null;
+    const response = await chrome.runtime.sendMessage({
+      action: 'getActionIconForTest',
+      tabId: tabs[0].id,
+    });
+    if (!response?.success) {
+      throw new Error(response?.error || 'getActionIconForTest failed');
+    }
+    return response.path;
+  }, url);
+}
+
+async function getActionBadgeForUrl(helper, url) {
+  return helper.evaluate(async (pageUrl) => {
+    const tabs = await chrome.tabs.query({ url: pageUrl });
+    if (tabs.length !== 1 || !Number.isFinite(tabs[0].id)) return null;
+    return {
+      text: await chrome.action.getBadgeText({ tabId: tabs[0].id }),
+      title: await chrome.action.getTitle({ tabId: tabs[0].id }),
+    };
+  }, url);
+}
+
 test.describe('Snapshot slug meta tag', () => {
   test('snapshot shortcut reconnects during connector cold start', async ({
     extContext,
@@ -394,6 +420,11 @@ test.describe('Snapshot slug meta tag', () => {
     await expect(snapshotRow).toBeVisible();
     await expect(snapshotRow).toHaveCSS('cursor', 'pointer');
 
+    const helper = await openHelperPage(extContext, extensionId);
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'restartConnectorRuntimeForTest' }),
+    );
+
     const openedPromise = extContext.waitForEvent('page');
     await snapshotRow.click();
     const viewer = await openedPromise;
@@ -413,6 +444,14 @@ test.describe('Snapshot slug meta tag', () => {
     expect(viewerOverlayBorderRun).toBeGreaterThanOrEqual(2);
     await viewer.keyboard.press('Escape');
 
+    await expect
+      .poll(() => getActionIconForUrl(helper, viewer.url()))
+      .toMatchObject({
+        16: 'icons/icon16-special-notes.png',
+        48: 'icons/icon48-special-notes.png',
+        128: 'icons/icon128-special-notes.png',
+      });
+
     const viewerPopup = await openPopupForUrl(extContext, extensionId, {
       url: viewer.url(),
       title: 'Popup Open Snapshot',
@@ -424,8 +463,20 @@ test.describe('Snapshot slug meta tag', () => {
     await expect(viewerPopup.locator('#notesSection')).toContainText(
       highlightText,
     );
-
     await viewerPopup.close();
+
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'resetForTest' }),
+    );
+    await viewer.reload();
+    await expect
+      .poll(() => getActionBadgeForUrl(helper, viewer.url()))
+      .toMatchObject({
+        text: '!',
+        title: expect.stringContaining('unavailable'),
+      });
+
+    await helper.close();
     await viewer.close();
     await popup.close();
     await sourcePage.close();

@@ -150,7 +150,21 @@ pub struct PopupAccessResult {
     pub has_visit_history: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HistoryMutationEntry {
+    pub action: String,
+    pub timestamp: i64,
+    pub url: String,
+    pub title: Option<String>,
+    pub user_title: Option<String>,
+    pub scroll_depth: Option<i64>,
+    pub time_on_page: Option<i64>,
+    pub likes: Option<i64>,
+    pub device_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct MutationPayload {
     #[serde(rename = "type")]
     pub mutation_type: String,
@@ -166,6 +180,8 @@ pub struct MutationPayload {
     pub url: Option<String>,
     pub urls: Option<Vec<String>>,
     pub key: Option<String>,
+    #[serde(rename = "historyEntry")]
+    pub history_entry: Option<HistoryMutationEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

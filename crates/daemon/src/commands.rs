@@ -1490,17 +1490,19 @@ pub async fn rename_page(
     device_id: &str,
     url: &str,
     user_title: &str,
-) -> Result<(), String> {
+) -> Result<i64, String> {
+    let timestamp = storage.next_command_timestamp_millis();
     replay_entry(
         storage,
         device_id,
         LogEntry::RenamePage {
-            timestamp: storage.next_command_timestamp_millis(),
+            timestamp,
             url: url.to_string(),
             user_title: user_title.to_string(),
         },
     )
-    .await
+    .await?;
+    Ok(timestamp)
 }
 
 fn import_list_name(name: &str) -> String {

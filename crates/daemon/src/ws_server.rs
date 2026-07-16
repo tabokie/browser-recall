@@ -1297,8 +1297,8 @@ async fn ingest_typed_entry(
             commit_entry_with_auto_pins(shared, transaction, entry.clone(), raw_entry.clone())
                 .await?;
 
-        let mutations =
-            build_mutations(&entry, &raw_entry, &effects).map_err(WsServerError::Ingest)?;
+        let mutations = build_mutations(&entry, &raw_entry, &effects, &device_id)
+            .map_err(WsServerError::Ingest)?;
         let acked_at = current_timestamp_millis()?;
         let last_drained_at = entry.timestamp();
         let mut ingest = shared.ingest_status.lock().await;
@@ -1625,13 +1625,14 @@ async fn commit_report_entry(
     transaction: ReplayTransaction<'_>,
     entry: LogEntry,
     raw_entry: Value,
+    device_id: &str,
 ) -> Result<(Value, Vec<MutationPayload>), WsServerError> {
     let effects =
         commit_entry_with_auto_pins(shared, transaction, entry.clone(), raw_entry.clone()).await?;
 
     Ok((
         json!({ "success": true, "timestamp": entry.timestamp() }),
-        build_mutations(&entry, &raw_entry, &effects).map_err(WsServerError::Ingest)?,
+        build_mutations(&entry, &raw_entry, &effects, device_id).map_err(WsServerError::Ingest)?,
     ))
 }
 
@@ -1695,7 +1696,7 @@ async fn report_visit_command(
             object.insert("bodyPreview".to_string(), Value::String(body_preview));
         }
     }
-    commit_report_entry(shared, transaction, entry, raw_entry).await
+    commit_report_entry(shared, transaction, entry, raw_entry, &device_id).await
 }
 
 async fn report_leave_command(
@@ -1730,7 +1731,7 @@ async fn report_leave_command(
     };
     let raw_entry =
         serde_json::to_value(&entry).map_err(|error| WsServerError::Ingest(error.to_string()))?;
-    commit_report_entry(shared, transaction, entry, raw_entry).await
+    commit_report_entry(shared, transaction, entry, raw_entry, &device_id).await
 }
 
 async fn run_shared_command(
@@ -2160,7 +2161,8 @@ async fn handle_replay_remote_entries(
                 .map_err(WsServerError::Ingest)?;
 
             mutations.extend(
-                build_mutations(&parsed, raw_entry, &effects).map_err(WsServerError::Ingest)?,
+                build_mutations(&parsed, raw_entry, &effects, &device_id)
+                    .map_err(WsServerError::Ingest)?,
             );
         }
 

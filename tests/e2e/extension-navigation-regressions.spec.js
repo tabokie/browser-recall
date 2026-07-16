@@ -8,6 +8,7 @@ import {
   pageCheckpointPath,
   pageEntityFixture,
   noteEntityFixture,
+  waitForVisitRecorded,
 } from './helpers.js';
 
 async function readPageEntity(helper, url) {
@@ -116,7 +117,7 @@ async function countReloadWarnings(page, reloadMessage) {
     .catch(() => 0);
 }
 
-test.describe('extension same-tab navigation regressions', () => {
+test.describe('extension navigation regressions', () => {
   test('records a new page visit after same-tab history navigation', async ({
     extContext,
     extensionId,
@@ -194,6 +195,63 @@ test.describe('extension same-tab navigation regressions', () => {
     });
 
     await page.close();
+    await helper.close();
+  });
+
+  test('keeps page summary available after opening a destination in a new tab', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/new-tab-source', {
+      title: 'New Tab Source',
+      body: '<a id="open-destination" href="/new-tab-destination" target="_blank">Open destination</a>',
+    });
+    localServer.addPage('/new-tab-destination', {
+      title: 'New Tab Destination',
+      body: '<main>Destination</main>',
+    });
+
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+
+    const sourceUrl = localServer.url('/new-tab-source');
+    const destinationUrl = localServer.url('/new-tab-destination');
+    const helper = await openHelperPage(extContext, extensionId);
+    const sourcePage = await extContext.newPage();
+    await sourcePage.goto(sourceUrl);
+    await waitForVisitRecorded(helper, sourcePage, sourceUrl, null);
+
+    const destinationPagePromise = extContext.waitForEvent('page');
+    await sourcePage.click('#open-destination');
+    const destinationPage = await destinationPagePromise;
+    await destinationPage.waitForLoadState('domcontentloaded');
+    await waitForVisitRecorded(
+      helper,
+      destinationPage,
+      destinationUrl,
+      sourceUrl,
+    );
+
+    const sourceEntity = await readPageEntity(helper, sourceUrl);
+    expect(sourceEntity.childIds).toContain(
+      `page:${getSlugForUrl(destinationUrl)}`,
+    );
+
+    const summary = await helper.evaluate(
+      ({ url, title }) =>
+        chrome.runtime.sendMessage({
+          action: 'getPageSummary',
+          url,
+          title,
+        }),
+      { url: sourceUrl, title: 'New Tab Source' },
+    );
+    expect(summary.success, JSON.stringify(summary)).toBe(true);
+    expect(summary.url).toBe(sourceUrl);
+
+    await destinationPage.close();
+    await sourcePage.close();
     await helper.close();
   });
 

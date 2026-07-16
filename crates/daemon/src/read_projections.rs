@@ -294,6 +294,9 @@ impl ReadProjections {
         let mut snapshots = Vec::new();
         if let Some(page) = &page {
             for child_id in &page.child_ids {
+                if child_id.strip_prefix("page:").is_some() {
+                    continue;
+                }
                 if let Some(note_slug) = child_id.strip_prefix("note:") {
                     let note = self
                         .storage

@@ -75,7 +75,11 @@ let popupBootstrapMutationRevision = 0;
 // Used by popup to avoid slug mismatch when tab.url drifts (SPA pushState, etc.).
 const tabReportedUrls = new Map();
 
-function badgeIdentityUrlForTab(tabId, url) {
+async function badgeIdentityUrlForTab(tabId, url) {
+  if (snapshotViewerSlugFromUrl(url)) {
+    const tab = await chrome.tabs.get(tabId);
+    return (await resolveTabPageIdentity(tab)).url;
+  }
   const reportedUrl = tabReportedUrls.get(tabId);
   if (reportedUrl && isSameDocumentPageUrl(reportedUrl, url)) {
     return reportedUrl;
@@ -598,12 +602,22 @@ async function buildLeaveReport(url, title, scrollDepth, timeOnPage) {
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
   try {
     const tab = await chrome.tabs.get(tabId);
-    badgeController.updateBadgeForTab(
-      tabId,
-      badgeIdentityUrlForTab(tabId, tab.url),
-    );
+    badgeController.updateBadgeForTab(tabId, tab.url);
   } catch (e) {
     logDebug('[badge] activated tab became unavailable:', e.message);
+  }
+});
+
+chrome.tabs.onUpdated?.addListener?.((tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'complete' && snapshotViewerSlugFromUrl(tab?.url)) {
+    void (async () => {
+      const connector = await refreshDesktopConnectorStateProbe();
+      syncDesktopConnectorPauseState(connector);
+      await badgeController.setConnectorState(connector);
+      await badgeController.updateBadgeForTab(tabId, tab.url);
+    })().catch((error) => {
+      logDebug('[badge] snapshot viewer refresh failed:', error.message);
+    });
   }
 });
 
@@ -1460,8 +1474,15 @@ async function setPreparedActionPopup(tabId, popupPath) {
 }
 
 function snapshotViewerSlugFromUrl(url) {
-  const parsed = new URL(url);
-  if (parsed.href.startsWith(chrome.runtime.getURL('snapshot-viewer.html'))) {
+  if (typeof url !== 'string' || !url) return null;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  const viewer = new URL(chrome.runtime.getURL('snapshot-viewer.html'));
+  if (parsed.origin === viewer.origin && parsed.pathname === viewer.pathname) {
     return parsed.searchParams.get('slug');
   }
   return null;
@@ -1477,7 +1498,7 @@ function popupTabIsUnavailable(tab) {
   );
 }
 
-async function resolvePopupPageIdentity(tab) {
+async function resolveTabPageIdentity(tab) {
   let effectiveUrl = tab.url;
   let effectiveSlug = null;
   let effectiveTitle = typeof tab.title === 'string' ? tab.title : '';
@@ -1554,7 +1575,7 @@ async function handleResolvePopupPageIdentity(request) {
   }
   return {
     success: true,
-    identity: await resolvePopupPageIdentity(tab),
+    identity: await resolveTabPageIdentity(tab),
   };
 }
 
@@ -1568,7 +1589,7 @@ async function preparePopupBootstrapForTab(tab) {
 
   let identity;
   try {
-    identity = await resolvePopupPageIdentity(tab);
+    identity = await resolveTabPageIdentity(tab);
   } catch (error) {
     return {
       mode: 'data-unavailable',

@@ -1,0 +1,13 @@
+- When I am building the desktop app using `npm run build`, it warns "skipping app notarization, no APPLE_ID & APPLE_PASSWORD & APPLE_TEAM_ID or APPLE_API_KEY & APPLE_API_ISSUER & APPLE_API_KEY_PATH environment variables found"
+- First issue: when I visit some page from new tab, the extension reports "has unsupported child reference page". I want you to investigate why this specific error is raised, and then I want you to make sure I don't get any user-level errors when normally visiting pages if the issue is not fatal to the functionality.
+- Second issue: When opening the snapshot for a page, the popup will show information for the original page url, but the extension icon's color is not using the original page's attributes. This inconsistency shouldn't be possible because both of the code paths should be using the same function to get page metadata.
+- Question: Is there a length cap for the list name in popup UI's list membership section? What happen if the list name is longer than width of the popup window?
+- We should make the long name omit the trailing part to fit inside the popup window. Add tests for both cases.
+- The last issue: Desktop history search spins for a long time, during the spinning phase the UI is constantly refreshing, I cannot operate the time chart or page items. There're at least two enhancement directions: (1) Avoid blocking normal operations while results are loading. (2) Investigate if there's room to improve on the loading time, especially in this scenario: the results are already loaded, but when I visited a few more pages on browser, the UI starts to spin again and this time doesn't stop for a disproportionate amount of time.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them
+- Please review my uncommitted changes
+- Fix them
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.6 Sol
+- Sure
+- Sure

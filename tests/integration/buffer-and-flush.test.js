@@ -1662,6 +1662,17 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
             url: 'https://example.com/change',
             urls: null,
             key: null,
+            historyEntry: {
+              action: 'visit_page',
+              timestamp: 1_710_000_000_123,
+              url: 'https://example.com/change',
+              title: 'Changed page',
+              userTitle: null,
+              scrollDepth: null,
+              timeOnPage: null,
+              likes: null,
+              deviceId: 'device-a',
+            },
             futureTraceId: 'compatible-additive-field',
           },
           {
@@ -1674,6 +1685,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
             url: null,
             urls: null,
             key: null,
+            historyEntry: null,
           },
         ],
       }),
@@ -1691,6 +1703,17 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       url: 'https://example.com/change',
       urls: null,
       key: null,
+      historyEntry: {
+        action: 'visit_page',
+        timestamp: 1_710_000_000_123,
+        url: 'https://example.com/change',
+        title: 'Changed page',
+        userTitle: null,
+        scrollDepth: null,
+        timeOnPage: null,
+        likes: null,
+        deviceId: 'device-a',
+      },
     });
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
       action: 'mutation',
@@ -1703,6 +1726,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       url: null,
       urls: null,
       key: null,
+      historyEntry: null,
     });
   }, 30_000);
 });

@@ -166,12 +166,26 @@ async fn page_list_and_snapshot_commands_report_their_committed_meaning() {
         .expect("rename page");
     assert_eq!(renamed.mutations[0].mutation_type, "history");
     assert_eq!(renamed.mutations[0].url.as_deref(), Some(url));
+    assert_eq!(
+        renamed.mutations[0]
+            .history_entry
+            .as_ref()
+            .map(|entry| (entry.action.as_str(), entry.user_title.as_deref())),
+        Some(("rename_page", Some("Authority Title")))
+    );
 
     let rated = authority
         .execute("ratePage", json!({ "url": url, "likes": 1 }))
         .await
         .expect("rate page");
     assert_eq!(rated.mutations[0].mutation_type, "history");
+    assert_eq!(
+        rated.mutations[0]
+            .history_entry
+            .as_ref()
+            .map(|entry| (entry.action.as_str(), entry.device_id.as_str())),
+        Some(("rate_page", "device-a"))
+    );
     let page = storage
         .load_page(&page_slug)
         .await

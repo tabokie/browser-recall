@@ -830,6 +830,9 @@ async function installDesktopBridgeMock(page, options = {}) {
         sessionValue(key) {
           return clone(stores.session.get(key));
         },
+        updateSessionValue(key, value) {
+          stores.session.set(key, clone(value));
+        },
         listenerCount(eventName) {
           return (listeners.get(eventName) || []).length;
         },
@@ -2775,6 +2778,478 @@ test.describe('desktop visual regression', () => {
       await commitDesktopSearch(page, 'stream duplicate');
       await expect(page.getByText('Stream duplicate newer')).toBeVisible();
       await expect(page.getByText('Stream duplicate older')).toHaveCount(0);
+    });
+  });
+
+  test('history search keeps loaded results interactive and merges live visits without restarting', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const loadedUrl = 'https://example.com/steady-loaded';
+    const streamedUrl = 'https://example.com/steady-streamed';
+    const liveUrl = 'https://example.com/steady-live';
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: [
+          {
+            url: loadedUrl,
+            title: 'Steady loaded result',
+            timestamp: now - 2000,
+          },
+        ],
+        searchHistoryResultsByQuery: {
+          steady: [
+            {
+              delay: 400,
+              results: [
+                {
+                  url: streamedUrl,
+                  title: 'Steady streamed result',
+                  timestamp: now - 1000,
+                  score: 4,
+                },
+              ],
+            },
+            { delay: 1500, results: [] },
+          ],
+        },
+      });
+
+      await commitDesktopSearch(page, 'steady');
+      const loadedRow = page.locator(`.result-row[data-url="${loadedUrl}"]`);
+      await expect(loadedRow).toBeVisible();
+      await loadedRow.click();
+      await expect(loadedRow).toHaveClass(/selected/);
+
+      await page.waitForTimeout(600);
+      await expect(page.locator('#contentSearchSpinner')).toBeVisible();
+      await expect(loadedRow).toHaveClass(/selected/);
+
+      await expect(page.locator('#contentSearchSpinner')).toBeHidden({
+        timeout: 3000,
+      });
+      await expect(page.getByText('Steady streamed result')).toBeVisible();
+      await expect(loadedRow).toHaveClass(/selected/);
+      await expect(
+        page.locator(
+          `#relatedChartBars .chart-bar-group[data-date="${todayKey()}"] .chart-bar`,
+        ),
+      ).toHaveClass(/highlighted/);
+      expect(
+        await page.evaluate(() =>
+          window.__desktopVisualHarness.searchHistoryInvocationCount(),
+        ),
+      ).toBe(1);
+
+      await page.evaluate(
+        ({ url, timestamp }) => {
+          window.__desktopVisualHarness.appendHistoryEntry({
+            url,
+            title: 'Steady live result',
+            timestamp,
+            action: 'visit_page',
+          });
+          window.__desktopVisualHarness.emitRuntimeMessage({
+            action: 'mutation',
+            type: 'history',
+          });
+        },
+        { url: liveUrl, timestamp: now },
+      );
+
+      await expect(page.getByText('Steady live result')).toBeVisible({
+        timeout: 3000,
+      });
+      expect(
+        await page.evaluate(() =>
+          window.__desktopVisualHarness.searchHistoryInvocationCount(),
+        ),
+      ).toBe(1);
+      await expect(page.locator('#contentSearchSpinner')).toBeHidden();
+    });
+  });
+
+  test('filtered history search consumes precise live visits without rereading the day log', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const url = 'https://example.com/incremental-filtered-result';
+    const slug = generateSlugFromUrl(url);
+    const title = 'Incremental filtered result';
+    const secondUrl = 'https://example.com/incremental-filtered-second';
+    const secondSlug = generateSlugFromUrl(secondUrl);
+    const secondTitle = 'Incremental filtered second';
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: [
+          {
+            url,
+            title,
+            timestamp: now - 2000,
+            deviceId: 'device-a',
+          },
+          {
+            url: secondUrl,
+            title: secondTitle,
+            timestamp: now - 3000,
+            deviceId: 'device-a',
+          },
+        ],
+        extraSession: {
+          [pageKey(slug)]: {
+            slug,
+            url,
+            title,
+            parentIds: [],
+            childIds: [],
+            timestamps: { 'device-a': now - 2000 },
+            visitDates: [visitDateInt(todayKey())],
+            createdAt: now - 2000,
+          },
+          [pageKey(secondSlug)]: {
+            slug: secondSlug,
+            url: secondUrl,
+            title: secondTitle,
+            parentIds: [],
+            childIds: [],
+            timestamps: { 'device-a': now - 3000 },
+            visitDates: [visitDateInt(todayKey())],
+            createdAt: now - 3000,
+          },
+        },
+      });
+
+      await commitDesktopSearch(page, 'incremental filtered');
+      await expect(
+        page.locator(`.result-row[data-url="${url}"]`),
+      ).toBeVisible();
+      await expect(
+        page.locator(`.result-row[data-url="${secondUrl}"]`),
+      ).toBeVisible();
+      await page.locator('#filterToggleBtn').click();
+      await page
+        .locator('.filter-checkbox input[data-key="visitedMultipleTimes"]')
+        .click();
+      await expect(page.locator(`.result-row[data-url="${url}"]`)).toHaveCount(
+        0,
+      );
+      await expect(
+        page.locator(`.result-row[data-url="${secondUrl}"]`),
+      ).toHaveCount(0);
+
+      const batchReadsBefore = await page.evaluate(() =>
+        window.__desktopVisualHarness.loadHistoryBatchInvocationCount(),
+      );
+      const searchesBefore = await page.evaluate(() =>
+        window.__desktopVisualHarness.searchHistoryInvocationCount(),
+      );
+      await page.evaluate(
+        ({ entries, timestamp }) => {
+          for (const entry of entries) {
+            window.__desktopVisualHarness.updateSessionValue(entry.pageKey, {
+              slug: entry.slug,
+              url: entry.url,
+              title: entry.title,
+              parentIds: [],
+              childIds: [],
+              timestamps: { 'device-a': timestamp },
+              visitDates: [
+                Number(
+                  new Date(timestamp)
+                    .toISOString()
+                    .slice(0, 10)
+                    .replaceAll('-', ''),
+                ),
+              ],
+              createdAt: timestamp - 3000,
+            });
+            window.__desktopVisualHarness.emitRuntimeMessage({
+              action: 'mutation',
+              type: 'history',
+              url: entry.url,
+              historyEntry: {
+                action: 'visit_page',
+                timestamp,
+                url: entry.url,
+                title: entry.title,
+                userTitle: null,
+                scrollDepth: null,
+                timeOnPage: null,
+                likes: null,
+                deviceId: 'device-a',
+              },
+            });
+          }
+        },
+        {
+          entries: [
+            { pageKey: pageKey(slug), slug, url, title },
+            {
+              pageKey: pageKey(secondSlug),
+              slug: secondSlug,
+              url: secondUrl,
+              title: secondTitle,
+            },
+          ],
+          timestamp: now,
+        },
+      );
+
+      await expect(page.locator(`.result-row[data-url="${url}"]`)).toBeVisible({
+        timeout: 3000,
+      });
+      await expect(
+        page.locator(`.result-row[data-url="${secondUrl}"]`),
+      ).toBeVisible();
+      expect(
+        await page.evaluate(() =>
+          window.__desktopVisualHarness.loadHistoryBatchInvocationCount(),
+        ),
+      ).toBe(batchReadsBefore);
+      expect(
+        await page.evaluate(() =>
+          window.__desktopVisualHarness.searchHistoryInvocationCount(),
+        ),
+      ).toBe(searchesBefore);
+      await expect(page.locator('#contentSearchSpinner')).toBeHidden();
+    });
+  });
+
+  test('precise metadata mutations preserve visit recency and update query and liked membership', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const visitedAt = now - 86_400_000;
+    const url = 'https://example.com/precise-metadata-result';
+    const slug = generateSlugFromUrl(url);
+    const title = 'Neutral page title';
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: [
+          {
+            url,
+            title,
+            user_title: 'Mutable alias',
+            timestamp: visitedAt,
+            deviceId: 'device-a',
+          },
+        ],
+        extraSession: {
+          [pageKey(slug)]: {
+            slug,
+            url,
+            title,
+            user_title: 'Mutable alias',
+            likes: 1,
+            scrollDepth: 10,
+            timeOnPage: 60_000,
+            parentIds: [],
+            childIds: [],
+            timestamps: { 'device-a': visitedAt },
+            visitDates: [
+              visitDateInt(new Date(visitedAt).toISOString().slice(0, 10)),
+            ],
+            createdAt: visitedAt,
+          },
+        },
+      });
+
+      await commitDesktopSearch(page, 'mutable');
+      const row = page.locator(`.result-row[data-url="${url}"]`);
+      await expect(row).toBeVisible();
+      const originalDates = await row.getAttribute('data-dates');
+
+      await page.evaluate(
+        ({ key, slug, url, title, visitedAt, timestamp }) => {
+          window.__desktopVisualHarness.updateSessionValue(key, {
+            slug,
+            url,
+            title,
+            user_title: 'Renamed alias',
+            likes: 1,
+            parentIds: [],
+            childIds: [],
+            timestamps: { 'device-a': visitedAt },
+            visitDates: [
+              Number(
+                new Date(visitedAt)
+                  .toISOString()
+                  .slice(0, 10)
+                  .replaceAll('-', ''),
+              ),
+            ],
+            createdAt: visitedAt,
+          });
+          window.__desktopVisualHarness.emitRuntimeMessage({
+            action: 'mutation',
+            type: 'history',
+            url,
+            historyEntry: {
+              action: 'rename_page',
+              timestamp: timestamp - 1,
+              url,
+              title: null,
+              userTitle: 'Mutable interim alias',
+              scrollDepth: null,
+              timeOnPage: null,
+              likes: null,
+              deviceId: 'device-a',
+            },
+          });
+          window.__desktopVisualHarness.emitRuntimeMessage({
+            action: 'mutation',
+            type: 'history',
+            url,
+            historyEntry: {
+              action: 'rename_page',
+              timestamp,
+              url,
+              title: null,
+              userTitle: 'Renamed alias',
+              scrollDepth: null,
+              timeOnPage: null,
+              likes: null,
+              deviceId: 'device-a',
+            },
+          });
+        },
+        {
+          key: pageKey(slug),
+          slug,
+          url,
+          title,
+          visitedAt,
+          timestamp: now,
+        },
+      );
+
+      await expect(row).toHaveCount(0, { timeout: 3000 });
+
+      await commitDesktopSearch(page, 'neutral');
+      const neutralRow = page.locator(`.result-row[data-url="${url}"]`);
+      await expect(neutralRow).toBeVisible();
+      await expect(neutralRow).toHaveAttribute('data-dates', originalDates);
+
+      await page.evaluate(
+        ({ key, slug, url, title, timestamp }) => {
+          window.__desktopVisualHarness.updateSessionValue(key, {
+            slug,
+            url,
+            title,
+            user_title: 'Renamed alias',
+            likes: 1,
+            scrollDepth: 80,
+            timeOnPage: 120_000,
+            parentIds: [],
+            childIds: [],
+            timestamps: { 'device-a': timestamp },
+            visitDates: [
+              Number(
+                new Date(timestamp)
+                  .toISOString()
+                  .slice(0, 10)
+                  .replaceAll('-', ''),
+              ),
+            ],
+            createdAt: timestamp - 86_400_000,
+          });
+          window.__desktopVisualHarness.emitRuntimeMessage({
+            action: 'mutation',
+            type: 'history',
+            url,
+            historyEntry: {
+              action: 'leave_page',
+              timestamp,
+              url,
+              title,
+              userTitle: null,
+              scrollDepth: 80,
+              timeOnPage: 60_000,
+              likes: null,
+              deviceId: 'device-a',
+            },
+          });
+        },
+        {
+          key: pageKey(slug),
+          slug,
+          url,
+          title,
+          timestamp: now + 1,
+        },
+      );
+
+      await expect(neutralRow).toHaveAttribute(
+        'data-dates',
+        new RegExp(todayKey()),
+        { timeout: 3000 },
+      );
+      await neutralRow.locator('.att-ctrl-btn').click({ force: true });
+      await expect(page.locator('.page-detail-card')).toContainText('2m');
+      await expect(page.locator('.page-detail-card')).toContainText(
+        '80% scrolled',
+      );
+      await page.locator('.page-detail-close').click();
+
+      await page.locator('#filterToggleBtn').click();
+      await page.locator('.filter-checkbox input[data-key="liked"]').click();
+      await expect(neutralRow).toBeVisible();
+
+      await page.evaluate(
+        ({ key, slug, url, title, visitedAt, timestamp }) => {
+          window.__desktopVisualHarness.updateSessionValue(key, {
+            slug,
+            url,
+            title,
+            user_title: 'Renamed alias',
+            likes: 0,
+            parentIds: [],
+            childIds: [],
+            timestamps: { 'device-a': visitedAt },
+            visitDates: [
+              Number(
+                new Date(visitedAt)
+                  .toISOString()
+                  .slice(0, 10)
+                  .replaceAll('-', ''),
+              ),
+            ],
+            createdAt: visitedAt,
+          });
+          window.__desktopVisualHarness.emitRuntimeMessage({
+            action: 'mutation',
+            type: 'history',
+            url,
+            historyEntry: {
+              action: 'rate_page',
+              timestamp,
+              url,
+              title: null,
+              userTitle: null,
+              scrollDepth: null,
+              timeOnPage: null,
+              likes: -1,
+              deviceId: 'device-a',
+            },
+          });
+        },
+        {
+          key: pageKey(slug),
+          slug,
+          url,
+          title,
+          visitedAt,
+          timestamp: now + 1,
+        },
+      );
+
+      await expect(neutralRow).toHaveCount(0, { timeout: 3000 });
     });
   });
 
