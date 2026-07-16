@@ -1,0 +1,36 @@
+- The desktop app crashes when I launch it, a regression introduced last commit, let's investigate the reason and why testing didn't caught it.
+- That is a wrong thing to implement. The original request was to remove code bloat around fallback and backward compat, in the meantime making sure the code that stays are working properly based on good mental model. For the log files, there's no need to assume there's no direct file under the /log. As far as the product is concerned, user starts the first install with latest software, it's not possible to generate stale data moving forward.
+- Yes, I want you to scan the other assertions or guards introduced in the last commit to see if there're other redundant ones and could cause the app to abort too easily.
+- Fix them all, TDD
+- Why did you add more code? I thought the idea is to remove code?
+- Clean them up
+- Scan one more time for all assertions and aborts across the codebase, let's see if they are truly necessary and whether can be converted to error
+- Fix them all
+- Please review my uncommitted changes
+- Fix them
+- I tried the latest desktop app, the app can open but it stuck as a blank page.
+- I launched it, it shows an error banner saying "/Users/xyt/browser-data/.../2026-02-10.jsonl: missing field `referrerUrl`". Do two things: (1) Figure out if this check is truly necessary, if it is, fix the existing data to make it pass, (2) Adjust the error banner so that the error message can be selected and copied.
+- Tell me what has changed around "protocol shape" since (including) the last commit?
+- Let's make the latest protocol format the version 1, and remove support for other flavors, including migrating old format data if there's any. Also, we should think about whether the strict checks would make it hard to add new fields without bumping version.
+- When I tried to take a snapshot, it says "Desktop command queue did not drain"
+- Why is this not covered by tests? It seems like a basic enough scenario
+- You are saying this only happen because the persisted queue was persisted by the old version app?
+- Then what does "The command buffer now rewrites those persisted requests" mean? I presume whatever logic to migrate the old format should be a one-off thing? Not something we leave in the production code
+- I have updated the app and the snapshot works now. You should remove the logic now. And I noticed one regression, the MacOS tray icon doesn't appear after I opened the desktop app.
+- But that's not true, the tray has plenty of room and I can enable other apps to appear on it. If the recent changes haven't touched the icon generation, then the issue is somewhere else.
+- I restarted the computer, rebuild and restart the app, the icon still doesn't show. The tray icons did nudge a bit to make room but retracted quickly.
+- Help me build a desktop binary at commit 37ae1cd, I will verify if it indeed doesn't work on an old version
+- The tray icon does fail to appear. But how is that possible? It works fine yesterday. You are not giving many clues to fix this issue.
+- I have done the reset, but it doesn't seem to change anything, my old customization is still on
+- I noticed: when you killed the control centre, the browser-recall icon did show up. But then when I manually remove ChatGPT icon from the tray, browser-recall disappeared along with it
+- Fix it thoroughly, and right now, it doesn't work even when ChatGPT icon is enabled
+- Granted, continue
+- Why is it that browser recall gets corrupted so often? Is it because our app bundling workflow is wrong somehow?
+- Continue
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) 
+- Fix them all
+- But do not touch the prompt file
+- Please review my uncommitted changes
+- Fix them
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.6 Sol
+- Sure

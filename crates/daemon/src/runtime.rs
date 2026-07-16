@@ -2,8 +2,9 @@ use crate::storage::{ReplayProgress, Storage};
 use browser_recall_replay::{
     effect_of, Context as ReplayContext, EntityEffect, LogEntry, ReplayError,
 };
+use parking_lot::Mutex as StdMutex;
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::Arc;
 use tokio::sync::MutexGuard;
 
 pub type EntityMapView = BTreeMap<String, EntityEffect>;
@@ -251,8 +252,7 @@ async fn effect_with_overlay(
                 match storage.load_entity(&key).await {
                     Ok(entity) => entity,
                     Err(error) => {
-                        let mut first_error =
-                            load_error.lock().expect("replay load error mutex poisoned");
+                        let mut first_error = load_error.lock();
                         if first_error.is_none() {
                             *first_error = Some(format!("{key}: {error}"));
                         }
@@ -264,10 +264,7 @@ async fn effect_with_overlay(
         context.clone(),
     )
     .await;
-    let load_error = load_error
-        .lock()
-        .expect("replay load error mutex poisoned")
-        .take();
+    let load_error = load_error.lock().take();
     match load_error {
         Some(error) => Err(ReplayError::Load(error)),
         None => replay_result,

@@ -33,17 +33,20 @@ pub fn trim_title_from_settings(
     if values["titleCleanupEnabled"] == Value::Bool(false) {
         return Ok(title.trim().to_string());
     }
-    for rule in values["titleTrimRules"]
+    let rules = values["titleTrimRules"]
         .as_array()
-        .expect("validated title trim rules")
-    {
+        .ok_or_else(|| "titleTrimRules must be an array".to_string())?;
+    for rule in rules {
         let prefix = rule["urlPrefix"]
             .as_str()
-            .expect("validated title trim prefix");
+            .ok_or_else(|| "titleTrimRules urlPrefix must be a string".to_string())?;
         if prefix.is_empty() || !url.starts_with(prefix) {
             continue;
         }
-        match rule["action"].as_str().expect("validated trim action") {
+        match rule["action"]
+            .as_str()
+            .ok_or_else(|| "titleTrimRules action must be a string".to_string())?
+        {
             "remove_after_pipe" => {
                 if let Some(index) = title.find('|').filter(|index| *index > 0) {
                     title.truncate(index);
@@ -65,17 +68,17 @@ pub fn blacklist_prefixes(settings: Option<&Entity>) -> Result<Vec<String>, Stri
             .map(|value| value.to_string())
             .collect());
     }
-    Ok(values["urlBlacklist"]
+    values["urlBlacklist"]
         .as_array()
-        .expect("validated URL blacklist")
+        .ok_or_else(|| "urlBlacklist must be an array".to_string())?
         .iter()
         .map(|value| {
             value
                 .as_str()
-                .expect("validated blacklist string")
-                .to_string()
+                .map(str::to_string)
+                .ok_or_else(|| "urlBlacklist must contain strings only".to_string())
         })
-        .collect())
+        .collect()
 }
 
 pub async fn should_record_visit(

@@ -39,6 +39,66 @@ describe('browser data URL identity migration', () => {
     tempRoot = null;
   });
 
+  it('writes the one current replay shape with explicit nullable fields', () => {
+    tempRoot = mkdtempSync(join(os.tmpdir(), 'browser-recall-migrate-'));
+    const root = join(tempRoot, 'browser-data');
+    const timestamp = 1_710_000_000_000;
+    const entries = [
+      { timestamp, action: 'visit_page', url: 'https://example.com' },
+      { timestamp, action: 'leave_page', url: 'https://example.com' },
+      {
+        timestamp,
+        action: 'pin_to_list',
+        name: 'Reading',
+        listOwner: 'device',
+        urls: ['https://example.com'],
+      },
+      {
+        timestamp,
+        action: 'create_list',
+        name: 'Reading',
+        listOwner: 'device',
+      },
+      {
+        timestamp,
+        action: 'create_note',
+        url: 'https://example.com',
+        path: 'objects/notes/note.json',
+      },
+    ];
+    const logPath = join(root, 'logs', 'device', '2026-07-15.jsonl');
+    writeText(logPath, `${entries.map(JSON.stringify).join('\n')}\n`);
+
+    execFileSync(
+      process.execPath,
+      ['scripts/migrate-browser-data-schema.mjs', '--root', root, '--apply'],
+      { cwd: process.cwd(), stdio: 'pipe' },
+    );
+
+    const migrated = readFileSync(logPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(migrated).toEqual([
+      { ...entries[0], title: null, referrerUrl: null },
+      {
+        ...entries[1],
+        title: null,
+        scrollDepth: null,
+        timeOnPage: null,
+      },
+      { ...entries[2], titles: null, source: null },
+      { ...entries[3], listId: null, parentListId: null },
+      {
+        ...entries[4],
+        title: null,
+        excerpt: null,
+        note: null,
+        cssPath: null,
+      },
+    ]);
+  });
+
   it('normalizes highlight note excerpts and css paths to arrays', () => {
     tempRoot = mkdtempSync(join(os.tmpdir(), 'browser-recall-migrate-'));
     const root = join(tempRoot, 'browser-data');

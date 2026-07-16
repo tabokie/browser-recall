@@ -1,7 +1,9 @@
 mod support;
 
 use browser_recall_daemon::pairing::{static_approver, PairingDecision};
-use browser_recall_daemon::protocol::{ConnectorMessage, DaemonMessage, TestControlMessage};
+use browser_recall_daemon::protocol::{
+    ConnectorMessage, DaemonMessage, TestControlMessage, CONNECTOR_PROTOCOL_VERSION,
+};
 use browser_recall_daemon::ws_server::start_server;
 use browser_recall_daemon::{ApprovedConnector, ConfigStore, ServerStartOptions, Token};
 use browser_recall_replay::generate_slug_from_url;
@@ -106,7 +108,7 @@ async fn authenticated_socket(port: u16, token: &str) -> TestSocket {
     socket
         .send(Message::Text(
             serde_json::to_string(&ConnectorMessage::Auth {
-                protocol_version: Some(2),
+                protocol_version: Some(CONNECTOR_PROTOCOL_VERSION),
                 token: token.into(),
             })
             .expect("auth json"),
@@ -118,7 +120,7 @@ async fn authenticated_socket(port: u16, token: &str) -> TestSocket {
     assert!(matches!(
         auth,
         DaemonMessage::AuthOk {
-            protocol_version: 2
+            protocol_version: CONNECTOR_PROTOCOL_VERSION
         }
     ));
     socket
@@ -914,7 +916,7 @@ async fn websocket_auth_control_and_error_matrix_keeps_connections_predictable()
     send_connector(
         &mut bad_auth,
         ConnectorMessage::Auth {
-            protocol_version: Some(2),
+            protocol_version: Some(CONNECTOR_PROTOCOL_VERSION),
             token: "missing-token".to_string(),
         },
     )
@@ -963,7 +965,7 @@ async fn websocket_pairing_denial_is_explicit_and_closes_request() {
     send_connector(
         &mut socket,
         ConnectorMessage::PairRequest {
-            protocol_version: Some(2),
+            protocol_version: Some(CONNECTOR_PROTOCOL_VERSION),
             browser_id: "denied-browser".to_string(),
             browser_name: "Chrome".to_string(),
             extension_id: "abcdefghijklmnop".to_string(),
@@ -1333,6 +1335,94 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
         &mut socket,
         json!({
             "type": "run_command",
+            "bufferDepth": 0,
+            "bufferBytes": 0,
+            "action": "reportLeave",
+            "request": {
+                "timestamp": 1_710_040_000_050i64,
+                "url": "https://private.example/secret",
+                "title": "Private Page",
+                "scrollDepth": 50,
+                "timeOnPage": 5000
+            }
+        }),
+    )
+    .await;
+    let leave_response = next_daemon(&mut socket).await;
+    assert!(
+        matches!(
+            leave_response,
+            DaemonMessage::CommandResult { success: true, .. }
+        ),
+        "expected leave after a skipped visit to be accepted, got {leave_response:?}"
+    );
+    assert!(!page_path(&data_dir, &private_slug).exists());
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "bufferDepth": 0,
+            "bufferBytes": 0,
+            "action": "reportVisit",
+            "request": {
+                "timestamp": 1_710_040_000_075i64,
+                "url": "https://example.com/from-interstitial",
+                "title": null,
+                "referrer": "chrome-extension://blocked-page/interstitial.html",
+                "bodyPreview": null,
+                "bypassBlacklist": false
+            }
+        }),
+    )
+    .await;
+    let interstitial_response = next_daemon(&mut socket).await;
+    assert!(
+        matches!(
+            interstitial_response,
+            DaemonMessage::CommandResult { success: true, .. }
+        ),
+        "expected non-web referrer to be omitted, got {interstitial_response:?}"
+    );
+    let interstitial_slug =
+        generate_slug_from_url("https://example.com/from-interstitial").expect("slug");
+    assert!(
+        get_entity(&mut socket, &format!("page:{interstitial_slug}"))
+            .await
+            .is_some()
+    );
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "bufferDepth": 0,
+            "bufferBytes": 0,
+            "action": "reportVisit",
+            "request": {
+                "timestamp": 1_710_040_000_080i64,
+                "url": "https://example.com/from-malformed-referrer",
+                "title": null,
+                "referrer": "https://",
+                "bodyPreview": null,
+                "bypassBlacklist": false
+            }
+        }),
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::CommandResult {
+            success: false,
+            error: Some(error),
+            ..
+        } => assert!(error.contains("invalid referrer")),
+        other => panic!("expected malformed referrer failure, got {other:?}"),
+    }
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
                 "bufferDepth": 0,
                 "bufferBytes": 0,
             "action": "reportVisit",
@@ -1558,7 +1648,7 @@ async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
         }
     }
 
-    handle.resume().await;
+    handle.control_handle().resume().await;
 
     send_connector(
         &mut socket,
@@ -1583,7 +1673,7 @@ async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
         other => panic!("expected snapshot fs pause, got {other:?}"),
     }
 
-    handle.resume().await;
+    handle.control_handle().resume().await;
 
     send_connector(
         &mut socket,
@@ -1610,7 +1700,7 @@ async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
         other => panic!("expected note fs pause, got {other:?}"),
     }
 
-    handle.resume().await;
+    handle.control_handle().resume().await;
     send_connector(&mut socket, ConnectorMessage::GetStatus).await;
     assert!(matches!(
         next_daemon(&mut socket).await,
@@ -3903,7 +3993,7 @@ async fn visit_events_auto_pin_lists_with_matching_function_rules() {
             "timestamp": 1_710_000_004_200i64,
             "action": "visit_page",
             "url": "https://example.com/",
-            "title": "Example Home",
+            "title": null,
             "referrerUrl": null,
         }),
     ] {
@@ -4280,7 +4370,7 @@ async fn replay_failure_pauses_daemon_and_rejects_followup_events() {
         other => panic!("expected paused error, got {other:?}"),
     }
 
-    handle.resume().await;
+    handle.control_handle().resume().await;
 
     let resumed_snapshot = handle.snapshot().await;
     assert_eq!(

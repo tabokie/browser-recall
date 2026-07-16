@@ -247,10 +247,6 @@ impl ServerHandle {
         }
     }
 
-    pub async fn resume(&self) {
-        resume_service(&self.shared).await;
-    }
-
     pub async fn shutdown(mut self) {
         let storage = self.shared.storage.clone();
         if let Some(tx) = self.shutdown_tx.take() {
@@ -271,6 +267,10 @@ pub struct ServerControlHandle {
 }
 
 impl ServerControlHandle {
+    pub async fn resume(&self) {
+        resume_service(&self.shared).await;
+    }
+
     pub async fn revoke_connector(
         &self,
         browser_id: &str,
@@ -431,7 +431,7 @@ async fn bind_first_available(candidates: &[u16]) -> Result<(TcpListener, u16), 
 
 #[allow(clippy::result_large_err)]
 async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(), WsServerError> {
-    let origin_slot = Arc::new(std::sync::Mutex::new(None::<String>));
+    let origin_slot = Arc::new(parking_lot::Mutex::new(None::<String>));
     let origin_slot_clone = origin_slot.clone();
     let ws_stream = accept_hdr_async_with_config(
         stream,
@@ -441,7 +441,7 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                 .get("origin")
                 .and_then(|value| value.to_str().ok())
                 .map(|value| value.to_string());
-            *origin_slot_clone.lock().expect("origin mutex poisoned") = origin.clone();
+            *origin_slot_clone.lock() = origin.clone();
             Ok(response)
         },
         Some(websocket_config()),
@@ -449,7 +449,7 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
     .await
     .map_err(|error| WsServerError::Handshake(error.to_string()))?;
 
-    let origin = origin_slot.lock().expect("origin mutex poisoned").clone();
+    let origin = origin_slot.lock().clone();
     info!(?origin, "accepted websocket connection");
     let (mut write, mut read) = ws_stream.split();
     let connection_id = shared.next_connection_id.fetch_add(1, Ordering::Relaxed);
@@ -1599,7 +1599,7 @@ async fn preview_rule_batch(
 
 fn page_data_from_batch_entry(entry: &RuleBatchEntry) -> PageData {
     PageData {
-        title: entry.title.clone(),
+        title: Some(entry.title.clone()),
         url: entry.url.clone(),
         body: entry.body_preview.clone(),
     }
@@ -1674,20 +1674,13 @@ async fn report_visit_command(
         .transpose()
         .map_err(WsServerError::Ingest)?
         .filter(|title| !title.is_empty());
-    let mut referrer_url = request
-        .referrer
-        .as_deref()
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
-    if let Some(referrer) = &referrer_url {
-        let referrer_slug = generate_slug_from_url(referrer)
-            .map_err(|error| WsServerError::Ingest(error.to_string()))?;
-        let page_slug = generate_slug_from_url(url)
-            .map_err(|error| WsServerError::Ingest(error.to_string()))?;
-        if referrer_slug == page_slug {
-            referrer_url = None;
-        }
-    }
+    let page_slug =
+        generate_slug_from_url(url).map_err(|error| WsServerError::Ingest(error.to_string()))?;
+    let referrer_url = commands::optional_page_referrer(request.referrer.as_deref())
+        .map_err(WsServerError::Ingest)?
+        .filter(|referrer| {
+            generate_slug_from_url(referrer).is_ok_and(|referrer_slug| referrer_slug != page_slug)
+        });
 
     let entry = LogEntry::VisitPage {
         timestamp,
@@ -2037,11 +2030,19 @@ async fn handle_get_snapshot_html(shared: &SharedState, slug: String, ts: i64) -
 
 async fn handle_get_entity(shared: &SharedState, key: String) -> DaemonMessage {
     match shared.storage.load_entity_coordinated(&key).await {
-        Ok(Some(entity)) => DaemonMessage::EntityResult {
-            success: true,
-            key,
-            entity: Some(entity_to_value(entity)),
-            error: None,
+        Ok(Some(entity)) => match entity_to_value(entity) {
+            Ok(entity) => DaemonMessage::EntityResult {
+                success: true,
+                key,
+                entity: Some(entity),
+                error: None,
+            },
+            Err(error) => DaemonMessage::EntityResult {
+                success: false,
+                key,
+                entity: None,
+                error: Some(error),
+            },
         },
         Ok(None) => DaemonMessage::EntityResult {
             success: true,
@@ -2529,18 +2530,8 @@ fn map_popup_page_entry(page: &crate::read_projections::PageProjection) -> Popup
     }
 }
 
-fn entity_to_value(entity: Entity) -> Value {
-    match entity {
-        Entity::Page(page) => serde_json::to_value(page).expect("page serializes"),
-        Entity::Note(note) => serde_json::to_value(note).expect("note serializes"),
-        Entity::List(list) => serde_json::to_value(list).expect("list serializes"),
-        Entity::Settings(settings) => serde_json::to_value(settings).expect("settings serialize"),
-        Entity::NameToId(manifest) => serde_json::to_value(manifest).expect("name map serializes"),
-        Entity::ListOrder(manifest) => {
-            serde_json::to_value(manifest).expect("list order serializes")
-        }
-        Entity::Orphaned(manifest) => serde_json::to_value(manifest).expect("orphaned serializes"),
-    }
+fn entity_to_value(entity: Entity) -> Result<Value, String> {
+    serde_json::to_value(entity).map_err(|error| error.to_string())
 }
 
 fn websocket_config() -> WebSocketConfig {

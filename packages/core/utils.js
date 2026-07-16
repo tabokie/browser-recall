@@ -50,9 +50,19 @@ function canonicalizePageReference(value) {
 
 export function canonicalizePageRequest(request = {}) {
   const output = { ...request };
-  for (const key of ['url', 'referrer']) {
-    if (typeof output[key] === 'string') {
-      output[key] = canonicalizePageUrl(output[key]);
+  if (typeof output.url === 'string') {
+    output.url = canonicalizePageUrl(output.url);
+  }
+  if (typeof output.referrer === 'string') {
+    const parsedReferrer = new URL(output.referrer);
+    if (
+      (parsedReferrer.protocol === 'http:' ||
+        parsedReferrer.protocol === 'https:') &&
+      parsedReferrer.hostname
+    ) {
+      output.referrer = canonicalizePageUrl(output.referrer);
+    } else {
+      output.referrer = null;
     }
   }
   for (const key of ['urls']) {

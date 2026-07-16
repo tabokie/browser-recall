@@ -63,9 +63,6 @@ if ('scrollRestoration' in history) {
   history.scrollRestoration = 'manual';
 }
 
-function revealApp() {
-  document.documentElement.style.opacity = '';
-}
 // parseBookmarkHtml imported dynamically inside the block below
 
 let desktopSystemLocale = null;
@@ -330,8 +327,7 @@ function showServiceErrorBanner(svcErr) {
   resumeBtn.onclick = async () => {
     try {
       await sendAction({ action: 'resumeService' });
-      await refreshDesktopConnectorState();
-      banner.style.display = 'none';
+      reloadApp();
     } catch (error) {
       msgEl.textContent = tr(
         'desktopErrorPrefix',
@@ -656,6 +652,7 @@ function bindWindowDragRegions() {
     'textarea',
     '[contenteditable="true"]',
     '[role="button"]',
+    '.selectable-text',
     '.main-title',
     '.color-dot',
   ].join(',');
@@ -1362,7 +1359,6 @@ function markShellReady() {
   if (shellReady) return;
   shellReady = true;
   document.body.dataset.shellReady = 'true';
-  revealApp();
   void applyPendingShellRoute();
 }
 
@@ -1383,7 +1379,7 @@ function buildDesktopHistoryResults(results) {
       !result ||
       typeof result.url !== 'string' ||
       !result.url ||
-      typeof result.title !== 'string' ||
+      (result.title !== null && typeof result.title !== 'string') ||
       !Number.isFinite(result.timestamp) ||
       !Number.isFinite(result.score)
     ) {
@@ -3211,7 +3207,7 @@ function buildEditRowHTML(type, config) {
     </div>
     <div class="rule-fn-editor" style="${isKeyword ? 'display:none' : ''}">
       <pre class="rule-fn-highlight" aria-hidden="true"></pre>
-      <textarea class="rule-fn-input scroll-boundary-contained" rows="20" placeholder="// page = { title, url, body }\nreturn page.title.length > 50;" spellcheck="false">${escapeHtml(fnSource)}</textarea>
+      <textarea class="rule-fn-input scroll-boundary-contained" rows="20" placeholder="// page = { title, url, body }\nreturn page.title !== null && page.title.length > 50;" spellcheck="false">${escapeHtml(fnSource)}</textarea>
     </div>
   </div>`;
 }
@@ -8630,12 +8626,28 @@ async function initializeMain(currentTheme, deviceResp = null) {
       `[init-timer] ${label}: ${(performance.now() - _t0).toFixed(0)}ms`,
     );
 
-  // Check for service downtime (paused state) and show error banner if set
-  const { serviceError: svcErr } = await chrome.storage.session.get([
-    'serviceError',
+  // Check for service downtime (paused state) and show error banner if set.
+  const [{ serviceError }, connector] = await Promise.all([
+    chrome.storage.session.get(['serviceError']),
+    loadDesktopConnectorState(),
   ]);
+  let svcErr = serviceError;
+  if (connector.state === 'paused') {
+    if (!connector.lastError || !connector.lastErrorCode) {
+      throw new Error('Paused desktop service is missing its diagnostic');
+    }
+    svcErr = {
+      code: connector.lastErrorCode,
+      message: connector.lastError,
+    };
+  }
   if (svcErr) {
     showServiceErrorBanner(svcErr);
+  }
+  if (connector.state === 'paused') {
+    markShellReady();
+    markAppReady();
+    return;
   }
 
   // Verify device identity from daemon app config.

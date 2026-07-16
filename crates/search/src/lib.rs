@@ -1,3 +1,13 @@
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::unwrap_used
+    )
+)]
+
 use browser_recall_replay::entities::{NoteEntity, PageEntity};
 use serde::Serialize;
 use serde_json::Value;
@@ -12,7 +22,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct HistoryEntry {
     pub timestamp: i64,
     pub url: String,
-    pub title: String,
+    pub title: Option<String>,
     pub user_title: Option<String>,
     pub content: String,
 }
@@ -30,7 +40,7 @@ impl HistoryEntry {
         Ok(Self {
             timestamp,
             url,
-            title,
+            title: Some(title),
             user_title: None,
             content: String::new(),
         })
@@ -45,7 +55,7 @@ impl HistoryEntry {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct SearchResult {
     pub url: String,
-    pub title: String,
+    pub title: Option<String>,
     pub timestamp: i64,
     pub score: f64,
 }
@@ -55,7 +65,7 @@ pub struct SearchResult {
 pub struct SearchRecord {
     pub timestamp: i64,
     pub url: String,
-    pub title: String,
+    pub title: Option<String>,
     pub user_title: Option<String>,
     pub slug: Option<String>,
 }
@@ -375,7 +385,7 @@ fn identity_score_opt(entry: &HistoryEntry, words: &[QueryWord]) -> Option<f64> 
     weighted_fields_score(
         words,
         &[
-            (&entry.title, 2.0),
+            (entry.title.as_deref().unwrap_or_default(), 2.0),
             (entry.user_title.as_deref().unwrap_or_default(), 2.0),
             (&entry.url, 0.5),
         ],
@@ -560,10 +570,10 @@ pub fn search_notes<P: AsRef<Path>>(notes_dir: P, query: &str) -> io::Result<Vec
         let entry = entry?;
         let path = entry.path();
         if !path.is_file() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("unexpected directory in note storage: {}", path.display()),
-            ));
+            continue;
+        }
+        if path.extension() != Some(std::ffi::OsStr::new("json")) {
+            continue;
         }
         let name = path
             .file_name()
@@ -571,12 +581,6 @@ pub fn search_notes<P: AsRef<Path>>(notes_dir: P, query: &str) -> io::Result<Vec
             .ok_or_else(|| {
                 io::Error::new(io::ErrorKind::InvalidData, "note filename is not UTF-8")
             })?;
-        if !name.ends_with(".json") {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("unexpected non-JSON note file: {name}"),
-            ));
-        }
         let text = fs::read_to_string(&path)?;
         let note = serde_json::from_str::<NoteEntity>(&text).map_err(|error| {
             io::Error::new(
@@ -854,7 +858,7 @@ mod tests {
         let entry = HistoryEntry {
             timestamp: 1,
             url: "https://example.com".into(),
-            title: "React Hooks".into(),
+            title: Some("React Hooks".into()),
             user_title: None,
             content: String::new(),
         };
@@ -876,7 +880,7 @@ mod tests {
         let entry = HistoryEntry {
             timestamp: 1,
             url: "https://example.com".into(),
-            title: "React Hooks".into(),
+            title: Some("React Hooks".into()),
             user_title: None,
             content: String::new(),
         };
@@ -894,7 +898,7 @@ mod tests {
         let entry = HistoryEntry {
             timestamp: 1,
             url: "https://example.com/research".into(),
-            title: "React Hooks".into(),
+            title: Some("React Hooks".into()),
             user_title: Some("Custom name".into()),
             content: String::new(),
         };
@@ -921,7 +925,7 @@ mod tests {
             vec![SearchRecord {
                 timestamp: 200,
                 url: "https://example.com/plain".into(),
-                title: "Original title".into(),
+                title: Some("Original title".into()),
                 user_title: Some("Custom title".into()),
                 slug: None,
             }],
@@ -937,7 +941,7 @@ mod tests {
             vec![SearchRecord {
                 timestamp: 200,
                 url: "https://example.com/url-needle".into(),
-                title: "Original title".into(),
+                title: Some("Original title".into()),
                 user_title: None,
                 slug: None,
             }],
@@ -971,7 +975,7 @@ mod tests {
             vec![SearchRecord {
                 timestamp: 200,
                 url: "https://example.com/renamed".into(),
-                title: "Original title".into(),
+                title: Some("Original title".into()),
                 user_title: None,
                 slug: Some(slug.into()),
             }],

@@ -1319,12 +1319,6 @@ async function handleRecordPageActivity(request, sender) {
         const bgRef = await getReferrer(sender.tab.id);
         if (bgRef) referrerUrl = bgRef;
       }
-      if (referrerUrl) {
-        const refSlug = generateSlugFromUrl(referrerUrl);
-        const selfSlug = generateSlugFromUrl(url);
-        if (refSlug === selfSlug) referrerUrl = null;
-      }
-
       const report = await buildVisitReport(
         url,
         request.title || '',

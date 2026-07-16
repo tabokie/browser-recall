@@ -413,7 +413,7 @@ class SuccessfulWebSocket {
     if (payload.type === 'auth') {
       queueMicrotask(() =>
         this.#emit('message', {
-          data: JSON.stringify({ type: 'auth_ok', protocolVersion: 2 }),
+          data: JSON.stringify({ type: 'auth_ok', protocolVersion: 1 }),
         }),
       );
       return;

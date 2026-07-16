@@ -75,6 +75,30 @@ jobs:
 
       - run: npm run ci:test-desktop-visual
 
+  test-desktop-native-bundle:
+    name: Desktop Native Lifecycle
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: npm ci
+
+      - run: npm run build --workspace @browser-recall/desktop
+
+      - name: Exercise native startup and tray lifecycle
+        env:
+          BROWSER_RECALL_ISOLATED_MACOS_SESSION: '1'
+        run: node tests/smoke/macos-desktop-window-lifecycle.mjs
+
   lint-js:
     name: Lint & Format (JS)
     runs-on: ubuntu-latest

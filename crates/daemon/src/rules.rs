@@ -29,7 +29,7 @@ const RULE_TIMEOUT: Duration = Duration::from_millis(50);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PageData {
-    pub title: String,
+    pub title: Option<String>,
     pub url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
@@ -63,11 +63,11 @@ pub fn page_data_from_raw_entry(entry: &Value) -> Result<PageData, String> {
         .and_then(Value::as_str)
         .ok_or_else(|| "Rule page data requires a string url".to_string())?
         .to_string();
-    let title = object
-        .get("title")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "Rule page data requires a string title".to_string())?
-        .to_string();
+    let title = match object.get("title") {
+        Some(Value::String(title)) => Some(title.clone()),
+        Some(Value::Null) => None,
+        Some(_) | None => return Err("Rule page data requires a string or null title".to_string()),
+    };
     if object.contains_key("body") {
         return Err("Rule page data does not accept legacy body; use bodyPreview".to_string());
     }
@@ -142,9 +142,12 @@ pub fn validate_fn_rule_source(fn_source: &str) -> ValidationResult {
 
     for name in BANNED_GLOBALS {
         let pattern = format!(r"\b{}\b", regex::escape(name));
-        let re = regex::Regex::new(&pattern).expect("banned-global regex");
-        if re.is_match(fn_source) {
-            errors.push(format!("Banned global detected: {name}"));
+        match regex::Regex::new(&pattern) {
+            Ok(re) if re.is_match(fn_source) => {
+                errors.push(format!("Banned global detected: {name}"));
+            }
+            Ok(_) => {}
+            Err(error) => errors.push(format!("Could not validate banned global {name}: {error}")),
         }
     }
 
@@ -164,28 +167,31 @@ fn evaluate_rule_strict(
         config: config.clone(),
     })?;
     match rule_type {
-        "keyword" => Ok(match_keyword_rule(config, page)),
+        "keyword" => match_keyword_rule(config, page),
         "function" => execute_function_rule(config, page),
         unknown => Err(format!("Unsupported rule type: {unknown}")),
     }
 }
 
-fn match_keyword_rule(config: &BTreeMap<String, Value>, page: &PageData) -> bool {
+fn match_keyword_rule(config: &BTreeMap<String, Value>, page: &PageData) -> Result<bool, String> {
+    let Some(title) = &page.title else {
+        return Ok(false);
+    };
     let pattern = config
         .get("pattern")
         .and_then(Value::as_str)
-        .expect("validated keyword rule pattern");
+        .ok_or_else(|| "Keyword rule requires a string pattern".to_string())?;
 
     if pattern.starts_with('/') && pattern.ends_with('/') && pattern.len() >= 2 {
         let expression = format!("(?i){}", &pattern[1..pattern.len() - 1]);
         let Ok(regex) = regex::Regex::new(&expression) else {
-            return false;
+            return Ok(false);
         };
-        return regex.is_match(&page.title);
+        return Ok(regex.is_match(title));
     }
 
     let needle = pattern.to_lowercase();
-    page.title.to_lowercase().contains(&needle)
+    Ok(title.to_lowercase().contains(&needle))
 }
 
 fn execute_function_rule(
@@ -236,11 +242,16 @@ Boolean((function(page) {{
     );
 
     let result = context.with(|ctx| {
-        let parse_url = Function::new(ctx.clone(), |input: String| -> String {
+        let parse_url = Function::new(ctx.clone(), |input: String| {
             match ParsedUrl::parse(&input) {
-                Ok(parsed) => serde_json::to_string(&parsed)
-                    .expect("ParsedUrl contains only JSON-serializable fields"),
-                Err(error) => serde_json::json!({ "error": error.to_string() }).to_string(),
+                Ok(parsed) => serde_json::to_string(&parsed).map_err(|error| {
+                    rquickjs::Error::new_from_js_message(
+                        "ParsedUrl",
+                        "JSON string",
+                        error.to_string(),
+                    )
+                }),
+                Err(error) => Ok(serde_json::json!({ "error": error.to_string() }).to_string()),
             }
         })?;
         ctx.globals().set("__brParseUrl", parse_url)?;
@@ -360,7 +371,7 @@ mod tests {
         assert_eq!(
             page,
             PageData {
-                title: "Example".to_string(),
+                title: Some("Example".to_string()),
                 url: "https://example.com/page".to_string(),
                 body: Some("Hello world".to_string()),
             }
@@ -398,7 +409,7 @@ mod tests {
         assert!(list_matches_page(
             &list,
             &PageData {
-                title: "All About Cats".to_string(),
+                title: Some("All About Cats".to_string()),
                 url: "https://example.com/page".to_string(),
                 body: None,
             }
@@ -406,7 +417,7 @@ mod tests {
         assert!(!list_matches_page(
             &list,
             &PageData {
-                title: "No title match".to_string(),
+                title: Some("No title match".to_string()),
                 url: "https://example.com/page".to_string(),
                 body: Some("Cats are here".to_string()),
             }
@@ -499,7 +510,7 @@ mod tests {
         assert!(list_matches_page(
             &list,
             &PageData {
-                title: "Example".to_string(),
+                title: Some("Example".to_string()),
                 url: "https://example.com/".to_string(),
                 body: None,
             }
@@ -507,7 +518,7 @@ mod tests {
         assert!(!list_matches_page(
             &list,
             &PageData {
-                title: "Search".to_string(),
+                title: Some("Search".to_string()),
                 url: "https://example.com/?q=rust".to_string(),
                 body: None,
             }

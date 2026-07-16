@@ -114,6 +114,15 @@ describe('canonicalizePageUrl', () => {
       urls: ['https://example.com/list?keep=1', 'objects/notes/note.json'],
     });
   });
+
+  it('omits non-page referrers but rejects malformed HTTP referrers', () => {
+    expect(
+      canonicalizePageRequest({
+        referrer: 'chrome-extension://blocked/interstitial.html',
+      }).referrer,
+    ).toBeNull();
+    expect(() => canonicalizePageRequest({ referrer: 'https://' })).toThrow();
+  });
 });
 
 // ---------------------------------------------------------------------------

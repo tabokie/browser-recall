@@ -74,9 +74,7 @@ where
     let slug = crate::generate_slug_from_url(url)?;
     let page_key = format!("{PAGE_PREFIX}{slug}");
     let Some(mut page) = load_page(load, &page_key).await else {
-        return Err(ReplayError::InvalidEntry(format!(
-            "leave_page target is missing: {page_key}"
-        )));
+        return Ok(EntityMap::new());
     };
 
     let prior_device_ts = page

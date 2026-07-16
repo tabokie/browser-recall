@@ -15,7 +15,7 @@ use std::thread;
 #[serde(rename_all = "camelCase")]
 pub struct HistorySearchHit {
     pub url: String,
-    pub title: String,
+    pub title: Option<String>,
     pub timestamp: i64,
     pub score: f64,
 }
@@ -238,11 +238,6 @@ fn list_subdirs(root: &Path) -> io::Result<Vec<PathBuf>> {
         let path = entry.path();
         if path.is_dir() {
             dirs.push(path);
-        } else {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("unexpected file in history log root: {}", path.display()),
-            ));
         }
     }
     dirs.sort();
@@ -293,16 +288,6 @@ fn latest_history_records_for_device(device_dir: &Path) -> io::Result<Vec<Search
                 } => (timestamp, url, title),
                 _ => continue,
             };
-            let title = title.ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!(
-                        "{} line {} history entry is missing title",
-                        path.display(),
-                        line_index + 1
-                    ),
-                )
-            })?;
             if seen_urls.insert(url.clone()) {
                 records.push(SearchRecord {
                     timestamp,
@@ -324,16 +309,13 @@ fn list_jsonl_files(dir: &Path) -> io::Result<Vec<String>> {
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("unexpected directory in device log: {}", path.display()),
-            ));
+            continue;
         }
         if !path.is_file() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("unexpected entry in device log: {}", path.display()),
-            ));
+            continue;
+        }
+        if path.extension() != Some(std::ffi::OsStr::new("jsonl")) {
+            continue;
         }
         let name = path
             .file_name()
@@ -365,22 +347,13 @@ fn collect_snapshot_files(root: &Path, dir: &Path, files: &mut Vec<String>) -> i
             continue;
         }
         if !path.is_file() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("unexpected snapshot entry: {}", path.display()),
-            ));
+            continue;
         }
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidData, "snapshot filename is not UTF-8")
-            })?;
-        if !(name.ends_with(".md") || name.ends_with(".html")) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("unexpected snapshot file: {}", path.display()),
-            ));
+        if !matches!(
+            path.extension().and_then(|extension| extension.to_str()),
+            Some("md" | "html")
+        ) {
+            continue;
         }
         let relative = path.strip_prefix(root).map_err(|error| {
             io::Error::new(
@@ -441,7 +414,9 @@ fn merge_history_hit(existing: &mut HistorySearchHit, next: HistorySearchHit) {
 
     if next.timestamp > existing.timestamp {
         existing.timestamp = next.timestamp;
-        if existing.title.is_empty() && !next.title.is_empty() {
+        if existing.title.as_deref().is_none_or(str::is_empty)
+            && next.title.as_deref().is_some_and(|title| !title.is_empty())
+        {
             existing.title = next.title;
         }
     }
@@ -546,6 +521,35 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].url, "https://example.com/article");
         assert_eq!(hits[0].timestamp, 200);
+    }
+
+    #[test]
+    fn search_history_ignores_unowned_files_and_preserves_a_missing_title() {
+        let temp_dir = tempdir().unwrap();
+        let data_dir = temp_dir.path();
+        let device = data_dir.join("logs/device-a");
+        fs::create_dir_all(&device).unwrap();
+        fs::create_dir_all(data_dir.join("views/pages")).unwrap();
+        fs::write(data_dir.join("logs/.DS_Store"), "metadata").unwrap();
+        fs::write(device.join(".DS_Store"), "metadata").unwrap();
+        fs::write(
+            device.join("2026-07-15.jsonl"),
+            json!({
+                "action": "visit_page",
+                "timestamp": 100,
+                "url": "https://nullable-title.example/needle",
+                "title": null,
+                "referrerUrl": null,
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let hits = search_history_in_data_dir(data_dir, "needle", None).unwrap();
+
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].url, "https://nullable-title.example/needle");
+        assert_eq!(hits[0].title, None);
     }
 
     #[test]
@@ -739,6 +743,8 @@ mod tests {
             serde_json::to_string(&note).unwrap(),
         )
         .unwrap();
+        fs::write(notes_dir.join(".DS_Store"), "metadata").unwrap();
+        fs::create_dir(notes_dir.join("unowned")).unwrap();
 
         let hits = search_notes_in_data_dir(temp_dir.path(), "banana", None).unwrap();
 
@@ -762,6 +768,12 @@ mod tests {
             "banana snapshot",
         )
         .unwrap();
+        fs::write(
+            temp_dir.path().join("objects/snapshots/.DS_Store"),
+            "metadata",
+        )
+        .unwrap();
+        fs::write(snapshots_dir.join("README.txt"), "unowned").unwrap();
 
         let hits = search_snapshots_in_data_dir(temp_dir.path(), "banana", None).unwrap();
 

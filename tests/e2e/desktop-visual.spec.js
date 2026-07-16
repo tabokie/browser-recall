@@ -1343,6 +1343,47 @@ test.describe('desktop visual regression', () => {
     });
   });
 
+  test('service error message can be selected and copied', async ({
+    context,
+    page,
+  }) => {
+    const errorMessage =
+      '/Users/xyt/browser-data/logs/device/2026-02-10.jsonl: missing field `referrerUrl`';
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await context.grantPermissions(['clipboard-read', 'clipboard-write'], {
+        origin: new URL(desktopUrl).origin,
+      });
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        extraSession: {
+          serviceError: {
+            code: 'daemon_start_failed',
+            message: errorMessage,
+          },
+        },
+      });
+
+      const message = page.locator('#serviceErrorMessage');
+      await expect(message).toHaveText(errorMessage);
+      await message.click({ clickCount: 3 });
+      await expect
+        .poll(() =>
+          page.evaluate(() => (getSelection()?.toString() || '').trim()),
+        )
+        .toBe(errorMessage);
+
+      await page.keyboard.press('Meta+C');
+      await expect
+        .poll(() =>
+          page.evaluate(async () =>
+            (await navigator.clipboard.readText()).trim(),
+          ),
+        )
+        .toBe(errorMessage);
+    });
+  });
+
   test('main shell and search panel render before initial history data finishes loading', async ({
     page,
   }) => {

@@ -1,3 +1,13 @@
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::unwrap_used
+    )
+)]
+
 use browser_recall_replay::entities::{Entity, NoteEntity};
 use browser_recall_replay::{effect_of, page_retains_checkpoint, Context, EntityEffect, LogEntry};
 use serde_json::Value;
@@ -144,18 +154,12 @@ fn load_log_steps(data_dir: &Path) -> Result<Vec<ReplayStep>, Box<dyn Error>> {
 
     for device_path in sorted_entries(&logs_dir)? {
         if !device_path.is_dir() {
-            return Err(format!(
-                "unexpected file in logs directory: {}",
-                device_path.display()
-            )
-            .into());
+            continue;
         }
         let device_id = file_name(&device_path)?;
         for file_path in sorted_entries(&device_path)? {
             if file_path.extension().and_then(|value| value.to_str()) != Some("jsonl") {
-                return Err(
-                    format!("unexpected non-JSONL log file: {}", file_path.display()).into(),
-                );
+                continue;
             }
             let raw = fs::read_to_string(&file_path)?;
             for (index, line) in raw.lines().enumerate() {
@@ -588,13 +592,7 @@ fn same_pins_ignoring_order(replayed: Option<&Value>, existing: Option<&Value>) 
         pins.sort_by(|left, right| {
             left.get("id")
                 .and_then(Value::as_str)
-                .expect("pin IDs validated before sorting")
-                .cmp(
-                    right
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .expect("pin IDs validated before sorting"),
-                )
+                .cmp(&right.get("id").and_then(Value::as_str))
         });
         Some(pins)
     }

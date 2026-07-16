@@ -224,6 +224,8 @@ function normalizePinEntry(entry) {
     (rawTitles && typeof rawTitles === 'object')
   ) {
     entry.titles = titles;
+  } else if (rawTitles === null) {
+    entry.titles = null;
   } else if (rawTitles !== undefined) {
     delete entry.titles;
   }
@@ -231,6 +233,7 @@ function normalizePinEntry(entry) {
 
 function normalizeRuleConfig(rule) {
   if (!rule || typeof rule !== 'object') return;
+  if (!Object.prototype.hasOwnProperty.call(rule, 'id')) rule.id = null;
   const type = rule.type ?? rule.rule_type;
   if (type === 'keyword' && rule.config && typeof rule.config === 'object') {
     delete rule.config.fields;
@@ -308,6 +311,44 @@ function normalizeManifestView(raw, path) {
 function normalizeLogEntry(entry) {
   delete entry.checkpoint;
   delete entry.bodyPreview;
+  const ensureNullable = (...keys) => {
+    for (const key of keys) {
+      if (!Object.prototype.hasOwnProperty.call(entry, key)) entry[key] = null;
+    }
+  };
+  switch (entry.action) {
+    case 'visit_page':
+      ensureNullable('title', 'referrerUrl');
+      break;
+    case 'leave_page':
+      ensureNullable('title', 'scrollDepth', 'timeOnPage');
+      break;
+    case 'rate_page':
+      ensureNullable('title');
+      break;
+    case 'pin_to_list':
+      ensureNullable('titles', 'source');
+      break;
+    case 'create_list':
+      ensureNullable('listId', 'parentListId');
+      break;
+    case 'update_list':
+      ensureNullable('newName');
+      break;
+    case 'create_note':
+      ensureNullable('title', 'excerpt', 'note', 'cssPath');
+      break;
+    case 'delete_note':
+    case 'restore_note':
+      ensureNullable('url');
+      break;
+    case 'replace_note':
+      ensureNullable('url', 'excerpt', 'note', 'cssPath');
+      break;
+    case 'create_snapshot':
+      ensureNullable('title');
+      break;
+  }
   if (typeof entry.url === 'string') entry.url = canonicalizePageUrl(entry.url);
   if (typeof entry.referrerUrl === 'string') {
     entry.referrerUrl = canonicalizePageUrl(entry.referrerUrl);

@@ -114,7 +114,6 @@ function broadcastDaemonMutations(mutations) {
       !mutation ||
       typeof mutation !== 'object' ||
       Array.isArray(mutation) ||
-      Object.keys(mutation).length !== expectedKeys.length ||
       expectedKeys.some(
         (key) => !Object.prototype.hasOwnProperty.call(mutation, key),
       ) ||
@@ -142,15 +141,18 @@ function broadcastDaemonMutations(mutations) {
     ) {
       throw new Error('Desktop mutation urls must be a string array or null');
     }
+    const canonicalMutation = Object.fromEntries(
+      expectedKeys.map((key) => [key, mutation[key]]),
+    );
     for (const listener of [...daemonMutationListeners]) {
       try {
-        listener(mutation);
+        listener(canonicalMutation);
       } catch (error) {
         logDebug('[connector] daemon mutation listener failed:', error.message);
       }
     }
     chrome.runtime
-      .sendMessage({ action: 'mutation', ...mutation })
+      .sendMessage({ action: 'mutation', ...canonicalMutation })
       .catch((error) =>
         logDebug(
           '[connector] mutation broadcast had no receiver:',
@@ -379,11 +381,6 @@ function requiredTimestamp(value) {
   return value;
 }
 
-function appendOptionalString(payload, key, value) {
-  const normalized = optionalString(value, key);
-  if (normalized !== undefined) payload[key] = normalized;
-}
-
 function buildBufferedBridgePayload(next, stats) {
   const base = {
     bufferDepth: Math.max(stats.pendingCommands - 1, 0),
@@ -420,10 +417,10 @@ function buildSnapshotBridgePayload(snapshot, stats) {
     slug: requiredString(snapshot.slug, 'slug'),
     ts: requiredTimestamp(snapshot.ts),
     url: requiredString(snapshot.url, 'url'),
+    title: optionalString(snapshot.title, 'title') ?? null,
+    markdown: optionalString(snapshot.markdown, 'markdown') ?? null,
     html: requiredString(snapshot.html, 'html'),
   };
-  appendOptionalString(payload, 'title', snapshot.title);
-  appendOptionalString(payload, 'markdown', snapshot.markdown);
   return payload;
 }
 
@@ -887,7 +884,7 @@ function requireNonNegativeInteger(value, field) {
 }
 
 function validateStatusPayload(payload) {
-  const expectedKeys = new Set([
+  const requiredKeys = [
     'type',
     'connectedBrowsers',
     'bufferDepth',
@@ -896,13 +893,8 @@ function validateStatusPayload(payload) {
     'lastDrainedAt',
     'dataFolder',
     'deviceId',
-  ]);
-  for (const key of Object.keys(payload)) {
-    if (!expectedKeys.has(key)) {
-      throw new Error(`Desktop status contains unknown field: ${key}`);
-    }
-  }
-  for (const key of expectedKeys) {
+  ];
+  for (const key of requiredKeys) {
     if (!Object.prototype.hasOwnProperty.call(payload, key)) {
       throw new Error(`Desktop status is missing field: ${key}`);
     }

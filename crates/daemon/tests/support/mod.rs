@@ -1,5 +1,7 @@
 use browser_recall_daemon::pairing::{static_approver, PairingDecision};
-use browser_recall_daemon::protocol::{ConnectorMessage, DaemonMessage};
+use browser_recall_daemon::protocol::{
+    ConnectorMessage, DaemonMessage, CONNECTOR_PROTOCOL_VERSION,
+};
 use browser_recall_daemon::ws_server::ServerStartOptions;
 use browser_recall_daemon::ConfigStore;
 use futures_util::{SinkExt, StreamExt};
@@ -33,7 +35,7 @@ pub(crate) async fn pair_once(port: u16) -> String {
     socket
         .send(Message::Text(
             serde_json::to_string(&ConnectorMessage::PairRequest {
-                protocol_version: Some(2),
+                protocol_version: Some(CONNECTOR_PROTOCOL_VERSION),
                 browser_id: "browser-install-1".into(),
                 browser_name: "Chrome".into(),
                 extension_id: "abcdefghijklmnop".into(),
@@ -69,7 +71,7 @@ pub(crate) async fn paired_socket(
     socket
         .send(Message::Text(
             serde_json::to_string(&ConnectorMessage::PairRequest {
-                protocol_version: Some(2),
+                protocol_version: Some(CONNECTOR_PROTOCOL_VERSION),
                 browser_id: "browser-install-1".into(),
                 browser_name: "Chrome".into(),
                 extension_id: "abcdefghijklmnop".into(),

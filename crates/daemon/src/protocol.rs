@@ -3,7 +3,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-pub const CONNECTOR_PROTOCOL_VERSION: u32 = 2;
+pub const CONNECTOR_PROTOCOL_VERSION: u32 = 1;
 
 fn deserialize_required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where
@@ -14,7 +14,6 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct DirectoryInfoPayload {
     pub name: String,
     #[serde(rename = "hasPermission")]
@@ -22,7 +21,6 @@ pub struct DirectoryInfoPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct RulePayload {
     #[serde(rename = "type")]
     pub rule_type: String,
@@ -30,7 +28,6 @@ pub struct RulePayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct RuleBatchEntry {
     pub url: String,
     pub title: String,
@@ -42,7 +39,6 @@ pub struct RuleBatchEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct RuleMatchResult {
     #[serde(rename = "ruleId")]
     pub rule_id: String,
@@ -50,7 +46,6 @@ pub struct RuleMatchResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct RuleBatchHit {
     #[serde(rename = "listId")]
     pub list_id: String,
@@ -62,7 +57,6 @@ pub struct RuleBatchHit {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct PreviewRuleHit {
     pub url: String,
     pub title: String,
@@ -70,7 +64,6 @@ pub struct PreviewRuleHit {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct SearchRequestPayload {
     pub query: String,
     #[serde(deserialize_with = "deserialize_required_option")]
@@ -78,14 +71,12 @@ pub struct SearchRequestPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct TestSeedFilePayload {
     pub path: String,
     pub content: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
 pub struct NoteSearchResult {
     pub url: String,
     #[serde(rename = "noteSlug")]
@@ -94,7 +85,6 @@ pub struct NoteSearchResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
 pub struct SnapshotSearchResult {
     pub slug: String,
     pub timestamp: i64,
@@ -102,7 +92,6 @@ pub struct SnapshotSearchResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct PopupPageInfoEntry {
     pub slug: String,
     pub url: Option<String>,
@@ -119,7 +108,6 @@ pub struct PopupPageInfoEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct PopupNoteResult {
     pub slug: String,
     pub excerpt: Option<serde_json::Value>,
@@ -130,7 +118,6 @@ pub struct PopupNoteResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct PopupSnapshotResult {
     pub timestamp: i64,
     #[serde(rename = "hasMd")]
@@ -140,7 +127,7 @@ pub struct PopupSnapshotResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct PopupListResult {
     pub slug: String,
     pub name: String,
@@ -149,7 +136,6 @@ pub struct PopupListResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct PopupAttentionResult {
     #[serde(rename = "totalSeconds")]
     pub total_seconds: Option<i64>,
@@ -158,14 +144,13 @@ pub struct PopupAttentionResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct PopupAccessResult {
     pub blacklisted: bool,
     pub has_visit_history: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct MutationPayload {
     #[serde(rename = "type")]
     pub mutation_type: String,
@@ -184,7 +169,7 @@ pub struct MutationPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ConnectorMessage {
     PairRequest {
         #[serde(
@@ -251,7 +236,9 @@ pub enum ConnectorMessage {
         slug: String,
         ts: i64,
         url: String,
+        #[serde(deserialize_with = "deserialize_required_option")]
         title: Option<String>,
+        #[serde(deserialize_with = "deserialize_required_option")]
         markdown: Option<String>,
         html: String,
         source: String,
@@ -263,7 +250,7 @@ pub enum ConnectorMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum TestControlMessage {
     ClearAllData,
     ReplayRemoteEntries {
@@ -333,7 +320,7 @@ pub enum TestControlMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum DaemonMessage {
     PairPending {
         #[serde(rename = "requestId")]
@@ -514,7 +501,7 @@ pub enum DaemonMessage {
 
 #[cfg(test)]
 mod tests {
-    use super::ConnectorMessage;
+    use super::{ConnectorMessage, CONNECTOR_PROTOCOL_VERSION};
     use serde_json::json;
 
     #[test]
@@ -539,5 +526,52 @@ mod tests {
             }
         });
         assert!(serde_json::from_value::<ConnectorMessage>(wrapped).is_ok());
+    }
+
+    #[test]
+    fn connector_v1_accepts_additive_message_fields() {
+        assert_eq!(CONNECTOR_PROTOCOL_VERSION, 1);
+
+        let message = json!({
+            "type": "run_command",
+            "action": "createList",
+            "request": { "name": "Reading" },
+            "bufferDepth": 0,
+            "bufferBytes": 0,
+            "futureTracingContext": { "spanId": "additive-v1-field" }
+        });
+
+        assert!(serde_json::from_value::<ConnectorMessage>(message).is_ok());
+    }
+
+    #[test]
+    fn connector_v1_still_requires_current_fields() {
+        let missing_request = json!({
+            "type": "run_command",
+            "action": "createList",
+            "bufferDepth": 0,
+            "bufferBytes": 0
+        });
+
+        assert!(serde_json::from_value::<ConnectorMessage>(missing_request).is_err());
+    }
+
+    #[test]
+    fn connector_v1_rejects_missing_nullable_snapshot_fields_even_with_additions() {
+        let misspelled_markdown = json!({
+            "type": "snapshot",
+            "slug": "snapshot-page",
+            "ts": 1_710_000_000_000_i64,
+            "url": "https://example.com/snapshot",
+            "title": null,
+            "markdonw": null,
+            "html": "<html></html>",
+            "source": "extension",
+            "bufferDepth": 0,
+            "bufferBytes": 0,
+            "futureTracingContext": { "spanId": "additive-v1-field" }
+        });
+
+        assert!(serde_json::from_value::<ConnectorMessage>(misspelled_markdown).is_err());
     }
 }

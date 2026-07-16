@@ -1,11 +1,22 @@
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::unwrap_used
+    )
+)]
+
 use browser_recall_daemon::pairing::{static_approver, PairingDecision};
 use browser_recall_daemon::ws_server::{start_server, ServerStartOptions};
 use browser_recall_daemon::{ConfigStore, DaemonConfig};
 use std::env;
+use std::error::Error;
 use std::path::PathBuf;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn Error>> {
     let args = match parse_cli_args(env::args().skip(1)) {
         Ok(args) => args,
         Err(message) => {
@@ -28,14 +39,11 @@ async fn main() {
         options.port_candidates = port_candidates;
     }
     options.test_control_enabled = args.test_control_enabled;
-    let handle = start_server(options)
-        .await
-        .expect("failed to start browser recall daemon");
+    let handle = start_server(options).await?;
     println!("listening on {}", handle.port());
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to listen for ctrl_c");
+    tokio::signal::ctrl_c().await?;
     handle.shutdown().await;
+    Ok(())
 }
 
 #[derive(Debug)]

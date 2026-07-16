@@ -17,6 +17,7 @@ browser-recall-replay = { path = "../replay" }
 chrono = "0.4"
 futures-util = "0.3"
 hostname = "0.4"
+parking_lot = "0.12"
 rand = "0.8"
 regex = "1.11"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

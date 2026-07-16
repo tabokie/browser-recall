@@ -1,3 +1,13 @@
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::unwrap_used
+    )
+)]
+
 pub mod entities;
 mod handlers;
 pub mod settings;
@@ -1102,13 +1112,13 @@ pub(crate) fn append_to_tree(
         id: list_id.to_string(),
         children: Vec::new(),
     };
-    if parent_id.is_none() {
+    let Some(parent_id) = parent_id else {
         let mut next = tree.to_vec();
         next.insert(0, new_node);
         return next;
-    }
+    };
     let mut cloned = tree.to_vec();
-    if append_to_tree_recursive(&mut cloned, list_id, parent_id.expect("checked above")) {
+    if append_to_tree_recursive(&mut cloned, list_id, parent_id) {
         cloned
     } else {
         cloned.push(new_node);

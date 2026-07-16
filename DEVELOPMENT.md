@@ -33,6 +33,8 @@ Tauri still uses `target/` internally as a Rust build cache, but release artifac
 
 The canonical build intentionally does not create a DMG/installer. Installer packaging is a release-only step because macOS may open installer UI during DMG creation.
 
+On macOS, the canonical desktop build signs the complete `.app` bundle and then runs `scripts/verify-macos-app-bundle.mjs`. Local builds use Tauri's ad-hoc `-` identity so `Info.plist` and resources are bound instead of leaving only the linker-signed executable; `scripts/finalize-macos-app-bundle.mjs` replaces the per-build CDHash designated requirement with the stable bundle identifier. This stabilizes local OS identity but does not authenticate a publisher. If an Apple Development or Developer ID Application certificate is installed, set `APPLE_SIGNING_IDENTITY` to the identity reported by `security find-identity -v -p codesigning`; Tauri gives that environment variable precedence and the local ad-hoc finalization is skipped. DMG builds fail before bundling unless this Apple identity is present, and distribution also requires notarization.
+
 ### Specialized Builds
 
 These commands exist for focused development only. Prefer `npm run build` when preparing artifacts for manual testing.
@@ -125,6 +127,14 @@ npm run test:visual                          # build desktop UI and run desktop 
 Config: `playwright.config.js`. Tests: `tests/e2e/*.spec.js`. Single worker, chromium channel.
 
 `npm run test:visual` is the canonical full desktop visual check. It first stages `dist/desktop/ui/`, then runs `tests/e2e/desktop-visual.spec.js`.
+
+The native macOS lifecycle test registers a real status item and must never run in a persistent personal login session. Run it only in an ephemeral macOS user or disposable CI runner:
+
+```bash
+BROWSER_RECALL_ISOLATED_MACOS_SESSION=1 npm run test:desktop-native
+```
+
+It verifies the actual bundle, painted startup-error recovery, concurrent Resume serialization, physical tray placement/clickability, repeated reopening, focus, and frame preservation. It unregisters its test app before deleting the temporary bundle, but the ephemeral-session requirement remains because Control Center can retain status-item ownership state independently of Launch Services. GitHub CI runs this scenario on a fresh macOS 26 VM so the native test covers the Control Center generation where the regression occurred without polluting a developer login session.
 
 When running under a filesystem/process sandbox, Chromium launch may require an unsandboxed command approval. If every visual test fails at `0ms` with `browserType.launch: Target page, context or browser has been closed`, `SIGABRT`, or `kill EPERM`, rerun the same command with browser-launch permissions instead of changing the tests or package script. A focused `npx playwright test ... -g "<name>"` run can pass while the sandboxed npm visual script fails, because the failure is at browser launch before any test code runs.
 

@@ -595,7 +595,7 @@ impl ReadProjections {
                 timestamps: BTreeMap::new(),
             });
         }
-        unreachable!("pin kind was validated before projection")
+        Err(format!("pin id '{}' has unsupported entity kind", pin.id))
     }
 }
 

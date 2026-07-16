@@ -5,13 +5,14 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use browser_recall_replay::LogEntry;
 use chrono::TimeZone;
+use parking_lot::Mutex;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::Notify;
 
 const API_BASE: &str = "https://api.github.com";
@@ -222,7 +223,7 @@ impl SyncController {
     }
 
     pub fn device_entries(&self) -> Vec<SyncDeviceEntry> {
-        let state = self.state.lock().expect("sync state poisoned");
+        let state = self.state.lock();
         collect_sync_device_entries(&state, &self.device_id)
     }
 
@@ -231,7 +232,7 @@ impl SyncController {
     }
 
     pub fn auth_state_json(&self) -> Value {
-        let state = self.state.lock().expect("sync state poisoned");
+        let state = self.state.lock();
         json!({
             "success": true,
             "hasToken": state.session_token.is_some(),
@@ -247,7 +248,7 @@ impl SyncController {
         }
 
         let (token, paused_devices, mut device_records) = {
-            let state = self.state.lock().expect("sync state poisoned");
+            let state = self.state.lock();
             (
                 state.session_token.clone(),
                 state.paused_devices.clone(),
@@ -275,7 +276,7 @@ impl SyncController {
             .collect::<Vec<_>>();
 
         {
-            let mut state = self.state.lock().expect("sync state poisoned");
+            let mut state = self.state.lock();
             state.devices = device_records;
         }
         self.persist_state()?;
@@ -289,7 +290,7 @@ impl SyncController {
 
     pub fn toggle_device_paused(&self, target: &str) -> Result<bool, String> {
         let paused = {
-            let mut state = self.state.lock().expect("sync state poisoned");
+            let mut state = self.state.lock();
             if state.paused_devices.contains(target) {
                 state.paused_devices.remove(target);
                 false
@@ -305,7 +306,7 @@ impl SyncController {
     pub async fn settings_changed(&self, storage: &Storage) -> Result<(), String> {
         let settings = load_sync_settings(storage).await?;
         if !settings.enabled {
-            let mut state = self.state.lock().expect("sync state poisoned");
+            let mut state = self.state.lock();
             state.rate_limited_until_ms = None;
         }
         self.request_worker();
@@ -313,7 +314,7 @@ impl SyncController {
     }
 
     pub fn cancel(&self) {
-        let state = self.state.lock().expect("sync state poisoned");
+        let state = self.state.lock();
         if let Some(flag) = &state.cancel_flag {
             flag.store(true, Ordering::Relaxed);
         }
@@ -321,7 +322,7 @@ impl SyncController {
 
     pub fn clear_token(&self) -> Result<(), String> {
         {
-            let mut state = self.state.lock().expect("sync state poisoned");
+            let mut state = self.state.lock();
             state.session_token = None;
             state.github_user = None;
             state.remember_token = true;
@@ -332,7 +333,7 @@ impl SyncController {
 
     pub fn toggle_remember(&self, remember: bool) -> Result<(), String> {
         {
-            let mut state = self.state.lock().expect("sync state poisoned");
+            let mut state = self.state.lock();
             state.remember_token = remember;
         }
         self.persist_state()?;
@@ -345,7 +346,7 @@ impl SyncController {
             .await
             .map_err(|error| error.message().to_string())?;
         {
-            let mut state = self.state.lock().expect("sync state poisoned");
+            let mut state = self.state.lock();
             state.session_token = Some(token.to_string());
             state.github_user = Some(github_user.clone());
             state.remember_token = remember;
@@ -483,7 +484,7 @@ impl SyncController {
     pub async fn delete_device(&self, storage: &Storage, target: &str) -> Result<(), String> {
         let settings = load_sync_settings(storage).await?;
         let token = {
-            let state = self.state.lock().expect("sync state poisoned");
+            let state = self.state.lock();
             state.session_token.clone()
         }
         .ok_or_else(|| "GitHub not connected".to_string())?;
@@ -494,7 +495,7 @@ impl SyncController {
             .await
             .map_err(|error| error.message().to_string())?;
         {
-            let mut state = self.state.lock().expect("sync state poisoned");
+            let mut state = self.state.lock();
             state.devices.remove(target);
             state.paused_devices.remove(target);
         }
@@ -513,7 +514,7 @@ impl SyncController {
         }
 
         let (token, paused_devices, mut device_records, cancel_flag) = {
-            let state = self.state.lock().expect("sync state poisoned");
+            let state = self.state.lock();
             (
                 state.session_token.clone(),
                 state.paused_devices.clone(),
@@ -588,12 +589,12 @@ impl SyncController {
     }
 
     fn start_manual_sync(&self) -> SyncStart {
-        let mut state = self.state.lock().expect("sync state poisoned");
+        let mut state = self.state.lock();
         Self::start_sync(&mut state)
     }
 
     fn start_background_sync(&self) -> SyncStart {
-        let mut state = self.state.lock().expect("sync state poisoned");
+        let mut state = self.state.lock();
         if state.session_token.is_none() {
             return SyncStart::Unavailable;
         }
@@ -617,7 +618,7 @@ impl SyncController {
     }
 
     fn complete_execution(&self, execution: SyncExecution) -> SyncRunResult {
-        let mut state = self.state.lock().expect("sync state poisoned");
+        let mut state = self.state.lock();
         state.devices = execution.devices;
         state.rate_limited_until_ms = None;
         state.last_result = Some(execution.result.clone());
@@ -625,25 +626,25 @@ impl SyncController {
     }
 
     fn record_rate_limit(&self, retry_at_ms: i64) {
-        let mut state = self.state.lock().expect("sync state poisoned");
+        let mut state = self.state.lock();
         state.rate_limited_until_ms = Some(retry_at_ms);
     }
 
     fn expire_auth(&self) {
-        let mut state = self.state.lock().expect("sync state poisoned");
+        let mut state = self.state.lock();
         state.session_token = None;
         state.github_user = None;
         state.last_result = None;
     }
 
     fn finish_sync(&self) {
-        let mut state = self.state.lock().expect("sync state poisoned");
+        let mut state = self.state.lock();
         state.sync_in_progress = false;
         state.cancel_flag = None;
     }
 
     fn persist_state(&self) -> Result<(), String> {
-        let state = self.state.lock().expect("sync state poisoned");
+        let state = self.state.lock();
         let mut config = self
             .config_store
             .load_or_create()
@@ -673,15 +674,15 @@ pub async fn load_sync_settings(storage: &Storage) -> Result<SyncSettingsPayload
     crate::settings::validate_complete(&settings.values)?;
     let enabled = settings.values["syncEnabled"]
         .as_bool()
-        .expect("validated syncEnabled");
+        .ok_or_else(|| "syncEnabled must be a boolean".to_string())?;
     let repo_url = settings.values["syncRepoUrl"]
         .as_str()
-        .expect("validated syncRepoUrl")
+        .ok_or_else(|| "syncRepoUrl must be a string".to_string())?
         .trim()
         .to_string();
     let retention_days = settings.values["syncRetentionDays"]
         .as_i64()
-        .expect("validated syncRetentionDays");
+        .ok_or_else(|| "syncRetentionDays must be an integer".to_string())?;
     Ok(SyncSettingsPayload {
         enabled,
         repo_url,
@@ -756,14 +757,25 @@ fn sync_device_entry(
 }
 
 fn retry_time_message(retry_at_ms: i64) -> String {
-    let timestamp = chrono::Local
-        .timestamp_millis_opt(retry_at_ms)
-        .single()
-        .expect("GitHub rate-limit timestamp was validated before storage");
+    let Some(timestamp) = chrono::Local.timestamp_millis_opt(retry_at_ms).single() else {
+        return "GitHub rate-limit timestamp is out of range".into();
+    };
     format!(
         "Rate limited, will retry at {}",
         timestamp.format("%H:%M:%S")
     )
+}
+
+fn rate_limit_retry_at_ms(reset_seconds: i64) -> Option<i64> {
+    reset_seconds
+        .checked_mul(1000)?
+        .checked_add(60_000)
+        .filter(|value| {
+            chrono::Local
+                .timestamp_millis_opt(*value)
+                .single()
+                .is_some()
+        })
 }
 
 pub fn hash_content(content: &str) -> String {
@@ -926,7 +938,7 @@ impl GitHubTransport {
                 .get("x-ratelimit-reset")
                 .and_then(|value| value.to_str().ok())
                 .and_then(|value| value.parse::<i64>().ok())
-                .map(|seconds| seconds * 1000 + 60_000)
+                .and_then(rate_limit_retry_at_ms)
                 .ok_or_else(|| {
                     SyncError::Message(
                         "GitHub rate-limit response is missing a valid reset timestamp".to_string(),
@@ -1417,7 +1429,10 @@ pub async fn fetch_github_user(token: &str) -> Result<String, SyncError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_github_branches, parse_github_tree, parse_remote_log_entries, SyncFile};
+    use super::{
+        parse_github_branches, parse_github_tree, parse_remote_log_entries, rate_limit_retry_at_ms,
+        retry_time_message, SyncFile,
+    };
     use serde_json::json;
 
     #[test]
@@ -1461,5 +1476,14 @@ mod tests {
         }))
         .expect_err("a blob without sha must fail");
         assert!(error.message().contains("missing its sha"));
+    }
+
+    #[test]
+    fn github_rate_limit_timestamps_are_range_checked_without_panicking() {
+        assert_eq!(rate_limit_retry_at_ms(i64::MAX), None);
+        assert_eq!(
+            retry_time_message(i64::MAX),
+            "GitHub rate-limit timestamp is out of range"
+        );
     }
 }

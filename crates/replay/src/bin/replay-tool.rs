@@ -1,3 +1,13 @@
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::unwrap_used
+    )
+)]
+
 use browser_recall_replay::entities::Entity;
 use browser_recall_replay::{effect_of, Context, EntityEffect, LogEntry};
 use serde::{Deserialize, Serialize};

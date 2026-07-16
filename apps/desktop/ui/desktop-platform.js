@@ -4,10 +4,14 @@ let runtimeBridgeStarted = false;
 let storageBridgeStarted = false;
 let runtimeBridgePromise = null;
 let storageBridgePromise = null;
-if (typeof globalThis.crypto?.randomUUID !== 'function') {
-  throw new Error('Desktop storage bridge requires crypto.randomUUID');
+const storageBridgeInstanceId = globalThis.crypto?.randomUUID?.() ?? null;
+
+function requireStorageBridgeInstanceId() {
+  if (!storageBridgeInstanceId) {
+    throw new Error('Desktop storage bridge requires crypto.randomUUID');
+  }
+  return storageBridgeInstanceId;
 }
-const storageBridgeInstanceId = globalThis.crypto.randomUUID();
 
 function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
@@ -272,7 +276,7 @@ function createStorageArea(storage, areaName, keyPrefix, options = {}) {
         const changes = await tauriInvoke('bridge_storage_set', {
           request: {
             areaName,
-            sourceId: storageBridgeInstanceId,
+            sourceId: requireStorageBridgeInstanceId(),
             items,
           },
         });
@@ -291,7 +295,7 @@ function createStorageArea(storage, areaName, keyPrefix, options = {}) {
       tauriInvoke('bridge_storage_broadcast', {
         request: {
           areaName,
-          sourceId: storageBridgeInstanceId,
+          sourceId: requireStorageBridgeInstanceId(),
           changes: normalized,
         },
       }).catch((error) => {
@@ -308,7 +312,7 @@ function createStorageArea(storage, areaName, keyPrefix, options = {}) {
         const changes = await tauriInvoke('bridge_storage_remove', {
           request: {
             areaName,
-            sourceId: storageBridgeInstanceId,
+            sourceId: requireStorageBridgeInstanceId(),
             keys: list,
           },
         });
@@ -328,7 +332,7 @@ function createStorageArea(storage, areaName, keyPrefix, options = {}) {
       tauriInvoke('bridge_storage_broadcast', {
         request: {
           areaName,
-          sourceId: storageBridgeInstanceId,
+          sourceId: requireStorageBridgeInstanceId(),
           changes: normalized,
         },
       }).catch((error) => {
@@ -344,7 +348,7 @@ function createStorageArea(storage, areaName, keyPrefix, options = {}) {
         const changes = await tauriInvoke('bridge_storage_clear', {
           request: {
             areaName,
-            sourceId: storageBridgeInstanceId,
+            sourceId: requireStorageBridgeInstanceId(),
           },
         });
         applyChanges(changes, { emit: true });
@@ -361,7 +365,7 @@ function createStorageArea(storage, areaName, keyPrefix, options = {}) {
       tauriInvoke('bridge_storage_broadcast', {
         request: {
           areaName,
-          sourceId: storageBridgeInstanceId,
+          sourceId: requireStorageBridgeInstanceId(),
           changes: normalized,
         },
       }).catch((error) => {

@@ -1,1 +1,1 @@
-{}
+{"main-window":{"identifier":"main-window","description":"Event subscriptions used by the desktop bridge.","local":true,"windows":["main"],"permissions":["core:event:default"]}}

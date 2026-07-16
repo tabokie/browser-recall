@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { describe, expect, test } from 'vitest';
+import { validateMacosSignatureMetadata } from '../../scripts/verify-macos-app-bundle.mjs';
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -13,6 +14,10 @@ const ciWorkflow = fs.readFileSync(
 );
 const packageJson = JSON.parse(
   fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'),
+);
+const macosLifecycleSmoke = fs.readFileSync(
+  path.join(repoRoot, 'tests/smoke/macos-desktop-window-lifecycle.mjs'),
+  'utf8',
 );
 
 function jobBody(jobName, nextJobName) {
@@ -50,5 +55,26 @@ describe('GitHub CI prerequisites', () => {
     expect(packageJson.scripts['ci:install-playwright']).toBe(
       'playwright install --no-shell chromium',
     );
+  });
+
+  test('macOS build checks require hardened runtime and host-native helpers', () => {
+    const identifier = 'app.browser-recall.desktop';
+    const requirements = `designated => identifier "${identifier}"`;
+    expect(() =>
+      validateMacosSignatureMetadata(
+        `Identifier=${identifier}\nCodeDirectory v=20500 flags=0x0(none)`,
+        identifier,
+        requirements,
+      ),
+    ).toThrow(/hardened runtime/);
+    expect(() =>
+      validateMacosSignatureMetadata(
+        `Identifier=${identifier}\nCodeDirectory v=20500 flags=0x10000(runtime)`,
+        identifier,
+        requirements,
+      ),
+    ).not.toThrow();
+    expect(macosLifecycleSmoke).not.toContain('arm64-apple-macos14.0');
+    expect(macosLifecycleSmoke).toContain('process.arch');
   });
 });

@@ -4,13 +4,14 @@ use browser_recall_replay::entities::{
 };
 use browser_recall_replay::{page_retains_checkpoint, EntityEffect, LogEntry};
 use chrono::{Local, TimeZone};
+use parking_lot::Mutex as StdMutex;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, oneshot, Mutex};
@@ -48,6 +49,7 @@ pub struct HistoryFileListing {
 #[derive(Debug)]
 struct LogFile {
     device_id: String,
+    date: String,
     name: String,
     path: PathBuf,
     size: u64,
@@ -142,11 +144,7 @@ impl Storage {
 
     pub fn next_command_timestamp_millis(&self) -> i64 {
         let now = Local::now().timestamp_millis();
-        let mut last = self
-            .inner
-            .last_command_timestamp_ms
-            .lock()
-            .expect("command timestamp lock poisoned");
+        let mut last = self.inner.last_command_timestamp_ms.lock();
         let next = now.max(*last + 1);
         *last = next;
         next
@@ -683,11 +681,7 @@ impl Storage {
 
         let logs_dir = self.root().join("logs").join(device_id);
         for log_file in scan_device_log_files(device_id, &logs_dir).await? {
-            let date_str = log_file
-                .name
-                .strip_suffix(".jsonl")
-                .expect("log filenames validated by catalog scan");
-            if date_str < cutoff_str.as_str() {
+            if log_file.date.as_str() < cutoff_str.as_str() {
                 continue;
             }
             files.push((
@@ -702,21 +696,16 @@ impl Storage {
             let entries = &mut note_entries;
             while let Some(entry) = entries.next_entry().await? {
                 if !entry.file_type().await?.is_file() {
-                    return Err(invalid_data(format!(
-                        "unexpected directory in notes storage: {}",
-                        entry.path().display()
-                    )));
+                    continue;
+                }
+                if entry.path().extension() != Some(std::ffi::OsStr::new("json")) {
+                    continue;
                 }
                 let name = entry
                     .file_name()
                     .to_str()
                     .map(str::to_string)
                     .ok_or_else(|| invalid_data("note filename is not UTF-8"))?;
-                if !name.ends_with(".json") {
-                    return Err(invalid_data(format!(
-                        "unexpected non-JSON note file: {name}"
-                    )));
-                }
                 files.push((
                     format!("objects/notes/{name}"),
                     fs::read_to_string(entry.path()).await?,
@@ -801,53 +790,51 @@ impl Storage {
                         line_index + 1
                     )));
                 }
-                let mut value: Value = serde_json::from_str(line).map_err(|error| {
+                let value: Value = serde_json::from_str(line).map_err(|error| {
                     invalid_data(format!(
                         "invalid JSONL in {} at line {}: {error}",
                         file.name,
                         line_index + 1
                     ))
                 })?;
-                let object = value.as_object().ok_or_else(|| {
-                    invalid_data(format!(
+                let Value::Object(mut object) = value else {
+                    return Err(invalid_data(format!(
                         "log entry in {} at line {} must be an object",
                         file.name,
                         line_index + 1
-                    ))
-                })?;
-                if object.get("timestamp").and_then(Value::as_i64).is_none() {
-                    return Err(invalid_data(format!(
-                        "log entry in {} at line {} is missing an integer timestamp",
-                        file.name,
-                        line_index + 1
                     )));
-                }
-                serde_json::from_value::<LogEntry>(value.clone()).map_err(|error| {
-                    invalid_data(format!(
-                        "invalid log schema in {} at line {}: {error}",
-                        file.name,
-                        line_index + 1
-                    ))
-                })?;
-                value
-                    .as_object_mut()
-                    .expect("log object validated before schema parsing")
-                    .insert(
-                        "deviceId".to_string(),
-                        Value::String(file.device_id.clone()),
-                    );
-                results.push(value);
+                };
+                let timestamp =
+                    object
+                        .get("timestamp")
+                        .and_then(Value::as_i64)
+                        .ok_or_else(|| {
+                            invalid_data(format!(
+                                "log entry in {} at line {} is missing an integer timestamp",
+                                file.name,
+                                line_index + 1
+                            ))
+                        })?;
+                serde_json::from_value::<LogEntry>(Value::Object(object.clone())).map_err(
+                    |error| {
+                        invalid_data(format!(
+                            "invalid log schema in {} at line {}: {error}",
+                            file.name,
+                            line_index + 1
+                        ))
+                    },
+                )?;
+                object.insert(
+                    "deviceId".to_string(),
+                    Value::String(file.device_id.clone()),
+                );
+                results.push((timestamp, Value::Object(object)));
             }
         }
 
-        results.sort_by_key(|entry| {
-            entry
-                .get("timestamp")
-                .and_then(Value::as_i64)
-                .expect("timestamps validated before sorting")
-        });
+        results.sort_by_key(|(timestamp, _)| *timestamp);
 
-        Ok(results)
+        Ok(results.into_iter().map(|(_, entry)| entry).collect())
     }
 
     async fn scan_log_catalog(&self) -> io::Result<LogCatalog> {
@@ -857,16 +844,11 @@ impl Storage {
         let mut files = Vec::new();
         while let Some(device_entry) = devices.next_entry().await? {
             if !device_entry.file_type().await?.is_dir() {
-                return Err(invalid_data(format!(
-                    "unexpected file in logs directory: {}",
-                    device_entry.path().display()
-                )));
+                continue;
             }
-            let device_id = device_entry
-                .file_name()
-                .to_str()
-                .map(str::to_string)
-                .ok_or_else(|| invalid_data("log device directory name is not UTF-8"))?;
+            let Some(device_id) = device_entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
             device_ids.push(device_id.clone());
             files.extend(scan_device_log_files(&device_id, &device_entry.path()).await?);
         }
@@ -887,37 +869,30 @@ impl Storage {
             Ok(mut entries) => {
                 while let Some(entry) = entries.next_entry().await? {
                     if !entry.file_type().await?.is_dir() {
-                        return Err(invalid_data(format!(
-                            "unexpected file in page checkpoint directory: {}",
-                            entry.path().display()
-                        )));
+                        continue;
                     }
-                    let shard = entry
-                        .file_name()
-                        .to_str()
-                        .map(str::to_string)
-                        .ok_or_else(|| invalid_data("page shard name is not UTF-8"))?;
+                    let Some(shard) = entry.file_name().to_str().map(str::to_string) else {
+                        continue;
+                    };
                     if shard.len() != 2 || !shard.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                        return Err(invalid_data(format!(
-                            "invalid page shard directory: {shard}"
-                        )));
+                        continue;
                     }
                     let mut files = fs::read_dir(entry.path()).await?;
                     while let Some(file) = files.next_entry().await? {
                         if !file.file_type().await?.is_file() {
-                            return Err(invalid_data(format!(
-                                "unexpected directory in page shard: {}",
-                                file.path().display()
-                            )));
+                            continue;
+                        }
+                        if file.path().extension() != Some(std::ffi::OsStr::new("json")) {
+                            continue;
                         }
                         let name = file
                             .file_name()
                             .to_str()
                             .map(str::to_string)
                             .ok_or_else(|| invalid_data("page checkpoint filename is not UTF-8"))?;
-                        let slug = name.strip_suffix(".json").ok_or_else(|| {
-                            invalid_data(format!("unexpected page checkpoint file: {name}"))
-                        })?;
+                        let Some(slug) = name.strip_suffix(".json") else {
+                            continue;
+                        };
                         if slug.is_empty() || shard_for(slug) != shard {
                             return Err(invalid_data(format!(
                                 "page checkpoint {name} is stored in the wrong shard {shard}"
@@ -951,11 +926,7 @@ impl Storage {
     }
 
     fn cached_page_overlay(&self) -> BTreeMap<String, Option<PageEntity>> {
-        let cache = self
-            .inner
-            .cache
-            .lock()
-            .expect("storage cache mutex poisoned");
+        let cache = self.inner.cache.lock();
         cache
             .entries
             .iter()
@@ -977,19 +948,19 @@ impl Storage {
             Ok(mut entries) => {
                 while let Some(entry) = entries.next_entry().await? {
                     if !entry.file_type().await?.is_file() {
-                        return Err(invalid_data(format!(
-                            "unexpected directory in list checkpoints: {}",
-                            entry.path().display()
-                        )));
+                        continue;
+                    }
+                    if entry.path().extension() != Some(std::ffi::OsStr::new("json")) {
+                        continue;
                     }
                     let name = entry
                         .file_name()
                         .to_str()
                         .map(str::to_string)
                         .ok_or_else(|| invalid_data("list checkpoint filename is not UTF-8"))?;
-                    let slug = name.strip_suffix(".json").ok_or_else(|| {
-                        invalid_data(format!("unexpected list checkpoint file: {name}"))
-                    })?;
+                    let Some(slug) = name.strip_suffix(".json") else {
+                        continue;
+                    };
                     if slug.is_empty() {
                         return Err(invalid_data("list checkpoint slug must not be empty"));
                     }
@@ -1020,11 +991,7 @@ impl Storage {
     }
 
     fn cached_list_overlay(&self) -> BTreeMap<String, Option<ListEntity>> {
-        let cache = self
-            .inner
-            .cache
-            .lock()
-            .expect("storage cache mutex poisoned");
+        let cache = self.inner.cache.lock();
         cache
             .entries
             .iter()
@@ -1175,11 +1142,7 @@ impl Storage {
     }
 
     fn cache_get(&self, key: &str) -> Option<Option<Entity>> {
-        self.inner
-            .cache
-            .lock()
-            .expect("storage cache mutex poisoned")
-            .get(key)
+        self.inner.cache.lock().get(key)
     }
 
     async fn load_cached_json<T>(
@@ -1201,19 +1164,11 @@ impl Storage {
     }
 
     fn cache_put(&self, key: String, value: Option<Entity>) {
-        self.inner
-            .cache
-            .lock()
-            .expect("storage cache mutex poisoned")
-            .put(key, value);
+        self.inner.cache.lock().put(key, value);
     }
 
     fn clear_cache(&self) {
-        let mut cache = self
-            .inner
-            .cache
-            .lock()
-            .expect("storage cache mutex poisoned");
+        let mut cache = self.inner.cache.lock();
         *cache = EntityCache::new(cache.capacity);
     }
 
@@ -1222,21 +1177,11 @@ impl Storage {
     }
 
     fn set_checkpoint_error(&self, error: String) {
-        *self
-            .inner
-            .checkpoint_error
-            .lock()
-            .expect("checkpoint error mutex poisoned") = Some(error);
+        *self.inner.checkpoint_error.lock() = Some(error);
     }
 
     fn check_checkpoint_health(&self) -> io::Result<()> {
-        if let Some(error) = self
-            .inner
-            .checkpoint_error
-            .lock()
-            .expect("checkpoint error mutex poisoned")
-            .clone()
-        {
+        if let Some(error) = self.inner.checkpoint_error.lock().clone() {
             return Err(io::Error::other(format!(
                 "checkpoint persistence failed: {error}"
             )));
@@ -1272,10 +1217,10 @@ async fn scan_device_log_files(device_id: &str, directory: &Path) -> io::Result<
     let mut files = Vec::new();
     while let Some(entry) = entries.next_entry().await? {
         if !entry.file_type().await?.is_file() {
-            return Err(invalid_data(format!(
-                "unexpected directory in device logs: {}",
-                entry.path().display()
-            )));
+            continue;
+        }
+        if entry.path().extension() != Some(std::ffi::OsStr::new("jsonl")) {
+            continue;
         }
         let name = entry
             .file_name()
@@ -1284,11 +1229,12 @@ async fn scan_device_log_files(device_id: &str, directory: &Path) -> io::Result<
             .ok_or_else(|| invalid_data("log filename is not UTF-8"))?;
         let date = name
             .strip_suffix(".jsonl")
-            .ok_or_else(|| invalid_data(format!("unexpected non-JSONL log file: {name}")))?;
+            .ok_or_else(|| invalid_data(format!("invalid JSONL log filename: {name}")))?;
         chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
             .map_err(|_| invalid_data(format!("log filename must be YYYY-MM-DD.jsonl: {name}")))?;
         files.push(LogFile {
             device_id: device_id.to_string(),
+            date: date.to_string(),
             name,
             path: entry.path(),
             size: entry.metadata().await?.len(),

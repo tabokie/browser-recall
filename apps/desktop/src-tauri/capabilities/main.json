@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window",
+  "description": "Event subscriptions used by the desktop bridge.",
+  "windows": ["main"],
+  "permissions": ["core:event:default"]
+}

@@ -1,5 +1,5 @@
 <!doctype html>
-<html style="opacity: 0">
+<html>
   <head>
     <meta charset="UTF-8" />
     <title data-i18n="extensionShortName">browser-recall</title>
@@ -4109,7 +4109,16 @@
           d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"
         />
       </svg>
-      <span id="serviceErrorMessage" style="flex: 1"></span>
+      <span
+        id="serviceErrorMessage"
+        class="selectable-text"
+        style="
+          flex: 1;
+          user-select: text;
+          -webkit-user-select: text;
+          cursor: text;
+        "
+      ></span>
       <button
         id="serviceErrorReloadBtn"
         data-i18n="commonReload"

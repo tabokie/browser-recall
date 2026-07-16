@@ -13,6 +13,8 @@ Project name: **browser-recall** (display name "Browser Recall"). Version 1.0 ta
 
 **No silent fallbacks or defaults.** Always get the true information regardless of cost. If a daemon cache misses, fall through to disk through the coordinated storage path. Silent fallbacks hide bugs and cause data corruption.
 
+Optional references may be omitted only when they are valid non-page URLs; malformed HTTP(S) references must remain explicit validation failures.
+
 **Desktop is the authority.** Persistent storage, replay, search, sync, rule policy, title cleanup, blacklist policy, and auto-pin synthesis belong to the daemon/desktop side. The extension is a connector for capture, current-page popup actions, pairing, and short-lived command buffering.
 
 **No extension-side migration or persistent preference storage.** On schema changes, migrate the persistent data at `~/browser-data` first, then upgrade code to handle only the new format. Extension persistence is limited to connector/pairing/short-lived queue state; product settings live in `views/manifest/settings.json` through daemon commands.

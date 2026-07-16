@@ -348,8 +348,9 @@ pub(crate) fn note_text_value(
                 return Err(format!("{field_name} array must contain strings only"));
             }
             if values.iter().any(|value| {
-                let text = value.as_str().expect("string array member");
-                text.is_empty() || text != text.trim()
+                value
+                    .as_str()
+                    .is_some_and(|text| text.is_empty() || text != text.trim())
             }) {
                 return Err(format!(
                     "{field_name} array must contain canonical non-empty strings"
@@ -372,8 +373,9 @@ pub(crate) fn note_css_path_value(value: Option<&Value>) -> Result<Option<Value>
                 Ok(None)
             } else {
                 if values.iter().any(|value| {
-                    let path = value.as_str().expect("string array member");
-                    !path.is_empty() && path != path.trim()
+                    value
+                        .as_str()
+                        .is_some_and(|path| !path.is_empty() && path != path.trim())
                 }) {
                     return Err(
                         "cssPath array must contain canonical strings without outer whitespace"
@@ -414,7 +416,10 @@ fn note_slug_text(value: Option<&Value>) -> Result<Option<String>, String> {
             }
             let parts = values
                 .iter()
-                .map(|value| value.as_str().expect("validated string member"))
+                .map(Value::as_str)
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| "Persisted note excerpt must contain strings only".to_string())?
+                .into_iter()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .collect::<Vec<_>>();
@@ -1383,7 +1388,7 @@ pub fn preview_rule_payload(
         let matched = preview_rule(
             &rule_spec,
             &PageData {
-                title: title.clone(),
+                title: Some(title.clone()),
                 url: entry.url.clone(),
                 body: entry.body_preview.clone(),
             },
@@ -1622,6 +1627,19 @@ fn is_history_importable_url(url: &str) -> bool {
     generate_slug_from_url(url).is_ok()
 }
 
+pub(crate) fn optional_page_referrer(value: Option<&str>) -> Result<Option<String>, String> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let parsed =
+        url::Url::parse(value).map_err(|error| format!("invalid referrer URL: {error}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Ok(None);
+    }
+    generate_slug_from_url(value).map_err(|error| format!("invalid referrer URL: {error}"))?;
+    Ok(Some(value.to_string()))
+}
+
 pub async fn import_history(
     storage: &Storage,
     device_id: &str,
@@ -1644,10 +1662,9 @@ pub async fn import_history(
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string);
-        let referrer_url = match entry.referrer_url.as_deref().map(str::trim) {
-            None | Some("") => None,
-            Some(value) if is_history_importable_url(value) => Some(value.to_string()),
-            Some(_) => {
+        let referrer_url = match optional_page_referrer(entry.referrer_url.as_deref()) {
+            Ok(referrer_url) => referrer_url,
+            Err(_) => {
                 skipped += 1;
                 continue;
             }

@@ -36,15 +36,6 @@ if (!highlightLifecycleModule?.create) {
 // Recording paused: skip all content script functionality.
 chrome.storage.session.get(['workspace'], (result) => {
   const recordingState = result.workspace;
-  if (
-    recordingState !== undefined &&
-    (!recordingState ||
-      typeof recordingState !== 'object' ||
-      Array.isArray(recordingState) ||
-      (recordingState.mode !== 'default' && recordingState.mode !== 'private'))
-  ) {
-    throw new Error('Stored recording state must have mode default or private');
-  }
   if (recordingState && recordingState.mode === 'private') {
     console.log('[content] Recording paused — all tracking disabled');
     return;

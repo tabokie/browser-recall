@@ -1595,6 +1595,12 @@ async fn command_error_and_normalization_paths_are_explicit() {
                 visit_times: vec![1_710_001_000_000],
             },
             HistoryImportEntry {
+                url: "https://example.com/malformed-referrer".to_string(),
+                title: Some("Malformed Referrer".to_string()),
+                referrer_url: Some(" https:// ".to_string()),
+                visit_times: vec![1_710_001_500_000],
+            },
+            HistoryImportEntry {
                 url: "https://example.com/trimmed".to_string(),
                 title: Some("  Trimmed Title  ".to_string()),
                 referrer_url: Some(" https://referrer.example/source ".to_string()),
@@ -1604,7 +1610,7 @@ async fn command_error_and_normalization_paths_are_explicit() {
     )
     .await
     .expect("history import with skips");
-    assert_eq!((page_count, visit_count, skipped_count), (1, 1, 4));
+    assert_eq!((page_count, visit_count, skipped_count), (2, 2, 4));
     let trimmed_slug = generate_slug_from_url("https://example.com/trimmed").expect("slug");
     let trimmed_page = storage
         .load_page(&trimmed_slug)
@@ -1613,10 +1619,16 @@ async fn command_error_and_normalization_paths_are_explicit() {
         .expect("trimmed page exists");
     assert_eq!(trimmed_page.title.as_deref(), Some("Trimmed Title"));
     assert_eq!(trimmed_page.parent_ids.len(), 1);
-    assert!(storage
+    let bad_referrer_page = storage
         .load_page(&generate_slug_from_url("https://example.com/bad-referrer").expect("slug"))
         .await
         .expect("load bad referrer page")
+        .expect("valid page imported without its non-web referrer");
+    assert!(bad_referrer_page.parent_ids.is_empty());
+    assert!(storage
+        .load_page(&generate_slug_from_url("https://example.com/malformed-referrer").expect("slug"))
+        .await
+        .expect("load malformed referrer page")
         .is_none());
 
     assert_eq!(

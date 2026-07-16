@@ -174,7 +174,7 @@ class BrowserLikeWebSocket {
   static delayMessagePredicate = null;
   static closeOnNextStatus = false;
   static hangOnNextStatus = false;
-  static simulateLegacyProtocol = false;
+  static omitProtocolVersion = false;
   static sendMismatchedProtocol = false;
   static instances = [];
 
@@ -197,7 +197,7 @@ class BrowserLikeWebSocket {
     const wrapped = (...args) => {
       if (type === 'message') {
         let data = args[0].toString();
-        if (BrowserLikeWebSocket.simulateLegacyProtocol) {
+        if (BrowserLikeWebSocket.omitProtocolVersion) {
           const payload = JSON.parse(data);
           if (payload.type === 'pair_approved' || payload.type === 'auth_ok') {
             delete payload.protocolVersion;
@@ -235,7 +235,7 @@ class BrowserLikeWebSocket {
         BrowserLikeWebSocket.sendMismatchedProtocol &&
         (message.type === 'auth' || message.type === 'pair_request')
       ) {
-        message.protocolVersion = 1;
+        message.protocolVersion = 2;
         this.socket.send(JSON.stringify(message));
         return;
       }
@@ -330,7 +330,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     BrowserLikeWebSocket.delayMessagePredicate = null;
     BrowserLikeWebSocket.closeOnNextStatus = false;
     BrowserLikeWebSocket.hangOnNextStatus = false;
-    BrowserLikeWebSocket.simulateLegacyProtocol = false;
+    BrowserLikeWebSocket.omitProtocolVersion = false;
     BrowserLikeWebSocket.sendMismatchedProtocol = false;
     BrowserLikeWebSocket.instances = [];
     RefusingWebSocket.urls = [];
@@ -354,7 +354,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     const { chrome, store } = createChromeMock();
     globalThis.chrome = chrome;
     globalThis.WebSocket = BrowserLikeWebSocket;
-    BrowserLikeWebSocket.simulateLegacyProtocol = true;
+    BrowserLikeWebSocket.omitProtocolVersion = true;
     Object.defineProperty(globalThis, 'navigator', {
       value: { userAgent: 'Chrome/123.0.0.0 Safari/537.36' },
       configurable: true,
@@ -378,7 +378,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(store.connectorAuthToken).toBeUndefined();
     expect(store.connectorLastDiagnostic).toMatchObject({
       code: 'incompatible_protocol',
-      expected: 2,
+      expected: 1,
       actual: null,
     });
 
@@ -436,7 +436,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(store.connectorAuthToken).toBeUndefined();
     expect(store.connectorLastDiagnostic).toMatchObject({
       code: 'incompatible_protocol',
-      expected: 2,
+      expected: 1,
     });
   }, 30_000);
 
@@ -709,8 +709,8 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       slug: 'large-snapshot-page',
       ts: 1710000002700,
       url: 'https://example.com/large-snapshot',
-      title: 'Large Snapshot Page',
-      markdown: 'large snapshot markdown',
+      title: null,
+      markdown: null,
       html: `<html><body>${largeBody}</body></html>`,
     });
 
@@ -812,7 +812,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     socket.send(
       JSON.stringify({
         type: 'pair_request',
-        protocolVersion: 2,
+        protocolVersion: 1,
         browserId: 'raw-browser',
         browserName: 'Chrome',
         extensionId: 'abcdefghijklmnop',
@@ -1662,6 +1662,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
             url: 'https://example.com/change',
             urls: null,
             key: null,
+            futureTraceId: 'compatible-additive-field',
           },
           {
             type: 'note',

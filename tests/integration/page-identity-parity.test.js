@@ -6,6 +6,7 @@ import {
   canonicalizePageUrl,
   generateSlugFromUrl,
 } from '../../packages/core/page-identity.js';
+import { canonicalizePageRequest } from '../../packages/core/utils.js';
 
 const PROPERTY_SEED = 0x48789428;
 const HELPER_PATH = path.resolve('target/debug/examples/page-identity');
@@ -144,5 +145,13 @@ describe('page identity parity', () => {
         ? undefined
         : `seed=${PROPERTY_SEED} index=${mismatchIndex} raw=${rawUrls[mismatchIndex]} canonical=${canonicalUrls[mismatchIndex]} js=${expected[mismatchIndex]} rust=${actual[mismatchIndex]}`,
     ).toBe(-1);
+  });
+
+  it('omits an optional referrer outside the page identity namespace', () => {
+    expect(
+      canonicalizePageRequest({
+        referrer: 'chrome-extension://blocked/interstitial.html',
+      }).referrer,
+    ).toBeNull();
   });
 });

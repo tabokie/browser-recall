@@ -125,7 +125,9 @@ async fn round_trips_all_entity_types_and_snapshot_artifacts() {
             &json!({
                 "timestamp": 1_710_000_000_000i64,
                 "action": "visit_page",
-                "url": "https://example.com/page"
+                "url": "https://example.com/page",
+                "title": null,
+                "referrerUrl": null
             }),
         )
         .await
@@ -142,6 +144,29 @@ async fn round_trips_all_entity_types_and_snapshot_artifacts() {
         )
         .await
         .expect("snapshot html saved");
+
+    let page_shard = page_path(temp_dir.path(), "page-a")
+        .parent()
+        .expect("page shard")
+        .to_path_buf();
+    for path in [
+        temp_dir.path().join("logs/.DS_Store"),
+        temp_dir.path().join("logs/device-a/.DS_Store"),
+        temp_dir.path().join("views/pages/.DS_Store"),
+        page_shard.join("README.txt"),
+        temp_dir.path().join("views/lists/.DS_Store"),
+        temp_dir.path().join("objects/notes/.DS_Store"),
+    ] {
+        tokio::fs::write(path, "outside the owned namespace")
+            .await
+            .expect("unrelated file written");
+    }
+    tokio::fs::create_dir_all(temp_dir.path().join("views/pages/not-a-shard"))
+        .await
+        .expect("unrelated page directory written");
+    tokio::fs::create_dir_all(temp_dir.path().join("objects/notes/unowned"))
+        .await
+        .expect("unrelated note directory written");
 
     assert_eq!(
         storage
@@ -210,6 +235,35 @@ async fn round_trips_all_entity_types_and_snapshot_artifacts() {
         .await
         .expect("snapshot html exists");
     assert!(snapshot_html.contains("snapshot"));
+
+    assert_eq!(
+        storage
+            .load_log_entries_after_replay_progress()
+            .await
+            .expect("log scan ignores unrelated entries")
+            .len(),
+        1
+    );
+    assert_eq!(
+        storage
+            .load_all_pages()
+            .await
+            .expect("page scan ignores unrelated entries")
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec!["page-a".to_string()]
+    );
+    assert_eq!(
+        storage
+            .load_all_lists()
+            .await
+            .expect("list scan ignores unrelated entries")
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec!["reading".to_string()]
+    );
 }
 
 #[tokio::test]
@@ -441,19 +495,10 @@ async fn sync_file_roundtrip_collects_expected_files_and_refreshes_reads() {
         vec!["device-b", "device-a"]
     );
 
-    let error = storage
-        .collect_sync_files("device-a", 1)
-        .await
-        .expect_err("unexpected files in a canonical object directory must fail sync");
-    assert!(error.to_string().contains("unexpected non-JSON note file"));
-    tokio::fs::remove_file(temp_dir.path().join("objects/notes/ignored.tmp"))
-        .await
-        .expect("remove invalid note artifact");
-
     let collected = storage
         .collect_sync_files("device-a", 1)
         .await
-        .expect("collect canonical sync files");
+        .expect("collect owned sync files while ignoring unrelated entries");
     let collected_paths = collected
         .iter()
         .map(|(path, _)| path.as_str())
@@ -461,6 +506,7 @@ async fn sync_file_roundtrip_collects_expected_files_and_refreshes_reads() {
     assert!(collected_paths.contains(&format!("logs/device-a/{today}.jsonl").as_str()));
     assert!(!collected_paths.contains(&"logs/device-a/1999-01-01.jsonl"));
     assert!(collected_paths.contains(&"objects/notes/sync-note.json"));
+    assert!(!collected_paths.contains(&"objects/notes/ignored.tmp"));
 
     let missing_storage = Storage::new(temp_dir.path().join("missing-storage"));
     let missing_sync_error = missing_storage

@@ -6,8 +6,9 @@
   "scripts": {
     "build:ui": "node ../../scripts/stage-app-assets.mjs desktop-ui",
     "dev": "tauri dev",
-    "build": "npm run build:ui && tauri build --bundles app && node ../../scripts/collect-desktop-artifacts.mjs --bundles app",
-    "build:dmg": "npm run build:ui && tauri build --bundles dmg && node ../../scripts/collect-desktop-artifacts.mjs --bundles dmg"
+    "build": "npm run build:ui && tauri build --bundles app && node ../../scripts/finalize-macos-app-bundle.mjs '../../target/release/bundle/macos/Browser Recall.app' && node ../../scripts/collect-desktop-artifacts.mjs --bundles app && npm run verify:macos-bundle",
+    "verify:macos-bundle": "node ../../scripts/verify-macos-app-bundle.mjs '../../dist/desktop/macos/app/Browser Recall.app'",
+    "build:dmg": "npm run build:ui && node ../../scripts/finalize-macos-app-bundle.mjs --require-apple-identity && tauri build --bundles dmg && node ../../scripts/verify-macos-app-bundle.mjs '../../target/release/bundle/macos/Browser Recall.app' && node ../../scripts/collect-desktop-artifacts.mjs --bundles dmg"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0"

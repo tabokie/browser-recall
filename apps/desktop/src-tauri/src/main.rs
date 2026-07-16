@@ -1,3 +1,13 @@
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::unwrap_used
+    )
+)]
+
 mod config;
 mod logging;
 mod login_item;
@@ -30,6 +40,7 @@ use browser_recall_daemon::ws_server::{
     ServiceStatus,
 };
 use browser_recall_daemon::{ConfigStore, DaemonConfig};
+use parking_lot::Mutex;
 use search::{CancelSearchRequest, SearchRequest, StreamingSearchRequest};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -37,7 +48,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
+    Arc,
 };
 #[cfg(target_os = "macos")]
 use std::time::Duration;
@@ -74,6 +85,7 @@ struct ShellState {
 
 struct DesktopState {
     server: Mutex<Option<ServerHandle>>,
+    server_start: StartGate,
     config_store: ConfigStore,
     shell: Mutex<ShellState>,
     sync: SyncController,
@@ -82,6 +94,28 @@ struct DesktopState {
     logging: logging::LoggingHandle,
     quit_requested: Mutex<bool>,
     main_window_focus_pending: AtomicBool,
+}
+
+#[derive(Default)]
+struct StartGate(tokio::sync::Mutex<()>);
+
+impl StartGate {
+    async fn run<T, E, Present, Start, StartFuture>(
+        &self,
+        present: Present,
+        start: Start,
+    ) -> Result<T, E>
+    where
+        Present: FnOnce() -> Option<T>,
+        Start: FnOnce() -> StartFuture,
+        StartFuture: std::future::Future<Output = Result<T, E>>,
+    {
+        let _guard = self.0.lock().await;
+        if let Some(value) = present() {
+            return Ok(value);
+        }
+        start().await
+    }
 }
 
 struct ActiveHistorySearch {
@@ -212,12 +246,7 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             }
             "logs" => {
                 if let Some(state) = app.try_state::<DesktopState>() {
-                    let log_dir = state
-                        .shell
-                        .lock()
-                        .expect("shell state poisoned")
-                        .log_dir
-                        .clone();
+                    let log_dir = state.shell.lock().log_dir.clone();
                     if let Err(error) = app.opener().open_path(log_dir, None::<&str>) {
                         warn!(%error, "failed to open log directory");
                     }
@@ -225,7 +254,7 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             }
             "quit" => {
                 if let Some(state) = app.try_state::<DesktopState>() {
-                    *state.quit_requested.lock().expect("quit state poisoned") = true;
+                    *state.quit_requested.lock() = true;
                 }
                 app.exit(0);
             }
@@ -355,15 +384,18 @@ fn restore_normal_webview_window_frame(window: &WebviewWindow) {
     log_window_error(window.center(), "center");
 }
 
-fn create_main_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
+fn create_main_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     let config = app
         .config()
         .app
         .windows
         .iter()
         .find(|window| window.label == "main")
-        .expect("main window config missing");
-    WebviewWindowBuilder::from_config(app, config)?.build()
+        .ok_or_else(|| "main window config is missing".to_string())?;
+    WebviewWindowBuilder::from_config(app, config)
+        .map_err(|error| error.to_string())?
+        .build()
+        .map_err(|error| error.to_string())
 }
 
 #[derive(Serialize)]
@@ -419,6 +451,7 @@ fn window_title(model: &UiModel) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
 
     fn ui_model(is_paused: bool, browsers: Vec<String>) -> UiModel {
         UiModel {
@@ -457,20 +490,54 @@ mod tests {
     fn tray_right_click_keeps_menu_available() {
         assert!(tray_menu_shows_on_right_click());
     }
+
+    #[tokio::test]
+    async fn daemon_start_gate_runs_only_one_absent_start() {
+        let gate = Arc::new(StartGate::default());
+        let running = Arc::new(AtomicBool::new(false));
+        let starts = Arc::new(AtomicUsize::new(0));
+        let mut tasks = Vec::new();
+
+        for _ in 0..2 {
+            let gate = Arc::clone(&gate);
+            let running = Arc::clone(&running);
+            let starts = Arc::clone(&starts);
+            tasks.push(tokio::spawn(async move {
+                gate.run(
+                    || running.load(Ordering::SeqCst).then_some(()),
+                    || async {
+                        starts.fetch_add(1, Ordering::SeqCst);
+                        tokio::task::yield_now().await;
+                        running.store(true, Ordering::SeqCst);
+                        Ok::<(), ()>(())
+                    },
+                )
+                .await
+            }));
+        }
+
+        for task in tasks {
+            assert!(task.await.is_ok());
+        }
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn configured_shell_without_daemon_has_no_storage_authority() {
+        assert_eq!(
+            require_running_storage(None::<()>)
+                .expect_err("absent daemon must reject storage access"),
+            "Browser Recall daemon is not running"
+        );
+    }
 }
 
 fn apply_shell_state(app: &AppHandle) {
     let Some(state) = app.try_state::<DesktopState>() else {
         return;
     };
-    let shell = state.shell.lock().expect("shell state poisoned").clone();
+    let shell = state.shell.lock().clone();
     let model = UiModel::from_state(&shell);
-
-    if let Some(tray) = app.tray_by_id(TRAY_ID) {
-        if let Err(error) = tray.set_title(None::<&str>) {
-            warn!(%error, "failed to clear tray title");
-        }
-    }
 
     if let Some(window) = app.get_webview_window("main") {
         log_window_error(window.set_title(&window_title(&model)), "set title");
@@ -486,7 +553,7 @@ fn apply_shell_state(app: &AppHandle) {
     }
 
     if model.route.is_some() {
-        let mut shell = state.shell.lock().expect("shell state poisoned");
+        let mut shell = state.shell.lock();
         shell.route = None;
     }
 }
@@ -497,7 +564,7 @@ where
 {
     let state = app.state::<DesktopState>();
     {
-        let mut shell = state.shell.lock().expect("shell state poisoned");
+        let mut shell = state.shell.lock();
         mutator(&mut shell);
     }
     apply_shell_state(app);
@@ -543,18 +610,12 @@ fn update_shell_settings(app: AppHandle, payload: ShellSettingsUpdate) -> Result
     Ok(())
 }
 
-#[tauri::command]
-fn resume_shell_service(app: AppHandle) -> Result<(), String> {
-    resume_daemon(&app)
-}
-
-fn resume_daemon(app: &AppHandle) -> Result<(), String> {
-    let state = app.state::<DesktopState>();
-    let server = state.server.lock().expect("server state poisoned");
-    let server = server
-        .as_ref()
-        .ok_or_else(|| "Browser Recall daemon is not running".to_string())?;
-    tauri::async_runtime::block_on(server.resume());
+async fn resume_daemon(app: &AppHandle) -> Result<(), String> {
+    if let Some(server) = server_control_for_app(app) {
+        server.resume().await;
+    } else {
+        start_shell_server(app).await?;
+    }
     update_shell_state(app, |state| state.route = Some("settings".to_string()));
     Ok(())
 }
@@ -563,7 +624,7 @@ fn resume_daemon(app: &AppHandle) -> Result<(), String> {
 fn open_shell_path(app: AppHandle, request: OpenPathRequest) -> Result<(), String> {
     let path = {
         let state = app.state::<DesktopState>();
-        let shell = state.shell.lock().expect("shell state poisoned");
+        let shell = state.shell.lock();
         match request.kind.as_str() {
             "data" => shell.data_dir.clone(),
             "logs" => shell.log_dir.clone(),
@@ -581,10 +642,7 @@ fn bridge_storage_get(app: AppHandle, request: BridgeStorageGetRequest) -> Resul
     match request.area_name.as_str() {
         "session" => {
             let state = app.state::<DesktopState>();
-            let storage = state
-                .storage_bridge
-                .lock()
-                .expect("storage bridge state poisoned");
+            let storage = state.storage_bridge.lock();
             Ok(Value::Object(session_bridge_snapshot(
                 &storage,
                 request.keys.as_deref(),
@@ -599,10 +657,7 @@ fn bridge_storage_set(app: AppHandle, request: BridgeStorageSetRequest) -> Resul
     let changes = match request.area_name.as_str() {
         "session" => {
             let state = app.state::<DesktopState>();
-            let mut storage = state
-                .storage_bridge
-                .lock()
-                .expect("storage bridge state poisoned");
+            let mut storage = state.storage_bridge.lock();
             session_bridge_set(&mut storage, request.items)
         }
         other => return Err(format!("unsupported storage area: {other}")),
@@ -624,10 +679,7 @@ fn bridge_storage_remove(
     let changes = match request.area_name.as_str() {
         "session" => {
             let state = app.state::<DesktopState>();
-            let mut storage = state
-                .storage_bridge
-                .lock()
-                .expect("storage bridge state poisoned");
+            let mut storage = state.storage_bridge.lock();
             session_bridge_remove(&mut storage, &request.keys)
         }
         other => return Err(format!("unsupported storage area: {other}")),
@@ -649,10 +701,7 @@ fn bridge_storage_clear(
     let changes = match request.area_name.as_str() {
         "session" => {
             let state = app.state::<DesktopState>();
-            let mut storage = state
-                .storage_bridge
-                .lock()
-                .expect("storage bridge state poisoned");
+            let mut storage = state.storage_bridge.lock();
             session_bridge_clear(&mut storage)
         }
         other => return Err(format!("unsupported storage area: {other}")),
@@ -685,37 +734,41 @@ fn bridge_storage_broadcast(
 
 fn shell_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let state = app.state::<DesktopState>();
-    let shell = state.shell.lock().expect("shell state poisoned");
+    let shell = state.shell.lock();
     Ok(PathBuf::from(shell.data_dir.clone()))
 }
 
 fn shell_setup_complete(app: &AppHandle) -> bool {
     let state = app.state::<DesktopState>();
-    let shell = state.shell.lock().expect("shell state poisoned");
+    let shell = state.shell.lock();
     shell.setup_complete
 }
 
 fn shell_snapshot(app: &AppHandle) -> ServerSnapshot {
     let state = app.state::<DesktopState>();
-    let shell = state.shell.lock().expect("shell state poisoned");
+    let shell = state.shell.lock();
     shell.snapshot.clone()
 }
 
-fn storage_for_app(app: &AppHandle) -> Result<Storage, String> {
-    let server_storage = {
+fn require_running_storage<T>(storage: Option<T>) -> Result<T, String> {
+    storage.ok_or_else(|| "Browser Recall daemon is not running".to_string())
+}
+
+fn server_storage_for_app(app: &AppHandle) -> Option<Storage> {
+    {
         let state = app.state::<DesktopState>();
-        let server = state.server.lock().expect("server state poisoned");
+        let server = state.server.lock();
         server.as_ref().map(ServerHandle::storage)
-    };
-    if let Some(storage) = server_storage {
-        return Ok(storage);
     }
-    Ok(Storage::new(shell_data_dir(app)?))
+}
+
+fn storage_for_app(app: &AppHandle) -> Result<Storage, String> {
+    require_running_storage(server_storage_for_app(app))
 }
 
 fn server_control_for_app(app: &AppHandle) -> Option<ServerControlHandle> {
     let state = app.state::<DesktopState>();
-    let server = state.server.lock().expect("server state poisoned");
+    let server = state.server.lock();
     server.as_ref().map(ServerHandle::control_handle)
 }
 
@@ -767,48 +820,45 @@ fn spawn_server_watchers(
 }
 
 async fn start_shell_server(app: &AppHandle) -> Result<ServerSnapshot, String> {
-    let config_store = {
-        let state = app.state::<DesktopState>();
-        if state
-            .server
-            .lock()
-            .expect("server state poisoned")
-            .is_some()
-        {
-            return Ok(shell_snapshot(app));
-        }
-        state.config_store.clone()
-    };
-    let config = config_store
-        .load_or_create()
-        .map_err(|error| error.to_string())?;
-    if !config.is_configured() {
-        return Err("Browser Recall setup is not complete".to_string());
-    }
+    let state = app.state::<DesktopState>();
+    state
+        .server_start
+        .run(
+            || {
+                let running = state.server.lock().is_some();
+                running.then(|| shell_snapshot(app))
+            },
+            || async {
+                let config_store = state.config_store.clone();
+                let config = config_store
+                    .load_or_create()
+                    .map_err(|error| error.to_string())?;
+                if !config.is_configured() {
+                    return Err("Browser Recall setup is not complete".to_string());
+                }
 
-    let server = start_server(ServerStartOptions::phase1_defaults(
-        config_store,
-        pairing_approver(app.clone()),
-    ))
-    .await
-    .map_err(|error| error.to_string())?;
-    let snapshot_rx = server.subscribe();
-    let change_rx = server.subscribe_changes();
-    let snapshot = snapshot_rx.borrow().clone();
+                let server = start_server(ServerStartOptions::phase1_defaults(
+                    config_store,
+                    pairing_approver(app.clone()),
+                ))
+                .await
+                .map_err(|error| error.to_string())?;
+                let snapshot_rx = server.subscribe();
+                let change_rx = server.subscribe_changes();
+                let snapshot = snapshot_rx.borrow().clone();
 
-    {
-        let state = app.state::<DesktopState>();
-        let mut server_slot = state.server.lock().expect("server state poisoned");
-        *server_slot = Some(server);
-    }
-
-    update_shell_state(app, |state| {
-        state.snapshot = snapshot.clone();
-        state.data_dir = config.data_dir.display().to_string();
-        state.setup_complete = true;
-    });
-    spawn_server_watchers(app.clone(), snapshot_rx, change_rx);
-    Ok(snapshot)
+                *state.server.lock() = Some(server);
+                update_shell_state(app, |shell| {
+                    shell.snapshot = snapshot.clone();
+                    shell.data_dir = config.data_dir.display().to_string();
+                    shell.setup_complete = true;
+                });
+                spawn_server_watchers(app.clone(), snapshot_rx, change_rx);
+                state.sync.request_worker();
+                Ok(snapshot)
+            },
+        )
+        .await
 }
 
 fn emit_runtime_message(app: &AppHandle, payload: Value) {
@@ -933,21 +983,21 @@ fn session_bridge_clear(state: &mut StorageBridgeState) -> Map<String, Value> {
     session_bridge_remove(state, &keys)
 }
 
-fn emit_passive_mutation(app: &AppHandle, mutation_type: &str, detail: Value) {
-    let mut payload = detail
-        .as_object()
-        .cloned()
-        .expect("passive mutation detail must be an object");
-    payload.insert("action".to_string(), Value::String("mutation".to_string()));
-    payload.insert("type".to_string(), Value::String(mutation_type.to_string()));
-    emit_runtime_message(app, Value::Object(payload));
+fn emit_passive_mutation(app: &AppHandle, mutation_type: &str) {
+    emit_runtime_message(
+        app,
+        json!({
+            "action": "mutation",
+            "type": mutation_type,
+        }),
+    );
 }
 
 fn emit_sync_refresh_mutations(app: &AppHandle) {
     for mutation_type in [
         "history", "note", "snapshot", "lists", "orphaned", "settings",
     ] {
-        emit_passive_mutation(app, mutation_type, json!({}));
+        emit_passive_mutation(app, mutation_type);
     }
 }
 
@@ -981,7 +1031,7 @@ async fn run_background_sync_once(app: AppHandle) {
 
 fn desktop_connector_state_response(
     snapshot: &ServerSnapshot,
-    storage: &Storage,
+    data_dir: &str,
     setup_complete: bool,
 ) -> Value {
     if !setup_complete {
@@ -1019,7 +1069,7 @@ fn desktop_connector_state_response(
         "lastError": snapshot.last_error,
         "lastErrorCode": snapshot.last_error_code,
         "lastDrainedAt": null,
-        "dataFolder": storage.root().to_string_lossy().to_string(),
+        "dataFolder": data_dir,
         "daemonBufferDepth": 0,
     })
 }
@@ -1068,13 +1118,7 @@ fn paired_browser_payloads(
 }
 
 fn choose_desktop_data_folder(app: &AppHandle) -> Result<Value, String> {
-    if app
-        .state::<DesktopState>()
-        .server
-        .lock()
-        .expect("server state poisoned")
-        .is_some()
-    {
+    if app.state::<DesktopState>().server.lock().is_some() {
         return Err("The data folder can only be changed before setup starts.".to_string());
     }
 
@@ -1142,7 +1186,6 @@ async fn complete_desktop_setup(app: &AppHandle, request: &Value) -> Result<Valu
         state.launch_at_login = launch_at_login;
     });
     let snapshot = start_shell_server(app).await?;
-    app.state::<DesktopState>().sync.request_worker();
 
     Ok(json!({
         "success": true,
@@ -1163,13 +1206,10 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
         .ok_or_else(|| "bridge action missing `action`".to_string())?;
     if CommandAuthority::supports(action) {
         if let Some(server) = server_control_for_app(&app) {
-            let mut daemon_request = request.clone();
-            daemon_request
-                .as_object_mut()
-                .expect("bridge request was validated as an object")
-                .remove("action");
+            let mut daemon_request = request_object.clone();
+            daemon_request.remove("action");
             return server
-                .run_command(action, daemon_request)
+                .run_command(action, Value::Object(daemon_request))
                 .await
                 .map_err(|error| error.to_string());
         }
@@ -1182,7 +1222,8 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             "locale": sys_locale::get_locale(),
         }));
     }
-    let storage = storage_for_app(&app)?;
+    let server_storage = server_storage_for_app(&app);
+    let storage = || require_running_storage(server_storage.as_ref());
     let snapshot = shell_snapshot(&app);
     let device_id = shell_device_id(&app);
     let setup_complete = shell_setup_complete(&app);
@@ -1198,11 +1239,12 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             "setupComplete": setup_complete,
         }),
         "getDesktopConnectorState" | "triggerDesktopPairing" => {
-            desktop_connector_state_response(&snapshot, &storage, setup_complete)
+            let data_dir = shell_data_dir(&app)?;
+            desktop_connector_state_response(&snapshot, &data_dir.to_string_lossy(), setup_complete)
         }
         "getDesktopShellState" => {
             let state = app.state::<DesktopState>();
-            let shell = state.shell.lock().expect("shell state poisoned");
+            let shell = state.shell.lock();
             let paired_browsers = paired_browser_payloads(&state.config_store, &snapshot)?;
             json!({
                 "success": true,
@@ -1276,7 +1318,6 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 state
                     .server
                     .lock()
-                    .expect("server state poisoned")
                     .as_ref()
                     .map(ServerHandle::control_handle)
             };
@@ -1297,13 +1338,13 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                     "info": null,
                 }));
             }
-            let name = storage
+            let name = storage()?
                 .root()
                 .file_name()
                 .and_then(|value| value.to_str())
                 .map(str::to_string)
                 .ok_or_else(|| "data directory has no UTF-8 folder name".to_string())?;
-            let _entries = tokio::fs::read_dir(storage.root())
+            let _entries = tokio::fs::read_dir(storage()?.root())
                 .await
                 .map_err(|error| format!("data directory is not readable: {error}"))?;
             json!({
@@ -1316,14 +1357,14 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
         }
         "getDirectorySize" => json!({
             "success": true,
-            "size": storage.directory_size().await.map_err(|error| error.to_string())?,
+            "size": storage()?.directory_size().await.map_err(|error| error.to_string())?,
         }),
         "getListDisplay" => {
             let list_id = request
                 .get("listId")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "getListDisplay missing listId".to_string())?;
-            let list = ReadProjections::new(storage.clone())
+            let list = ReadProjections::new(storage()?.clone())
                 .list_display(list_id)
                 .await?;
             json!({
@@ -1344,19 +1385,19 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                         .ok_or_else(|| "getPageContext slugs must be strings".to_string())
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let pages = ReadProjections::new(storage.clone())
+            let pages = ReadProjections::new(storage()?.clone())
                 .page_context(&slugs)
                 .await?;
             json!({ "success": true, "pages": pages })
         }
         "getAllPageContext" => {
-            let pages = ReadProjections::new(storage.clone())
+            let pages = ReadProjections::new(storage()?.clone())
                 .all_page_context()
                 .await?;
             json!({ "success": true, "pages": pages })
         }
         "getListTree" => {
-            let projection = ReadProjections::new(storage.clone()).list_tree().await?;
+            let projection = ReadProjections::new(storage()?.clone()).list_tree().await?;
             json!({
                 "success": true,
                 "tree": projection.tree,
@@ -1364,11 +1405,13 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             })
         }
         "getRecycleBin" => {
-            let entries = ReadProjections::new(storage.clone()).recycle_bin().await?;
+            let entries = ReadProjections::new(storage()?.clone())
+                .recycle_bin()
+                .await?;
             json!({ "success": true, "entries": entries })
         }
         "getSettings" => {
-            let settings = ReadProjections::new(storage.clone()).settings().await?;
+            let settings = ReadProjections::new(storage()?.clone()).settings().await?;
             json!({ "success": true, "settings": settings })
         }
         "listHistoryFiles" => {
@@ -1376,7 +1419,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .get("includeSizes")
                 .and_then(Value::as_bool)
                 .ok_or_else(|| "listHistoryFiles missing includeSizes".to_string())?;
-            let listing = list_history_files(&storage, include_sizes).await?;
+            let listing = list_history_files(storage()?, include_sizes).await?;
             let sizes = if include_sizes {
                 listing
                     .sizes
@@ -1404,7 +1447,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                         .ok_or_else(|| "loadHistoryBatch files must be strings".to_string())
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let entries = load_history_batch(&storage, &files).await?;
+            let entries = load_history_batch(storage()?, &files).await?;
             json!({
                 "success": true,
                 "entries": entries,
@@ -1415,7 +1458,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .get("query")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "searchNotes missing query".to_string())?;
-            let results = command_search_notes(&storage, query)?;
+            let results = command_search_notes(storage()?, query)?;
             json!({
                 "success": true,
                 "results": results,
@@ -1426,7 +1469,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .get("query")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "searchSnapshots missing query".to_string())?;
-            let results = command_search_snapshots(&storage, query)?;
+            let results = command_search_snapshots(storage()?, query)?;
             json!({
                 "success": true,
                 "results": results,
@@ -1437,7 +1480,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .get("slug")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "loadPageNotes missing slug".to_string())?;
-            let page = ReadProjections::new(storage.clone())
+            let page = ReadProjections::new(storage()?.clone())
                 .page_info(slug)
                 .await?;
             json!({ "success": true, "notes": page.notes })
@@ -1447,7 +1490,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .get("slug")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "listSnapshots missing slug".to_string())?;
-            let page = ReadProjections::new(storage.clone())
+            let page = ReadProjections::new(storage()?.clone())
                 .page_info(slug)
                 .await?;
             json!({ "success": true, "snapshots": page.snapshots })
@@ -1462,7 +1505,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .and_then(Value::as_i64)
                 .ok_or_else(|| "getSnapshotHtml missing timestamp".to_string())?;
             let html =
-                browser_recall_daemon::commands::get_snapshot_html(&storage, slug, timestamp)
+                browser_recall_daemon::commands::get_snapshot_html(storage()?, slug, timestamp)
                     .await?;
             match html {
                 Some(html) => json!({
@@ -1480,7 +1523,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .get("url")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "getPageRelations missing url".to_string())?;
-            let payload = page_relations_payload(&storage, url).await?;
+            let payload = page_relations_payload(storage()?, url).await?;
             json!({
                 "success": true,
                 "parents": payload["parents"].clone(),
@@ -1496,7 +1539,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .get("timestamp")
                 .and_then(Value::as_i64)
                 .ok_or_else(|| "openSnapshot missing timestamp".to_string())?;
-            let snapshot_path = storage.snapshot_html_file_path(slug, timestamp);
+            let snapshot_path = storage()?.snapshot_html_file_path(slug, timestamp);
             if !snapshot_path.exists() {
                 return Err("Snapshot not found".to_string());
             }
@@ -1523,7 +1566,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             preview_rule_payload(rule, entries)?
         }
         "resumeService" => {
-            resume_daemon(&app)?;
+            resume_daemon(&app).await?;
             json!({ "success": true })
         }
         "getSyncDevices" => {
@@ -1536,7 +1579,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
         }
         "syncListDevices" => {
             let state = app.state::<DesktopState>();
-            match state.sync.refresh_devices(&storage).await {
+            match state.sync.refresh_devices(storage()?).await {
                 Ok(devices) => json!({
                     "success": true,
                     "devices": sync_device_entries_json(&devices),
@@ -1564,7 +1607,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
         }
         "updateSyncSettings" | "clearSyncFolder" | "flushDesktopQueue" | "initializeFilesystem" => {
             let state = app.state::<DesktopState>();
-            state.sync.settings_changed(&storage).await?;
+            state.sync.settings_changed(storage()?).await?;
             json!({ "success": true })
         }
         "cancelSync" => {
@@ -1588,7 +1631,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
         }
         "syncNow" => {
             let state = app.state::<DesktopState>();
-            let response = state.sync.sync_now_response(&storage).await;
+            let response = state.sync.sync_now_response(storage()?).await;
             if response
                 .get("entriesReplayed")
                 .and_then(Value::as_u64)
@@ -1624,7 +1667,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .and_then(Value::as_str)
                 .ok_or_else(|| "deleteSyncDevice missing deviceId".to_string())?;
             let state = app.state::<DesktopState>();
-            state.sync.delete_device(&storage, target).await?;
+            state.sync.delete_device(storage()?, target).await?;
             json!({ "success": true })
         }
         other => json!({
@@ -1702,10 +1745,7 @@ async fn search_history_stream(
     let state = app.state::<DesktopState>();
     let cancel = Arc::new(AtomicBool::new(false));
     {
-        let mut active = state
-            .active_history_search
-            .lock()
-            .expect("active history search state poisoned");
+        let mut active = state.active_history_search.lock();
         if let Some(previous) = active.take() {
             previous.cancel.store(true, Ordering::Relaxed);
         }
@@ -1755,10 +1795,7 @@ async fn search_history_stream(
             }),
         );
         let state = app_for_task.state::<DesktopState>();
-        let mut active = state
-            .active_history_search
-            .lock()
-            .expect("active history search state poisoned");
+        let mut active = state.active_history_search.lock();
         if active
             .as_ref()
             .is_some_and(|active| active.search_id == search_id)
@@ -1778,10 +1815,7 @@ async fn cancel_history_search(
     let state = app.state::<DesktopState>();
     let mut cancelled = false;
     {
-        let mut active = state
-            .active_history_search
-            .lock()
-            .expect("active history search state poisoned");
+        let mut active = state.active_history_search.lock();
         if active
             .as_ref()
             .is_some_and(|active| active.search_id == request.search_id)
@@ -1859,15 +1893,14 @@ fn configure_deep_links(app: &AppHandle) {
     }
 }
 
-fn main() {
-    tauri::Builder::default()
+fn main() -> tauri::Result<()> {
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![
             bridge_action,
             update_shell_settings,
-            resume_shell_service,
             open_shell_path,
             search_history_stream,
             cancel_history_search,
@@ -1891,28 +1924,42 @@ fn main() {
 
             let (server_handle, initial_snapshot, watcher_bundle) =
                 if bootstrap.config.is_configured() {
-                    let server = tauri::async_runtime::block_on(start_server(
+                    let server_result = tauri::async_runtime::block_on(start_server(
                         ServerStartOptions::phase1_defaults(
                             bootstrap.config_store.clone(),
                             pairing_approver(app_handle.clone()),
                         ),
-                    ))
-                    .expect("failed to start phase 1 Browser Recall daemon");
-                    let snapshot_rx = server.subscribe();
-                    let change_rx = server.subscribe_changes();
-                    let initial_snapshot = snapshot_rx.borrow().clone();
-                    (
-                        Some(server),
-                        initial_snapshot,
-                        Some((snapshot_rx, change_rx)),
-                    )
+                    ));
+                    match server_result {
+                        Ok(server) => {
+                            let snapshot_rx = server.subscribe();
+                            let change_rx = server.subscribe_changes();
+                            let initial_snapshot = snapshot_rx.borrow().clone();
+                            (
+                                Some(server),
+                                initial_snapshot,
+                                Some((snapshot_rx, change_rx)),
+                            )
+                        }
+                        Err(error) => {
+                            warn!(%error, "failed to start Browser Recall daemon");
+                            let mut snapshot = inactive_server_snapshot(&bootstrap.config);
+                            snapshot.service_status = ServiceStatus::Paused;
+                            snapshot.last_error =
+                                Some(format!("Failed to start Browser Recall daemon: {error}"));
+                            snapshot.last_error_code = Some("daemon_start_failed".into());
+                            (None, snapshot, None)
+                        }
+                    }
                 } else {
                     (None, inactive_server_snapshot(&bootstrap.config), None)
                 };
+            let daemon_started = server_handle.is_some();
             create_tray(app.handle())?;
             let sync_notify = Arc::new(Notify::new());
             app.manage(DesktopState {
                 server: Mutex::new(server_handle),
+                server_start: StartGate::default(),
                 config_store: bootstrap.config_store.clone(),
                 shell: Mutex::new(ShellState {
                     snapshot: initial_snapshot,
@@ -1952,7 +1999,7 @@ fn main() {
                 }
             }));
             configure_deep_links(app.handle());
-            if bootstrap.config.is_configured() {
+            if daemon_started {
                 app.state::<DesktopState>().sync.request_worker();
             }
             show_main_window(app.handle());
@@ -1968,22 +2015,22 @@ fn main() {
             }
             _ => {}
         })
-        .build(tauri::generate_context!())
-        .expect("error while building Browser Recall desktop shell")
-        .run(|app, event| match event {
-            tauri::RunEvent::ExitRequested { api, .. } => {
-                let quit_requested = app
-                    .try_state::<DesktopState>()
-                    .map(|state| *state.quit_requested.lock().expect("quit state poisoned"))
-                    .unwrap_or(false);
-                if !quit_requested {
-                    api.prevent_exit();
-                }
+        .build(tauri::generate_context!())?;
+    app.run(|app, event| match event {
+        tauri::RunEvent::ExitRequested { api, .. } => {
+            let quit_requested = app
+                .try_state::<DesktopState>()
+                .map(|state| *state.quit_requested.lock())
+                .unwrap_or(false);
+            if !quit_requested {
+                api.prevent_exit();
             }
-            #[cfg(target_os = "macos")]
-            tauri::RunEvent::Reopen { .. } => {
-                show_main_window(app);
-            }
-            _ => {}
-        });
+        }
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Reopen { .. } => {
+            show_main_window(app);
+        }
+        _ => {}
+    });
+    Ok(())
 }

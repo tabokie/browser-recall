@@ -3,6 +3,8 @@ import {
   cpSync,
   existsSync,
   mkdtempSync,
+  mkdirSync,
+  readFileSync,
   readdirSync,
   renameSync,
   rmSync,
@@ -15,6 +17,12 @@ import process from 'node:process';
 if (process.platform !== 'darwin') {
   console.log('macOS desktop window lifecycle smoke test skipped');
   process.exit(0);
+}
+
+if (process.env.BROWSER_RECALL_ISOLATED_MACOS_SESSION !== '1') {
+  throw new Error(
+    'Native tray testing registers a macOS status item. Run only in an ephemeral user/session with BROWSER_RECALL_ISOLATED_MACOS_SESSION=1.',
+  );
 }
 
 const root = path.resolve(import.meta.dirname, '../..');
@@ -34,6 +42,10 @@ const executableDir = path.join(testApp, 'Contents/MacOS');
 const executableName = 'browser-recall-lifecycle-test';
 const clickSource = path.join(workDir, 'click.swift');
 const clickExecutable = path.join(workDir, 'click');
+const captureSource = path.join(workDir, 'capture.swift');
+const captureExecutable = path.join(workDir, 'capture');
+const pausedStartupScreenshot = path.join(workDir, 'paused-startup.png');
+const pausedStartupBitmap = path.join(workDir, 'paused-startup.bmp');
 let pid = null;
 
 function run(command, args) {
@@ -42,6 +54,33 @@ function run(command, args) {
 
 function appleScript(source) {
   return run('/usr/bin/osascript', ['-e', source]);
+}
+
+function assertWebviewPainted(bitmapPath) {
+  const bitmap = readFileSync(bitmapPath);
+  const pixelOffset = bitmap.readUInt32LE(10);
+  const width = bitmap.readInt32LE(18);
+  const signedHeight = bitmap.readInt32LE(22);
+  const height = Math.abs(signedHeight);
+  if (bitmap.readUInt16LE(28) !== 32 || width <= 0 || height <= 0) {
+    throw new Error('Desktop screenshot is not a 32-bit bitmap');
+  }
+  let paintedPixels = 0;
+  let sampledPixels = 0;
+  for (let y = 120; y < height - 20; y += 4) {
+    const sourceY = signedHeight < 0 ? y : height - 1 - y;
+    for (let x = 20; x < width - 20; x += 4) {
+      const offset = pixelOffset + (sourceY * width + x) * 4;
+      const blue = bitmap[offset];
+      const green = bitmap[offset + 1];
+      const red = bitmap[offset + 2];
+      sampledPixels += 1;
+      if (red < 245 || green < 245 || blue < 245) paintedPixels += 1;
+    }
+  }
+  if (paintedPixels / sampledPixels < 0.01) {
+    throw new Error('Desktop webview remained blank after startup');
+  }
 }
 
 try {
@@ -60,6 +99,49 @@ CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: poi
 `,
   );
   run('/usr/bin/swiftc', [clickSource, '-o', clickExecutable]);
+  writeFileSync(
+    captureSource,
+    `import AppKit
+import CoreGraphics
+import Foundation
+
+let ownerPid = Int32(CommandLine.arguments[1])!
+let output = URL(fileURLWithPath: CommandLine.arguments[2])
+let windows = CGWindowListCopyWindowInfo(
+  [.optionOnScreenOnly, .excludeDesktopElements],
+  kCGNullWindowID
+) as! [[String: Any]]
+let window = windows.first { info in
+  (info[kCGWindowOwnerPID as String] as? Int32) == ownerPid &&
+    (info[kCGWindowLayer as String] as? Int) == 0
+}!
+let windowId = CGWindowID(window[kCGWindowNumber as String] as! UInt32)
+let bounds = CGRect(
+  dictionaryRepresentation: window[kCGWindowBounds as String] as! CFDictionary
+)!
+let image = CGWindowListCreateImage(
+  .null,
+  .optionIncludingWindow,
+  windowId,
+  [.boundsIgnoreFraming, .bestResolution]
+)!
+let bitmap = NSBitmapImageRep(cgImage: image)
+try bitmap.representation(using: .png, properties: [:])!.write(to: output)
+print("\\(bounds.origin.x),\\(bounds.origin.y),\\(bounds.width),\\(bounds.height)")
+`,
+  );
+  const swiftArchitecture = process.arch === 'x64' ? 'x86_64' : process.arch;
+  if (!['arm64', 'x86_64'].includes(swiftArchitecture)) {
+    throw new Error(`Unsupported macOS architecture: ${process.arch}`);
+  }
+  run('/usr/bin/swiftc', [
+    '-suppress-warnings',
+    '-target',
+    `${swiftArchitecture}-apple-macos14.0`,
+    captureSource,
+    '-o',
+    captureExecutable,
+  ]);
   cpSync(sourceApp, testApp, { recursive: true });
   const originalExecutable = readdirSync(executableDir)[0];
   renameSync(
@@ -81,6 +163,45 @@ CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: poi
   ]);
   run('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', testApp]);
 
+  const dataDir = path.join(testHome, 'browser-data');
+  const configDir = path.join(
+    testHome,
+    'Library/Application Support/app.browser-recall.desktop/daemon',
+  );
+  const malformedLogPath = path.join(
+    dataDir,
+    'logs/smoke-device/2026-07-15.jsonl',
+  );
+  mkdirSync(path.join(dataDir, 'logs/smoke-device'), { recursive: true });
+  writeFileSync(
+    malformedLogPath,
+    `${JSON.stringify({
+      timestamp: 1_710_000_000_000,
+      action: 'visit_page',
+      url: 'https://smoke.example/page',
+      title: 'Smoke Page',
+    })}\n`,
+  );
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(
+    path.join(configDir, 'config.json'),
+    JSON.stringify({
+      device_id: 'smoke-device',
+      data_dir: dataDir,
+      last_port: null,
+      launch_at_login: false,
+      log_level: 'info',
+      setup_complete: true,
+      connectors: [],
+      sync_github_token: null,
+      sync_github_user: null,
+      sync_remember_token: true,
+      sync_paused_devices: [],
+      sync_devices: {},
+    }),
+  );
+
+  spawnSync('/usr/bin/pkill', ['-x', executableName]);
   run('/usr/bin/open', [
     '-n',
     '-F',
@@ -103,6 +224,56 @@ CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: poi
   }
   if (!pid) throw new Error('Desktop lifecycle test app did not launch');
 
+  appleScript(`
+    tell application "System Events"
+      set targetProcess to missing value
+      repeat 100 times
+        set matches to application processes whose unix id is ${pid}
+        if (count of matches) > 0 then
+          set targetProcess to item 1 of matches
+          exit repeat
+        end if
+        delay 0.05
+      end repeat
+      if targetProcess is missing value then error "application process unavailable"
+      repeat 100 times
+        if (count of windows of targetProcess) > 0 then exit repeat
+        delay 0.05
+      end repeat
+      if (count of windows of targetProcess) is 0 then error "initial window unavailable"
+      set position of window 1 of targetProcess to {170, 160}
+      set size of window 1 of targetProcess to {980, 680}
+      set frontmost of targetProcess to true
+      repeat 100 times
+        if name of window 1 of targetProcess is "Browser Recall - Error" then exit repeat
+        delay 0.05
+      end repeat
+      if name of window 1 of targetProcess is not "Browser Recall - Error" then error "daemon startup failure was not reported"
+      delay 1
+    end tell
+  `);
+  const [windowX, windowY, windowWidth] = run(captureExecutable, [
+    String(pid),
+    pausedStartupScreenshot,
+  ])
+    .split(',')
+    .map(Number);
+  run('/usr/bin/sips', [
+    '-s',
+    'format',
+    'bmp',
+    pausedStartupScreenshot,
+    '--out',
+    pausedStartupBitmap,
+  ]);
+  assertWebviewPainted(pausedStartupBitmap);
+  const resumeX = Math.round(windowX + windowWidth - 55);
+  const resumeY = Math.round(windowY + 29);
+
+  // Repair the startup error after first paint so the visible Resume action
+  // can prove that an absent daemon is started without restarting the shell.
+  writeFileSync(malformedLogPath, '');
+
   // Reopen-only assertions can miss no-op closes and delayed focus theft, so
   // verify both the hidden transition and the final focus handoff explicitly.
   const result = appleScript(`
@@ -113,10 +284,21 @@ CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: poi
         delay 0.05
       end repeat
       if (count of windows of targetProcess) is 0 then error "initial window unavailable"
-      set frontmost of targetProcess to true
+
       set position of window 1 of targetProcess to {170, 160}
       set size of window 1 of targetProcess to {980, 680}
+      set frontmost of targetProcess to true
       delay 0.2
+      do shell script "${clickExecutable} ${resumeX} ${resumeY}"
+      do shell script "${clickExecutable} ${resumeX} ${resumeY}"
+      repeat 100 times
+        if name of window 1 of targetProcess is "Browser Recall" then exit repeat
+        delay 0.05
+      end repeat
+      if name of window 1 of targetProcess is not "Browser Recall" then error "visible Resume Service did not start the absent daemon"
+
+      set frontmost of targetProcess to true
+      delay 1
 
       repeat with cycle from 1 to 5
         click button 1 of window 1 of targetProcess
@@ -129,6 +311,8 @@ CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: poi
         set trayItem to menu bar item 1 of menu bar 2 of targetProcess
         set trayPosition to position of trayItem
         set traySize to size of trayItem
+        if (item 1 of traySize) < 1 or (item 2 of traySize) < 1 then error "tray item has no visible frame"
+        if (item 1 of trayPosition) < 0 or (item 2 of trayPosition) < 0 or (item 2 of trayPosition) > 80 then error "tray item is outside the visible menu bar"
         set trayX to (item 1 of trayPosition) + ((item 1 of traySize) div 2)
         set trayY to (item 2 of trayPosition) + ((item 2 of traySize) div 2)
         do shell script "${clickExecutable} " & trayX & " " & trayY
@@ -164,12 +348,33 @@ CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: poi
       return "five tray reopen cycles preserved geometry and focus"
     end tell
   `);
+  const listeners = run('/usr/sbin/lsof', [
+    '-nP',
+    '-a',
+    '-p',
+    String(pid),
+    '-iTCP',
+    '-sTCP:LISTEN',
+  ])
+    .split('\n')
+    .filter((line) => /127\.0\.0\.1:2847[1-3]\s+\(LISTEN\)/.test(line));
+  if (listeners.length !== 1) {
+    throw new Error(
+      `Double Resume must leave exactly one desktop listener; found ${listeners.length}`,
+    );
+  }
   console.log(result);
 } finally {
   if (pid) {
     try {
       process.kill(pid, 'SIGTERM');
     } catch {}
+  }
+  if (existsSync(testApp)) {
+    spawnSync(
+      '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister',
+      ['-u', testApp],
+    );
   }
   rmSync(workDir, { recursive: true, force: true });
 }
