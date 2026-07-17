@@ -2,7 +2,8 @@
 
 ## Prerequisites
 
-- [Rust](https://rustup.rs/) (latest stable)
+- [Rust](https://rustup.rs/) via `rustup`; the repository pins Rust 1.97.0 in
+  `rust-toolchain.toml`, and GitHub CI uses the same version
 - Node.js 24+ (for npm scripts, test runners)
 
 ```bash

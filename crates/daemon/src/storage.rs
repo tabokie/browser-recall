@@ -361,7 +361,7 @@ impl Storage {
             }
         }
 
-        result.sort_by(|left, right| left.1.timestamp().cmp(&right.1.timestamp()));
+        result.sort_by_key(|entry| entry.1.timestamp());
         Ok(result)
     }
 

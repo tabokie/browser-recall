@@ -1367,6 +1367,19 @@ test.describe('desktop visual regression', () => {
         },
       });
 
+      const titlebarSpace = await page
+        .locator('html')
+        .evaluate((element) =>
+          Number.parseFloat(
+            getComputedStyle(element).getPropertyValue(
+              '--desktop-titlebar-space',
+            ),
+          ),
+        );
+      const banner = page.locator('#serviceErrorBanner');
+      const bannerBox = await banner.boundingBox();
+      expect(bannerBox?.y).toBeGreaterThanOrEqual(titlebarSpace);
+
       const message = page.locator('#serviceErrorMessage');
       await expect(message).toHaveText(errorMessage);
       await message.click({ clickCount: 3 });

@@ -15,6 +15,7 @@ const ciWorkflow = fs.readFileSync(
 const packageJson = JSON.parse(
   fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'),
 );
+const rustToolchainPath = path.join(repoRoot, 'rust-toolchain.toml');
 const macosLifecycleSmoke = fs.readFileSync(
   path.join(repoRoot, 'tests/smoke/macos-desktop-window-lifecycle.mjs'),
   'utf8',
@@ -55,6 +56,16 @@ describe('GitHub CI prerequisites', () => {
     expect(packageJson.scripts['ci:install-playwright']).toBe(
       'playwright install --no-shell chromium',
     );
+  });
+
+  test('local and GitHub CI use the same pinned Rust toolchain', () => {
+    expect(fs.existsSync(rustToolchainPath)).toBe(true);
+    const rustToolchain = fs.readFileSync(rustToolchainPath, 'utf8');
+    expect(rustToolchain).toContain('channel = "1.97.0"');
+    expect(ciWorkflow.match(/dtolnay\/rust-toolchain@1\.97\.0/g)).toHaveLength(
+      4,
+    );
+    expect(ciWorkflow).not.toContain('dtolnay/rust-toolchain@stable');
   });
 
   test('macOS build checks require hardened runtime and host-native helpers', () => {

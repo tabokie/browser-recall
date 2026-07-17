@@ -46,6 +46,7 @@ const captureSource = path.join(workDir, 'capture.swift');
 const captureExecutable = path.join(workDir, 'capture');
 const pausedStartupScreenshot = path.join(workDir, 'paused-startup.png');
 const pausedStartupBitmap = path.join(workDir, 'paused-startup.bmp');
+const stagedDesktopHtml = path.join(root, 'dist/desktop/ui/index.html');
 let pid = null;
 
 function run(command, args) {
@@ -267,8 +268,15 @@ print("\\(bounds.origin.x),\\(bounds.origin.y),\\(bounds.width),\\(bounds.height
     pausedStartupBitmap,
   ]);
   assertWebviewPainted(pausedStartupBitmap);
+  const titlebarSpaceMatch = readFileSync(stagedDesktopHtml, 'utf8').match(
+    /--desktop-titlebar-space:\s*(\d+(?:\.\d+)?)px/,
+  );
+  if (!titlebarSpaceMatch) {
+    throw new Error('Desktop titlebar spacing is missing from staged UI');
+  }
+  const titlebarSpace = Number(titlebarSpaceMatch[1]);
   const resumeX = Math.round(windowX + windowWidth - 55);
-  const resumeY = Math.round(windowY + 29);
+  const resumeY = Math.round(windowY + titlebarSpace + 20);
 
   // Repair the startup error after first paint so the visible Resume action
   // can prove that an absent daemon is started without restarting the shell.

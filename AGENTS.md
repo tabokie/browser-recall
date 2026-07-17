@@ -71,6 +71,9 @@ Optional references may be omitted only when they are valid non-page URLs; malfo
 
 ## CSS Lessons
 
+- In macOS full-size-content windows, keep interactive error banners below the
+  titlebar drag region and derive native smoke-test click coordinates from the
+  same titlebar spacing.
 - Inspect generated raster assets at actual target sizes before judging SVG icon changes; 16px toolbar icons and macOS `.icns` slots can diverge from source previews.
 - For popup, menu, and overlay CSS bugs, capture a focused Playwright screenshot of the rendered state and inspect the pixels before adding more CSS. Geometry and computed-style assertions can pass while browser scrollports, native scrollbar gutters, clipping, or paint order still leave visible artifacts; screenshots validate the actual raster.
 - Use CSS pseudo-element shapes instead of text characters for small icons; text glyphs render inconsistently across fonts/colors.
@@ -102,6 +105,8 @@ Optional references may be omitted only when they are valid non-page URLs; malfo
 
 ## Formatting And Lint Tools
 
+- Pin the Rust toolchain locally and in GitHub CI to the same explicit version;
+  guard the pin with a workflow test so Clippy changes cannot appear only in CI.
 - JS/JSON formatting: `npm run fmt` or `npm run fmt:check`
 - Rust formatting: `cargo fmt` or `cargo fmt -- --check`
 - Rust lint: `cargo clippy --workspace --all-targets -- -D warnings`

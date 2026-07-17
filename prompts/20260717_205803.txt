@@ -1,0 +1,46 @@
+- CI is failing on two jobs: [https://github.com/tabokie/browser-recall/actions/runs/29507764156/job/87652897150](https://github.com/tabokie/browser-recall/actions/runs/29507764156/job/87652897150) and [https://github.com/tabokie/browser-recall/actions/runs/29507764156/job/87652897187](https://github.com/tabokie/browser-recall/actions/runs/29507764156/job/87652897187). Take a look at them using the ChatGPT browser extension and my cookies. It's a private repo CI.
+-
+# Files mentioned by the user:
+
+## Run node tests/smoke/macos-desktop-window-lifecycle.mjs /var/folders/8j/sfr9qqc…: /Users/xyt/.codex/attachments/776dcc23-8aa5-4dd4-b945-cf8fd353e158/pasted-text.txt
+
+## My request for Codex:
+**Checking** browser-recall-daemon v0.1.0 (/home/runner/work/browser-recall/browser-recall/crates/daemon)
+**error: consider using `sort\_by\_key`**
+   **-->** crates/daemon/src/read_projections.rs:331:9
+    **|**
+**331** **|**         snapshots.sort_by(|left, right| right.timestamp.cmp(&left.timestamp));
+    **|**         **^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^**
+    **|**
+    **= help**: for further information visit [https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#unnecessary_sort_by](https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#unnecessary_sort_by)
+    **= note**: `-D clippy::unnecessary-sort-by` implied by `-D warnings`
+    **= help**: to override `-D warnings` add `#[allow(clippy::unnecessary_sort_by)]`
+**help**: try
+    **|**
+**331** -         snapshots.sort_by(|left, right| right.timestamp.cmp(&left.timestamp));
+**331** +         snapshots.sort_by_key(|right| std::cmp::Reverse(right.timestamp));
+    **|**
+
+**error: consider using `sort\_by\_key`**
+   **-->** crates/daemon/src/storage.rs:364:9
+    **|**
+**364** **|**         result.sort_by(|left, right| left.1.timestamp().cmp(&right.1.timestamp()));
+    **|**         **^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^**
+    **|**
+    **= help**: for further information visit [https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#unnecessary_sort_by](https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#unnecessary_sort_by)
+**help**: try
+    **|**
+**364** -         result.sort_by(|left, right| left.1.timestamp().cmp(&right.1.timestamp()));
+**364** +         result.sort_by_key(|left| left.1.timestamp());
+    **|**
+
+**error**: could not compile `browser-recall-daemon` (lib) due to 2 previous errors
+**warning**: build failed, waiting for other jobs to finish...
+**Error:** Process completed with exit code 101.
+- Have you made sure the discrepancy between local and GitHub CI is resolved?
+- Please review my uncommitted changes
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.6 Sol
+- Continue
+- Sure
+- Sure
+- Go

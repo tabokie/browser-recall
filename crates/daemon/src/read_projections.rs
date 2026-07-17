@@ -331,7 +331,7 @@ impl ReadProjections {
                 });
             }
         }
-        snapshots.sort_by(|left, right| right.timestamp.cmp(&left.timestamp));
+        snapshots.sort_by_key(|snapshot| std::cmp::Reverse(snapshot.timestamp));
         Ok(PageInfoProjection {
             page: page.map(project_page),
             notes: notes.into_iter().map(project_note).collect(),
