@@ -19,7 +19,7 @@ use crate::rules::{
     RuleSpec,
 };
 use crate::runtime::{self, EntityMapView, ReplayTransaction};
-use crate::search::{search_notes_in_data_dir, search_snapshots_in_data_dir};
+use crate::search::{search_notes_in_storage, search_snapshots_in_data_dir};
 use crate::storage::Storage;
 use browser_recall_replay::entities::{Entity, ListOrderManifest, TreeNode};
 use browser_recall_replay::{generate_slug_from_url, EntityEffect, LogEntry};
@@ -1816,14 +1816,8 @@ async fn handle_search_notes(
     query: String,
     limit: Option<usize>,
 ) -> DaemonMessage {
-    let data_dir = {
-        let config = shared.config.lock().await;
-        config.data_dir.clone()
-    };
-    match tokio::task::spawn_blocking(move || search_notes_in_data_dir(&data_dir, &query, limit))
-        .await
-    {
-        Ok(Ok(results)) => DaemonMessage::SearchNotesResult {
+    match search_notes_in_storage(&shared.storage, &query, limit).await {
+        Ok(results) => DaemonMessage::SearchNotesResult {
             success: true,
             results: results
                 .into_iter()
@@ -1834,11 +1828,6 @@ async fn handle_search_notes(
                 })
                 .collect(),
             error: None,
-        },
-        Ok(Err(error)) => DaemonMessage::SearchNotesResult {
-            success: false,
-            results: Vec::new(),
-            error: Some(error.to_string()),
         },
         Err(error) => DaemonMessage::SearchNotesResult {
             success: false,

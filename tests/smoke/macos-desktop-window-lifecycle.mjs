@@ -253,12 +253,7 @@ print("\\(bounds.origin.x),\\(bounds.origin.y),\\(bounds.width),\\(bounds.height
       delay 1
     end tell
   `);
-  const [windowX, windowY, windowWidth] = run(captureExecutable, [
-    String(pid),
-    pausedStartupScreenshot,
-  ])
-    .split(',')
-    .map(Number);
+  run(captureExecutable, [String(pid), pausedStartupScreenshot]);
   run('/usr/bin/sips', [
     '-s',
     'format',
@@ -275,8 +270,6 @@ print("\\(bounds.origin.x),\\(bounds.origin.y),\\(bounds.width),\\(bounds.height
     throw new Error('Desktop titlebar spacing is missing from staged UI');
   }
   const titlebarSpace = Number(titlebarSpaceMatch[1]);
-  const resumeX = Math.round(windowX + windowWidth - 55);
-  const resumeY = Math.round(windowY + titlebarSpace + 20);
 
   // Repair the startup error after first paint so the visible Resume action
   // can prove that an absent daemon is started without restarting the shell.
@@ -297,8 +290,12 @@ print("\\(bounds.origin.x),\\(bounds.origin.y),\\(bounds.width),\\(bounds.height
       set size of window 1 of targetProcess to {980, 680}
       set frontmost of targetProcess to true
       delay 0.2
-      do shell script "${clickExecutable} ${resumeX} ${resumeY}"
-      do shell script "${clickExecutable} ${resumeX} ${resumeY}"
+      set resumePosition to position of window 1
+      set resumeSize to size of window 1
+      set resumeX to (item 1 of resumePosition) + (item 1 of resumeSize) - 55
+      set resumeY to (item 2 of resumePosition) + ${titlebarSpace} + 20
+      do shell script "${clickExecutable} " & resumeX & " " & resumeY
+      do shell script "${clickExecutable} " & resumeX & " " & resumeY
       repeat 100 times
         if name of window 1 of targetProcess is "Browser Recall" then exit repeat
         delay 0.05

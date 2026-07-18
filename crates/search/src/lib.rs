@@ -559,13 +559,7 @@ where
 /// Search all note JSON files in a directory for query matches.
 pub fn search_notes<P: AsRef<Path>>(notes_dir: P, query: &str) -> io::Result<Vec<NoteMatch>> {
     let entries = fs::read_dir(notes_dir.as_ref())?;
-
-    let words = parse_query_words(query);
-    if words.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let mut matches = Vec::new();
+    let mut notes = Vec::new();
     for entry in entries {
         let entry = entry?;
         let path = entry.path();
@@ -598,6 +592,24 @@ pub fn search_notes<P: AsRef<Path>>(notes_dir: P, query: &str) -> io::Result<Vec
                 ),
             ));
         }
+        notes.push(note);
+    }
+
+    search_note_entities(notes, query)
+}
+
+/// Search note entities for query matches.
+pub fn search_note_entities(
+    notes: impl IntoIterator<Item = NoteEntity>,
+    query: &str,
+) -> io::Result<Vec<NoteMatch>> {
+    let words = parse_query_words(query);
+    if words.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut matches = Vec::new();
+    for note in notes {
         if note.deleted {
             continue;
         }

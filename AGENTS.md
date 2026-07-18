@@ -74,6 +74,7 @@ Optional references may be omitted only when they are valid non-page URLs; malfo
 - In macOS full-size-content windows, keep interactive error banners below the
   titlebar drag region and derive native smoke-test click coordinates from the
   same titlebar spacing.
+- Native macOS UI automation must derive physical click coordinates from the Accessibility window frame used for positioning; Quartz capture bounds are only for screenshots and may use a different coordinate space.
 - Inspect generated raster assets at actual target sizes before judging SVG icon changes; 16px toolbar icons and macOS `.icns` slots can diverge from source previews.
 - For popup, menu, and overlay CSS bugs, capture a focused Playwright screenshot of the rendered state and inspect the pixels before adding more CSS. Geometry and computed-style assertions can pass while browser scrollports, native scrollbar gutters, clipping, or paint order still leave visible artifacts; screenshots validate the actual raster.
 - Use CSS pseudo-element shapes instead of text characters for small icons; text glyphs render inconsistently across fonts/colors.
@@ -92,6 +93,7 @@ Optional references may be omitted only when they are valid non-page URLs; malfo
 ## Workflow Preferences
 
 - Bug fixes are test-first: write the failing test, confirm it fails, apply the fix, confirm it passes.
+- Tests for reads acknowledged before asynchronous checkpoint persistence must deterministically construct the cache-only state; repeated scheduler-dependent runs do not prove the race is covered.
 - E2E is the primary product safety net. For desktop app and extension app behavior, reproduce bugs and cover new functionality in Playwright first, using the real daemon/connector path whenever feasible.
 - For site-specific highlight bugs, verify the live/source DOM and saved note/page identity data before attributing the failure to CSS path drift, hydration, or text matching.
 - E2E tests for notification fallbacks should force the exact delivery channel to fail, not only assert the final visible notification.

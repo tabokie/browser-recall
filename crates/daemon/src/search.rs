@@ -1,4 +1,8 @@
-use browser_recall::{search_notes, search_records, search_snapshots, SearchRecord, SearchResult};
+use crate::storage::Storage;
+use browser_recall::{
+    search_note_entities, search_notes, search_records, search_snapshots, SearchRecord,
+    SearchResult,
+};
 use browser_recall_replay::LogEntry;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -182,6 +186,26 @@ pub fn search_notes_in_data_dir(
     let notes_dir = data_dir.join("objects").join("notes");
     require_directory(&notes_dir, "note object")?;
     let hits = search_notes(&notes_dir, query)?
+        .into_iter()
+        .map(|hit| NoteSearchHit {
+            url: hit.url,
+            note_slug: hit.note_slug,
+            score: hit.score,
+        })
+        .collect();
+    Ok(truncate_to_limit(hits, limit))
+}
+
+pub async fn search_notes_in_storage(
+    storage: &Storage,
+    query: &str,
+    limit: Option<usize>,
+) -> io::Result<Vec<NoteSearchHit>> {
+    if query.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let hits = search_note_entities(storage.load_all_notes().await?.into_values(), query)?
         .into_iter()
         .map(|hit| NoteSearchHit {
             url: hit.url,

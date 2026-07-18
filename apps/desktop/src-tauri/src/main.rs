@@ -27,7 +27,7 @@ use browser_recall_daemon::protocol::{
 };
 use browser_recall_daemon::read_projections::ReadProjections;
 use browser_recall_daemon::search::{
-    search_history_parallel_in_data_dir, search_notes_in_data_dir, search_snapshots_in_data_dir,
+    search_history_parallel_in_data_dir, search_notes_in_storage, search_snapshots_in_data_dir,
     NoteSearchHit, SnapshotSearchHit,
 };
 use browser_recall_daemon::storage::Storage;
@@ -1458,7 +1458,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .get("query")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "searchNotes missing query".to_string())?;
-            let results = command_search_notes(storage()?, query)?;
+            let results = command_search_notes(storage()?, query).await?;
             json!({
                 "success": true,
                 "results": results,
@@ -1830,11 +1830,11 @@ async fn cancel_history_search(
 }
 
 #[tauri::command]
-fn search_notes(app: AppHandle, request: SearchRequest) -> Result<serde_json::Value, String> {
-    let data_dir = shell_data_dir(&app)?;
-    let hits: Vec<NoteSearchHit> =
-        search_notes_in_data_dir(&data_dir, &request.query, request.limit)
-            .map_err(|error| error.to_string())?;
+async fn search_notes(app: AppHandle, request: SearchRequest) -> Result<serde_json::Value, String> {
+    let storage = storage_for_app(&app)?;
+    let hits: Vec<NoteSearchHit> = search_notes_in_storage(&storage, &request.query, request.limit)
+        .await
+        .map_err(|error| error.to_string())?;
     serde_json::to_value(hits).map_err(|error| error.to_string())
 }
 

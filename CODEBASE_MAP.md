@@ -64,7 +64,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `crates/daemon/src/config.rs` | Daemon configuration persistence and explicit unconfigured → folder-selected → setup-complete transitions; no default data path |
 | `crates/daemon/src/read_projections.rs` | Workflow-shaped semantic page, list, search-enrichment, recycle-bin, popup, and settings DTOs with coordinated joins, child-reference classification, and visibility policy |
 | `crates/daemon/src/runtime.rs` | Authoritative replay transactions: serialized overlay evolution, canonical local log append, projection publication, replay progress, ordered checkpoint submission, downloaded sync-file installation, recovery, and destructive flush coordination |
-| `crates/daemon/src/storage.rs` | Data-root storage, sharded object/view paths, coordinated cache reads, current projection cache, log append, and flushable ordered checkpoint worker |
+| `crates/daemon/src/storage.rs` | Data-root storage, sharded object/view paths, coordinated cache reads and namespace enumeration overlays, current projection cache, log append, and flushable ordered checkpoint worker |
 | `crates/daemon/src/search.rs` | Daemon search queries over history/notes/snapshots |
 | `crates/daemon/src/sync.rs` | GitHub sync controller, token handling, pause persistence |
 | `crates/daemon/src/ws_server.rs` | Browser pairing, authenticated websocket adapter, strict rule command DTOs, browser observations, streaming, and change broadcasts |
@@ -134,7 +134,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 
 ### Search
 
-- `crates/search/` and `crates/daemon/src/search.rs` implement history identity search plus dedicated note/snapshot text search. They preserve explicit-nullable history titles and select owned checkpoint/sidecar files before strict parsing. History search also exposes a fixed-parallelism chunk callback for desktop streaming and cancellation.
+- `crates/search/` and `crates/daemon/src/search.rs` implement history identity search plus dedicated note/snapshot text search. They preserve explicit-nullable history titles and select owned checkpoint/sidecar files before strict parsing. Note search overlays current projection-cache entities before scoring so committed notes do not wait for checkpoint persistence. History search also exposes a fixed-parallelism chunk callback for desktop streaming and cancellation.
 - `apps/desktop/src-tauri/src/main.rs` exposes `search_history_stream` / `cancel_history_search` Tauri commands and emits `bridge-search-history` chunks to the UI.
 - `crates/daemon/src/ws_server.rs` exposes note/snapshot search and page-scoped connector reads, but deliberately does not expose full-history streaming or cancellation.
 - `apps/desktop/ui/index.js` keeps typed search text as a draft until Enter commits it, then merges streamed history chunks with note/snapshot result phases. It renders the already-loaded or first available matches once while those phases continue, preserves URL-keyed row selection and chart highlighting when the accumulated set commits, and consumes precise daemon history-mutation entries without rereading the current-day log or restarting searches. Visit/leave observations update visit recency; rename/rating actions only invalidate metadata, query membership, filters, and authoritative page enrichment. Explore device filters still come from daemon-reported `logs/<device>/` directories, and newer searches cancel stale history work.

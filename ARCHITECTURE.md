@@ -221,7 +221,7 @@ Search is daemon-owned.
 
 - `crates/search/` provides native full-text helpers.
 - `crates/daemon/src/search.rs` wires those helpers into command/query paths.
-- History search matches page identity fields (`title`, `user_title`, `url`) while preserving a canonical missing title as `null`. Note and snapshot body text are searched by their dedicated daemon phases and return their own match scores and timestamps.
+- History search matches page identity fields (`title`, `user_title`, `url`) while preserving a canonical missing title as `null`. Note search strictly reads the owned checkpoint namespace, overlays the latest daemon projection cache, and only then scores note text, so acknowledged mutations are searchable before asynchronous checkpoints flush. Snapshot body text is searched from its sidecars; note and snapshot phases return their own match scores and timestamps.
 - Desktop search/filter input keeps typed text as a local draft and starts the daemon search or list filter only when Enter commits the query.
 - Committed desktop search results are rendered directly from the in-memory merged result set; the virtual scroller remains for all-history Explore rendering where demand loading can grow the result set.
 - While a committed search is loading, the desktop renders the already-loaded matches (or the first non-empty daemon batch) once, accumulates later history/note/snapshot matches in memory, and refreshes the visible result set after all phases finish. This keeps the time chart and result rows operable instead of replacing their DOM for every streamed chunk.

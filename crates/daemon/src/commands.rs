@@ -1,5 +1,5 @@
 use crate::connectors::{current_local_day_start_unix, prune_inactive_connectors};
-use crate::search::{search_notes_in_data_dir, search_snapshots_in_data_dir};
+use crate::search::{search_notes_in_storage, search_snapshots_in_data_dir};
 use crate::storage::{HistoryFileListing, Storage};
 use crate::{
     protocol::{RuleBatchEntry, RulePayload},
@@ -231,11 +231,13 @@ pub async fn load_history_batch(storage: &Storage, files: &[String]) -> Result<V
         .map_err(|error| error.to_string())
 }
 
-pub fn search_notes(
+pub async fn search_notes(
     storage: &Storage,
     query: &str,
 ) -> Result<Vec<crate::search::NoteSearchHit>, String> {
-    search_notes_in_data_dir(storage.root(), query, None).map_err(|error| error.to_string())
+    search_notes_in_storage(storage, query, None)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 pub fn search_snapshots(

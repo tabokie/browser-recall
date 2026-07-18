@@ -13,10 +13,10 @@ use browser_recall_daemon::read_projections::ReadProjections;
 use browser_recall_daemon::storage::Storage;
 use browser_recall_daemon::{ApprovedConnector, ConfigStore, Token};
 use browser_recall_replay::entities::{
-    ListEntity, ListOrderManifest, NameToIdManifest, OrphanedEntry, OrphanedManifest, PageEntity,
-    PinEntity, TreeNode,
+    Entity, ListEntity, ListOrderManifest, NameToIdManifest, NoteEntity, OrphanedEntry,
+    OrphanedManifest, PageEntity, PinEntity, TreeNode,
 };
-use browser_recall_replay::{generate_slug_from_url, LogEntry, RuleInput};
+use browser_recall_replay::{generate_slug_from_url, EntityEffect, LogEntry, RuleInput};
 use std::collections::BTreeMap;
 use std::path::Path;
 use tempfile::tempdir;
@@ -2018,10 +2018,61 @@ async fn command_error_and_normalization_paths_are_explicit() {
     );
 
     assert!(search_notes(&storage, "Alpha Beta")
+        .await
         .expect("search notes")
         .iter()
         .any(|hit| hit.note_slug == direct_note_slug));
     assert!(search_snapshots(&storage, "nothing")
         .expect("search snapshots")
         .is_empty());
+}
+
+#[tokio::test]
+async fn note_search_reads_the_committed_projection_before_checkpoint_flush() {
+    let temp_dir = tempdir().expect("tempdir");
+    let storage = Storage::new(temp_dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("storage layout");
+
+    let mut note = NoteEntity::new("cached-note".to_string());
+    note.url = Some("https://example.com/cached-note".to_string());
+    note.excerpt = Some(serde_json::json!(["Alpha", "Beta"]));
+    storage.apply_effect_to_cache(
+        "note:cached-note",
+        &EntityEffect::Upsert(Entity::Note(note)),
+    );
+
+    assert!(search_notes(&storage, "Alpha Beta")
+        .await
+        .expect("search notes")
+        .iter()
+        .any(|hit| hit.note_slug == "cached-note"));
+}
+
+#[tokio::test]
+async fn note_search_errors_identify_the_malformed_checkpoint() {
+    let temp_dir = tempdir().expect("tempdir");
+    let storage = Storage::new(temp_dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("storage layout");
+    let checkpoint = temp_dir
+        .path()
+        .join("objects")
+        .join("notes")
+        .join("broken.json");
+    tokio::fs::write(&checkpoint, "{not-json")
+        .await
+        .expect("write malformed checkpoint");
+
+    let error = search_notes(&storage, "anything")
+        .await
+        .expect_err("malformed checkpoint fails note search");
+    assert!(
+        error.contains(&checkpoint.to_string_lossy().to_string()),
+        "error must identify the malformed checkpoint: {error}"
+    );
 }

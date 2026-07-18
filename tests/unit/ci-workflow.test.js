@@ -87,5 +87,11 @@ describe('GitHub CI prerequisites', () => {
     ).not.toThrow();
     expect(macosLifecycleSmoke).not.toContain('arm64-apple-macos14.0');
     expect(macosLifecycleSmoke).toContain('process.arch');
+    expect(macosLifecycleSmoke).toContain(
+      'set resumePosition to position of window 1',
+    );
+    expect(macosLifecycleSmoke).not.toContain(
+      'const [windowX, windowY, windowWidth] = run(captureExecutable',
+    );
   });
 });

@@ -941,6 +941,79 @@ impl Storage {
             .collect()
     }
 
+    pub async fn load_all_notes(&self) -> io::Result<BTreeMap<String, NoteEntity>> {
+        let notes_dir = self.root().join("objects").join("notes");
+        let mut result = BTreeMap::new();
+        let mut entries = fs::read_dir(&notes_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if !entry.file_type().await?.is_file() {
+                continue;
+            }
+            if path.extension() != Some(std::ffi::OsStr::new("json")) {
+                continue;
+            }
+            let name = entry
+                .file_name()
+                .to_str()
+                .map(str::to_string)
+                .ok_or_else(|| invalid_data("note checkpoint filename is not UTF-8"))?;
+            let Some(slug) = name.strip_suffix(".json") else {
+                continue;
+            };
+            if slug.is_empty() {
+                return Err(invalid_data("note checkpoint slug must not be empty"));
+            }
+            let raw = fs::read_to_string(&path).await?;
+            let note: NoteEntity = serde_json::from_str(&raw).map_err(|error| {
+                invalid_data(format!(
+                    "invalid note checkpoint {}: {error}",
+                    path.display()
+                ))
+            })?;
+            if note.slug != slug {
+                return Err(invalid_data(format!(
+                    "note checkpoint filename {slug} does not match entity slug {}",
+                    note.slug
+                )));
+            }
+            if result.insert(slug.to_string(), note).is_some() {
+                return Err(invalid_data(format!(
+                    "duplicate note checkpoint slug: {slug}"
+                )));
+            }
+        }
+
+        for (slug, cached) in self.cached_note_overlay() {
+            match cached {
+                Some(note) => {
+                    result.insert(slug, note);
+                }
+                None => {
+                    result.remove(&slug);
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn cached_note_overlay(&self) -> BTreeMap<String, Option<NoteEntity>> {
+        let cache = self.inner.cache.lock();
+        cache
+            .entries
+            .iter()
+            .filter_map(|(key, value)| {
+                let slug = key.strip_prefix("note:")?;
+                let note = match value {
+                    Some(Entity::Note(note)) => Some(note.clone()),
+                    _ => None,
+                };
+                Some((slug.to_string(), note))
+            })
+            .collect()
+    }
+
     pub async fn load_all_lists(&self) -> io::Result<BTreeMap<String, ListEntity>> {
         let lists_dir = self.root().join("views").join("lists");
         let mut result = BTreeMap::new();
