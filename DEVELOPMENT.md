@@ -98,9 +98,12 @@ Run the complete GitHub CI test and lint suite locally with:
 npm run ci
 ```
 
-GitHub CI delegates to the same `ci:*` package scripts, so local and hosted
-verification cannot drift into different command sets. Run the complete suite
-before committing.
+GitHub's locally safe jobs delegate to the same `ci:*` package scripts, so local
+and hosted verification cannot drift into different command sets. The native
+macOS lifecycle job is the explicit exception: it requires the isolated session
+described below and is not part of `npm run ci`. Run the complete local suite
+before committing and the native lifecycle job on a disposable runner when its
+covered paths change.
 
 ### Unit Tests (Vitest)
 
@@ -135,7 +138,7 @@ The native macOS lifecycle test registers a real status item and must never run 
 BROWSER_RECALL_ISOLATED_MACOS_SESSION=1 npm run test:desktop-native
 ```
 
-It verifies the actual bundle, painted startup-error recovery, concurrent Resume serialization, physical tray placement/clickability, repeated reopening, focus, and frame preservation. It unregisters its test app before deleting the temporary bundle, but the ephemeral-session requirement remains because Control Center can retain status-item ownership state independently of Launch Services. GitHub CI runs this scenario on a fresh macOS 26 VM so the native test covers the Control Center generation where the regression occurred without polluting a developer login session.
+It verifies the actual bundle, painted startup-error reporting, repaired-storage relaunch, accessible tray placement/menu activation, repeated reopening, focus, and frame preservation. Playwright separately covers visible Resume command wiring, while Rust exercises the real absent-daemon repair-and-restart boundary and concurrent start serialization. The smoke test unregisters its test app before deleting the temporary bundle, but the ephemeral-session requirement remains because Control Center can retain status-item ownership state independently of Launch Services. GitHub CI runs this scenario on a fresh macOS 26 VM so the native test covers the Control Center generation where the regression occurred without polluting a developer login session.
 
 When running under a filesystem/process sandbox, Chromium launch may require an unsandboxed command approval. If every visual test fails at `0ms` with `browserType.launch: Target page, context or browser has been closed`, `SIGABRT`, or `kill EPERM`, rerun the same command with browser-launch permissions instead of changing the tests or package script. A focused `npx playwright test ... -g "<name>"` run can pass while the sandboxed npm visual script fails, because the failure is at browser launch before any test code runs.
 

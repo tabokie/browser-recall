@@ -382,6 +382,9 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       actual: null,
     });
 
+    BrowserLikeWebSocket.delayMessageMs = 100;
+    BrowserLikeWebSocket.delayMessagePredicate = (data) =>
+      JSON.parse(data).type === 'pair_approved';
     const manualState = await Promise.race([
       wsClient.connectDesktopBridge(),
       new Promise((_, reject) => {

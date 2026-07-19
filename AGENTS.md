@@ -95,6 +95,7 @@ Optional references may be omitted only when they are valid non-page URLs; malfo
 - Bug fixes are test-first: write the failing test, confirm it fails, apply the fix, confirm it passes.
 - Tests for reads acknowledged before asynchronous checkpoint persistence must deterministically construct the cache-only state; repeated scheduler-dependent runs do not prove the race is covered.
 - E2E is the primary product safety net. For desktop app and extension app behavior, reproduce bugs and cover new functionality in Playwright first, using the real daemon/connector path whenever feasible.
+- When CI cannot inject native webview input, split coverage across Playwright for UI command wiring, Rust for the real host/daemon boundary, and native smoke tests for window/tray lifecycle; never treat a mocked bridge as host-boundary coverage.
 - For site-specific highlight bugs, verify the live/source DOM and saved note/page identity data before attributing the failure to CSS path drift, hydration, or text matching.
 - E2E tests for notification fallbacks should force the exact delivery channel to fail, not only assert the final visible notification.
 - Desktop visual E2E uses `npm run test:visual`; in sandboxed agent runs, request browser-launch permissions for that command if Chromium aborts before test code runs. A launch-only failure where every visual test fails at `0ms` with `browserType.launch`, `SIGABRT`, or `kill EPERM` is a sandbox execution issue, not a product regression.

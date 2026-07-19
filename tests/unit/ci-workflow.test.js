@@ -37,7 +37,7 @@ describe('GitHub CI prerequisites', () => {
     ['test-rust', 'test-desktop-visual', 'ci:test-rust'],
     [
       'test-desktop-visual',
-      'lint-js',
+      'test-desktop-native-bundle',
       'ci:install-playwright ci:test-desktop-visual',
     ],
     ['lint-js', 'lint-rust', 'ci:lint-js'],
@@ -49,13 +49,21 @@ describe('GitHub CI prerequisites', () => {
     }
   });
 
-  test('local CI composes every GitHub CI job', () => {
+  test('local CI composes every locally safe GitHub CI job', () => {
     expect(packageJson.scripts.ci).toBe(
       'npm run ci:test && npm run ci:test-rust && npm run ci:install-playwright && npm run ci:test-desktop-visual && npm run ci:lint-js && npm run ci:lint-rust',
     );
     expect(packageJson.scripts['ci:install-playwright']).toBe(
       'playwright install --no-shell chromium',
     );
+    const nativeJob = jobBody('test-desktop-native-bundle', 'lint-js');
+    expect(nativeJob).toContain(
+      'npm run build --workspace @browser-recall/desktop',
+    );
+    expect(nativeJob).toContain(
+      'node tests/smoke/macos-desktop-window-lifecycle.mjs',
+    );
+    expect(packageJson.scripts.ci).not.toContain('test:desktop-native');
   });
 
   test('local and GitHub CI use the same pinned Rust toolchain', () => {
@@ -87,11 +95,14 @@ describe('GitHub CI prerequisites', () => {
     ).not.toThrow();
     expect(macosLifecycleSmoke).not.toContain('arm64-apple-macos14.0');
     expect(macosLifecycleSmoke).toContain('process.arch');
+    expect(macosLifecycleSmoke).not.toContain('CGEvent(');
+    expect(macosLifecycleSmoke).not.toContain('perform action "AXPress"');
     expect(macosLifecycleSmoke).toContain(
-      'set resumePosition to position of window 1',
+      'tell trayItem\n          perform action "AXShowMenu"\n          delay 0.1\n          click menu item "Open" of menu 1\n        end tell',
     );
+    expect(macosLifecycleSmoke).toContain('waitForProcessExit(pid)');
     expect(macosLifecycleSmoke).not.toContain(
-      'const [windowX, windowY, windowWidth] = run(captureExecutable',
+      'visible Resume Service did not start the absent daemon',
     );
   });
 });

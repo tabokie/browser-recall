@@ -348,6 +348,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       listHistoryFilesDelayMs,
       loadHistoryBatchDelayMs,
       readDesktopValueDelayMs,
+      resumeServiceDelayMs,
       initialRoute,
       systemLocale,
       previewRuleMatchesByPattern,
@@ -364,6 +365,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       const searchHistoryInvocations = [];
       const loadHistoryBatchInvocations = [];
       const previewRuleInvocations = [];
+      const bridgeActionInvocations = [];
 
       function clone(value) {
         return value === undefined
@@ -824,6 +826,9 @@ async function installDesktopBridgeMock(page, options = {}) {
         loadHistoryBatchInvocationCount() {
           return loadHistoryBatchInvocations.length;
         },
+        bridgeActionInvocations() {
+          return clone(bridgeActionInvocations);
+        },
         previewRuleInvocations() {
           return clone(previewRuleInvocations);
         },
@@ -851,6 +856,12 @@ async function installDesktopBridgeMock(page, options = {}) {
       };
 
       async function bridgeAction(request = {}) {
+        bridgeActionInvocations.push(clone(request));
+        if (request.action === 'resumeService' && resumeServiceDelayMs > 0) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, resumeServiceDelayMs),
+          );
+        }
         switch (request.action) {
           case 'getDesktopSystemLocale':
             return { success: true, locale: systemLocale };
@@ -1260,6 +1271,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       listHistoryFilesDelayMs: options.listHistoryFilesDelayMs || 0,
       loadHistoryBatchDelayMs: options.loadHistoryBatchDelayMs || 0,
       readDesktopValueDelayMs: options.readDesktopValueDelayMs || 0,
+      resumeServiceDelayMs: options.resumeServiceDelayMs || 0,
       initialRoute: options.initialRoute || '',
       systemLocale: options.systemLocale || 'en',
       previewRuleMatchesByPattern: options.previewRuleMatchesByPattern || {},
@@ -1397,6 +1409,35 @@ test.describe('desktop visual regression', () => {
           ),
         )
         .toBe(errorMessage);
+    });
+  });
+
+  test('service error resume button sends the desktop resume command', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        resumeServiceDelayMs: 10_000,
+        extraSession: {
+          serviceError: {
+            code: 'daemon_start_failed',
+            message: 'Daemon startup failed',
+          },
+        },
+      });
+
+      await page.locator('#serviceErrorResumeBtn').click();
+
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness
+              .bridgeActionInvocations()
+              .some((request) => request.action === 'resumeService'),
+          ),
+        )
+        .toBe(true);
     });
   });
 

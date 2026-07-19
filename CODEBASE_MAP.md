@@ -98,7 +98,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 - Desktop UI localization uses the registry in `packages/core/i18n.js`; system locale comes from the Tauri shell, while `localeOverride` persists in daemon settings. The settings selector is generated from the registry rather than maintained separately in HTML.
 - `apps/desktop/ui/desktop-bridge.js` owns direct Tauri command dispatch for desktop product actions.
 - `apps/desktop/ui/desktop-platform.js` exposes only the host surfaces current desktop UI code uses and fails startup if Tauri invoke/event bridges are unavailable.
-- `apps/desktop/src-tauri/src/main.rs` forwards command results, change events, and storage updates into the webview. Its window lifecycle keeps the webview warm while closed and restores visibility/focus when the tray, Dock, or a deep link reopens it. One asynchronous start gate serializes daemon creation; an absent daemon exposes shell recovery actions but no fabricated storage authority.
+- `apps/desktop/src-tauri/src/main.rs` forwards command results, change events, and storage updates into the webview. Its window lifecycle keeps the webview warm while closed and restores visibility/focus when the tray, Dock, or a deep link reopens it, discarding retained frames that no longer intersect a current display. One asynchronous start gate serializes daemon creation; an absent daemon exposes shell recovery actions but no fabricated storage authority, and its real startup path is tested against repair-and-retry recovery.
 
 ### Connector Popup
 
@@ -171,7 +171,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `tests/e2e/extension-navigation-regressions.spec.js` | Browser navigation coverage for same-document transitions, new-tab referrer relationships, page summaries, and highlight lifecycle behavior |
 | `tests/e2e/desktop-locale-setting.spec.js` | Registry-complete desktop locale workflow through the real connector, daemon, settings checkpoints, UI reloads, invalid-override reporting, and RTL verification |
 | `tests/e2e/extension-localization.spec.js` | Browser-native WebExtension catalog selection using the packaged extension and the browser-reported UI locale |
-| `tests/smoke/macos-desktop-window-lifecycle.mjs` | Ephemeral-session signed-app smoke test proving startup errors remain painted, double Resume creates one listener, and a physically visible/clickable tray item survives repeated close/reopen, focus, and frame preservation; CI runs it on a disposable macOS 26 runner |
+| `tests/smoke/macos-desktop-window-lifecycle.mjs` | Ephemeral-session signed-app smoke test proving startup errors remain painted, repaired storage survives a native relaunch, and an accessible tray menu survives repeated close/reopen, focus, and frame preservation; CI runs it on a disposable macOS 26 runner |
 | `scripts/test-coverage-monitor.mjs` | Test-suite LoC mix and JS/Rust uncovered production line reporting |
 | `crates/daemon/tests/commands.rs` | Desktop command-surface coverage |
 | `crates/daemon/tests/command_authority.rs` | Shared semantic command response, validation, committed state, and mutation outcome coverage |

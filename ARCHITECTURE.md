@@ -129,7 +129,7 @@ Fresh desktop configuration has an empty data-directory path. Onboarding explici
 
 The Tauri layer is intentionally thin; storage/search/replay behavior lives in `crates/daemon/`.
 
-Closing the desktop window hides it instead of destroying its webview. Tray clicks, Dock reopen events, and deep links reuse that warm webview, preserve its frame, then unminimize, show, and focus it. macOS performs one delayed focus retry to handle native activation timing.
+Closing the desktop window hides it instead of destroying its webview. Tray clicks, Dock reopen events, and deep links reuse that warm webview, preserve its frame, then unminimize, show, and focus it. A retained physical frame is restored only while it still intersects a current display work area; otherwise the window returns to its normal centered frame so display removal or topology changes cannot strand it off-screen. macOS performs one delayed focus retry to handle native activation timing.
 
 If a configured daemon cannot start because an owned data file is invalid or another explicit startup error occurs, the Tauri shell remains alive with a paused snapshot and visible `daemon_start_failed` diagnostic. After the cause is corrected, Resume starts the absent daemon without restarting the shell. Daemon startup is guarded across the complete asynchronous start operation, so concurrent Resume/setup requests converge on one server and one watcher set. While that server is absent, shell/setup diagnostics remain available but storage-backed reads and sync return `Browser Recall daemon is not running`; the Tauri layer never constructs a second `Storage` authority or checkpoint worker.
 

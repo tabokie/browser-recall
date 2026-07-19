@@ -40,13 +40,10 @@ const testApp = path.join(workDir, 'Browser Recall Lifecycle Test.app');
 const testHome = path.join(workDir, 'home');
 const executableDir = path.join(testApp, 'Contents/MacOS');
 const executableName = 'browser-recall-lifecycle-test';
-const clickSource = path.join(workDir, 'click.swift');
-const clickExecutable = path.join(workDir, 'click');
 const captureSource = path.join(workDir, 'capture.swift');
 const captureExecutable = path.join(workDir, 'capture');
 const pausedStartupScreenshot = path.join(workDir, 'paused-startup.png');
 const pausedStartupBitmap = path.join(workDir, 'paused-startup.bmp');
-const stagedDesktopHtml = path.join(root, 'dist/desktop/ui/index.html');
 let pid = null;
 
 function run(command, args) {
@@ -55,6 +52,44 @@ function run(command, args) {
 
 function appleScript(source) {
   return run('/usr/bin/osascript', ['-e', source]);
+}
+
+function launchTestApp() {
+  run('/usr/bin/open', [
+    '-n',
+    '-F',
+    '--env',
+    `HOME=${testHome}`,
+    '--env',
+    'BROWSER_RECALL_SKIP_DEEP_LINK_REGISTRATION=1',
+    testApp,
+  ]);
+}
+
+function waitForAppPid() {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const result = spawnSync('/usr/bin/pgrep', ['-x', executableName], {
+      encoding: 'utf8',
+    });
+    if (result.status === 0 && result.stdout.trim()) {
+      return Number(result.stdout.trim().split('\n').at(-1));
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  }
+  throw new Error('Desktop lifecycle test app did not launch');
+}
+
+function waitForProcessExit(processId) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      process.kill(processId, 0);
+    } catch (error) {
+      if (error.code === 'ESRCH') return;
+      throw error;
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  }
+  throw new Error('Desktop lifecycle test app did not exit');
 }
 
 function assertWebviewPainted(bitmapPath) {
@@ -85,21 +120,6 @@ function assertWebviewPainted(bitmapPath) {
 }
 
 try {
-  writeFileSync(
-    clickSource,
-    `import CoreGraphics
-import Foundation
-
-let point = CGPoint(
-  x: Double(CommandLine.arguments[1])!,
-  y: Double(CommandLine.arguments[2])!
-)
-CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
-Thread.sleep(forTimeInterval: 0.02)
-CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
-`,
-  );
-  run('/usr/bin/swiftc', [clickSource, '-o', clickExecutable]);
   writeFileSync(
     captureSource,
     `import AppKit
@@ -203,27 +223,8 @@ print("\\(bounds.origin.x),\\(bounds.origin.y),\\(bounds.width),\\(bounds.height
   );
 
   spawnSync('/usr/bin/pkill', ['-x', executableName]);
-  run('/usr/bin/open', [
-    '-n',
-    '-F',
-    '--env',
-    `HOME=${testHome}`,
-    '--env',
-    'BROWSER_RECALL_SKIP_DEEP_LINK_REGISTRATION=1',
-    testApp,
-  ]);
-
-  for (let attempt = 0; attempt < 100 && pid === null; attempt += 1) {
-    const result = spawnSync('/usr/bin/pgrep', ['-x', executableName], {
-      encoding: 'utf8',
-    });
-    if (result.status === 0 && result.stdout.trim()) {
-      pid = Number(result.stdout.trim().split('\n').at(-1));
-      break;
-    }
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
-  }
-  if (!pid) throw new Error('Desktop lifecycle test app did not launch');
+  launchTestApp();
+  pid = waitForAppPid();
 
   appleScript(`
     tell application "System Events"
@@ -242,8 +243,8 @@ print("\\(bounds.origin.x),\\(bounds.origin.y),\\(bounds.width),\\(bounds.height
         delay 0.05
       end repeat
       if (count of windows of targetProcess) is 0 then error "initial window unavailable"
-      set position of window 1 of targetProcess to {170, 160}
       set size of window 1 of targetProcess to {980, 680}
+      set position of window 1 of targetProcess to {170, 160}
       set frontmost of targetProcess to true
       repeat 100 times
         if name of window 1 of targetProcess is "Browser Recall - Error" then exit repeat
@@ -263,47 +264,49 @@ print("\\(bounds.origin.x),\\(bounds.origin.y),\\(bounds.width),\\(bounds.height
     pausedStartupBitmap,
   ]);
   assertWebviewPainted(pausedStartupBitmap);
-  const titlebarSpaceMatch = readFileSync(stagedDesktopHtml, 'utf8').match(
-    /--desktop-titlebar-space:\s*(\d+(?:\.\d+)?)px/,
-  );
-  if (!titlebarSpaceMatch) {
-    throw new Error('Desktop titlebar spacing is missing from staged UI');
-  }
-  const titlebarSpace = Number(titlebarSpaceMatch[1]);
 
-  // Repair the startup error after first paint so the visible Resume action
-  // can prove that an absent daemon is started without restarting the shell.
+  // Playwright covers the visible Resume command wiring, while the desktop
+  // Rust test starts the real absent daemon after repairing this same startup
+  // failure. GitHub-hosted macOS sessions reject synthetic WKWebView input, so
+  // repair storage and relaunch before exercising native window behavior.
   writeFileSync(malformedLogPath, '');
+  process.kill(pid, 'SIGTERM');
+  waitForProcessExit(pid);
+  pid = null;
+  launchTestApp();
+  pid = waitForAppPid();
 
   // Reopen-only assertions can miss no-op closes and delayed focus theft, so
   // verify both the hidden transition and the final focus handoff explicitly.
   const result = appleScript(`
     tell application "System Events"
-      set targetProcess to first application process whose unix id is ${pid}
+      set targetProcess to missing value
+      repeat 100 times
+        set matches to application processes whose unix id is ${pid}
+        if (count of matches) > 0 then
+          set targetProcess to item 1 of matches
+          exit repeat
+        end if
+        delay 0.05
+      end repeat
+      if targetProcess is missing value then error "recovered application process unavailable"
       repeat 100 times
         if (count of windows of targetProcess) > 0 then exit repeat
         delay 0.05
       end repeat
-      if (count of windows of targetProcess) is 0 then error "initial window unavailable"
-
-      set position of window 1 of targetProcess to {170, 160}
-      set size of window 1 of targetProcess to {980, 680}
-      set frontmost of targetProcess to true
-      delay 0.2
-      set resumePosition to position of window 1
-      set resumeSize to size of window 1
-      set resumeX to (item 1 of resumePosition) + (item 1 of resumeSize) - 55
-      set resumeY to (item 2 of resumePosition) + ${titlebarSpace} + 20
-      do shell script "${clickExecutable} " & resumeX & " " & resumeY
-      do shell script "${clickExecutable} " & resumeX & " " & resumeY
+      if (count of windows of targetProcess) is 0 then error "recovered window unavailable"
       repeat 100 times
         if name of window 1 of targetProcess is "Browser Recall" then exit repeat
         delay 0.05
       end repeat
-      if name of window 1 of targetProcess is not "Browser Recall" then error "visible Resume Service did not start the absent daemon"
+      if name of window 1 of targetProcess is not "Browser Recall" then error "desktop did not recover after storage repair"
 
+      set size of window 1 of targetProcess to {980, 680}
+      set position of window 1 of targetProcess to {170, 160}
       set frontmost of targetProcess to true
       delay 1
+      set baselinePosition to position of window 1 of targetProcess
+      set baselineSize to size of window 1 of targetProcess
 
       repeat with cycle from 1 to 5
         click button 1 of window 1 of targetProcess
@@ -318,17 +321,22 @@ print("\\(bounds.origin.x),\\(bounds.origin.y),\\(bounds.width),\\(bounds.height
         set traySize to size of trayItem
         if (item 1 of traySize) < 1 or (item 2 of traySize) < 1 then error "tray item has no visible frame"
         if (item 1 of trayPosition) < 0 or (item 2 of trayPosition) < 0 or (item 2 of trayPosition) > 80 then error "tray item is outside the visible menu bar"
-        set trayX to (item 1 of trayPosition) + ((item 1 of traySize) div 2)
-        set trayY to (item 2 of trayPosition) + ((item 2 of traySize) div 2)
-        do shell script "${clickExecutable} " & trayX & " " & trayY
+        tell trayItem
+          perform action "AXShowMenu"
+          delay 0.1
+          click menu item "Open" of menu 1
+        end tell
         repeat 40 times
-          if (count of windows of targetProcess) > 0 and frontmost of targetProcess then exit repeat
+          if (count of windows of targetProcess) > 0 and frontmost of targetProcess and (value of attribute "AXMain" of window 1 of targetProcess) and position of window 1 of targetProcess is equal to baselinePosition and size of window 1 of targetProcess is equal to baselineSize then exit repeat
           delay 0.05
         end repeat
         if (count of windows of targetProcess) is 0 then error "window did not reopen on cycle " & cycle
         if not frontmost of targetProcess then error "window did not focus on cycle " & cycle
-        if position of window 1 of targetProcess is not equal to {170, 160} then error "window position changed on cycle " & cycle
-        if size of window 1 of targetProcess is not equal to {980, 680} then error "window size changed on cycle " & cycle
+        if not (value of attribute "AXMain" of window 1 of targetProcess) then error "window did not become main on cycle " & cycle
+        set actualPosition to position of window 1 of targetProcess
+        set actualSize to size of window 1 of targetProcess
+        if actualPosition is not equal to baselinePosition then error "window position changed on cycle " & cycle & "; expected " & (item 1 of baselinePosition) & "," & (item 2 of baselinePosition) & ", got " & (item 1 of actualPosition) & "," & (item 2 of actualPosition)
+        if actualSize is not equal to baselineSize then error "window size changed on cycle " & cycle & "; expected " & (item 1 of baselineSize) & "," & (item 2 of baselineSize) & ", got " & (item 1 of actualSize) & "," & (item 2 of actualSize)
       end repeat
 
       click button 1 of window 1 of targetProcess
@@ -342,11 +350,13 @@ print("\\(bounds.origin.x),\\(bounds.origin.y),\\(bounds.width),\\(bounds.height
         delay 0.1
         click menu item "Open" of menu 1
       end tell
-      repeat 10 times
-        if frontmost of targetProcess then exit repeat
-        delay 0.005
+      repeat 40 times
+        if frontmost of targetProcess and (value of attribute "AXMain" of window 1 of targetProcess) then exit repeat
+        delay 0.05
       end repeat
       if not frontmost of targetProcess then error "window did not focus before focus handoff test"
+      if not (value of attribute "AXMain" of window 1 of targetProcess) then error "window did not become main before focus handoff test"
+      delay 0.15
       set frontmost of application process "Finder" to true
       delay 0.2
       if frontmost of targetProcess then error "focus retry stole focus from Finder"
@@ -365,7 +375,7 @@ print("\\(bounds.origin.x),\\(bounds.origin.y),\\(bounds.width),\\(bounds.height
     .filter((line) => /127\.0\.0\.1:2847[1-3]\s+\(LISTEN\)/.test(line));
   if (listeners.length !== 1) {
     throw new Error(
-      `Double Resume must leave exactly one desktop listener; found ${listeners.length}`,
+      `Recovered desktop must leave exactly one listener; found ${listeners.length}`,
     );
   }
   console.log(result);

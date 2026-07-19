@@ -27,6 +27,7 @@ const SOCKET_OPEN_TIMEOUT_MS = 5000;
 const BRIDGE_REQUEST_TIMEOUT_MS = 1500;
 const SNAPSHOT_REQUEST_TIMEOUT_MS = 60_000;
 const STATE_PROBE_TIMEOUT_MS = 2500;
+const MANUAL_PAIR_SETTLE_MS = 1500;
 
 let currentSocket = null;
 let reconnectTimer = null;
@@ -1215,8 +1216,14 @@ export async function connectDesktopBridge() {
       previousSocket: socketReadyStateName(currentSocket),
     });
     await connect();
-    const state = await waitForConnectorState((candidate) =>
-      isTerminalConnectorState(candidate.state),
+    // Auto-approved pairing still emits pair_pending before its final result.
+    // Give that transient state time to settle; a real pending approval is
+    // returned when the bounded wait expires.
+    const state = await waitForConnectorState(
+      (candidate) =>
+        isTerminalConnectorState(candidate.state) &&
+        candidate.state !== CONNECTOR_STATES.PAIR_PENDING,
+      MANUAL_PAIR_SETTLE_MS,
     );
     if (isManualReadyConnectorState(state.state)) {
       return state;

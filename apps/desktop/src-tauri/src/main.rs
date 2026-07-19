@@ -55,7 +55,8 @@ use std::time::Duration;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{
-    AppHandle, Emitter, LogicalSize, Manager, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalRect, PhysicalSize,
+    WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
@@ -94,6 +95,13 @@ struct DesktopState {
     logging: logging::LoggingHandle,
     quit_requested: Mutex<bool>,
     main_window_focus_pending: AtomicBool,
+    main_window_frame: Mutex<Option<WindowFrame>>,
+}
+
+#[derive(Clone, Copy)]
+struct WindowFrame {
+    position: PhysicalPosition<i32>,
+    size: PhysicalSize<u32>,
 }
 
 #[derive(Default)]
@@ -304,8 +312,71 @@ fn log_window_error(result: tauri::Result<()>, action: &str) {
     }
 }
 
+fn capture_window_frame(window: &WebviewWindow) -> Option<WindowFrame> {
+    Some(WindowFrame {
+        position: window.outer_position().ok()?,
+        size: window.outer_size().ok()?,
+    })
+}
+
+fn window_frame_intersects_work_area(
+    frame: WindowFrame,
+    work_area: PhysicalRect<i32, u32>,
+) -> bool {
+    let frame_left = i64::from(frame.position.x);
+    let frame_top = i64::from(frame.position.y);
+    let frame_right = frame_left + i64::from(frame.size.width);
+    let frame_bottom = frame_top + i64::from(frame.size.height);
+    let work_left = i64::from(work_area.position.x);
+    let work_top = i64::from(work_area.position.y);
+    let work_right = work_left + i64::from(work_area.size.width);
+    let work_bottom = work_top + i64::from(work_area.size.height);
+
+    frame_left < work_right
+        && frame_right > work_left
+        && frame_top < work_bottom
+        && frame_bottom > work_top
+}
+
+fn window_frame_intersects_any_work_area(
+    frame: WindowFrame,
+    work_areas: &[PhysicalRect<i32, u32>],
+) -> bool {
+    work_areas
+        .iter()
+        .copied()
+        .any(|work_area| window_frame_intersects_work_area(frame, work_area))
+}
+
+fn retained_window_frame_is_visible(window: &WebviewWindow, frame: WindowFrame) -> bool {
+    match window.available_monitors() {
+        Ok(monitors) => {
+            let work_areas = monitors
+                .iter()
+                .map(|monitor| *monitor.work_area())
+                .collect::<Vec<_>>();
+            window_frame_intersects_any_work_area(frame, &work_areas)
+        }
+        Err(error) => {
+            warn!(%error, "failed to inspect displays before restoring retained main window frame");
+            false
+        }
+    }
+}
+
+fn restore_window_frame(window: &WebviewWindow, frame: WindowFrame) {
+    log_window_error(window.set_size(frame.size), "restore retained size");
+    log_window_error(
+        window.set_position(frame.position),
+        "restore retained position",
+    );
+}
+
 fn show_main_window(app: &AppHandle) {
     set_main_window_focus_pending(app, true);
+    let retained_frame = app
+        .try_state::<DesktopState>()
+        .and_then(|state| *state.main_window_frame.lock());
     set_dock_visible(app, true);
     let (window, created) = match app.get_webview_window("main") {
         Some(window) => (window, false),
@@ -318,11 +389,22 @@ fn show_main_window(app: &AppHandle) {
         },
     };
 
-    if created {
-        restore_normal_webview_window_frame(&window);
-    }
     log_window_error(window.unminimize(), "unminimize");
     log_window_error(window.show(), "show");
+    match retained_frame {
+        Some(frame) if retained_window_frame_is_visible(&window, frame) => {
+            restore_window_frame(&window, frame);
+        }
+        Some(_) => {
+            warn!("retained main window frame is outside the current displays; restoring the normal frame");
+            if let Some(state) = app.try_state::<DesktopState>() {
+                *state.main_window_frame.lock() = None;
+            }
+            restore_normal_webview_window_frame(&window);
+        }
+        None if created => restore_normal_webview_window_frame(&window),
+        None => {}
+    }
     log_window_error(window.set_focus(), "focus");
     retry_main_window_focus(app.clone());
     apply_shell_state(app);
@@ -366,6 +448,11 @@ fn set_main_window_focus_pending(app: &AppHandle, pending: bool) {
 fn close_main_window(app: &AppHandle) {
     set_main_window_focus_pending(app, false);
     if let Some(window) = app.get_webview_window("main") {
+        if let Some(frame) = capture_window_frame(&window) {
+            if let Some(state) = app.try_state::<DesktopState>() {
+                *state.main_window_frame.lock() = Some(frame);
+            }
+        }
         log_window_error(window.hide(), "hide");
     }
     set_dock_visible(app, false);
@@ -451,6 +538,7 @@ fn window_title(model: &UiModel) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use browser_recall_daemon::pairing::static_approver;
     use std::sync::atomic::AtomicUsize;
 
     fn ui_model(is_paused: bool, browsers: Vec<String>) -> UiModel {
@@ -491,6 +579,40 @@ mod tests {
         assert!(tray_menu_shows_on_right_click());
     }
 
+    #[test]
+    fn retained_window_frame_must_intersect_a_current_work_area() {
+        let retained = WindowFrame {
+            position: PhysicalPosition::new(2_100, 120),
+            size: PhysicalSize::new(980, 680),
+        };
+        let laptop_work_area = PhysicalRect {
+            position: PhysicalPosition::new(0, 0),
+            size: PhysicalSize::new(1_920, 1_080),
+        };
+
+        assert!(!window_frame_intersects_any_work_area(
+            retained,
+            &[laptop_work_area]
+        ));
+    }
+
+    #[test]
+    fn retained_window_frame_can_intersect_a_negative_origin_display() {
+        let retained = WindowFrame {
+            position: PhysicalPosition::new(-1_200, 100),
+            size: PhysicalSize::new(980, 680),
+        };
+        let left_display_work_area = PhysicalRect {
+            position: PhysicalPosition::new(-1_440, 0),
+            size: PhysicalSize::new(1_440, 900),
+        };
+
+        assert!(window_frame_intersects_any_work_area(
+            retained,
+            &[left_display_work_area]
+        ));
+    }
+
     #[tokio::test]
     async fn daemon_start_gate_runs_only_one_absent_start() {
         let gate = Arc::new(StartGate::default());
@@ -520,6 +642,55 @@ mod tests {
             assert!(task.await.is_ok());
         }
         assert_eq!(starts.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn absent_daemon_start_recovers_after_startup_storage_is_repaired() {
+        let dir = tempfile::tempdir().expect("temporary daemon directory");
+        let config_store = ConfigStore::new(dir.path().join("config"));
+        let config = DaemonConfig::new_configured(dir.path().join("browser-data"))
+            .expect("configured data directory");
+        config_store.save(&config).expect("save daemon config");
+        let log_path = config
+            .data_dir
+            .join("logs")
+            .join(&config.device_id)
+            .join("2026-07-19.jsonl");
+        std::fs::create_dir_all(log_path.parent().expect("log parent"))
+            .expect("create log directory");
+        std::fs::write(
+            &log_path,
+            format!(
+                "{}\n",
+                json!({
+                    "timestamp": 1_710_000_000_000_i64,
+                    "action": "visit_page",
+                    "url": "https://resume.example/page",
+                    "title": "Resume Test"
+                })
+            ),
+        )
+        .expect("write malformed startup log");
+
+        let test_server_options = || {
+            let mut options = ServerStartOptions::phase1_defaults(
+                config_store.clone(),
+                static_approver(PairingDecision::Approve),
+            );
+            options.port_candidates = vec![0];
+            options
+        };
+        let first_start = start_configured_shell_server(test_server_options()).await;
+        assert!(first_start.is_err());
+
+        std::fs::write(&log_path, "").expect("repair malformed startup log");
+        let (server, recovered_config) = start_configured_shell_server(test_server_options())
+            .await
+            .expect("resume start after storage repair");
+
+        assert_eq!(recovered_config.data_dir, config.data_dir);
+        assert!(server.port() > 0);
+        server.shutdown().await;
     }
 
     #[test]
@@ -819,6 +990,22 @@ fn spawn_server_watchers(
     });
 }
 
+async fn start_configured_shell_server(
+    options: ServerStartOptions,
+) -> Result<(ServerHandle, DaemonConfig), String> {
+    let config_store = options.config_store.clone();
+    let config = config_store
+        .load_or_create()
+        .map_err(|error| error.to_string())?;
+    if !config.is_configured() {
+        return Err("Browser Recall setup is not complete".to_string());
+    }
+    let server = start_server(options)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok((server, config))
+}
+
 async fn start_shell_server(app: &AppHandle) -> Result<ServerSnapshot, String> {
     let state = app.state::<DesktopState>();
     state
@@ -830,19 +1017,11 @@ async fn start_shell_server(app: &AppHandle) -> Result<ServerSnapshot, String> {
             },
             || async {
                 let config_store = state.config_store.clone();
-                let config = config_store
-                    .load_or_create()
-                    .map_err(|error| error.to_string())?;
-                if !config.is_configured() {
-                    return Err("Browser Recall setup is not complete".to_string());
-                }
-
-                let server = start_server(ServerStartOptions::phase1_defaults(
+                let options = ServerStartOptions::phase1_defaults(
                     config_store,
                     pairing_approver(app.clone()),
-                ))
-                .await
-                .map_err(|error| error.to_string())?;
+                );
+                let (server, config) = start_configured_shell_server(options).await?;
                 let snapshot_rx = server.subscribe();
                 let change_rx = server.subscribe_changes();
                 let snapshot = snapshot_rx.borrow().clone();
@@ -1983,6 +2162,7 @@ fn main() -> tauri::Result<()> {
                 logging,
                 quit_requested: Mutex::new(false),
                 main_window_focus_pending: AtomicBool::new(false),
+                main_window_frame: Mutex::new(None),
             });
             apply_shell_state(app.handle());
             if let Some((snapshot_rx, change_rx)) = watcher_bundle {
