@@ -42,8 +42,8 @@ The two active adapters justify a real seam. Native shell commands and browser-o
 - `tests/integration/popup-rpc.test.js`
 - `tests/integration/event-flow.test.js`
 - Relevant desktop and popup E2E coverage
-- `ARCHITECTURE.md`
-- `CODEBASE_MAP.md`
+- `docs/ARCHITECTURE.md`
+- `docs/CODEBASE_MAP.md`
 
 ## Non-goals
 
@@ -100,7 +100,7 @@ The two active adapters justify a real seam. Native shell commands and browser-o
 
 - Delete obsolete action lists, match arms, response construction, and mutation helpers from transport modules.
 - Search for command names across alternate casing, comments, tests, and docs.
-- Update `ARCHITECTURE.md` and `CODEBASE_MAP.md` to show one command authority with Tauri and WebSocket adapters.
+- Update `docs/ARCHITECTURE.md` and `docs/CODEBASE_MAP.md` to show one command authority with Tauri and WebSocket adapters.
 - Run daemon tests, integration tests, focused E2E, formatting, clippy, and unused-code checks.
 
 ## Test surface after the change

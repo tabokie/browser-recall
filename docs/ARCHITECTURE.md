@@ -288,4 +288,6 @@ real WebExtension locale catalog. Only Tauri shell-only surfaces are shimmed.
 
 E2E is the preferred product safety net for desktop and extension behavior. New coverage should favor real user workflows, cross-feature combinations, and seeded randomized inputs over expanding unit-test LoC. Rust daemon integration tests are the preferred fallback for daemon authority behavior that is impractical to assert through browser E2E. `scripts/test-coverage-monitor.mjs` surfaces JS and Rust uncovered production line ranges for triage, tracks the suite mix, and fails on JS or inline Rust unit-test LoC growth unless an explicit exception is made.
 
+The CI cold-script job runs the complete JS/Rust coverage workflow and a daemon-backed Playwright check that manual seed generation preserves the daemon's current settings checkpoint and uses the same connector flush boundary as automated seeding. This keeps operational scripts from drifting after their primary workflows change.
+
 The desktop smoke / GUI parity suite remains the notable intentionally-skipped gap.

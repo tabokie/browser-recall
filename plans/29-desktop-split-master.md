@@ -2,7 +2,7 @@
 
 ## Why
 
-The current MV3 architecture loses File System Access permission inside the offscreen document under realistic conditions, especially on Brave (`docs/fs-permission-repro.md`). The investigation ruled out cached-handle staleness, lost root-handle references, and stale UI state. The conclusion: extension-managed File System Access in MV3 is not reliable enough to ship a "remember everything" product.
+The current MV3 architecture loses File System Access permission inside the offscreen document under realistic conditions, especially on Brave. The investigation ruled out cached-handle staleness, lost root-handle references, and stale UI state. The conclusion: extension-managed File System Access in MV3 is not reliable enough to ship a "remember everything" product.
 
 The product also wants properties MV3 cannot provide: always-on capture (survives browser close), multi-browser support (Chrome + Firefox + Safari + Arc feeding one archive), and freedom from the 10MB `chrome.storage.local` ceiling, the offscreen lifecycle, and CSP gymnastics around WASM.
 
@@ -78,7 +78,7 @@ Each phase ends in a runnable, testable state. No "we'll wire it up later" cliff
 | 25 | CURRENT file gains `hostname` field; daemon prompts "Same machine / New machine (fork ID)" on mismatch to guard sync integrity on shared/synced folders | Phase 2 |
 | 26 | Daemon logging via `tracing` + `tracing-appender`, daily rotation, 7-day retention | Phase 2 |
 | 27 | Snapshot behavior during buffer pressure: inherit refuse mode from decision 4 (stop all capture when buffer near full, resume on drain). No separate deferred-snapshot tracking. | Phase 2 |
-| 28 | PRIVACY.md and DEVELOPMENT.md updated in Phase 4 (privacy threat model; dev-time daemon workflow) | Phase 4 |
+| 28 | `docs/PRIVACY.md` and `DEVELOPMENT.md` updated in Phase 4 (privacy threat model; dev-time daemon workflow) | Phase 4 |
 | 29 | Migration scope = dev folders + any pre-1.0 beta testers. No published-user population exists. | Phase 2 |
 
 ## Open sub-questions to resolve during implementation

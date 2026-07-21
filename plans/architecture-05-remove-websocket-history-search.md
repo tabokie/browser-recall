@@ -35,8 +35,8 @@ The implementation request resolves the product gate in favor of removal. No shi
 - `crates/daemon/src/search.rs`
 - WebSocket search tests in daemon/integration suites
 - Desktop search tests and `tests/e2e/desktop-visual.spec.js`
-- `ARCHITECTURE.md`
-- `CODEBASE_MAP.md`
+- `docs/ARCHITECTURE.md`
+- `docs/CODEBASE_MAP.md`
 
 ## Non-goals
 
@@ -91,7 +91,7 @@ The implementation request resolves the product gate in favor of removal. No shi
 
 - Remove statements that the connector WebSocket protocol exposes full-history search.
 - Document that full-history search is a Desktop Explore capability reached through Tauri.
-- Update `CODEBASE_MAP.md` search routing.
+- Update `docs/CODEBASE_MAP.md` search routing.
 - Run Rust/JS formatting, clippy, unused-code checks, daemon tests, integration tests, and focused desktop E2E.
 
 ## Test surface after the change

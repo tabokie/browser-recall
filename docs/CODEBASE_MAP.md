@@ -76,6 +76,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `scripts/stage-app-assets.mjs` | Stages loadable app assets under `dist/extension/{chrome,firefox}/` and `dist/desktop/ui/`, validates registered locale catalog parity, and generates filtered WebExtension locale files and the content-script page identity bridge |
 | `scripts/collect-desktop-artifacts.mjs` | Collects Tauri release binaries and bundles into `dist/desktop/<platform>/` |
 | `scripts/migrate-browser-data-schema.mjs` | Browser data migration utility for log/view/object schema changes, including URL identity canonicalization |
+| `scripts/manual-test-browser.mjs` and `scripts/lib/manual-seed.mjs` | Isolated manual Chrome/daemon workflow and its replay-consistent, daemon-default-preserving seed/flush helper |
 | `scripts/test-coverage-monitor.mjs` | Test investment and JS/Rust uncovered-line monitor; enforces no JS or inline Rust unit-test LoC growth |
 | `scripts/generate-icons.mjs` | Renders root SVG icon sources into opaque desktop/extension icons, the transparent tray icon, and the macOS `.icns` pack |
 | `scripts/finalize-macos-app-bundle.mjs` | Gives local ad-hoc macOS bundles a stable explicit bundle-identifier designated requirement; real Apple identities bypass this local-only step |
@@ -168,6 +169,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `tests/e2e/extension-error-popouts.spec.js` | Browser-level extension popup and snapshot error popout styling |
 | `tests/e2e/snapshot-resource-timeout.spec.js` | Snapshot resource body timeouts, CORS fallback reporting, and partial-capture warnings through the real connector/daemon path |
 | `tests/e2e/seeded-combination-workflows.spec.js` | Seeded randomized extension workflow combining visits, notes, list pins, and popup reads |
+| `tests/e2e/manual-seed-workflow.spec.js` | Real daemon/connector regression coverage for the manual seeded-data helper, including valid current settings and post-seed queue flush |
 | `tests/e2e/extension-navigation-regressions.spec.js` | Browser navigation coverage for same-document transitions, new-tab referrer relationships, page summaries, and highlight lifecycle behavior |
 | `tests/e2e/desktop-locale-setting.spec.js` | Registry-complete desktop locale workflow through the real connector, daemon, settings checkpoints, UI reloads, invalid-override reporting, and RTL verification |
 | `tests/e2e/extension-localization.spec.js` | Browser-native WebExtension catalog selection using the packaged extension and the browser-reported UI locale |

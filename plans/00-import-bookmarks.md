@@ -30,7 +30,7 @@ All design decisions resolved through grilling session (Q1-Q22).
 | `extension/background.js` | New port handler: walk selected tree, create lists via `addLog(create_list)`, pin URLs via `addLog(pin_to_list)`, send progress |
 | `tests/bookmark-parser.test.js` | Unit tests for HTML→tree parser (edge cases: nested, empty, malformed, non-web URLs) |
 | `tests/e2e/import-bookmarks.spec.js` | E2E: load fixture file, interact with picker, import, verify lists in sidebar |
-| `CODEBASE_MAP.md` | Document new import feature, message handler, parser |
+| `docs/CODEBASE_MAP.md` | Document new import feature, message handler, parser |
 
 ## Implementation
 
@@ -234,8 +234,8 @@ port.onMessage.addListener(async (msg) => {
 
 ### Step 5: Update docs
 
-- **CODEBASE_MAP.md** — add `bookmark-parser.js` to file index, add import handler to message routing table, add feature→code mapping
-- **ARCHITECTURE.md** — no changes needed (import uses existing event-sourced patterns)
+- **`docs/CODEBASE_MAP.md`** — add `bookmark-parser.js` to file index, add import handler to message routing table, add feature→code mapping
+- **`docs/ARCHITECTURE.md`** — no changes needed (import uses existing event-sourced patterns)
 
 ## Verification
 

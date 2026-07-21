@@ -41,7 +41,7 @@ Worker-scoped: `daemon` (real Rust daemon process started before the browser), `
 
 ### Seed Builder
 
-`scripts/lib/seed-builder.mjs` produces file arrays for `seedTestData`. It is a convenience helper for daemon-backed test/manual seeding, not an automated correctness target.
+`scripts/lib/seed-builder.mjs` produces file arrays for `seedTestData`. The daemon-backed cold-script E2E covers its manual-seed integration, including authoritative settings replay and connector flushing.
 
 ## Gotchas
 

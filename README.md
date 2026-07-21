@@ -61,18 +61,17 @@ The desktop app owns the main UI, local storage directory, daemon lifecycle, and
 - `apps/extension/` — WebExtension connector: Chrome service worker or Firefox background module script, popup, content capture, `connector/` bridge
 - `crates/replay/` — pure event replay and entity effects
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full technical deep-dive.
+See [ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the full technical deep-dive.
 
 ## Documentation
 
 
 | Document                             | Description                                      |
 | ------------------------------------ | ------------------------------------------------ |
-| [DESIGN.md](./DESIGN.md)             | Product philosophy and design rationale          |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Entity storage, caching, replay, sync, deletion  |
-| [CODEBASE_MAP.md](./CODEBASE_MAP.md) | File index, message routing, feature-to-code map |
+| [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | Entity storage, caching, replay, sync, deletion  |
+| [CODEBASE_MAP.md](./docs/CODEBASE_MAP.md) | File index, message routing, feature-to-code map |
 | [DEVELOPMENT.md](./DEVELOPMENT.md)   | Building, testing, debugging, migration scripts  |
-| [PRIVACY.md](./PRIVACY.md)           | Privacy policy                                   |
+| [PRIVACY.md](./docs/PRIVACY.md)      | Privacy policy                                   |
 
 
 ## Technology Stack

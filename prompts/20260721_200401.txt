@@ -1,0 +1,17 @@
+- Archive DESIGN.md, as in move it to ./plans/design.md, and remove the reference to it from other root-level documents.
+- Remove ./docs/fs-permission-repro.md, and move other root-level markdown documents under ./docs, except for README.md, DEVELOPMENT.md, AGENTS.md and CLAUDE.md .
+- References are migrated?
+- Whta is the folder test-results used for?
+- Explain the folder ./coverage, and tell me where do we keep the documentation for running code coverage analysis.
+- Could we move ./coverage and ./test-results to ./target? Does that make sense to you?
+- Let's move on. Examine ./scripts, find out what each of them does and if their purpose are obsolete and can be deleted.
+- The two findings are important, let's fix them and add a CI job to make sure the cold scripts' functionality can be validated.
+- Please review my uncommitted changes
+- Fix them
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.6 Terra and Sol
+- No, I'm not asking to use dual model, I am simply providing the model names as the commit co-authors.
+- Fix them
+- Sure
+- Sure
+- Sure
+- Go ahead

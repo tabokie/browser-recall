@@ -5,6 +5,7 @@
 - [Rust](https://rustup.rs/) via `rustup`; the repository pins Rust 1.97.0 in
   `rust-toolchain.toml`, and GitHub CI uses the same version
 - Node.js 24+ (for npm scripts, test runners)
+- `cargo-llvm-cov` 0.8.5 (for the coverage workflow included in full CI)
 
 ```bash
 # Install Rust
@@ -12,6 +13,9 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Install Node dependencies
 npm install
+
+# Install the pinned Rust coverage command
+cargo install cargo-llvm-cov --version 0.8.5 --locked
 ```
 
 ## Building
@@ -167,7 +171,9 @@ npm run coverage:monitor  # print uncovered line ranges and suite LoC mix
 npm run coverage          # run JS coverage, Rust coverage, then the monitor
 ```
 
-`coverage:rust` requires `cargo-llvm-cov` (`cargo install cargo-llvm-cov`). Coverage percentages are context, not a target. The useful output is the uncovered file/line list from the stable JS coverage source plus Rust llvm-cov missing-line output: review those gaps and decide whether they represent real user workflows that deserve E2E or daemon integration coverage. `coverage:monitor` also enforces the E2E-first policy by keeping JS unit and inline Rust unit LoC at or below their current baselines unless `ALLOW_UNIT_TEST_GROWTH=1` is set for an explicit architecture exception.
+`coverage:rust` uses the pinned `cargo-llvm-cov` prerequisite above. Coverage percentages are context, not a target. The useful output is the uncovered file/line list from the stable JS coverage source plus Rust llvm-cov missing-line output: review those gaps and decide whether they represent real user workflows that deserve E2E or daemon integration coverage. `coverage:monitor` also enforces the E2E-first policy by keeping JS unit and inline Rust unit LoC at or below their current baselines unless `ALLOW_UNIT_TEST_GROWTH=1` is set for an explicit architecture exception.
+
+GitHub CI's **Cold Script Smoke** job runs the coverage workflow and a daemon-backed Playwright check of the manual seeded-data helper. Run that focused local check with `npm run test:cold-scripts` after installing Playwright Chromium.
 
 ### Manual Testing
 
@@ -181,7 +187,7 @@ npm run manual:case <name>  # loads seeds/<name>.mjs
 
 Closing the browser prints a data diff showing everything that changed during the session.
 
-Seed cases live in `seeds/` (gitignored). Each `.mjs` file exports a function returning `{ events, entities, deviceId, settings }`. The seed builder (`scripts/lib/seed-builder.mjs`) is a manual-tool helper, not part of automated correctness coverage.
+Seed cases live in `seeds/` (gitignored). Each `.mjs` file exports a function returning `{ events, entities, deviceId, settings }`. The seed builder (`scripts/lib/seed-builder.mjs`) is shared by manual tooling and the daemon-backed cold-script E2E workflow.
 
 ## Debugging
 

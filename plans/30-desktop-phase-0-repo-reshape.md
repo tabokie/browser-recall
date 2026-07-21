@@ -63,7 +63,7 @@ Reorganize the existing repo into a workspace layout so subsequent phases have s
    - `npm run build` builds the WASM crate and copies to `apps/extension/pkg/` as before.
    - `npm test`, `npm run fmt`, `npm run fmt:check` all work from root and discover workspaces.
 
-8. **Update `CODEBASE_MAP.md` and `ARCHITECTURE.md`.**
+8. **Update `docs/CODEBASE_MAP.md` and `docs/ARCHITECTURE.md`.**
    - Path references throughout. No semantic change — same code, new paths.
 
 9. **Run the full test suite.** Everything passes. Load the extension into Chrome and smoke-test that capture still works.
@@ -96,4 +96,4 @@ Reorganize the existing repo into a workspace layout so subsequent phases have s
 - [ ] `cargo fmt --check` and `cargo clippy` pass.
 - [ ] `npm run fmt:check` passes.
 - [ ] `apps/extension/` loads as an unpacked extension in Chrome and captures a visit successfully.
-- [ ] `CODEBASE_MAP.md` updated with new paths.
+- [ ] `docs/CODEBASE_MAP.md` updated with new paths.

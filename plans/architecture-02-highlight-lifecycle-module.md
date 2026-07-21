@@ -38,8 +38,8 @@ The current helper fails the deletion test: deleting it removes tests and snapsh
 - `tests/e2e/context-menu-highlight.spec.js`
 - `tests/e2e/extension-navigation-regressions.spec.js`
 - `tests/e2e/snapshot-slug-meta.spec.js`
-- `ARCHITECTURE.md`
-- `CODEBASE_MAP.md`
+- `docs/ARCHITECTURE.md`
+- `docs/CODEBASE_MAP.md`
 
 ## Non-goals
 
@@ -96,7 +96,7 @@ The current helper fails the deletion test: deleting it removes tests and snapsh
 
 - Delete mirrored helper blocks and comments from `content.js`.
 - Remove re-export modules that no longer earn depth, unless required as the generated classic-script entry.
-- Update `ARCHITECTURE.md` and `CODEBASE_MAP.md` with module ownership and adapter roles.
+- Update `docs/ARCHITECTURE.md` and `docs/CODEBASE_MAP.md` with module ownership and adapter roles.
 - Run extension build, focused E2E, formatting, and unused-export checks.
 
 ## Test surface after the change

@@ -58,8 +58,8 @@ This is a data-integrity seam. Deepening it improves locality for crash-safety r
 - `crates/daemon/tests/storage.rs`
 - `crates/daemon/tests/sync_controller.rs`
 - Relevant connector/sync E2E coverage
-- `ARCHITECTURE.md`
-- `CODEBASE_MAP.md`
+- `docs/ARCHITECTURE.md`
+- `docs/CODEBASE_MAP.md`
 
 ## Non-goals
 
@@ -119,7 +119,7 @@ This is a data-integrity seam. Deepening it improves locality for crash-safety r
 
 - Run focused daemon integration tests, sync tests, connector event-flow tests, and replay verification.
 - Run Rust formatting and clippy.
-- Update `ARCHITECTURE.md` and `CODEBASE_MAP.md` to name the replay transaction module and its callers.
+- Update `docs/ARCHITECTURE.md` and `docs/CODEBASE_MAP.md` to name the replay transaction module and its callers.
 - Remove obsolete comments and helpers after all callers migrate; do not retain compatibility paths.
 
 ## Test surface after the change

@@ -35,8 +35,8 @@ Deep projections keep schema and policy local to the daemon while giving desktop
 - `crates/daemon/tests/commands.rs`
 - `tests/e2e/desktop-visual.spec.js`
 - Relevant popup/list/search/recycle E2E coverage
-- `ARCHITECTURE.md`
-- `CODEBASE_MAP.md`
+- `docs/ARCHITECTURE.md`
+- `docs/CODEBASE_MAP.md`
 
 ## Non-goals
 
@@ -108,7 +108,7 @@ These are planning categories, not settled interfaces.
 
 - Run daemon command tests and focused desktop/popup/list/search/recycle E2E.
 - Exercise cache hits and coordinated disk misses.
-- Update `ARCHITECTURE.md` and `CODEBASE_MAP.md` as each significant projection lands.
+- Update `docs/ARCHITECTURE.md` and `docs/CODEBASE_MAP.md` as each significant projection lands.
 - Run formatting and unused-export checks.
 
 ## Test surface after the change

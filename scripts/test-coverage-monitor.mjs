@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const ROOT = process.cwd();
-const JS_UNIT_TEST_LOC_BASELINE = 5586;
-const INLINE_RUST_UNIT_TEST_LOC_BASELINE = 1140;
+const JS_UNIT_TEST_LOC_BASELINE = 7288;
+const INLINE_RUST_UNIT_TEST_LOC_BASELINE = 2317;
 const COVERAGE_GAP_LIMIT = Number(process.env.COVERAGE_GAP_LIMIT || 25);
 const COVERAGE_GAP_RANGES_PER_FILE = Number(
   process.env.COVERAGE_GAP_RANGES_PER_FILE || 12,

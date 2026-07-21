@@ -55,8 +55,8 @@ Test the full pipeline against a `v0.0.1-rc1` tag before tagging v1.
 ## Connector extension publication
 
 - **Chrome Web Store**: new listing for the connector. Listing copy explains it's the companion to the desktop app, with a link to download.
-- Manifest permissions in the connector are much smaller than the current extension's — review the resulting permission list and update `STORE_LISTING.md`.
-- Privacy disclosures: connector sends data to `127.0.0.1` only, never makes outbound network requests, never reads/writes user files. Update `PRIVACY.md` to reflect the new architecture.
+- Manifest permissions in the connector are much smaller than the current extension's — review the resulting permission list and update `docs/STORE_LISTING.md`.
+- Privacy disclosures: connector sends data to `127.0.0.1` only, never makes outbound network requests, never reads/writes user files. Update `docs/PRIVACY.md` to reflect the new architecture.
 - Screenshots + promo images: refresh to show the desktop app + popup, not the old options page.
 - Review timeline: 1-3 business days typically.
 
@@ -88,7 +88,7 @@ Things to call out explicitly in the release post:
 
 ## Docs updates (part of this phase)
 
-### PRIVACY.md
+### `docs/PRIVACY.md`
 
 Rewrite to reflect the split architecture:
 
@@ -125,7 +125,7 @@ Add a section on the new development workflow:
 - [ ] Connector extension submitted to CWS.
 - [ ] Brave-on-mac E2E passes locally and on CI.
 - [ ] `~/browser-data` adopt-in-place verified by the dev's own data folder.
-- [ ] PRIVACY.md, STORE_LISTING.md, README.md, DEVELOPMENT.md updated for the new architecture.
+- [ ] `docs/PRIVACY.md`, `docs/STORE_LISTING.md`, `README.md`, and `DEVELOPMENT.md` updated for the new architecture.
 - [ ] Release post drafted.
 
 ## End state

@@ -8,12 +8,15 @@ function shard(value) {
 
 export async function buildSeedFiles(
   events,
-  { deviceId, checkpointProgress, settings, entities } = {},
+  { deviceId, checkpointProgress, baseSettings, settings, entities } = {},
 ) {
   if (!deviceId) throw new Error('buildSeedFiles: deviceId is required');
   if (checkpointProgress == null) checkpointProgress = events.length;
 
   const baseStore = {};
+  if (baseSettings) {
+    baseStore['manifest:settings'] = baseSettings;
+  }
   if (entities) {
     for (const [key, value] of Object.entries(entities)) {
       baseStore[key] = value;

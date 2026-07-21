@@ -136,7 +136,7 @@ Permissions and declarations that change from the current manifest:
 | `background.service_worker` | ✓ | | Still SW-based; logic is slim |
 | `web_accessible_resources` (fontface-intercept) | ✓ | | Save Page WE still needs it |
 
-Update `STORE_LISTING.md` permission justifications to match the new list.
+Update `docs/STORE_LISTING.md` permission justifications to match the new list.
 
 ## Connector extension options page (stub)
 

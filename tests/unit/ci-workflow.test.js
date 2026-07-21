@@ -37,9 +37,10 @@ describe('GitHub CI prerequisites', () => {
     ['test-rust', 'test-desktop-visual', 'ci:test-rust'],
     [
       'test-desktop-visual',
-      'test-desktop-native-bundle',
+      'cold-scripts',
       'ci:install-playwright ci:test-desktop-visual',
     ],
+    ['cold-scripts', 'test-desktop-native-bundle', 'ci:cold-scripts'],
     ['lint-js', 'lint-rust', 'ci:lint-js'],
     ['lint-rust', null, 'ci:lint-rust'],
   ])('%s delegates to local CI scripts', (job, nextJob, scripts) => {
@@ -51,7 +52,7 @@ describe('GitHub CI prerequisites', () => {
 
   test('local CI composes every locally safe GitHub CI job', () => {
     expect(packageJson.scripts.ci).toBe(
-      'npm run ci:test && npm run ci:test-rust && npm run ci:install-playwright && npm run ci:test-desktop-visual && npm run ci:lint-js && npm run ci:lint-rust',
+      'npm run ci:test && npm run ci:test-rust && npm run ci:install-playwright && npm run ci:test-desktop-visual && npm run ci:cold-scripts && npm run ci:lint-js && npm run ci:lint-rust',
     );
     expect(packageJson.scripts['ci:install-playwright']).toBe(
       'playwright install --no-shell chromium',
@@ -67,11 +68,11 @@ describe('GitHub CI prerequisites', () => {
   });
 
   test('local and GitHub CI use the same pinned Rust toolchain', () => {
-    expect(fs.existsSync(rustToolchainPath)).toBe(true);
     const rustToolchain = fs.readFileSync(rustToolchainPath, 'utf8');
     expect(rustToolchain).toContain('channel = "1.97.0"');
+    expect(rustToolchain).toContain('"llvm-tools-preview"');
     expect(ciWorkflow.match(/dtolnay\/rust-toolchain@1\.97\.0/g)).toHaveLength(
-      4,
+      5,
     );
     expect(ciWorkflow).not.toContain('dtolnay/rust-toolchain@stable');
   });

@@ -4,9 +4,8 @@ Project name: **browser-recall** (display name "Browser Recall"). Version 1.0 ta
 
 ## Essential Reading
 
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — desktop-first topology, storage, replay, sync, deletion
-- [DESIGN.md](./DESIGN.md) — product philosophy and design rationale
-- [CODEBASE_MAP.md](./CODEBASE_MAP.md) — file index, message routing, feature-to-code map
+- [ARCHITECTURE.md](./docs/ARCHITECTURE.md) — desktop-first topology, storage, replay, sync, deletion
+- [CODEBASE_MAP.md](./docs/CODEBASE_MAP.md) — file index, message routing, feature-to-code map
 - [DEVELOPMENT.md](./DEVELOPMENT.md) — building, testing, debugging
 
 ## Core Principles
@@ -23,7 +22,7 @@ Optional references may be omitted only when they are valid non-page URLs; malfo
 
 ## Storage And Replay
 
-- Data layout is `logs/`, `objects/`, and `views/`; see [ARCHITECTURE.md](./ARCHITECTURE.md) for exact paths.
+- Data layout is `logs/`, `objects/`, and `views/`; see [ARCHITECTURE.md](./docs/ARCHITECTURE.md) for exact paths.
 - Logs are authoritative. Checkpoints in `views/` are replay-derived and rebuildable.
 - Replay tests for mutable identifiers must reapply the same entry after its first application; rename handlers must recognize the already-applied destination through immutable identity or replay timestamps.
 - Page checkpoints are selective: persist only pages with durable user state, meaning list parent, note/snapshot child, user title, or rating.
@@ -94,6 +93,9 @@ Optional references may be omitted only when they are valid non-page URLs; malfo
 
 - Bug fixes are test-first: write the failing test, confirm it fails, apply the fix, confirm it passes.
 - Tests for reads acknowledged before asynchronous checkpoint persistence must deterministically construct the cache-only state; repeated scheduler-dependent runs do not prove the race is covered.
+- Manual seed generation must use the daemon's complete current settings as replay base state; seeded setting events apply next, and explicit seed-case overrides apply last.
+- Operational scripts that normally run manually should route critical logic through importable helpers and have a noninteractive CI smoke path at the real daemon/connector boundary.
+- Any tool invoked by canonical local CI must be pinned in hosted CI, declared in the repository toolchain when possible, and documented as a local prerequisite.
 - E2E is the primary product safety net. For desktop app and extension app behavior, reproduce bugs and cover new functionality in Playwright first, using the real daemon/connector path whenever feasible.
 - When CI cannot inject native webview input, split coverage across Playwright for UI command wiring, Rust for the real host/daemon boundary, and native smoke tests for window/tray lifecycle; never treat a mocked bridge as host-boundary coverage.
 - For site-specific highlight bugs, verify the live/source DOM and saved note/page identity data before attributing the failure to CSS path drift, hydration, or text matching.
@@ -104,7 +106,7 @@ Optional references may be omitted only when they are valid non-page URLs; malfo
 - Do not add new unit tests by default. Convert existing unit coverage to E2E when practical, and use unit tests only when behavior cannot be exercised through E2E or when guarding a narrow architecture invariant such as replay idempotence or strict protocol parsing.
 - When a bug escapes tests, first ask why current E2E coverage missed it, then add or strengthen the E2E scenario before fixing the product code.
 - Use `npm run coverage` / `npm run coverage:monitor` to find uncovered production lines worth reviewing across JS and Rust; coverage percentages are context, not a target. Prefer closing meaningful gaps with E2E coverage. Unit-test LoC must not grow without an explicit architecture exception.
-- When functionality is added, removed, or significantly changed, update both [CODEBASE_MAP.md](./CODEBASE_MAP.md) and [ARCHITECTURE.md](./ARCHITECTURE.md).
+- When functionality is added, removed, or significantly changed, update both [CODEBASE_MAP.md](./docs/CODEBASE_MAP.md) and [ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
 ## Formatting And Lint Tools
 

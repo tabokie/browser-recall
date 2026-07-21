@@ -16,7 +16,7 @@ Final step before Chrome Web Store submission. Needs: updated manifest (name, ve
 }
 ```
 
-### Privacy policy: `PRIVACY.md`
+### Privacy policy: `docs/PRIVACY.md`
 
 Create in repo root. Cover:
 - What data is collected (browsing history URLs, page titles, user-created notes, highlights, snapshots)
@@ -59,8 +59,8 @@ These should be captured from a real instance with sample data. Can be done manu
 | File | Action |
 |------|--------|
 | `extension/manifest.json` | Update name, version, description |
-| `PRIVACY.md` | **New** — privacy policy |
-| `STORE_LISTING.md` | **New** — store description drafts |
+| `docs/PRIVACY.md` | **New** — privacy policy |
+| `docs/STORE_LISTING.md` | **New** — store description drafts |
 | `extension/icons/*` | Evaluate/update if needed |
 
 ### Verification

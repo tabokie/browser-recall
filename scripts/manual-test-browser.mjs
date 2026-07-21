@@ -9,7 +9,7 @@
 // HOW IT WORKS:
 //   1. Starts a temporary daemon and launches Chromium with a temp profile.
 //      Nothing touches your personal browser data.
-//   2. Seeds data via scripts/lib/seed-builder.mjs → seedTestData → rehydrate.
+//   2. Seeds data through manual-seed.mjs, then flushes the connector queue.
 //   3. Captures initial state snapshot (pages, notes, lists, log entries).
 //   4. Opens the options page. You interact with the browser manually.
 //   5. When you close the browser window, captures final state and prints a diff.
@@ -38,7 +38,7 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { fileURLToPath } from 'url';
-import { buildSeedFiles } from './lib/seed-builder.mjs';
+import { seedManualData } from './lib/manual-seed.mjs';
 import {
   cleanupTestExtensionDir,
   createTestExtensionDir,
@@ -156,6 +156,26 @@ async function dumpState(ctx, extensionId) {
   } finally {
     await page.close();
   }
+}
+
+async function sendTestMessage(page, message) {
+  return page.evaluate(
+    (payload) => chrome.runtime.sendMessage(payload),
+    message,
+  );
+}
+
+async function readDesktopSettings(page) {
+  const response = await sendTestMessage(page, {
+    action: 'readDesktopValue',
+    key: 'manifest:settings',
+  });
+  if (!response?.success || !response.value) {
+    throw new Error(
+      response?.error || 'Desktop settings are unavailable after reset',
+    );
+  }
+  return response.value;
 }
 
 // --- Diff computation ---
@@ -323,67 +343,69 @@ if (!resetResult?.success) {
   process.exit(1);
 }
 
+const currentSettings = await readDesktopSettings(setupPage);
+
 if (seed) {
   console.log('Seeding sample data...');
   const now = Date.now();
   const deviceId = crypto.randomUUID().slice(0, 8);
   const WIKI_URL = 'https://en.wikipedia.org/wiki/Rust_(programming_language)';
 
-  const sampleFiles = await buildSeedFiles(
-    [
-      // rate_page creates page entities (visit_page alone doesn't)
-      {
-        action: 'rate_page',
-        url: 'https://github.com/',
-        title: 'GitHub',
-        timestamp: now - 3600_000,
-        likes: 1,
-      },
-      {
-        action: 'rate_page',
-        url: WIKI_URL,
-        title: 'Rust (programming language) - Wikipedia',
-        timestamp: now - 1800_000,
-        likes: 1,
-      },
-      {
-        action: 'rate_page',
-        url: 'https://news.ycombinator.com/',
-        title: 'Hacker News',
-        timestamp: now - 600_000,
-        likes: 1,
-      },
-      // create_note links note to wiki page
-      {
-        action: 'create_note',
-        url: WIKI_URL,
-        timestamp: now - 1700_000,
-        path: 'notes/rust-note.json',
-      },
-      // visit_page entries enrich pages with visit dates
-      {
-        action: 'visit_page',
-        url: 'https://github.com/',
-        title: 'GitHub',
-        timestamp: now - 3600_000,
-      },
-      {
-        action: 'visit_page',
-        url: WIKI_URL,
-        title: 'Rust (programming language) - Wikipedia',
-        timestamp: now - 1800_000,
-      },
-      {
-        action: 'visit_page',
-        url: 'https://news.ycombinator.com/',
-        title: 'Hacker News',
-        timestamp: now - 600_000,
-      },
-    ],
-    {
+  try {
+    await seedManualData({
+      events: [
+        // rate_page creates page entities (visit_page alone doesn't)
+        {
+          action: 'rate_page',
+          url: 'https://github.com/',
+          title: 'GitHub',
+          timestamp: now - 3600_000,
+          likes: 1,
+        },
+        {
+          action: 'rate_page',
+          url: WIKI_URL,
+          title: 'Rust (programming language) - Wikipedia',
+          timestamp: now - 1800_000,
+          likes: 1,
+        },
+        {
+          action: 'rate_page',
+          url: 'https://news.ycombinator.com/',
+          title: 'Hacker News',
+          timestamp: now - 600_000,
+          likes: 1,
+        },
+        // create_note links note to wiki page
+        {
+          action: 'create_note',
+          url: WIKI_URL,
+          timestamp: now - 1700_000,
+          path: 'notes/rust-note.json',
+        },
+        // visit_page entries enrich pages with visit dates
+        {
+          action: 'visit_page',
+          url: 'https://github.com/',
+          title: 'GitHub',
+          timestamp: now - 3600_000,
+        },
+        {
+          action: 'visit_page',
+          url: WIKI_URL,
+          title: 'Rust (programming language) - Wikipedia',
+          timestamp: now - 1800_000,
+        },
+        {
+          action: 'visit_page',
+          url: 'https://news.ycombinator.com/',
+          title: 'Hacker News',
+          timestamp: now - 600_000,
+        },
+      ],
       deviceId,
+      currentSettings,
       // Default checkpointProgress = events.length: all events produce entity checkpoints AND JSONL.
-      settings: { trimRules: [] },
       entities: {
         'note:rust-note': {
           slug: 'rust-note',
@@ -393,23 +415,10 @@ if (seed) {
           url: WIKI_URL,
         },
       },
-    },
-  );
-
-  const seedResult = await setupPage.evaluate(
-    (files) => chrome.runtime.sendMessage({ action: 'seedTestData', files }),
-    sampleFiles,
-  );
-  if (!seedResult?.success) {
-    console.error('seedTestData failed:', seedResult);
-    process.exit(1);
-  }
-
-  const rehydrateResult = await setupPage.evaluate(() =>
-    chrome.runtime.sendMessage({ action: 'rehydrateForTest' }),
-  );
-  if (!rehydrateResult?.success) {
-    console.error('rehydrateForTest failed:', rehydrateResult);
+      sendMessage: (message) => sendTestMessage(setupPage, message),
+    });
+  } catch (error) {
+    console.error(error.message);
     process.exit(1);
   }
   console.log('Sample data seeded (3 pages, 1 note).');
@@ -429,28 +438,18 @@ if (seedCase) {
     `  ${events.length} events, ${Object.keys(entities || {}).length} entity overrides`,
   );
 
-  const sampleFiles = await buildSeedFiles(events, {
-    deviceId,
-    settings: settings || {},
-    entities: entities || {},
-  });
-
-  console.log(`  ${sampleFiles.length} seed files generated. Uploading...`);
-
-  const seedResult = await setupPage.evaluate(
-    (files) => chrome.runtime.sendMessage({ action: 'seedTestData', files }),
-    sampleFiles,
-  );
-  if (!seedResult?.success) {
-    console.error('seedTestData failed:', seedResult);
-    process.exit(1);
-  }
-
-  const rehydrateResult = await setupPage.evaluate(() =>
-    chrome.runtime.sendMessage({ action: 'rehydrateForTest' }),
-  );
-  if (!rehydrateResult?.success) {
-    console.error('rehydrateForTest failed:', rehydrateResult);
+  try {
+    const sampleFiles = await seedManualData({
+      events,
+      deviceId,
+      currentSettings,
+      settings: settings || {},
+      entities: entities || {},
+      sendMessage: (message) => sendTestMessage(setupPage, message),
+    });
+    console.log(`  ${sampleFiles.length} seed files generated and uploaded.`);
+  } catch (error) {
+    console.error(error.message);
     process.exit(1);
   }
   console.log(`Seed case "${seedCase}" ready.`);
