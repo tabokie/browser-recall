@@ -44,7 +44,7 @@ export function canonicalizePageUrl(url) {
   return parsed.href;
 }
 
-export function pageSlugTextFromUrl(url) {
+function pageSlugTextFromUrl(url) {
   const parsed = new URL(url);
   let domain = parsed.hostname.toLowerCase();
   if (domain.startsWith('www.')) domain = domain.slice(4);

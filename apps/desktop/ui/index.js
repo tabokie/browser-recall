@@ -147,6 +147,25 @@ function canScrollInDirection(el, axis, delta) {
   return el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
 }
 
+function handoffNestedSettingsWheel(event, nestedScroller, deltaY) {
+  if (!nestedScroller || deltaY === 0) return false;
+  const modalBody =
+    event.target instanceof Element
+      ? event.target.closest('#settingsModal .modal-body')
+      : null;
+  if (
+    !modalBody ||
+    nestedScroller === modalBody ||
+    !canScrollInDirection(modalBody, 'y', deltaY)
+  ) {
+    return false;
+  }
+
+  event.preventDefault();
+  modalBody.scrollTop += deltaY;
+  return true;
+}
+
 function resetMainScroll() {
   const main = document.querySelector('.main');
   if (main) main.scrollTop = 0;
@@ -210,14 +229,14 @@ function preventDesktopOverscroll(event) {
 
   const scrollableX = wantsX ? scrollableForAxis(event.target, 'x') : null;
   const scrollableY = wantsY ? scrollableForAxis(event.target, 'y') : null;
+  const deltaY = wantsY ? wheelDeltaPixels(event, 'y') : 0;
   const canScrollX =
     wantsX &&
     canScrollInDirection(scrollableX, 'x', wheelDeltaPixels(event, 'x'));
-  const canScrollY =
-    wantsY &&
-    canScrollInDirection(scrollableY, 'y', wheelDeltaPixels(event, 'y'));
+  const canScrollY = wantsY && canScrollInDirection(scrollableY, 'y', deltaY);
 
   if (canScrollX || canScrollY) return;
+  if (handoffNestedSettingsWheel(event, scrollableY, deltaY)) return;
 
   event.preventDefault();
 }
@@ -4216,10 +4235,11 @@ async function loadExtraDetail(url) {
 
   const contexts = await loadPageContext([slug]);
   const context = contexts[slug];
-  if (!context) throw new Error(`Page context not found: ${slug}`);
-  const pageEntity = context.page;
-  const likes = pageEntity.likes ?? 0;
-  const belongedLists = context.lists
+  // Visit-only pages intentionally have no durable checkpoint. Rating, list
+  // membership, or a child artifact would make the page durable, so their
+  // absence is the authoritative empty state for a missing context.
+  const likes = context?.page.likes ?? 0;
+  const belongedLists = (context?.lists ?? [])
     .filter((list) => !isSystemList(listKey(list.slug)))
     .map(listDisplayName);
 
@@ -4229,7 +4249,7 @@ async function loadExtraDetail(url) {
     belongedLists,
     slug,
     likes,
-    visitDates: pageEntity.visitDates,
+    visitDates: context?.page.visitDates ?? [],
   };
 }
 

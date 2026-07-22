@@ -46,7 +46,7 @@ function desktopVisualSeed(colorScheme = 'amber', options = {}) {
     historyFileBatch: options.historyFileBatch || 10,
     captureSnapshotVideo: false,
     blacklistEnabled: true,
-    urlBlacklist: ['chrome://', 'edge://', 'about:'],
+    urlBlacklist: options.urlBlacklist || ['chrome://', 'edge://', 'about:'],
     titleCleanupEnabled: true,
     titleTrimRules: [],
     syncEnabled: false,
@@ -1342,15 +1342,16 @@ test.describe('desktop visual regression', () => {
     });
   });
 
-  test('main shell keeps rose styling and sidebar titlebar spacing', async ({
+  test('main shell keeps amber styling and exposes only supported color schemes', async ({
     page,
   }) => {
     await serveDesktopUi(async (desktopUrl) => {
       await openDesktopUi(page, desktopUrl, {
         setupComplete: true,
-        colorScheme: 'rose',
+        colorScheme: 'amber',
       });
-      await expect(page).toHaveScreenshot('desktop-main-rose.png', {
+      await expect(page.locator('[data-scheme="rose"]')).toHaveCount(0);
+      await expect(page).toHaveScreenshot('desktop-main-amber.png', {
         fullPage: true,
         animations: 'disabled',
         maxDiffPixelRatio: 0.01,
@@ -1917,6 +1918,41 @@ test.describe('desktop visual regression', () => {
     });
   });
 
+  test('history search opens details for a visit-only page without a durable checkpoint', async ({
+    page,
+  }) => {
+    const url =
+      'https://techcrunch.com/2026/05/27/tech-ceos-are-apparently-suffering-from-ai-psychosis/';
+    const timestamp = new Date('2026-05-28T08:00:00Z').getTime();
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        searchHistoryResults: [
+          {
+            url,
+            title:
+              'Tech CEOs are apparently suffering from AI psychosis | TechCrunch',
+            timestamp,
+            score: 5,
+          },
+        ],
+      });
+
+      await commitDesktopSearch(page, 'tech ceo');
+      const row = page.locator(`.result-row[data-url="${url}"]`);
+      await expect(row).toBeVisible();
+      await row.locator('.att-ctrl-btn').click({ force: true });
+
+      await expect(page.locator('.page-detail-card')).toBeVisible();
+      await expect(page.locator('.detail-url a')).toHaveText(url);
+      await expect(page.locator('.detail-page-note-add')).toBeVisible();
+      await expect(page.locator('.page-detail-body')).not.toContainText(
+        'Failed to load page details',
+      );
+    });
+  });
+
   test('page detail URL opens through the desktop bridge', async ({ page }) => {
     await serveDesktopUi(async (desktopUrl) => {
       await openDesktopUi(page, desktopUrl, {
@@ -2455,6 +2491,47 @@ test.describe('desktop visual regression', () => {
           )
           .toEqual({ x: 'none', y: 'auto' });
       }
+    });
+  });
+
+  test('mouse wheel over an excluded site continues scrolling settings at the list boundary', async ({
+    page,
+  }) => {
+    const urlBlacklist = Array.from(
+      { length: 24 },
+      (_, index) => `https://excluded-${index}.example/`,
+    );
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        urlBlacklist,
+      });
+
+      await page.locator('#settingsBtn').click();
+      const modalBody = page.locator('#settingsModal .modal-body');
+      const entries = page.locator('#blacklistEntries');
+      const lastEntry = entries.locator('.blacklist-entry').last();
+      await expect(lastEntry).toContainText('excluded-23.example');
+      await lastEntry.evaluate((element) =>
+        element.scrollIntoView({ block: 'center' }),
+      );
+      await entries.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+
+      const entryBox = await lastEntry.boundingBox();
+      expect(entryBox).not.toBeNull();
+      const before = await modalBody.evaluate((element) => element.scrollTop);
+      await page.mouse.move(
+        entryBox.x + entryBox.width / 2,
+        entryBox.y + entryBox.height / 2,
+      );
+      await page.mouse.wheel(0, 360);
+
+      await expect
+        .poll(() => modalBody.evaluate((element) => element.scrollTop))
+        .toBeGreaterThan(before);
     });
   });
 

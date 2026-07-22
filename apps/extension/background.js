@@ -44,6 +44,7 @@ import {
   LIST_PREFIX,
   pageKey,
 } from './entity-types.js';
+import { prepareSnapshotHtml } from '../../packages/core/snapshot-html.js';
 
 logDebug('Background script loading...');
 
@@ -779,64 +780,6 @@ async function stopSpinnerBadge(tabId) {
   }
 }
 
-function escapeHtmlAttribute(value) {
-  return String(value).replace(
-    /[&<>"']/g,
-    (char) =>
-      ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#39;',
-      })[char],
-  );
-}
-
-function prepareSnapshotHtml(html, slug, url = null) {
-  if (!html) return html;
-  let cleaned = html
-    .replace(
-      /<mark\b(?=[^>]*\bclass=(["'])[^"']*\bbrowser-recall-highlight\b[^"']*\1)[^>]*>([\s\S]*?)<\/mark>/gi,
-      '$2',
-    )
-    .replace(
-      /\sclass=(["'])([^"']*\bbrowser-recall-highlight\b[^"']*)\1/gi,
-      (_, quote, classes) => {
-        const remaining = classes
-          .split(/\s+/)
-          .filter(
-            (className) =>
-              className && className !== 'browser-recall-highlight',
-          )
-          .join(' ');
-        return remaining ? ` class=${quote}${remaining}${quote}` : '';
-      },
-    )
-    .replace(/\sdata-highlight-(?:text|timestamp)=(["']).*?\1/gi, '')
-    .replace(/\sdata-note-slug=(["']).*?\1/gi, '');
-
-  if (!slug || /<meta\s+name=(["'])x-browser-recall-slug\1/i.test(cleaned)) {
-    return cleaned;
-  }
-  const meta = [
-    `<meta name="x-browser-recall-slug" content="${escapeHtmlAttribute(slug)}">`,
-    url
-      ? `<meta name="x-browser-recall-url" content="${escapeHtmlAttribute(url)}">`
-      : '',
-  ].join('');
-  if (/<head\b[^>]*>/i.test(cleaned)) {
-    return cleaned.replace(/<head\b[^>]*>/i, (match) => `${match}${meta}`);
-  }
-  if (/<html\b[^>]*>/i.test(cleaned)) {
-    return cleaned.replace(
-      /<html\b[^>]*>/i,
-      (match) => `${match}<head>${meta}</head>`,
-    );
-  }
-  return `${meta}${cleaned}`;
-}
-
 async function captureAndLog(tabId, slug, timestamp, url, title) {
   badgeController.startSpinnerBadge(tabId);
   try {
@@ -884,7 +827,7 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
     ) {
       throw new Error('Snapshot capture returned an invalid payload');
     }
-    const html = prepareSnapshotHtml(capture.html, slug, url);
+    const html = prepareSnapshotHtml(capture.html, { slug, url });
     const markdown = mdResp.markdown;
     if (!markdown && !html) {
       throw new Error(
@@ -1594,7 +1537,7 @@ async function preparePopupBootstrapForTab(tab) {
     return {
       mode: 'data-unavailable',
       tab,
-      error: error.message,
+      error: userActionErrorMessage(error),
       diagnostic: {
         reason: 'popup-page-identity-failed',
         url: tab.url,

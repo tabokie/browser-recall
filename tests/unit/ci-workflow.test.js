@@ -67,6 +67,15 @@ describe('GitHub CI prerequisites', () => {
     expect(packageJson.scripts.ci).not.toContain('test:desktop-native');
   });
 
+  test('cold Rust commands prepare generated build inputs', () => {
+    expect(packageJson.scripts['test:cold-scripts']).toBe(
+      'cargo build --quiet -p browser-recall-daemon && playwright test tests/e2e/manual-seed-workflow.spec.js',
+    );
+    expect(packageJson.scripts['coverage:rust']).toBe(
+      'npm run build:desktop-ui && node scripts/rust-coverage.mjs',
+    );
+  });
+
   test('local and GitHub CI use the same pinned Rust toolchain', () => {
     const rustToolchain = fs.readFileSync(rustToolchainPath, 'utf8');
     expect(rustToolchain).toContain('channel = "1.97.0"');

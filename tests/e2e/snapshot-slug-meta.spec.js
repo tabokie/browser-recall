@@ -1,5 +1,7 @@
 import { test, expect } from './fixtures.js';
 import crypto from 'crypto';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import {
   resetAndSeed,
   settingsCheckpoint,
@@ -729,6 +731,74 @@ test.describe('Snapshot slug meta tag', () => {
     expect(html).not.toContain('browser-recall-highlight');
     expect(html).not.toMatch(/<mark\b[^>]*>\s*important\s*<\/mark>/i);
     expect(html).toContain('important');
+
+    await helper.close();
+    await page.close();
+  });
+
+  test('captureSnapshot produces complete, structured searchable Markdown', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    const longArticle = `${'substantive article text '.repeat(500)}end-of-article-marker`;
+    localServer.addPage('/structured-markdown', {
+      title: 'Structured Markdown',
+      body: `
+        <style>.stylesheet-hidden-search-content { display: none; }</style>
+        <main>
+          <h1>Psychosis &amp; Care</h1>
+          <p>Read <a href="/care">the care guide</a> today.</p>
+          <blockquote><p>First line<br>Second line</p></blockquote>
+          <ol start="3"><li>Third item<ul><li>Nested item</li></ul></li></ol>
+          <pre><code class="language-js">const x = 1;\n  x += 2;</code></pre>
+          <table><thead><tr><th>Term</th><th>Meaning</th></tr></thead><tbody><tr><td>care</td><td>support</td></tr></tbody></table>
+          <img alt="inline image description" src="data:image/svg+xml;base64,PHN2Zy8+">
+          <p>${longArticle}</p>
+        </main>
+        <button>non-content-control</button>
+        <p hidden>hidden-search-noise</p>
+        <p class="stylesheet-hidden-search-content">stylesheet-hidden-search-noise</p>
+        <script>window.unsearchableScriptToken = 'script-search-noise';</script>
+      `,
+    });
+    const pageUrl = localServer.url('/structured-markdown');
+    const slug = getSlugForUrl(pageUrl);
+
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+
+    const page = await extContext.newPage();
+    await page.goto(pageUrl);
+    await page.waitForLoadState('load');
+    const helper = await openHelperPage(extContext, extensionId);
+    await page.bringToFront();
+    const captureResp = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' }),
+    );
+    expect(captureResp.success).toBe(true);
+
+    const markdown = readFileSync(
+      join(setupDir, snapshotSidecarPath(slug, captureResp.timestamp, 'md')),
+      'utf8',
+    );
+    expect(markdown).toContain('# Psychosis & Care');
+    expect(markdown).toContain(
+      `Read [the care guide](${localServer.url('/care')}) today.`,
+    );
+    expect(markdown).toContain('> First line\n> Second line');
+    expect(markdown).toContain('3. Third item\n   - Nested item');
+    expect(markdown).toContain('```js\nconst x = 1;\n  x += 2;\n```');
+    expect(markdown).toContain('| Term | Meaning |');
+    expect(markdown).toContain('| --- | --- |');
+    expect(markdown).toContain('| care | support |');
+    expect(markdown).toContain('inline image description');
+    expect(markdown).toContain('end-of-article-marker');
+    expect(markdown).not.toContain('data:image');
+    expect(markdown).not.toContain('non-content-control');
+    expect(markdown).not.toContain('hidden-search-noise');
+    expect(markdown).not.toContain('stylesheet-hidden-search-noise');
+    expect(markdown).not.toContain('script-search-noise');
 
     await helper.close();
     await page.close();

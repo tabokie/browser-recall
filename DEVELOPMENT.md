@@ -171,9 +171,9 @@ npm run coverage:monitor  # print uncovered line ranges and suite LoC mix
 npm run coverage          # run JS coverage, Rust coverage, then the monitor
 ```
 
-`coverage:rust` uses the pinned `cargo-llvm-cov` prerequisite above. Coverage percentages are context, not a target. The useful output is the uncovered file/line list from the stable JS coverage source plus Rust llvm-cov missing-line output: review those gaps and decide whether they represent real user workflows that deserve E2E or daemon integration coverage. `coverage:monitor` also enforces the E2E-first policy by keeping JS unit and inline Rust unit LoC at or below their current baselines unless `ALLOW_UNIT_TEST_GROWTH=1` is set for an explicit architecture exception.
+`coverage:rust` uses the pinned `cargo-llvm-cov` prerequisite above and stages the desktop UI required by Tauri's compile-time context before covering all workspace targets. Coverage percentages are context, not a target. The useful output is the uncovered file/line list from the stable JS coverage source plus Rust llvm-cov missing-line output: review those gaps and decide whether they represent real user workflows that deserve E2E or daemon integration coverage. `coverage:monitor` also enforces the E2E-first policy by keeping JS unit and inline Rust unit LoC at or below their current baselines unless `ALLOW_UNIT_TEST_GROWTH=1` is set for an explicit architecture exception.
 
-GitHub CI's **Cold Script Smoke** job runs the coverage workflow and a daemon-backed Playwright check of the manual seeded-data helper. Run that focused local check with `npm run test:cold-scripts` after installing Playwright Chromium.
+GitHub CI's **Cold Script Smoke** job runs the coverage workflow and a daemon-backed Playwright check of the manual seeded-data helper. `npm run test:cold-scripts` builds the daemon before Playwright starts so a cold Rust compile does not consume the fixture's daemon-startup timeout. Run that focused local check after installing Playwright Chromium.
 
 ### Manual Testing
 
@@ -233,26 +233,6 @@ cargo run -q -p browser-recall-replay --bin replay-verify --                    
 cargo run -q -p browser-recall-replay --bin replay-verify -- --write /tmp/my-replay  # custom output dir
 cargo run -q -p browser-recall-replay --bin replay-verify -- --verbose               # show all diffs (not just 5 per category)
 ```
-
-## Data Schema Migration
-
-The current desktop data layout is `logs/`, `objects/`, and `views/`. To verify migration from the legacy layout without writing files:
-
-```bash
-node scripts/migrate-browser-data-schema.mjs --root ~/browser-data --dry-run
-```
-
-Use `--apply` only after the dry run looks correct; the script writes a timestamped backup before modifying the data root.
-
-Before replay, the script normalizes known data inconsistencies:
-- Rewrites `pin_to_list` entries that reference a list by its post-rename name before the rename event
-- Adjusts `create_list` timestamps when pins predate the list's creation
-- Filters null urls from `pin_to_list`/`unpin_from_list` entries while preserving title alignment
-
-Diff results are classified into three categories:
-- **schema-gap** — field added/removed by code evolution (e.g. `createdAt` on old pages)
-- **timing-drift** — replay and disk differ because the checkpoint was written at an intermediate state
-- **data** — genuine discrepancy worth investigating
 
 ## Project Structure
 

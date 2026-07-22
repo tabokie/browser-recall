@@ -30,10 +30,6 @@ const storageSource = readFileSync(
   resolve(process.cwd(), 'crates', 'daemon', 'src', 'storage.rs'),
   'utf8',
 );
-const migrationSource = readFileSync(
-  resolve(process.cwd(), 'scripts', 'migrate-browser-data-schema.mjs'),
-  'utf8',
-);
 const packageJson = JSON.parse(
   readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'),
 );
@@ -163,9 +159,5 @@ describe('extension write queue invariants', () => {
       expect(replayVerifySource).not.toContain('pageRetainsCheckpoint');
     }
     expect(packageJson.scripts).not.toHaveProperty('replay:verify');
-    expect(migrationSource).not.toContain('replay progress from retained logs');
-    expect(migrationSource).toContain(
-      'remove unsafe replay progress until legacy checkpoints are rebuilt',
-    );
   });
 });

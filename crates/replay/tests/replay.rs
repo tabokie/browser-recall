@@ -1893,21 +1893,32 @@ async fn update_setting_rejects_keys_outside_persistent_schema() {
 
 #[tokio::test]
 async fn update_setting_rejects_invalid_values() {
-    let error = effect_of(
-        LogEntry::UpdateSetting {
-            timestamp: 100,
-            key: "historyFileBatch".to_string(),
-            value: json!(0),
-        },
-        |_| ready(None),
-        context(),
-    )
-    .await
-    .expect_err("invalid settings values must stop replay");
+    for (key, value, expected_error) in [
+        (
+            "historyFileBatch",
+            json!(0),
+            "historyFileBatch must be an integer greater than or equal to 1",
+        ),
+        (
+            "colorScheme",
+            json!("rose"),
+            "colorScheme has an unsupported value",
+        ),
+    ] {
+        let error = effect_of(
+            LogEntry::UpdateSetting {
+                timestamp: 100,
+                key: key.to_string(),
+                value,
+            },
+            |_| ready(None),
+            context(),
+        )
+        .await
+        .expect_err("invalid settings values must stop replay");
 
-    assert!(error
-        .to_string()
-        .contains("historyFileBatch must be an integer greater than or equal to 1"));
+        assert!(error.to_string().contains(expected_error));
+    }
 }
 
 #[tokio::test]

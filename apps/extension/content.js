@@ -4,6 +4,7 @@ console.log('Browser Recall content script loaded on:', window.location.href);
 const extensionSurface = globalThis.browserRecallExtensionSurface;
 const pageIdentity = globalThis.browserRecallPageIdentity;
 const highlightLifecycleModule = globalThis.browserRecallHighlightLifecycle;
+const markdownExtractorModule = globalThis.browserRecallMarkdownExtractor;
 
 function tr(key, fallback, substitutions) {
   return (
@@ -30,6 +31,12 @@ if (
 if (!highlightLifecycleModule?.create) {
   throw new Error(
     'Browser Recall highlight lifecycle was not loaded before content.js',
+  );
+}
+
+if (!markdownExtractorModule?.extractMarkdown) {
+  throw new Error(
+    'Browser Recall Markdown extractor was not loaded before content.js',
   );
 }
 
@@ -69,188 +76,13 @@ function initContentScript() {
     { passive: true },
   );
 
-  // Extract page content as Markdown
+  // Extract the complete live DOM as structured Markdown. Raw HTML is saved
+  // separately for replay, but desktop text search reads only this sidecar.
   function extractMarkdown() {
-    const SKIP_TAGS = new Set([
-      'SCRIPT',
-      'STYLE',
-      'NAV',
-      'HEADER',
-      'FOOTER',
-      'NOSCRIPT',
-      'SVG',
-    ]);
-    const maxLength = 10000;
-    let result = '';
-
-    function processNode(node) {
-      if (result.length >= maxLength) return;
-
-      if (node.nodeType === Node.TEXT_NODE) {
-        const text = node.textContent.replace(/\s+/g, ' ').trim();
-        if (text) {
-          result += text;
-        }
-        return;
-      }
-
-      if (node.nodeType !== Node.ELEMENT_NODE) return;
-
-      const tag = node.tagName;
-
-      if (SKIP_TAGS.has(tag)) return;
-      // Skip hidden elements
-      if (node.hidden || node.getAttribute('aria-hidden') === 'true') return;
-
-      switch (tag) {
-        case 'H1':
-          result += '\n\n# ';
-          processChildren(node);
-          result += '\n\n';
-          break;
-        case 'H2':
-          result += '\n\n## ';
-          processChildren(node);
-          result += '\n\n';
-          break;
-        case 'H3':
-          result += '\n\n### ';
-          processChildren(node);
-          result += '\n\n';
-          break;
-        case 'H4':
-          result += '\n\n#### ';
-          processChildren(node);
-          result += '\n\n';
-          break;
-        case 'H5':
-          result += '\n\n##### ';
-          processChildren(node);
-          result += '\n\n';
-          break;
-        case 'H6':
-          result += '\n\n###### ';
-          processChildren(node);
-          result += '\n\n';
-          break;
-
-        case 'P':
-          result += '\n\n';
-          processChildren(node);
-          result += '\n\n';
-          break;
-        case 'BR':
-          result += '\n';
-          break;
-        case 'HR':
-          result += '\n\n---\n\n';
-          break;
-
-        case 'A': {
-          const href = node.getAttribute('href');
-          result += '[';
-          processChildren(node);
-          result += `](${href || ''})`;
-          break;
-        }
-
-        case 'STRONG':
-        case 'B':
-          result += '**';
-          processChildren(node);
-          result += '**';
-          break;
-
-        case 'EM':
-        case 'I':
-          result += '*';
-          processChildren(node);
-          result += '*';
-          break;
-
-        case 'CODE':
-          if (node.parentElement && node.parentElement.tagName === 'PRE') {
-            // Handled by PRE case
-            processChildren(node);
-          } else {
-            result += '`';
-            processChildren(node);
-            result += '`';
-          }
-          break;
-
-        case 'PRE':
-          result += '\n\n```\n';
-          processChildren(node);
-          result += '\n```\n\n';
-          break;
-
-        case 'BLOCKQUOTE':
-          result += '\n\n> ';
-          processChildren(node);
-          result += '\n\n';
-          break;
-
-        case 'UL':
-        case 'OL':
-          result += '\n';
-          processChildren(node);
-          result += '\n';
-          break;
-
-        case 'LI': {
-          const parent = node.parentElement;
-          if (parent && parent.tagName === 'OL') {
-            const items = Array.from(parent.children).filter(
-              (c) => c.tagName === 'LI',
-            );
-            const index = items.indexOf(node) + 1;
-            result += `\n${index}. `;
-          } else {
-            result += '\n- ';
-          }
-          processChildren(node);
-          break;
-        }
-
-        case 'IMG': {
-          const alt = node.getAttribute('alt') || '';
-          const src = node.getAttribute('src') || '';
-          result += `![${alt}](${src})`;
-          break;
-        }
-
-        case 'DIV':
-        case 'SECTION':
-        case 'ARTICLE':
-        case 'MAIN':
-          result += '\n';
-          processChildren(node);
-          result += '\n';
-          break;
-
-        default:
-          processChildren(node);
-          break;
-      }
-    }
-
-    function processChildren(node) {
-      for (const child of node.childNodes) {
-        if (result.length >= maxLength) break;
-        processNode(child);
-      }
-    }
-
-    if (document.body) {
-      processNode(document.body);
-    }
-
-    // Clean up excessive whitespace
-    return result
-      .replace(/\n{3,}/g, '\n\n')
-      .trim()
-      .substring(0, maxLength);
+    if (!document.body) return '';
+    return markdownExtractorModule.extractMarkdown(document.body, {
+      baseUrl: document.baseURI,
+    });
   }
 
   function slugFromUrl(url) {
@@ -1050,7 +882,7 @@ function initContentScript() {
     <style>
       ${extensionSurface.shadowCss}
       .panel { width: 300px; max-height: 400px; overflow-y: auto; background: var(--br-bg-base); border: var(--br-floating-border); border-radius: 2px; color: var(--br-text-primary); font-family: var(--br-font-body); font-size: 12px; line-height: 1.45; }
-      .panel-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--br-border-section); color: var(--br-text-primary); cursor: move; font-size: 10px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; user-select: none; }
+      .panel-header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--br-bg-base); border-bottom: 1px solid var(--br-border-section); color: var(--br-text-primary); cursor: move; font-size: 10px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; user-select: none; }
       .close-btn { width: 22px; height: 22px; background: none; border: none; border-radius: 2px; cursor: pointer; color: var(--br-text-muted); font-size: 16px; line-height: 1; padding: 0; }
       .close-btn:hover { background: var(--br-bg-surface-active); color: var(--br-text-primary); }
       .highlight-item { display: grid; grid-template-columns: 18px 1fr; column-gap: 8px; padding: 9px 12px; border-bottom: 1px dotted var(--br-border-section); }

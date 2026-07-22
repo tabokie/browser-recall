@@ -43,7 +43,7 @@ pub fn default_values() -> BTreeMap<String, Value> {
 pub fn validate_value(key: &str, value: &Value) -> Result<(), String> {
     match key {
         "theme" => validate_enum(key, value, &["system", "light", "dark"]),
-        "colorScheme" => validate_enum(key, value, &["amber", "mono", "rose"]),
+        "colorScheme" => validate_enum(key, value, &["amber", "mono"]),
         "localeOverride" => validate_enum(
             key,
             value,

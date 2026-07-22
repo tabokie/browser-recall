@@ -458,11 +458,17 @@ test.describe('Highlight note edit', () => {
         ?.shadowRoot?.querySelector('.panel');
       if (!panel) return null;
       panel.scrollTop = panel.scrollHeight;
+      const header = panel.querySelector('.panel-header');
+      const closeButton = panel.querySelector('.close-btn');
       return {
         scrollTop: panel.scrollTop,
         markCount: panel.querySelectorAll('mark.browser-recall-highlight')
           .length,
         text: panel.textContent || '',
+        panelTop: panel.getBoundingClientRect().top,
+        headerTop: header?.getBoundingClientRect().top ?? null,
+        headerPosition: header ? getComputedStyle(header).position : null,
+        closeButtonTop: closeButton?.getBoundingClientRect().top ?? null,
       };
     });
 
@@ -470,7 +476,13 @@ test.describe('Highlight note edit', () => {
     expect(panelState.text).toContain('PDF panel highlight text 1');
     expect(panelState.markCount).toBe(0);
     expect(panelState.scrollTop).toBeGreaterThan(0);
-
+    expect(panelState.headerPosition).toBe('sticky');
+    expect(
+      Math.abs(panelState.headerTop - panelState.panelTop),
+    ).toBeLessThanOrEqual(2);
+    expect(panelState.closeButtonTop).toBeGreaterThanOrEqual(
+      panelState.panelTop,
+    );
     const helper = await openHelperPage(extContext, extensionId);
     await page.evaluate(() => {
       const paragraph = document.getElementById('new-highlight');
@@ -498,6 +510,25 @@ test.describe('Highlight note edit', () => {
       .toBeGreaterThan(0);
 
     await helper.close();
+
+    const panelHost = page.locator('#browser-recall-highlights-panel');
+    const panelHeader = panelHost.locator('.panel-header');
+    const beforeDrag = await panelHost.boundingBox();
+    const headerBox = await panelHeader.boundingBox();
+    expect(beforeDrag).not.toBeNull();
+    expect(headerBox).not.toBeNull();
+    await page.mouse.move(headerBox.x + 40, headerBox.y + headerBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(headerBox.x - 60, headerBox.y + 60, { steps: 5 });
+    await page.mouse.up();
+
+    const afterDrag = await panelHost.boundingBox();
+    expect(afterDrag).not.toBeNull();
+    expect(Math.abs(afterDrag.x - beforeDrag.x)).toBeGreaterThan(50);
+    expect(Math.abs(afterDrag.y - beforeDrag.y)).toBeGreaterThan(30);
+
+    await panelHost.locator('.close-btn').click();
+    await expect(panelHost).toHaveCount(0);
 
     await page.close();
   });

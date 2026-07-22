@@ -127,6 +127,15 @@ describe('extension staged assets', () => {
     );
     expect(coreEntityTypes).toContain('export const listKey = (id) =>');
     expect(coreEntityTypes).toContain('export const pageKey = (slug) =>');
+
+    const backgroundSource = readFileSync(
+      join(outDir, 'background.js'),
+      'utf8',
+    );
+    expect(backgroundSource).toContain("from './core/snapshot-html.js';");
+    expect(
+      readFileSync(join(outDir, 'core/snapshot-html.js'), 'utf8'),
+    ).toContain('export function prepareSnapshotHtml');
   });
 
   it('stages browser-native extension localization files', () => {
@@ -307,13 +316,9 @@ describe('extension staged assets', () => {
       'utf8',
     );
 
-    expect(manifest.content_scripts[1].js).toEqual([
-      'browser-api.js',
-      'extension-surface.js',
-      'browser-recall-page-identity.js',
-      'browser-recall-highlight-lifecycle.js',
-      'content.js',
-    ]);
+    expect(manifest.content_scripts[1].js.at(-2)).toBe(
+      'browser-recall-markdown-extractor.js',
+    );
     expect(pageIdentitySource).toContain(
       'globalThis.browserRecallPageIdentity',
     );
@@ -406,6 +411,7 @@ describe('extension staged assets', () => {
       'extension-surface.js',
       'browser-recall-page-identity.js',
       'browser-recall-highlight-lifecycle.js',
+      'browser-recall-markdown-extractor.js',
       'content.js',
     ]);
     expect(manifest.content_scripts[2].js).toEqual([

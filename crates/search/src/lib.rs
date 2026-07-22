@@ -459,10 +459,10 @@ fn extract_snapshot_parts_from_name(name: &str) -> io::Result<(String, i64)> {
         ));
     }
     let components: Vec<_> = path.components().collect();
-    if components.len() > 2 {
+    if components.len() != 2 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("snapshot path must be <file> or <shard>/<file>: {name}"),
+            format!("snapshot path must be <shard>/<file>: {name}"),
         ));
     }
     if let [std::path::Component::Normal(shard), _] = components.as_slice() {
@@ -482,15 +482,12 @@ fn extract_snapshot_parts_from_name(name: &str) -> io::Result<(String, i64)> {
         .ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidData, "snapshot filename is not UTF-8")
         })?;
-    let name = file_name
-        .strip_suffix(".md")
-        .or_else(|| file_name.strip_suffix(".html"))
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("snapshot filename must end in .md or .html: {name}"),
-            )
-        })?;
+    let name = file_name.strip_suffix(".md").ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("snapshot search filename must end in .md: {name}"),
+        )
+    })?;
     let last_dash = name.rfind('-').ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
@@ -1038,15 +1035,15 @@ mod tests {
     fn search_snapshots_returns_matching_slugs() {
         let temp_dir = tempdir().unwrap();
         let snapshots_dir = temp_dir.path().join("snapshots");
-        fs::create_dir_all(&snapshots_dir).unwrap();
+        fs::create_dir_all(snapshots_dir.join("aa")).unwrap();
 
         fs::write(
-            snapshots_dir.join("my-page-1709251200000.md"),
+            snapshots_dir.join("aa/my-page-1709251200000.md"),
             "captured banana document",
         )
         .unwrap();
         fs::write(
-            snapshots_dir.join("other-page-1709251200001.md"),
+            snapshots_dir.join("aa/other-page-1709251200001.md"),
             "no match here",
         )
         .unwrap();
@@ -1054,7 +1051,10 @@ mod tests {
         let results = search_snapshots(
             &snapshots_dir,
             "banana",
-            &["my-page-1709251200000.md", "other-page-1709251200001.md"],
+            &[
+                "aa/my-page-1709251200000.md",
+                "aa/other-page-1709251200001.md",
+            ],
         )
         .unwrap();
 

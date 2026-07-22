@@ -46,8 +46,10 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `apps/extension/browser-api.js` | Strict engine-selected Manifest V3 adapter for Chromium and Firefox; requires canonical runtime/action/context-menu APIs and rejects unsupported platform shapes |
 | `apps/extension/icon-paths.js` | Packaged default, stop-recording, and special-state toolbar icon paths |
 | `apps/extension/background-test-control.js` | Test-only background RPC handlers staged by `tests/fixtures/test-extension.mjs` |
-| `apps/extension/content.js` | Visit/attention capture and browser-message adapter for the shared highlight lifecycle |
+| `apps/extension/content.js` | Visit/attention capture and browser-message adapter for shared highlight and Markdown extraction modules |
 | `packages/core/highlight-lifecycle.js` | Narrow shared selection, scoped matching, `browser-recall-` mark ownership, missing-mark hydration repair, and disposal module for live pages and snapshots |
+| `packages/core/markdown-extractor.js` | Shared complete DOM-to-Markdown conversion plus the generated classic content-script bridge used for searchable snapshot sidecars |
+| `packages/core/snapshot-html.js` | Pure idempotent snapshot preparation: Browser Recall highlight cleanup, snapshot identity metadata injection, and unavailable external stylesheet deactivation |
 | `apps/extension/popup.js` | Current-tab popup UI |
 | `apps/extension/extension-surface.css` | Shared light paper styling for extension pages |
 | `apps/extension/extension-surface.js` | Shared shadow-DOM styling and overlay placement helpers for extension content surfaces |
@@ -59,13 +61,13 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `apps/extension/options-stub.html` | Stub page that points users to the desktop app |
 | `crates/daemon/src/command_authority.rs` | Shared Tauri/WebSocket semantic mutation classification, strict response validation, typed execution results, and committed mutation meaning |
 | `crates/daemon/src/commands.rs` | Replay-backed command and read implementations used behind daemon interfaces |
-| `crates/replay/src/settings.rs` | Replay-owned persistent settings keys, defaults, enum domains, collection shapes, and numeric bounds shared by every log/command/sync ingress |
+| `crates/replay/src/settings.rs` | Replay-owned persistent settings keys, defaults, enum domains (including amber and mono color schemes), collection shapes, and numeric bounds shared by every log/command/sync ingress |
 | `crates/daemon/src/settings.rs` | Thin re-export of the replay-owned settings contract for daemon commands, reads, capture policy, startup, and sync |
 | `crates/daemon/src/config.rs` | Daemon configuration persistence and explicit unconfigured → folder-selected → setup-complete transitions; no default data path |
 | `crates/daemon/src/read_projections.rs` | Workflow-shaped semantic page, list, search-enrichment, recycle-bin, popup, and settings DTOs with coordinated joins, child-reference classification, and visibility policy |
 | `crates/daemon/src/runtime.rs` | Authoritative replay transactions: serialized overlay evolution, canonical local log append, projection publication, replay progress, ordered checkpoint submission, downloaded sync-file installation, recovery, and destructive flush coordination |
 | `crates/daemon/src/storage.rs` | Data-root storage, sharded object/view paths, coordinated cache reads and namespace enumeration overlays, current projection cache, log append, and flushable ordered checkpoint worker |
-| `crates/daemon/src/search.rs` | Daemon search queries over history/notes/snapshots |
+| `crates/daemon/src/search.rs` | Daemon search queries over history/notes and canonical sharded Markdown snapshot sidecars |
 | `crates/daemon/src/sync.rs` | GitHub sync controller, token handling, pause persistence |
 | `crates/daemon/src/ws_server.rs` | Browser pairing, authenticated websocket adapter, strict rule command DTOs, browser observations, streaming, and change broadcasts |
 | `crates/daemon/src/pairing.rs` | Pairing data/state helpers |
@@ -73,9 +75,8 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `crates/replay/examples/page-identity.rs` | Test-only batch adapter exposing native replay URL slug generation to cross-language identity parity coverage |
 | `crates/replay/src/bin/replay-verify.rs` | Full-log checkpoint verifier using the production replay and checkpoint policy |
 | `crates/search/src/lib.rs` | Native search primitives |
-| `scripts/stage-app-assets.mjs` | Stages loadable app assets under `dist/extension/{chrome,firefox}/` and `dist/desktop/ui/`, validates registered locale catalog parity, and generates filtered WebExtension locale files and the content-script page identity bridge |
+| `scripts/stage-app-assets.mjs` | Stages loadable app assets under `dist/extension/{chrome,firefox}/` and `dist/desktop/ui/`, validates registered locale catalog parity, and generates filtered WebExtension locale files plus shared classic content-script bridges |
 | `scripts/collect-desktop-artifacts.mjs` | Collects Tauri release binaries and bundles into `dist/desktop/<platform>/` |
-| `scripts/migrate-browser-data-schema.mjs` | Browser data migration utility for log/view/object schema changes, including URL identity canonicalization |
 | `scripts/manual-test-browser.mjs` and `scripts/lib/manual-seed.mjs` | Isolated manual Chrome/daemon workflow and its replay-consistent, daemon-default-preserving seed/flush helper |
 | `scripts/test-coverage-monitor.mjs` | Test investment and JS/Rust uncovered-line monitor; enforces no JS or inline Rust unit-test LoC growth |
 | `scripts/generate-icons.mjs` | Renders root SVG icon sources into opaque desktop/extension icons, the transparent tray icon, and the macOS `.icns` pack |
@@ -112,14 +113,14 @@ This map intentionally excludes removed extension-only storage/sync internals.
 ### Capture Path
 
 - `apps/extension/content.js` captures visit/attention signals and adapts browser messages and daemon note reads to `packages/core/highlight-lifecycle.js`. The shared module owns structured selection, scoped reapply, mark groups, hydration retries, and route disposal for live pages and the snapshot viewer. Snapshot identity uses only `x-browser-recall-slug` and `x-browser-recall-url` metadata. Staged builds generate and load both `browser-recall-page-identity.js` and `browser-recall-highlight-lifecycle.js` before classic `content.js`, so module and content-script callers execute the same implementations.
-- `apps/extension/savepage-bridge.js` performs snapshot capture through one identified per-tab session that owns capture settings, lifecycle timers, and explicit resource-failure warnings.
+- `apps/extension/savepage-bridge.js` performs snapshot capture through one identified per-tab session that owns capture settings, lifecycle timers, and explicit resource-failure warnings. `apps/extension/background.js` passes the stored result through the pure `packages/core/snapshot-html.js` boundary, which removes Browser Recall-owned highlight markup, injects identity metadata, and deactivates stylesheet links that remained external after capture. This keeps capture and repair tooling on one idempotent implementation while preventing known-unavailable CSS from blocking replay and retaining the URL as diagnostic metadata.
 - `apps/extension/background.js` buffers and forwards capture events to the daemon, and injects a page reload warning when shortcut/context-menu actions cannot reach a stale content script.
 - `apps/extension/popup.js` surfaces popup-initiated capture failures through page notifications with popup-bubble fallback.
 
 ### Replay and Storage
 
 - `crates/replay/` is the production replay engine and owns replay-derived checkpoint policy used by verification and daemon persistence.
-- `packages/core/page-identity.js` canonicalizes extension-originated page URLs before they are sent to desktop, removes underscore-prefixed query params while keeping ordinary query params and fragments, and classifies same-document navigation for both background and content-script callers. Optional non-page referrers are omitted at the connector boundary. `packages/core/utils.js`, migration scripts, and the generated content-script bridge use that shared implementation. `crates/replay/src/lib.rs` hashes the URL it receives with a native Rust implementation; non-extension producers must send canonical URLs, and `tests/integration/page-identity-parity.test.js` differentially checks both implementations over a deterministic generated corpus.
+- `packages/core/page-identity.js` canonicalizes extension-originated page URLs before they are sent to desktop, removes underscore-prefixed query params while keeping ordinary query params and fragments, and classifies same-document navigation for both background and content-script callers. Optional non-page referrers are omitted at the connector boundary. `packages/core/utils.js` and the generated content-script bridge use that shared implementation. `packages/core/markdown-extractor.js` similarly owns live-DOM Markdown conversion and its generated classic bridge, so capture and tests exercise one implementation. `crates/replay/src/lib.rs` hashes the URL it receives with a native Rust implementation; non-extension producers must send canonical URLs, and `tests/integration/page-identity-parity.test.js` differentially checks both implementations over a deterministic generated corpus.
 - `crates/daemon/src/storage.rs` owns coordinated cache-miss reads, filesystem primitives, the current projection cache, synchronous log append, history file/device-directory listing, the ordered async checkpoint worker, replay-progress files, and the current `logs/`, `objects/`, `views/` path layout.
 - `crates/daemon/src/command_authority.rs` is the shared semantic mutation interface used by the in-process Tauri adapter and authenticated WebSocket adapter. It owns the supported action set, validation, response formation, and post-commit mutation meaning, including affected URL sets used by connector surfaces; note-pin commands derive that URL from the authoritative note when the request has no page URL. Mutation payload construction is shared with replay notification paths through `crates/daemon/src/mutations.rs`. Native shell actions and connector observations remain adapter-specific. Extension command handlers consume this notification stream instead of reclassifying mutations or directly refreshing product badges.
 - `crates/daemon/src/commands.rs` implements replay-backed reads and mutations behind daemon interfaces, constructs strict replay entries, and keeps command-only fields out of JSONL.
@@ -135,7 +136,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 
 ### Search
 
-- `crates/search/` and `crates/daemon/src/search.rs` implement history identity search plus dedicated note/snapshot text search. They preserve explicit-nullable history titles and select owned checkpoint/sidecar files before strict parsing. Note search overlays current projection-cache entities before scoring so committed notes do not wait for checkpoint persistence. History search also exposes a fixed-parallelism chunk callback for desktop streaming and cancellation.
+- `crates/search/` and `crates/daemon/src/search.rs` implement history identity search plus dedicated note/snapshot text search. They preserve explicit-nullable history titles and select owned checkpoint/sidecar files before strict parsing. Snapshot search walks only the documented two-character shard level and accepts only `.md`; it never reads raw `.html` replay sidecars. Note search overlays current projection-cache entities before scoring so committed notes do not wait for checkpoint persistence. History search also exposes a fixed-parallelism chunk callback for desktop streaming and cancellation.
 - `apps/desktop/src-tauri/src/main.rs` exposes `search_history_stream` / `cancel_history_search` Tauri commands and emits `bridge-search-history` chunks to the UI.
 - `crates/daemon/src/ws_server.rs` exposes note/snapshot search and page-scoped connector reads, but deliberately does not expose full-history streaming or cancellation.
 - `apps/desktop/ui/index.js` keeps typed search text as a draft until Enter commits it, then merges streamed history chunks with note/snapshot result phases. It renders the already-loaded or first available matches once while those phases continue, preserves URL-keyed row selection and chart highlighting when the accumulated set commits, and consumes precise daemon history-mutation entries without rereading the current-day log or restarting searches. Visit/leave observations update visit recency; rename/rating actions only invalidate metadata, query membership, filters, and authoritative page enrichment. Explore device filters still come from daemon-reported `logs/<device>/` directories, and newer searches cancel stale history work.
@@ -167,7 +168,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `tests/e2e/popup-lists.spec.js` | Popup list interactions in the shipped connector, including pre-existing membership and toolbar icon state for query-bearing HN-shaped URLs |
 | `tests/e2e/badge.spec.js` | Popup/badge behavior in the shipped connector |
 | `tests/e2e/extension-error-popouts.spec.js` | Browser-level extension popup and snapshot error popout styling |
-| `tests/e2e/snapshot-resource-timeout.spec.js` | Snapshot resource body timeouts, CORS fallback reporting, and partial-capture warnings through the real connector/daemon path |
+| `tests/e2e/snapshot-resource-timeout.spec.js` | Snapshot resource body timeouts, CORS fallback reporting, partial-capture warnings, and deactivation of timed-out stylesheet links through the real connector/daemon path |
 | `tests/e2e/seeded-combination-workflows.spec.js` | Seeded randomized extension workflow combining visits, notes, list pins, and popup reads |
 | `tests/e2e/manual-seed-workflow.spec.js` | Real daemon/connector regression coverage for the manual seeded-data helper, including valid current settings and post-seed queue flush |
 | `tests/e2e/extension-navigation-regressions.spec.js` | Browser navigation coverage for same-document transitions, new-tab referrer relationships, page summaries, and highlight lifecycle behavior |

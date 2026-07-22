@@ -1208,7 +1208,7 @@ async fn command_workflow_combines_bookmark_import_bulk_pins_restore_and_relatio
         &storage,
         "device-a",
         "colorScheme",
-        serde_json::json!("rose"),
+        serde_json::json!("mono"),
     )
     .await
     .expect("save setting after default lists");

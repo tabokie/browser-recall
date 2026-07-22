@@ -136,6 +136,60 @@ async function waitForContentScript(helper, page, url) {
   throw new Error(`content script did not load for ${url}`);
 }
 
+test('popup shows reload guidance when page identity receiver is stale', async ({
+  extContext,
+  extensionId,
+  setupDir,
+  localServer,
+}) => {
+  void setupDir;
+  localServer.addPage('/stale-popup-page-identity', {
+    title: 'Stale Popup Page Identity',
+    body: '<main>Page opened before an extension reload.</main>',
+  });
+  const url = localServer.url('/stale-popup-page-identity');
+  await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+
+  const page = await extContext.newPage();
+  await page.goto(url);
+  await page.waitForLoadState('domcontentloaded');
+  const helper = await openHelperPage(extContext, extensionId);
+  const reloadMessage = await getExtensionMessage(helper, 'extensionReloaded');
+  const prepared = await helper.evaluate(async (pageUrl) => {
+    const [tab] = await chrome.tabs.query({ url: pageUrl });
+    if (!tab?.id) throw new Error('Source tab not found');
+    const injected = await chrome.runtime.sendMessage({
+      action: 'failNextTabMessageForTest',
+      messageAction: 'getPageIdentity',
+      tabId: tab.id,
+      error: 'Could not establish connection. Receiving end does not exist.',
+    });
+    if (!injected?.success) throw new Error(injected?.error);
+    return chrome.runtime.sendMessage({
+      action: 'preparePopupBootstrapForTest',
+      tabId: tab.id,
+    });
+  }, url);
+
+  expect(prepared).toMatchObject({
+    success: true,
+    mode: 'data-unavailable',
+    error: reloadMessage,
+  });
+  const popup = await extContext.newPage();
+  await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
+  await expect(popup.locator('#pageDiagnosticMessage')).toHaveText(
+    reloadMessage,
+  );
+  await expect(popup.locator('#pageDiagnosticDetail')).toContainText(
+    'reason: popup-page-identity-failed',
+  );
+
+  await popup.close();
+  await helper.close();
+  await page.close();
+});
+
 test.describe('Popup list chip behavior', () => {
   for (const scenario of [
     {

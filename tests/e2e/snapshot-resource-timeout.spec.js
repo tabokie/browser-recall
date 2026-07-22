@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { test, expect } from './fixtures.js';
-import { openHelperPage } from './helpers.js';
+import { getSlugForUrl, openHelperPage } from './helpers.js';
 
 function startServer(handler) {
   const sockets = new Set();
@@ -27,18 +27,24 @@ function stallImageResponse(response) {
   response.write(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
 }
 
+function stallStylesheetResponse(response) {
+  response.writeHead(200, { 'Content-Type': 'text/css' });
+  response.write('html { background: white; }');
+}
+
 test('capture skips resource bodies that exceed the resource time limit', async ({
   extContext,
   extensionId,
   setupDir,
 }) => {
   void setupDir;
-  test.setTimeout(25_000);
+  test.setTimeout(40_000);
 
   const resourceRequests = {
     crossOrigin: 0,
     crossOriginDetails: [],
     sameOrigin: 0,
+    sameOriginStylesheet: 0,
   };
   const crossOrigin = await startServer((request, response) => {
     resourceRequests.crossOrigin++;
@@ -59,6 +65,11 @@ test('capture skips resource bodies that exceed the resource time limit', async 
     stallImageResponse(response);
   });
   const pageOrigin = await startServer((request, response) => {
+    if (request.url === '/same-origin.css') {
+      resourceRequests.sameOriginStylesheet++;
+      stallStylesheetResponse(response);
+      return;
+    }
     if (request.url === '/same-origin.png') {
       resourceRequests.sameOrigin++;
       stallImageResponse(response);
@@ -67,6 +78,7 @@ test('capture skips resource bodies that exceed the resource time limit', async 
     response.writeHead(200, { 'Content-Type': 'text/html' });
     response.end(`<!doctype html>
       <title>Stalled snapshot resources</title>
+      <link rel="stylesheet" href="/same-origin.css">
       <img src="/same-origin.png">
       <img src="http://127.0.0.1:${crossOrigin.port}/cross-origin.png">`);
   });
@@ -107,7 +119,7 @@ test('capture skips resource bodies that exceed the resource time limit', async 
     const result = await Promise.race([
       capture.then((response) => ({ response })),
       new Promise((resolve) => {
-        timeout = setTimeout(() => resolve({ timedOut: true }), 12_000);
+        timeout = setTimeout(() => resolve({ timedOut: true }), 25_000);
       }),
     ]);
     clearTimeout(timeout);
@@ -115,8 +127,12 @@ test('capture skips resource bodies that exceed the resource time limit', async 
     expect(result).toEqual({
       response: expect.objectContaining({
         success: true,
-        warning: expect.stringContaining('2'),
+        warning: expect.stringContaining('3'),
         warnings: expect.arrayContaining([
+          expect.objectContaining({
+            location: expect.stringContaining('/same-origin.css'),
+            reason: 'maxtime',
+          }),
           expect.objectContaining({
             location: expect.stringContaining('/same-origin.png'),
             reason: 'maxtime',
@@ -128,7 +144,28 @@ test('capture skips resource bodies that exceed the resource time limit', async 
         ]),
       }),
     });
+    const snapshotResponse = await helper.evaluate(
+      ({ slug, timestamp }) =>
+        chrome.runtime.sendMessage({
+          action: 'getSnapshotHtml',
+          slug,
+          timestamp,
+        }),
+      {
+        slug: getSlugForUrl(`http://127.0.0.1:${pageOrigin.port}/`),
+        timestamp: result.response.timestamp,
+      },
+    );
+    expect(snapshotResponse.success).toBe(true);
+    const stalledStylesheetTag = snapshotResponse.html
+      .match(/<link\b[^>]*>/gi)
+      ?.find((tag) => tag.includes('same-origin.css'));
+    expect(stalledStylesheetTag).toContain(
+      'data-browser-recall-unavailable-href="/same-origin.css"',
+    );
+    expect(stalledStylesheetTag).not.toMatch(/\shref\s*=/i);
     expect(resourceRequests.sameOrigin).toBeGreaterThanOrEqual(2);
+    expect(resourceRequests.sameOriginStylesheet).toBeGreaterThanOrEqual(2);
     expect(resourceRequests.crossOrigin).toBeGreaterThanOrEqual(2);
     expect(resourceRequests.crossOriginDetails).toEqual(
       expect.arrayContaining([

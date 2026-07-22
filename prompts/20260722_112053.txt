@@ -1,0 +1,22 @@
+- Remove the pink color theme.
+- When my mouse over some area in the desktop setting page (e.g. a specific excluded site), I can no longer scroll.
+- When I click on the detail of a page in the search result, it reports: "Failed to load page details: Page context not found: techcrunch-2026-05-27-tech-ceo-ju1tvn".
+- Search is too slow for keyword e.g. psychosis. Is it full-text searching the html snapshot? Because the full volume of markdown snapshots shouldn't take this long. Or is it a bug causing the search to spin indefinitely?
+- First of all, we should make sure the markdown text extraction algorithm is robust, and let it only search markdown instead of html. Also, I'm not sure what you meant by "recursively finds .md files", are all snapshots already laid out clearly in the directory?
+- Right now the desktop reports "settings missing localeOverride; migrate browser data before continuing". Is this caused by the changes in this session? Do I need to update desktop app to latest version, or was the config file corrupted?
+- Fix the migration and data.
+- Can we remove the migration script now?
+- Fail to snapshot <https://web.archive.org/web/20240808033319/https://philosophyinhell.substack.com/p/instead-of-your-lifes-purpose>, 80 resources unavailable, and the saved page opens up blank.
+- There was a transient error while opening the page's popup: Could not establish connection. Receiving end does not exist.
+reason: popup-page-identity-failed
+url: https://web.archive.org/web/20240808033319/https://philosophyinhell.substack.com/p/instead-of-your-lifes-purpose
+
+Is this normal?
+- When viewing PDF, the highlight hover window should have a anchored header, so that user can still move or shut the window after scrolling inside.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix 5 and 6. Do the architectural cleanup as well.
+- Please review my uncommitted changes
+- Fix them all.
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.6 Sol
+- No need, the lesson looks more suitable as code comment
+- go

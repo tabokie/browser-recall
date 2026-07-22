@@ -228,7 +228,7 @@ pub fn search_snapshots_in_data_dir(
     let snapshots_dir = data_dir.join("objects").join("snapshots");
     require_directory(&snapshots_dir, "snapshot object")?;
 
-    let file_names = list_snapshot_files(&snapshots_dir)?;
+    let file_names = list_snapshot_markdown_files(&snapshots_dir)?;
     let mut hits_by_snapshot = HashMap::new();
     for hit in search_snapshots(&snapshots_dir, query, &file_names)? {
         let key = (hit.slug.clone(), hit.timestamp);
@@ -355,42 +355,39 @@ fn list_jsonl_files(dir: &Path) -> io::Result<Vec<String>> {
     Ok(files)
 }
 
-fn list_snapshot_files(dir: &Path) -> io::Result<Vec<String>> {
+fn list_snapshot_markdown_files(dir: &Path) -> io::Result<Vec<String>> {
     let mut files = Vec::new();
-    collect_snapshot_files(dir, dir, &mut files)?;
-    files.sort();
-    Ok(files)
-}
-
-fn collect_snapshot_files(root: &Path, dir: &Path, files: &mut Vec<String>) -> io::Result<()> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            collect_snapshot_files(root, &path, files)?;
+        if !entry.file_type()?.is_dir() {
             continue;
         }
-        if !path.is_file() {
+        let shard = entry.file_name();
+        let Some(shard) = shard.to_str() else {
+            continue;
+        };
+        if shard.len() != 2 || !shard.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             continue;
         }
-        if !matches!(
-            path.extension().and_then(|extension| extension.to_str()),
-            Some("md" | "html")
-        ) {
-            continue;
+        for sidecar in fs::read_dir(entry.path())? {
+            let sidecar = sidecar?;
+            if !sidecar.file_type()?.is_file()
+                || sidecar.path().extension() != Some(std::ffi::OsStr::new("md"))
+            {
+                continue;
+            }
+            let name = sidecar.file_name();
+            let name = name.to_str().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "snapshot Markdown filename is not UTF-8",
+                )
+            })?;
+            files.push(format!("{shard}/{name}"));
         }
-        let relative = path.strip_prefix(root).map_err(|error| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("snapshot path escaped its root: {error}"),
-            )
-        })?;
-        let relative = relative.to_str().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "snapshot path is not UTF-8")
-        })?;
-        files.push(relative.to_string());
     }
-    Ok(())
+    files.sort();
+    Ok(files)
 }
 
 fn require_directory(path: &Path, kind: &str) -> io::Result<()> {
@@ -812,7 +809,7 @@ mod tests {
     }
 
     #[test]
-    fn search_snapshots_in_data_dir_reads_html_when_markdown_does_not_match() {
+    fn search_snapshots_in_data_dir_ignores_html_when_markdown_does_not_match() {
         let temp_dir = tempdir().unwrap();
         let snapshots_dir = temp_dir.path().join("objects/snapshots/aa");
         fs::create_dir_all(&snapshots_dir).unwrap();
@@ -829,13 +826,6 @@ mod tests {
 
         let hits = search_snapshots_in_data_dir(temp_dir.path(), "banana", None).unwrap();
 
-        assert_eq!(
-            hits,
-            vec![SnapshotSearchHit {
-                slug: "my-page".into(),
-                timestamp: 1_709_251_200_000,
-                score: 1.0,
-            }]
-        );
+        assert!(hits.is_empty());
     }
 }

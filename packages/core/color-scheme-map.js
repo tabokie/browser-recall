@@ -23,18 +23,6 @@ const PALETTES = {
     excerptBg: '#F8F8F8',
     excerptBorder: '#1A1A1A',
   },
-  rose: {
-    accent: '#D84070',
-    bgBase: '#FFECE8',
-    borderSubtle: 'rgba(180, 138, 140, 0.18)',
-    borderSection: 'rgba(180, 138, 140, 0.12)',
-    shadowColor: '58, 30, 34',
-    textPrimary: '#3C1C20',
-    textSecondary: '#64303A',
-    textMuted: '#905862',
-    excerptBg: '#FAE0DC',
-    excerptBorder: '#E86898',
-  },
 };
 
 export const SCHEME_HEX = Object.fromEntries(

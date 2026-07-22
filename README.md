@@ -70,7 +70,7 @@ See [ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the full technical deep-dive.
 | ------------------------------------ | ------------------------------------------------ |
 | [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | Entity storage, caching, replay, sync, deletion  |
 | [CODEBASE_MAP.md](./docs/CODEBASE_MAP.md) | File index, message routing, feature-to-code map |
-| [DEVELOPMENT.md](./DEVELOPMENT.md)   | Building, testing, debugging, migration scripts  |
+| [DEVELOPMENT.md](./DEVELOPMENT.md)   | Building, testing, and debugging                  |
 | [PRIVACY.md](./docs/PRIVACY.md)      | Privacy policy                                   |
 
 
