@@ -413,7 +413,7 @@ class SuccessfulWebSocket {
     if (payload.type === 'auth') {
       queueMicrotask(() =>
         this.#emit('message', {
-          data: JSON.stringify({ type: 'auth_ok', protocolVersion: 1 }),
+          data: JSON.stringify({ type: 'auth_ok', protocolVersion: 2 }),
         }),
       );
       return;
@@ -430,6 +430,7 @@ class SuccessfulWebSocket {
             daemonBufferDepth: 0,
             lastDrainedAt: Date.now(),
             dataFolder: '/tmp/browser-recall-firefox-smoke',
+            maxMessageBytes: 64 * 1024 * 1024,
           }),
         }),
       );

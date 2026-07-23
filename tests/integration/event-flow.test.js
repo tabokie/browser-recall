@@ -131,7 +131,7 @@ async function pairSocket(port) {
   socket.send(
     JSON.stringify({
       type: 'pair_request',
-      protocolVersion: 1,
+      protocolVersion: 2,
       browserId: 'browser-install-1',
       browserName: 'Chrome',
       extensionId: 'abcdefghijklmnop',
@@ -193,6 +193,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
       connectedBrowsers: ['Chrome'],
       bufferDepth: 0,
       dataFolder: path.join(dir, 'browser-data'),
+      maxMessageBytes: 64 * 1024 * 1024,
     });
     expect(status.lastDrainedAt).toBe(1710000000000);
 

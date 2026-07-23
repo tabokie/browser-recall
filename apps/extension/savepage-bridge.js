@@ -1,6 +1,7 @@
 // Save Page WE bridge — handles SPWE message protocol and capture orchestration
 // Only uses Chrome APIs (scripting, tabs, fetch). No deps back to background.js.
 import { logDebug } from './logger.js';
+import { readBoundedResponse } from '../../packages/core/bounded-response.js';
 
 const captureSessions = new Map();
 let nextCaptureId = 1;
@@ -49,7 +50,7 @@ async function injectSavepageScripts(tabId) {
 
   await chrome.scripting.executeScript({
     target: { tabId },
-    files: ['savepage/content.js'],
+    files: ['browser-recall-bounded-response.js', 'savepage/content.js'],
   });
   logDebug('[savepage] content.js injected, waiting for scriptLoaded message');
 }
@@ -138,13 +139,6 @@ function isSupportedResourceType(mimetype) {
   );
 }
 
-function arrayBufferToBinaryString(buffer) {
-  const bytes = new Uint8Array(buffer);
-  let binaryString = '';
-  for (const byte of bytes) binaryString += String.fromCharCode(byte);
-  return binaryString;
-}
-
 async function loadSavepageResource(
   tabId,
   captureId,
@@ -179,12 +173,6 @@ async function loadSavepageResource(
     });
     if (response.status === 200) {
       const contentType = response.headers.get('Content-Type') || '';
-      const contentLength = +(response.headers.get('Content-Length') || 0);
-
-      if (contentLength > MAX_RESOURCE_SIZE) {
-        sendResourceFailure(tabId, captureId, index, 'maxsize*');
-        return;
-      }
 
       const matches = contentType.match(/([^;]+)/i);
       const mimetype = matches ? matches[1].toLowerCase() : '';
@@ -205,12 +193,18 @@ async function loadSavepageResource(
         return;
       }
 
+      const body = await readBoundedResponse(response, MAX_RESOURCE_SIZE);
+      if (body.status === 'maxsize') {
+        sendResourceFailure(tabId, captureId, index, 'maxsize*');
+        return;
+      }
+
       chrome.tabs.sendMessage(tabId, {
         type: 'loadSuccess',
         captureId,
         index,
         reason: '*',
-        content: arrayBufferToBinaryString(await response.arrayBuffer()),
+        content: body.content,
         mimetype,
         charset,
       });

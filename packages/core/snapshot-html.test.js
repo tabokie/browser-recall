@@ -8,7 +8,9 @@ describe('snapshot HTML preparation', () => {
       <link data-rel="preload" rel="stylesheet preload" href="https://example.test/missing.css">
       <link rel="stylesheet" href="data:text/css,body%7Bcolor:red%7D">
       <style>main { color: green; }</style>
+      <script id="savepage-shadowloader">savepage_ShadowLoader(5);</script>
     </head><body>
+      <snapshot-card><template data-savepage-shadowroot=""><p>Shadow content</p></template></snapshot-card>
       <mark class="kept browser-recall-highlight" data-highlight-text="saved" data-note-slug="note-1">Remember me</mark>
     </body></html>`;
 
@@ -31,5 +33,7 @@ describe('snapshot HTML preparation', () => {
     expect(prepared).not.toContain('<mark');
     expect(prepared).not.toContain('data-highlight-text');
     expect(prepared).not.toContain('data-note-slug');
+    expect(prepared).not.toContain('savepage-shadowloader');
+    expect(prepared).toContain('template data-savepage-shadowroot');
   });
 });

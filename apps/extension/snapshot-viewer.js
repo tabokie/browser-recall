@@ -65,6 +65,25 @@ function showSnapshotError(error) {
   logDebug('[snapshot-viewer] operation failed:', message);
 }
 
+function restoreSerializedShadowRoots(root) {
+  const templates = [
+    ...root.querySelectorAll('template[data-savepage-shadowroot]'),
+  ];
+  for (const template of templates) {
+    const host = template.parentElement;
+    if (!host || template.parentNode !== host) {
+      throw new Error('Saved shadow root is missing its host element');
+    }
+    if (host.shadowRoot) {
+      throw new Error('Saved shadow root host already has a shadow root');
+    }
+    const shadowRoot = host.attachShadow({ mode: 'open' });
+    shadowRoot.append(template.content);
+    template.remove();
+    restoreSerializedShadowRoots(shadowRoot);
+  }
+}
+
 if (!slug || !Number.isFinite(ts)) {
   document.body.textContent = tr(
     'extensionSnapshotMissingParams',
@@ -132,6 +151,12 @@ if (title) document.title = title;
 
 frame.addEventListener('load', async () => {
   try {
+    const doc = frame.contentDocument;
+    if (!doc) {
+      throw new Error('Snapshot document is unavailable');
+    }
+    restoreSerializedShadowRoots(doc);
+
     const resp = await chrome.runtime.sendMessage({
       action: 'loadPageNotes',
       slug,
@@ -140,7 +165,6 @@ frame.addEventListener('load', async () => {
       throw new Error(resp?.error || 'loadPageNotes returned invalid notes');
     }
 
-    const doc = frame.contentDocument;
     let highlightLifecycle;
     highlightLifecycle = createHighlightLifecycle({
       document: doc,

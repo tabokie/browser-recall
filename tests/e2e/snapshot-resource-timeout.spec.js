@@ -32,6 +32,253 @@ function stallStylesheetResponse(response) {
   response.write('html { background: white; }');
 }
 
+test('capture reconstructs serialized shadow DOM in the trusted snapshot viewer', async ({
+  extContext,
+  extensionId,
+  localServer,
+  setupDir,
+}) => {
+  void setupDir;
+
+  localServer.addPage('/shadow-dom-snapshot', {
+    title: 'Shadow DOM snapshot',
+    body: `
+      <link rel="icon" href="data:image/png;base64,iVBORw0KGgo=">
+      <snapshot-card id="snapshot-card"></snapshot-card>
+      <script>
+        customElements.define('snapshot-card', class extends HTMLElement {
+          constructor() {
+            super();
+            const root = this.attachShadow({ mode: 'open' });
+            root.innerHTML =
+              '<style>#shadow-copy { color: rgb(35, 87, 133); }</style>' +
+              '<p id="shadow-copy">Captured shadow content</p>';
+          }
+        });
+      </script>
+    `,
+  });
+
+  const pageUrl = localServer.url('/shadow-dom-snapshot');
+  let helper;
+  let page;
+  let viewer;
+  try {
+    page = await extContext.newPage();
+    await page.goto(pageUrl);
+    await expect
+      .poll(() =>
+        page
+          .locator('#snapshot-card')
+          .evaluate(
+            (element) =>
+              element.shadowRoot?.querySelector('#shadow-copy')?.textContent ??
+              null,
+          ),
+      )
+      .toBe('Captured shadow content');
+
+    helper = await openHelperPage(extContext, extensionId);
+    await page.bringToFront();
+    await expect
+      .poll(() =>
+        helper.evaluate(async () => {
+          const [tab] = await chrome.tabs.query({
+            active: true,
+            currentWindow: true,
+          });
+          if (!tab) return null;
+          try {
+            return await chrome.tabs.sendMessage(tab.id, {
+              action: 'isPdfPage',
+            });
+          } catch {
+            return null;
+          }
+        }),
+      )
+      .toEqual({ isPdf: false });
+
+    const capture = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' }),
+    );
+    expect(capture).toEqual(
+      expect.objectContaining({
+        success: true,
+      }),
+    );
+
+    const snapshotResponse = await helper.evaluate(
+      ({ slug, timestamp }) =>
+        chrome.runtime.sendMessage({
+          action: 'getSnapshotHtml',
+          slug,
+          timestamp,
+        }),
+      {
+        slug: getSlugForUrl(pageUrl),
+        timestamp: capture.timestamp,
+      },
+    );
+    expect(snapshotResponse.success).toBe(true);
+    expect(snapshotResponse.html).toContain(
+      '<template data-savepage-shadowroot="">',
+    );
+    expect(snapshotResponse.html).toContain('Captured shadow content');
+    expect(snapshotResponse.html).not.toContain('id="savepage-shadowloader"');
+
+    viewer = await extContext.newPage();
+    await viewer.goto(
+      `chrome-extension://${extensionId}/snapshot-viewer.html?slug=${encodeURIComponent(getSlugForUrl(pageUrl))}&ts=${capture.timestamp}`,
+    );
+    const frame = viewer.frameLocator('iframe');
+    const card = frame.locator('#snapshot-card');
+    await expect
+      .poll(() =>
+        card.evaluate((element) => ({
+          text:
+            element.shadowRoot?.querySelector('#shadow-copy')?.textContent ??
+            null,
+          templateCount: element.querySelectorAll(
+            ':scope > template[data-savepage-shadowroot]',
+          ).length,
+        })),
+      )
+      .toEqual({
+        text: 'Captured shadow content',
+        templateCount: 0,
+      });
+    await expect(card.locator('#shadow-copy')).toHaveCSS(
+      'color',
+      'rgb(35, 87, 133)',
+    );
+  } finally {
+    await Promise.all([
+      helper?.close().catch(() => {}),
+      page?.close().catch(() => {}),
+      viewer?.close().catch(() => {}),
+    ]);
+  }
+});
+
+test('capture embeds nested cross-origin CSS imports through the extension fallback', async ({
+  extContext,
+  extensionId,
+  setupDir,
+}) => {
+  void setupDir;
+  test.setTimeout(30_000);
+
+  const stylesheetOrigin = await startServer((request, response) => {
+    if (request.url === '/page.css') {
+      response.writeHead(200, { 'Content-Type': 'text/css' });
+      response.end(`
+        @import url("/palette.css");
+        #snapshot-content { display: block !important; }
+      `);
+      return;
+    }
+    if (request.url === '/palette.css') {
+      response.writeHead(200, { 'Content-Type': 'text/css' });
+      response.end('body { background: rgb(241, 232, 214); }');
+      return;
+    }
+    response.writeHead(404).end();
+  });
+  const pageOrigin = await startServer((_request, response) => {
+    response.writeHead(200, { 'Content-Type': 'text/html' });
+    response.end(`<!doctype html>
+      <title>Cross-origin stylesheet snapshot</title>
+      <style>@import url("http://127.0.0.1:${stylesheetOrigin.port}/page.css");</style>
+      <main id="snapshot-content" style="display: none">
+        Cross-origin capture remained visible
+      </main>`);
+  });
+
+  let helper;
+  let page;
+  let viewer;
+  try {
+    page = await extContext.newPage();
+    const pageUrl = `http://127.0.0.1:${pageOrigin.port}/`;
+    await page.goto(pageUrl);
+    await expect(page.locator('#snapshot-content')).toBeVisible();
+
+    helper = await openHelperPage(extContext, extensionId);
+    await page.bringToFront();
+    await expect
+      .poll(() =>
+        helper.evaluate(async () => {
+          const [tab] = await chrome.tabs.query({
+            active: true,
+            currentWindow: true,
+          });
+          if (!tab) return null;
+          try {
+            return await chrome.tabs.sendMessage(tab.id, {
+              action: 'isPdfPage',
+            });
+          } catch {
+            return null;
+          }
+        }),
+      )
+      .toEqual({ isPdf: false });
+
+    const capture = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' }),
+    );
+    expect(capture).toEqual(
+      expect.objectContaining({
+        success: true,
+        warnings: [],
+      }),
+    );
+
+    const snapshotResponse = await helper.evaluate(
+      ({ slug, timestamp }) =>
+        chrome.runtime.sendMessage({
+          action: 'getSnapshotHtml',
+          slug,
+          timestamp,
+        }),
+      {
+        slug: getSlugForUrl(pageUrl),
+        timestamp: capture.timestamp,
+      },
+    );
+    expect(snapshotResponse.success).toBe(true);
+    expect(snapshotResponse.html).toContain('/*savepage-import-url=http://');
+    expect(snapshotResponse.html).toContain(
+      '#snapshot-content { display: block !important; }',
+    );
+    expect(snapshotResponse.html).toContain(
+      'body { background: rgb(241, 232, 214); }',
+    );
+    expect(snapshotResponse.html).not.toContain(
+      'data-browser-recall-unavailable-href=',
+    );
+
+    viewer = await extContext.newPage();
+    await viewer.goto(
+      `chrome-extension://${extensionId}/snapshot-viewer.html?slug=${encodeURIComponent(getSlugForUrl(pageUrl))}&ts=${capture.timestamp}`,
+    );
+    const frame = viewer.frameLocator('iframe');
+    await expect(frame.locator('#snapshot-content')).toBeVisible();
+    await expect(frame.locator('body')).toHaveCSS(
+      'background-color',
+      'rgb(241, 232, 214)',
+    );
+  } finally {
+    await Promise.all([
+      helper?.close().catch(() => {}),
+      page?.close().catch(() => {}),
+      viewer?.close().catch(() => {}),
+    ]);
+    await Promise.all([pageOrigin.close(), stylesheetOrigin.close()]);
+  }
+});
+
 test('capture skips resource bodies that exceed the resource time limit', async ({
   extContext,
   extensionId,
@@ -139,7 +386,7 @@ test('capture skips resource bodies that exceed the resource time limit', async 
           }),
           expect.objectContaining({
             location: expect.stringContaining('/cross-origin.png'),
-            reason: 'fetcherr',
+            reason: 'maxtime',
           }),
         ]),
       }),

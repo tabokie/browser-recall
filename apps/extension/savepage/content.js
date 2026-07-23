@@ -1733,7 +1733,7 @@ function loadResources()
 async function loadResource(index,location,referrer,referrerPolicy)
 {
     var controller,timeout,response;
-    var i,contentType,contentLength,mimetype,charset,buffer,byteArray,binaryString;
+    var contentType,mimetype,charset,body;
     var matches = [];
     
     resourceStatus[index] = "loading";
@@ -1757,31 +1757,23 @@ async function loadResource(index,location,referrer,referrerPolicy)
             contentType = response.headers.get("Content-Type");
             if (contentType == null) contentType = "";
             
-            contentLength = +response.headers.get("Content-Length");
-            if (contentLength == null) contentLength = 0;
+            matches = contentType.match(/([^;]+)/i);
+            if (matches != null) mimetype = matches[1].toLowerCase();
+            else mimetype = "";
             
-            if (contentLength > maxResourceSize*1024*1024)
+            matches = contentType.match(/;charset=([^;]+)/i);
+            if (matches != null) charset = matches[1].toLowerCase();
+            else charset = "";
+
+            body = await globalThis.browserRecallBoundedResponse.readBoundedResponse(response,maxResourceSize*1024*1024);
+
+            if (body.status == "maxsize")
             {
                 loadFailure(index,"maxsize");
             }
             else
             {
-                matches = contentType.match(/([^;]+)/i);
-                if (matches != null) mimetype = matches[1].toLowerCase();
-                else mimetype = "";
-                
-                matches = contentType.match(/;charset=([^;]+)/i);
-                if (matches != null) charset = matches[1].toLowerCase();
-                else charset = "";
-                
-                buffer = await response.arrayBuffer();
-                
-                byteArray = new Uint8Array(buffer);
-                
-                binaryString = "";
-                for (i = 0; i < byteArray.byteLength; i++) binaryString += String.fromCharCode(byteArray[i]);
-                
-                loadSuccess(index,"",binaryString,mimetype,charset);
+                loadSuccess(index,"",body.content,mimetype,charset);
             }
         }
         else  /* load resource in background script */

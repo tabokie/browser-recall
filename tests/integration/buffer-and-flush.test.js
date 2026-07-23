@@ -176,6 +176,7 @@ class BrowserLikeWebSocket {
   static hangOnNextStatus = false;
   static omitProtocolVersion = false;
   static sendMismatchedProtocol = false;
+  static statusMaxMessageBytes = null;
   static instances = [];
 
   constructor(url) {
@@ -201,6 +202,14 @@ class BrowserLikeWebSocket {
           const payload = JSON.parse(data);
           if (payload.type === 'pair_approved' || payload.type === 'auth_ok') {
             delete payload.protocolVersion;
+            data = JSON.stringify(payload);
+          }
+        }
+        if (BrowserLikeWebSocket.statusMaxMessageBytes != null) {
+          const payload = JSON.parse(data);
+          if (payload.type === 'status') {
+            payload.maxMessageBytes =
+              BrowserLikeWebSocket.statusMaxMessageBytes;
             data = JSON.stringify(payload);
           }
         }
@@ -235,7 +244,7 @@ class BrowserLikeWebSocket {
         BrowserLikeWebSocket.sendMismatchedProtocol &&
         (message.type === 'auth' || message.type === 'pair_request')
       ) {
-        message.protocolVersion = 2;
+        message.protocolVersion = 1;
         this.socket.send(JSON.stringify(message));
         return;
       }
@@ -332,6 +341,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     BrowserLikeWebSocket.hangOnNextStatus = false;
     BrowserLikeWebSocket.omitProtocolVersion = false;
     BrowserLikeWebSocket.sendMismatchedProtocol = false;
+    BrowserLikeWebSocket.statusMaxMessageBytes = null;
     BrowserLikeWebSocket.instances = [];
     RefusingWebSocket.urls = [];
 
@@ -378,7 +388,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(store.connectorAuthToken).toBeUndefined();
     expect(store.connectorLastDiagnostic).toMatchObject({
       code: 'incompatible_protocol',
-      expected: 1,
+      expected: 2,
       actual: null,
     });
 
@@ -439,7 +449,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(store.connectorAuthToken).toBeUndefined();
     expect(store.connectorLastDiagnostic).toMatchObject({
       code: 'incompatible_protocol',
-      expected: 1,
+      expected: 2,
     });
   }, 30_000);
 
@@ -732,6 +742,62 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(readFileSync(snapshotPath, 'utf8')).toContain('large snapshot body');
   }, 30_000);
 
+  it('rejects a snapshot whose encoded message exceeds the daemon-advertised limit', async () => {
+    const dir = mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-oversized-snapshot-preflight-'),
+    );
+    tempDirs.push(dir);
+
+    originalWebSocket = globalThis.WebSocket;
+    originalChrome = globalThis.chrome;
+    originalNavigator = globalThis.navigator;
+    originalSetTimeout = globalThis.setTimeout;
+
+    const { chrome, store } = createChromeMock();
+    globalThis.chrome = chrome;
+    globalThis.WebSocket = BrowserLikeWebSocket;
+    BrowserLikeWebSocket.statusMaxMessageBytes = 512;
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { userAgent: 'Chrome/123.0.0.0 Safari/537.36' },
+      configurable: true,
+    });
+    globalThis.setTimeout = (fn, delay, ...args) => {
+      const timer = originalSetTimeout(fn, delay, ...args);
+      timer?.unref?.();
+      return timer;
+    };
+
+    const wsClient =
+      await import('../../apps/extension/connector/ws-client.js');
+
+    const child = launchDaemon(dir, 'allow');
+    childProcesses.push(child);
+    store.connectorDaemonPort = await waitForListening(child);
+
+    await wsClient.initConnectorBridge();
+    await waitFor(async () => {
+      const state = await wsClient.getConnectorBridgeState();
+      return state.state === 'connected' && state.hasToken;
+    });
+
+    await expect(
+      wsClient.enqueueDesktopSnapshot({
+        slug: 'oversized-snapshot-page',
+        ts: 1710000002750,
+        url: 'https://example.com/oversized-snapshot',
+        title: null,
+        markdown: null,
+        html: `<html><body>${'x'.repeat(1024)}</body></html>`,
+      }),
+    ).rejects.toMatchObject({
+      code: 'snapshot_message_too_large',
+      message: expect.stringContaining('512-byte desktop message limit'),
+    });
+
+    expect(store.desktopPendingCommands).toBe(0);
+    expect(store.desktopCommandBuffer || []).toEqual([]);
+  }, 30_000);
+
   it('preserves an unknown buffered item and pauses instead of losing queued data', async () => {
     const dir = mkdtempSync(
       path.join(tmpdir(), 'browser-recall-buffer-invalid-event-'),
@@ -815,7 +881,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     socket.send(
       JSON.stringify({
         type: 'pair_request',
-        protocolVersion: 1,
+        protocolVersion: 2,
         browserId: 'raw-browser',
         browserName: 'Chrome',
         extensionId: 'abcdefghijklmnop',

@@ -3,7 +3,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-pub const CONNECTOR_PROTOCOL_VERSION: u32 = 1;
+pub const CONNECTOR_PROTOCOL_VERSION: u32 = 2;
 
 fn deserialize_required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where
@@ -381,6 +381,8 @@ pub enum DaemonMessage {
         data_folder: String,
         #[serde(rename = "deviceId")]
         device_id: String,
+        #[serde(rename = "maxMessageBytes")]
+        max_message_bytes: usize,
     },
     Change {
         mutations: Vec<MutationPayload>,
@@ -545,8 +547,8 @@ mod tests {
     }
 
     #[test]
-    fn connector_v1_accepts_additive_message_fields() {
-        assert_eq!(CONNECTOR_PROTOCOL_VERSION, 1);
+    fn connector_v2_accepts_additive_message_fields() {
+        assert_eq!(CONNECTOR_PROTOCOL_VERSION, 2);
 
         let message = json!({
             "type": "run_command",
@@ -554,14 +556,14 @@ mod tests {
             "request": { "name": "Reading" },
             "bufferDepth": 0,
             "bufferBytes": 0,
-            "futureTracingContext": { "spanId": "additive-v1-field" }
+            "futureTracingContext": { "spanId": "additive-v2-field" }
         });
 
         assert!(serde_json::from_value::<ConnectorMessage>(message).is_ok());
     }
 
     #[test]
-    fn connector_v1_still_requires_current_fields() {
+    fn connector_v2_still_requires_current_fields() {
         let missing_request = json!({
             "type": "run_command",
             "action": "createList",
@@ -573,7 +575,7 @@ mod tests {
     }
 
     #[test]
-    fn connector_v1_rejects_missing_nullable_snapshot_fields_even_with_additions() {
+    fn connector_v2_rejects_missing_nullable_snapshot_fields_even_with_additions() {
         let misspelled_markdown = json!({
             "type": "snapshot",
             "slug": "snapshot-page",
@@ -585,7 +587,7 @@ mod tests {
             "source": "extension",
             "bufferDepth": 0,
             "bufferBytes": 0,
-            "futureTracingContext": { "spanId": "additive-v1-field" }
+            "futureTracingContext": { "spanId": "additive-v2-field" }
         });
 
         assert!(serde_json::from_value::<ConnectorMessage>(misspelled_markdown).is_err());

@@ -1808,6 +1808,7 @@ async fn build_status_message(shared: &SharedState) -> DaemonMessage {
         last_drained_at: ingest.last_drained_at,
         data_folder: config.data_dir.to_string_lossy().into_owned(),
         device_id: config.device_id.clone(),
+        max_message_bytes: MAX_WEBSOCKET_MESSAGE_BYTES,
     }
 }
 

@@ -330,7 +330,7 @@ async fn auth_rejects_a_mismatched_protocol_version() {
     socket
         .send(Message::Text(
             serde_json::to_string(&ConnectorMessage::Auth {
-                protocol_version: Some(2),
+                protocol_version: Some(1),
                 token,
             })
             .expect("auth json"),

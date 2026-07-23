@@ -52,6 +52,13 @@ function removeBrowserRecallHighlightMarkup(html) {
     .replace(/\sdata-note-slug=(["']).*?\1/gi, '');
 }
 
+function removeInactiveShadowLoader(html) {
+  return html.replace(
+    /<script\b(?=[^>]*\bid=(["'])savepage-shadowloader\1)[^>]*>[\s\S]*?<\/script\s*>/gi,
+    '',
+  );
+}
+
 function injectSnapshotIdentity(html, slug, url) {
   if (!slug || /<meta\s+name=(["'])x-browser-recall-slug\1/i.test(html)) {
     return html;
@@ -81,6 +88,7 @@ function injectSnapshotIdentity(html, slug, url) {
 export function prepareSnapshotHtml(html, { slug, url = null } = {}) {
   if (!html) return html;
   const selfContainedHtml = deactivateUnembeddedStylesheets(html);
-  const cleanHtml = removeBrowserRecallHighlightMarkup(selfContainedHtml);
+  const safeHtml = removeInactiveShadowLoader(selfContainedHtml);
+  const cleanHtml = removeBrowserRecallHighlightMarkup(safeHtml);
   return injectSnapshotIdentity(cleanHtml, slug, url);
 }

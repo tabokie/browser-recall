@@ -12,6 +12,7 @@ import {
 import { createPageIdentityGlobalScript } from '../packages/core/page-identity.js';
 import { createHighlightLifecycleGlobalScript } from '../packages/core/highlight-lifecycle.js';
 import { createMarkdownExtractorGlobalScript } from '../packages/core/markdown-extractor.js';
+import { createBoundedResponseGlobalScript } from '../packages/core/bounded-response.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
@@ -27,6 +28,7 @@ const desktopUiOutDir = path.join(repoRoot, 'dist/desktop/ui');
 const pageIdentityContentScript = 'browser-recall-page-identity.js';
 const highlightLifecycleContentScript = 'browser-recall-highlight-lifecycle.js';
 const markdownExtractorContentScript = 'browser-recall-markdown-extractor.js';
+const boundedResponseContentScript = 'browser-recall-bounded-response.js';
 
 export const defaultArtifactDirs = Object.freeze({
   chromeExtension: chromeExtensionOutDir,
@@ -110,6 +112,13 @@ function writeExtensionMarkdownExtractorGlobal(outDir) {
   fs.writeFileSync(
     path.join(outDir, markdownExtractorContentScript),
     createMarkdownExtractorGlobalScript(),
+  );
+}
+
+function writeExtensionBoundedResponseGlobal(outDir) {
+  fs.writeFileSync(
+    path.join(outDir, boundedResponseContentScript),
+    createBoundedResponseGlobalScript(),
   );
 }
 
@@ -672,6 +681,7 @@ export function stageExtensionAssets(outDir = targets.extension.defaultOutDir) {
   writeExtensionPageIdentityGlobal(staged);
   writeExtensionHighlightLifecycleGlobal(staged);
   writeExtensionMarkdownExtractorGlobal(staged);
+  writeExtensionBoundedResponseGlobal(staged);
   writeExtensionManifest(staged, 'chrome');
   return staged;
 }
@@ -682,6 +692,7 @@ export function stageFirefoxExtensionAssets(outDir = firefoxExtensionOutDir) {
   writeExtensionPageIdentityGlobal(staged);
   writeExtensionHighlightLifecycleGlobal(staged);
   writeExtensionMarkdownExtractorGlobal(staged);
+  writeExtensionBoundedResponseGlobal(staged);
   writeExtensionManifest(staged, 'firefox');
   return staged;
 }

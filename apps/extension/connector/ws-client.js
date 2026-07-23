@@ -890,6 +890,25 @@ function sendBridgeMessageNow(message, acceptTypes, options = {}) {
   if (pendingRequest) {
     throw new Error('Desktop bridge request already in flight');
   }
+  const serializedMessage = JSON.stringify(message);
+  if (message.type === 'snapshot') {
+    const maxMessageBytes = currentSocket._maxMessageBytes;
+    if (!Number.isSafeInteger(maxMessageBytes) || maxMessageBytes <= 0) {
+      const error = new Error(
+        'Desktop did not advertise a valid snapshot message limit',
+      );
+      error.code = 'missing_desktop_message_limit';
+      throw error;
+    }
+    const payloadBytes = new TextEncoder().encode(serializedMessage).length;
+    if (payloadBytes > maxMessageBytes) {
+      const error = new Error(
+        `Snapshot message is ${payloadBytes} bytes, exceeding the ${maxMessageBytes}-byte desktop message limit`,
+      );
+      error.code = 'snapshot_message_too_large';
+      throw error;
+    }
+  }
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       if (pendingRequest?.timer !== timer) return;
@@ -911,7 +930,7 @@ function sendBridgeMessageNow(message, acceptTypes, options = {}) {
       timer,
     };
     try {
-      currentSocket.send(JSON.stringify(message));
+      currentSocket.send(serializedMessage);
     } catch (error) {
       clearTimeout(timer);
       pendingRequest = null;
@@ -937,6 +956,7 @@ function validateStatusPayload(payload) {
     'lastDrainedAt',
     'dataFolder',
     'deviceId',
+    'maxMessageBytes',
   ];
   for (const key of requiredKeys) {
     if (!Object.prototype.hasOwnProperty.call(payload, key)) {
@@ -959,6 +979,10 @@ function validateStatusPayload(payload) {
   requireNonNegativeInteger(payload.bufferDepth, 'bufferDepth');
   requireNonNegativeInteger(payload.bufferBytes, 'bufferBytes');
   requireNonNegativeInteger(payload.daemonBufferDepth, 'daemonBufferDepth');
+  requireNonNegativeInteger(payload.maxMessageBytes, 'maxMessageBytes');
+  if (payload.maxMessageBytes === 0) {
+    throw new Error('Desktop status maxMessageBytes must be greater than zero');
+  }
   if (
     payload.lastDrainedAt !== null &&
     !Number.isSafeInteger(payload.lastDrainedAt)
@@ -977,9 +1001,14 @@ async function requestStatus() {
   if (!currentSocket?._authenticated) {
     throw new Error('Cannot request desktop status before authentication');
   }
+  const socket = currentSocket;
   const payload = validateStatusPayload(
     await sendBridgeMessage({ type: 'get_status' }, ['status', 'error']),
   );
+  if (currentSocket !== socket || !socket._authenticated) {
+    throw new Error('Desktop bridge changed while reading status');
+  }
+  socket._maxMessageBytes = payload.maxMessageBytes;
   const statePatch = {
     [STORAGE_KEYS.daemonBufferDepth]: payload.daemonBufferDepth,
     [STORAGE_KEYS.lastDrainedAt]: payload.lastDrainedAt,
