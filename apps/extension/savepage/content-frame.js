@@ -197,7 +197,7 @@ function frameScript()
                     }
                     else htmltext = "";
                     
-                    htmltext += document.documentElement.outerHTML;
+                    htmltext += cloneNodeWithSerializedShadowRoots(document.documentElement).outerHTML;
                     
                     htmltext = htmltext.replace(/<head([^>]*)>/,"<head$1><base href=\"" + document.baseURI + "\">");
                     
@@ -206,6 +206,43 @@ function frameScript()
                     break;
             }
         });
+    }
+
+    function cloneNodeWithSerializedShadowRoots(sourceNode)
+    {
+        var i,clone,shadowroot,template;
+
+        if (sourceNode.nodeType != 1) return sourceNode.cloneNode(true);
+
+        clone = sourceNode.cloneNode(false);
+
+        if (sourceNode.localName == "template")
+        {
+            for (i = 0; i < sourceNode.content.childNodes.length; i++)
+                clone.content.appendChild(cloneNodeWithSerializedShadowRoots(sourceNode.content.childNodes[i]));
+            return clone;
+        }
+
+        if (sourceNode.localName != "audio" && sourceNode.localName != "video" && sourceNode.localName != "use")
+        {
+            if (typeof browser != "undefined") shadowroot = sourceNode.shadowRoot || sourceNode.openOrClosedShadowRoot;
+            else shadowroot = sourceNode.shadowRoot || ((chrome.dom && sourceNode instanceof HTMLElement) ? chrome.dom.openOrClosedShadowRoot(sourceNode) : null);
+
+            if (shadowroot != null)
+            {
+                template = document.createElement("template");
+                template.setAttribute("data-savepage-shadowroot","");
+                template.setAttribute("shadowrootmode","open");
+                for (i = 0; i < shadowroot.childNodes.length; i++)
+                    template.content.appendChild(cloneNodeWithSerializedShadowRoots(shadowroot.childNodes[i]));
+                clone.appendChild(template);
+            }
+        }
+
+        for (i = 0; i < sourceNode.childNodes.length; i++)
+            clone.appendChild(cloneNodeWithSerializedShadowRoots(sourceNode.childNodes[i]));
+
+        return clone;
     }
 
     /********************************************************************/

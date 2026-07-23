@@ -34,6 +34,17 @@ describe('snapshot HTML preparation', () => {
     expect(prepared).not.toContain('data-highlight-text');
     expect(prepared).not.toContain('data-note-slug');
     expect(prepared).not.toContain('savepage-shadowloader');
-    expect(prepared).toContain('template data-savepage-shadowroot');
+    expect(prepared).toContain(
+      'template data-savepage-shadowroot="" shadowrootmode="open"',
+    );
+  });
+
+  it('does not rewrite serialized tags inside an iframe srcdoc attribute', () => {
+    const nested =
+      '<iframe srcdoc="<legacy-card><template data-savepage-shadowroot=&quot;&quot;>nested</template></legacy-card>"></iframe>';
+
+    expect(prepareSnapshotHtml(nested, { slug: 'legacy-page' })).toContain(
+      'srcdoc="<legacy-card><template data-savepage-shadowroot=&quot;&quot;>nested</template></legacy-card>"',
+    );
   });
 });

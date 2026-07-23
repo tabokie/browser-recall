@@ -4,6 +4,11 @@ import {
   createBoundedResponseGlobalScript,
   readBoundedResponse,
 } from '../../packages/core/bounded-response.js';
+import {
+  createSnapshotCaptureBudget,
+  estimateEmbeddedResourceBytes,
+  snapshotHtmlBudgetBytes,
+} from '../../packages/core/snapshot-capture-budget.js';
 
 function chunkedResponse(chunks, headers = {}) {
   const cancel = vi.fn();
@@ -31,6 +36,46 @@ function chunkedResponse(chunks, headers = {}) {
 }
 
 describe('bounded snapshot resource reads', () => {
+  it('derives the HTML budget from the exact daemon message envelope', () => {
+    const payload = {
+      type: 'snapshot',
+      source: 'extension',
+      slug: 'page',
+      ts: 123,
+      url: 'https://example.test/',
+      title: 'Example',
+      markdown: 'Markdown',
+      html: '',
+      bufferDepth: 0,
+      bufferBytes: 0,
+    };
+    const maxMessageBytes = 1024;
+    const budget = snapshotHtmlBudgetBytes({ maxMessageBytes, payload });
+    const encoded = new TextEncoder().encode(
+      JSON.stringify({ ...payload, html: 'x'.repeat(budget) }),
+    ).length;
+
+    expect(encoded).toBe(maxMessageBytes);
+  });
+
+  it('accounts for base64 expansion and rejects aggregate over-budget resources', () => {
+    const budget = createSnapshotCaptureBudget({
+      maxEncodedBytes: 12,
+      baseEncodedBytes: 2,
+    });
+    const first = estimateEmbeddedResourceBytes({
+      bytesRead: 3,
+      charset: '',
+      referenceCount: 2,
+    });
+
+    expect(first).toBe(8);
+    expect(budget.reserve(first)).toBe(true);
+    expect(budget.reserve(1)).toBe(true);
+    expect(budget.reserve(2)).toBe(false);
+    expect(budget.remainingBytes()).toBe(1);
+  });
+
   it('stops a chunked response when its body exceeds the declared resource limit', async () => {
     const { response, cancel } = chunkedResponse([
       [1, 2, 3],

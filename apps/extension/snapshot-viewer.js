@@ -84,6 +84,73 @@ function restoreSerializedShadowRoots(root) {
   }
 }
 
+function visitTemplateContentRoots(root, visit, seen = new Set()) {
+  if (seen.has(root)) return;
+  seen.add(root);
+  visit(root);
+  for (const template of root.querySelectorAll('template')) {
+    visitTemplateContentRoots(template.content, visit, seen);
+  }
+}
+
+function prepareDeclarativeShadowRoots(root) {
+  visitTemplateContentRoots(root, (currentRoot) => {
+    for (const template of currentRoot.querySelectorAll(
+      'template[data-savepage-shadowroot]',
+    )) {
+      template.setAttribute('shadowrootmode', 'open');
+    }
+    for (const nestedFrame of currentRoot.querySelectorAll(
+      'iframe[srcdoc],frame[srcdoc]',
+    )) {
+      const nestedHtml = nestedFrame.getAttribute('srcdoc');
+      if (!nestedHtml) continue;
+      const nestedDocument = new DOMParser().parseFromString(
+        nestedHtml,
+        'text/html',
+      );
+      prepareDeclarativeShadowRoots(nestedDocument);
+      nestedFrame.setAttribute(
+        'srcdoc',
+        `<!doctype html>${nestedDocument.documentElement.outerHTML}`,
+      );
+    }
+  });
+}
+
+function visitRenderedRoots(root, visit, seen = new Set()) {
+  if (seen.has(root)) return;
+  seen.add(root);
+  visit(root);
+  for (const element of root.querySelectorAll('*')) {
+    if (element.shadowRoot) {
+      visitRenderedRoots(element.shadowRoot, visit, seen);
+    }
+  }
+}
+
+function restoreSerializedShadowRootsInFrameTree(root) {
+  // Walk frames from every rendered root: frame trees and shadow trees can
+  // nest inside one another, so restoring either hierarchy alone is incomplete.
+  restoreSerializedShadowRoots(root);
+  visitRenderedRoots(root, (currentRoot) => {
+    for (const nestedFrame of currentRoot.querySelectorAll('iframe,frame')) {
+      const restoreNestedFrame = () => {
+        try {
+          const nestedDocument = nestedFrame.contentDocument;
+          if (nestedDocument?.documentElement) {
+            restoreSerializedShadowRootsInFrameTree(nestedDocument);
+          }
+        } catch {
+          // Sandboxed retained frames restore through declarative shadow DOM.
+        }
+      };
+      restoreNestedFrame();
+      nestedFrame.addEventListener('load', restoreNestedFrame, { once: true });
+    }
+  });
+}
+
 if (!slug || !Number.isFinite(ts)) {
   document.body.textContent = tr(
     'extensionSnapshotMissingParams',
@@ -143,9 +210,10 @@ if (
 const pageUrl = pageResp.entry.url;
 const html = htmlResp.html;
 const frame = document.getElementById('frame');
-frame.srcdoc = html;
 
 const parsed = new DOMParser().parseFromString(html, 'text/html');
+prepareDeclarativeShadowRoots(parsed);
+frame.srcdoc = `<!doctype html>${parsed.documentElement.outerHTML}`;
 const title = parsed.querySelector('title')?.textContent;
 if (title) document.title = title;
 
@@ -155,7 +223,7 @@ frame.addEventListener('load', async () => {
     if (!doc) {
       throw new Error('Snapshot document is unavailable');
     }
-    restoreSerializedShadowRoots(doc);
+    restoreSerializedShadowRootsInFrameTree(doc);
 
     const resp = await chrome.runtime.sendMessage({
       action: 'loadPageNotes',

@@ -18,6 +18,7 @@ import {
 } from './state.js';
 import { logDebug, logError } from '../logger.js';
 import { canonicalizePageRequest, canonicalizePageUrl } from '../utils.js';
+import { snapshotHtmlBudgetBytes } from '../snapshot-capture-budget.js';
 
 const DEFAULT_PORTS = [28471, 28472, 28473];
 const RECONNECT_ALARM_NAME = 'browserRecallConnectorReconnect';
@@ -26,6 +27,8 @@ const RECONNECT_DELAY_MS = 15_000;
 const SOCKET_OPEN_TIMEOUT_MS = 5000;
 const BRIDGE_REQUEST_TIMEOUT_MS = 1500;
 const SNAPSHOT_REQUEST_TIMEOUT_MS = 60_000;
+const SNAPSHOT_CAPTURE_ENVELOPE_RESERVE_BYTES = 64 * 1024;
+const SNAPSHOT_RESOURCE_CONCURRENCY = 6;
 const STATE_PROBE_TIMEOUT_MS = 2500;
 const MANUAL_PAIR_SETTLE_MS = 1500;
 
@@ -1329,6 +1332,47 @@ export async function enqueueDesktopSnapshot(snapshot) {
     [STORAGE_KEYS.lastErrorCode]: null,
   });
   return await syncBufferStats();
+}
+
+export async function requestDesktopSnapshotCaptureBudget(snapshot) {
+  const canonicalUrl = canonicalizePageUrl(snapshot.url);
+  await ensureBridgeReadyForRequest();
+  await flushBufferedMessages();
+  const stats = await bufferStats();
+  if (stats.pendingCommands > 0) {
+    const error = new Error('Desktop command queue did not drain');
+    error.code = 'desktop_queue_not_drained';
+    throw error;
+  }
+  const payload = buildSnapshotBridgePayload(
+    {
+      kind: 'snapshot',
+      slug: snapshot.slug,
+      ts: snapshot.ts,
+      url: canonicalUrl,
+      title: snapshot.title,
+      markdown: snapshot.markdown,
+      html: 'x',
+    },
+    stats,
+  );
+  payload.html = '';
+  const maxMessageBytes = currentSocket?._maxMessageBytes;
+  if (!Number.isSafeInteger(maxMessageBytes) || maxMessageBytes <= 0) {
+    const error = new Error(
+      'Desktop did not advertise a valid snapshot message limit',
+    );
+    error.code = 'missing_desktop_message_limit';
+    throw error;
+  }
+  return {
+    maxEncodedHtmlBytes: snapshotHtmlBudgetBytes({
+      maxMessageBytes,
+      payload,
+      reserveBytes: SNAPSHOT_CAPTURE_ENVELOPE_RESERVE_BYTES,
+    }),
+    maxConcurrentResourceLoads: SNAPSHOT_RESOURCE_CONCURRENCY,
+  };
 }
 
 export async function getConnectorBridgeState() {

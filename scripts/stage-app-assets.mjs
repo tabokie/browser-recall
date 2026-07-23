@@ -13,6 +13,7 @@ import { createPageIdentityGlobalScript } from '../packages/core/page-identity.j
 import { createHighlightLifecycleGlobalScript } from '../packages/core/highlight-lifecycle.js';
 import { createMarkdownExtractorGlobalScript } from '../packages/core/markdown-extractor.js';
 import { createBoundedResponseGlobalScript } from '../packages/core/bounded-response.js';
+import { createSnapshotCaptureBudgetGlobalScript } from '../packages/core/snapshot-capture-budget.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
@@ -29,6 +30,8 @@ const pageIdentityContentScript = 'browser-recall-page-identity.js';
 const highlightLifecycleContentScript = 'browser-recall-highlight-lifecycle.js';
 const markdownExtractorContentScript = 'browser-recall-markdown-extractor.js';
 const boundedResponseContentScript = 'browser-recall-bounded-response.js';
+const snapshotCaptureBudgetContentScript =
+  'browser-recall-snapshot-capture-budget.js';
 
 export const defaultArtifactDirs = Object.freeze({
   chromeExtension: chromeExtensionOutDir,
@@ -119,6 +122,13 @@ function writeExtensionBoundedResponseGlobal(outDir) {
   fs.writeFileSync(
     path.join(outDir, boundedResponseContentScript),
     createBoundedResponseGlobalScript(),
+  );
+}
+
+function writeExtensionSnapshotCaptureBudgetGlobal(outDir) {
+  fs.writeFileSync(
+    path.join(outDir, snapshotCaptureBudgetContentScript),
+    createSnapshotCaptureBudgetGlobalScript(),
   );
 }
 
@@ -682,6 +692,7 @@ export function stageExtensionAssets(outDir = targets.extension.defaultOutDir) {
   writeExtensionHighlightLifecycleGlobal(staged);
   writeExtensionMarkdownExtractorGlobal(staged);
   writeExtensionBoundedResponseGlobal(staged);
+  writeExtensionSnapshotCaptureBudgetGlobal(staged);
   writeExtensionManifest(staged, 'chrome');
   return staged;
 }
@@ -693,6 +704,7 @@ export function stageFirefoxExtensionAssets(outDir = firefoxExtensionOutDir) {
   writeExtensionHighlightLifecycleGlobal(staged);
   writeExtensionMarkdownExtractorGlobal(staged);
   writeExtensionBoundedResponseGlobal(staged);
+  writeExtensionSnapshotCaptureBudgetGlobal(staged);
   writeExtensionManifest(staged, 'firefox');
   return staged;
 }

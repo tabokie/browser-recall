@@ -165,6 +165,30 @@ describe('savepage/content.js guards against undefined resourceMimeType', () => 
     'utf-8',
   );
 
+  it('budgets the serializer output after retained frames have replied', () => {
+    expect(spSource).not.toContain(
+      'jsonStringEncodedBytes(document.documentElement.outerHTML)',
+    );
+    const initializeBudgetFn = spSource.match(
+      /function initializeCaptureBudgetFromStructure[\s\S]*?^}/m,
+    );
+    expect(initializeBudgetFn).not.toBeNull();
+    expect(initializeBudgetFn[0]).toContain(
+      'extractHTML(0,window,document.documentElement',
+    );
+    expect(initializeBudgetFn[0]).toContain(
+      'jsonStringEncodedBytes(htmlStrings.join(""))',
+    );
+
+    const frameDelayCallback = spSource.match(
+      /chrome\.runtime\.sendMessage\(\{ type: "setDelay", milliseconds: 200 \}[\s\S]*?gatherStyleSheets\(\);/,
+    );
+    expect(frameDelayCallback).not.toBeNull();
+    expect(frameDelayCallback[0]).toContain(
+      'initializeCaptureBudgetFromStructure()',
+    );
+  });
+
   it('loadSuccess guards against undefined resourceMimeType[index]', () => {
     // When background sends loadSuccess for an index whose resource slot was
     // never initialized (e.g., due to CSP blocking base-uri injection),
@@ -215,6 +239,8 @@ describe('savepage bridge uses capture-scoped Desktop settings', () => {
     );
     expect(captureAndLogMatch).not.toBeNull();
     expect(captureAndLogMatch[0]).toContain('await requestDesktopSettings()');
-    expect(captureAndLogMatch[0]).toContain('captureSavePage(tabId, settings)');
+    expect(captureAndLogMatch[0]).toContain(
+      'captureSavePage(tabId, settings, captureBudget)',
+    );
   });
 });

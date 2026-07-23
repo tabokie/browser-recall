@@ -6,6 +6,9 @@
 - **License**: GNU General Public License v2
 - **Chrome Web Store**: https://chromewebstore.google.com/detail/save-page-we/dhhpefjklgkmgeafimnjhojgjamoafof
 - **Source mirror**: https://github.com/nicholasdwebb/nicholasdwebb.github.io (may be stale)
+- **Browser Recall baseline commit**: `65ed733` (the v33.9 import; use
+  `git diff 65ed733 -- apps/extension/savepage/` for the complete maintained
+  patch)
 
 ## How to get latest source
 The authoritative source is the Chrome Web Store .crx file:
@@ -27,6 +30,11 @@ The authoritative source is the Chrome Web Store .crx file:
 - UI panels: all stripped (message, lazyload, comments, pageinfo, unsaved, download-iframe)
 - Firefox code paths: kept intact (guarded by `isFirefox` flag — zero runtime cost on Chrome, preserves future Firefox portability)
 - content-fontface.js: updated chrome.runtime.getURL path for savepage/ subdirectory
+- content-frame.js: serializes live shadow roots before cross-origin frame HTML
+  crosses the extension message boundary
+- content.js: requires Browser Recall's generated streamed-reader and
+  capture-budget runtimes, schedules bounded resource loads, and escapes the
+  original `srcdoc` value before retaining it as diagnostic metadata
 
 ## Intentional Browser Recall divergences
 
@@ -57,24 +65,36 @@ updating the fork unless the policy itself is being changed:
   external stylesheets that remained uncaptured: those links are deactivated
   because a failed stylesheet can block or leave replay blank, while its
   original URL is retained as diagnostic metadata.
-- **Report unexpected resource failures, not policy skips.** The Browser
-  Recall capture result reports timeouts, size failures, fetch failures, and
-  non-success HTTP responses. It does not count intentionally blocked video
-  or every internal Save Page WE `loadFailure` reason as an unavailable
-  resource. If richer reporting is added, keep separate categories for
-  unavailable, intentionally skipped, and security/policy-blocked resources
-  rather than combining them into one warning count.
+- **Report unexpected resource failures, not policy skips.** Capture
+  diagnostics retain every HTTP(S) omission with a typed category
+  (`network`, `budget`, `security`, `unsupported`, `policy`, or
+  `unavailable`) and an `intentional` flag. The user-facing unavailable count
+  excludes intentional policy skips such as disabled video; callers can still
+  inspect those skips in the structured capture result.
 
-The empty shadow loader and the removed upstream aggregate-size check are not
-documented as intentional divergences. Browser Recall handles those integration
-gaps outside the vendored serializer:
+The empty shadow loader and the previously removed upstream aggregate-size
+check are not intentional divergences. Browser Recall handles those integration
+gaps with explicit maintained boundaries:
 
-- `snapshot-viewer.js` reconstructs the serialized
-  `template[data-savepage-shadowroot]` nodes from trusted extension code, and
+- The serializer emits declarative `shadowrootmode="open"` templates.
+  `content-frame.js` preserves live shadow trees in retained cross-origin
+  frames, and `snapshot-viewer.js` recursively prepares nested `srcdoc`
+  documents before replay. Trusted viewer code remains as a fallback while
   snapshot preparation removes the fork's nonfunctional inline loader.
 - `packages/core/bounded-response.js` enforces the 50 MB per-resource limit
   against bytes actually read, including chunked responses with no trustworthy
   `Content-Length`, in both the page and host-permission fallback fetch paths.
 - Connector protocol v2 advertises the daemon's exact WebSocket message limit.
-  The extension measures the complete UTF-8 snapshot envelope against it before
-  sending, replacing a late connection failure with an explicit size error.
+  `packages/core/snapshot-capture-budget.js` derives the available
+  JSON-encoded HTML budget from the complete message envelope. After retained
+  frames reply, capture performs a resource-free serializer pass so nested
+  frame documents, shadow roots, and their attribute escaping are included in
+  the structural reservation. It then keeps mutation overhead, accounts for
+  base64/percent expansion and repeated references, shares the remaining
+  budget across at most six in-flight resources, and skips later resources
+  with a typed `budget` diagnostic. The exact transport preflight remains the
+  final guard.
+- Snapshot reads reapply the idempotent preparation boundary, so legacy stored
+  HTML gets unavailable-stylesheet deactivation, loader removal, identity
+  metadata, and declarative shadow attributes without an extension-side
+  persistent migration.

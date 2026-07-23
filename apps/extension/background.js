@@ -34,6 +34,7 @@ import {
   requestDesktopPageInfo,
   requestDesktopPageSummary,
   requestDesktopSettings,
+  requestDesktopSnapshotCaptureBudget,
   requestDesktopCommand,
   requestDesktopSnapshotHtml,
   connectDesktopBridge,
@@ -819,7 +820,14 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
       );
     }
     const settings = settingsResponse.settings;
-    const capture = await captureSavePage(tabId, settings);
+    const captureBudget = await requestDesktopSnapshotCaptureBudget({
+      slug,
+      ts: timestamp,
+      url,
+      title,
+      markdown: mdResp.markdown,
+    });
+    const capture = await captureSavePage(tabId, settings, captureBudget);
     if (
       !capture ||
       typeof capture.html !== 'string' ||
@@ -856,7 +864,9 @@ function captureWarningMessage(warnings) {
   if (!Array.isArray(warnings)) {
     throw new Error('Snapshot capture warnings must be an array');
   }
-  const count = warnings.length;
+  const count = warnings.filter(
+    (warning) => warning.intentional !== true,
+  ).length;
   if (count === 0) return null;
   if (count === 1) {
     return tr(
@@ -1772,7 +1782,10 @@ async function requestSnapshotHtml(request) {
         error: desktopResp.error,
       };
     }
-    return { success: true, html: desktopResp.html };
+    return {
+      success: true,
+      html: prepareSnapshotHtml(desktopResp.html, { slug: request.slug }),
+    };
   } catch (error) {
     return {
       success: false,

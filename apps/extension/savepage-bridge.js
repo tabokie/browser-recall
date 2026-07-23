@@ -50,12 +50,16 @@ async function injectSavepageScripts(tabId) {
 
   await chrome.scripting.executeScript({
     target: { tabId },
-    files: ['browser-recall-bounded-response.js', 'savepage/content.js'],
+    files: [
+      'browser-recall-bounded-response.js',
+      'browser-recall-snapshot-capture-budget.js',
+      'savepage/content.js',
+    ],
   });
   logDebug('[savepage] content.js injected, waiting for scriptLoaded message');
 }
 
-export function captureSavePage(tabId, settings) {
+export function captureSavePage(tabId, settings, captureBudget) {
   if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
     return Promise.reject(
       new Error('Snapshot capture settings must be an object'),
@@ -66,6 +70,17 @@ export function captureSavePage(tabId, settings) {
       new Error(
         'Snapshot capture setting captureSnapshotVideo must be a boolean',
       ),
+    );
+  }
+  if (
+    !captureBudget ||
+    !Number.isSafeInteger(captureBudget.maxEncodedHtmlBytes) ||
+    captureBudget.maxEncodedHtmlBytes <= 0 ||
+    !Number.isSafeInteger(captureBudget.maxConcurrentResourceLoads) ||
+    captureBudget.maxConcurrentResourceLoads <= 0
+  ) {
+    return Promise.reject(
+      new Error('Snapshot capture requires a valid desktop-derived budget'),
     );
   }
   if (captureSessions.has(tabId)) {
@@ -81,6 +96,7 @@ export function captureSavePage(tabId, settings) {
       reject,
       resolve,
       settings,
+      captureBudget,
       settled: false,
       started: false,
       timeoutId: null,
@@ -126,6 +142,30 @@ function sendResourceFailure(tabId, captureId, index, reason) {
   });
 }
 
+function classifyResourceFailure(reason) {
+  const normalized = String(reason).replace(/\*$/, '');
+  if (normalized === 'blocked') {
+    return { category: 'policy', intentional: true };
+  }
+  if (normalized === 'mime') {
+    return { category: 'unsupported', intentional: true };
+  }
+  if (normalized === 'budget' || normalized === 'maxsize') {
+    return { category: 'budget', intentional: false };
+  }
+  if (normalized === 'mixed' || normalized === 'corsfail') {
+    return { category: 'security', intentional: false };
+  }
+  if (
+    normalized === 'maxtime' ||
+    normalized === 'fetcherr' ||
+    normalized.startsWith('load:')
+  ) {
+    return { category: 'network', intentional: false };
+  }
+  return { category: 'unavailable', intentional: false };
+}
+
 function isSupportedResourceType(mimetype) {
   return (
     mimetype === 'text/css' ||
@@ -146,6 +186,7 @@ async function loadSavepageResource(
   location,
   referrer,
   referrerPolicy,
+  maxBytes,
 ) {
   const session = matchingCaptureSession(tabId, captureId);
   if (!session) return;
@@ -180,7 +221,7 @@ async function loadSavepageResource(
       const charset = charsetMatch ? charsetMatch[1].toLowerCase() : '';
 
       if (!isSupportedResourceType(mimetype)) {
-        sendResourceFailure(tabId, captureId, index, 'blocked*');
+        sendResourceFailure(tabId, captureId, index, 'mime*');
         return;
       }
 
@@ -193,9 +234,19 @@ async function loadSavepageResource(
         return;
       }
 
-      const body = await readBoundedResponse(response, MAX_RESOURCE_SIZE);
+      if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+        sendResourceFailure(tabId, captureId, index, 'budget*');
+        return;
+      }
+      const readLimit = Math.min(MAX_RESOURCE_SIZE, maxBytes);
+      const body = await readBoundedResponse(response, readLimit);
       if (body.status === 'maxsize') {
-        sendResourceFailure(tabId, captureId, index, 'maxsize*');
+        sendResourceFailure(
+          tabId,
+          captureId,
+          index,
+          readLimit < MAX_RESOURCE_SIZE ? 'budget*' : 'maxsize*',
+        );
         return;
       }
 
@@ -207,6 +258,7 @@ async function loadSavepageResource(
         content: body.content,
         mimetype,
         charset,
+        bytesRead: body.bytesRead,
       });
     } else {
       sendResourceFailure(tabId, captureId, index, `load:${response.status}*`);
@@ -245,6 +297,9 @@ export function initSavepageBridge() {
             swapdevices: false,
             multiplesaves: false,
             csprestriction: false,
+            maxEncodedSnapshotBytes: session.captureBudget.maxEncodedHtmlBytes,
+            maxConcurrentResourceLoads:
+              session.captureBudget.maxConcurrentResourceLoads,
           });
         }
         break;
@@ -263,6 +318,7 @@ export function initSavepageBridge() {
         const warning = {
           location: String(message.location),
           reason: String(message.reason),
+          ...classifyResourceFailure(message.reason),
         };
         session.warnings.set(
           `${warning.reason}\u0000${warning.location}`,
@@ -304,6 +360,7 @@ export function initSavepageBridge() {
             message.location,
             message.referrer,
             message.referrerPolicy,
+            message.maxBytes,
           );
         }
         break;
@@ -335,7 +392,12 @@ export function initSavepageBridge() {
         const session = matchingCaptureSession(tabId, message.captureId);
         if (session) {
           settleCaptureSession(tabId, session, {
-            error: new Error('Save Page WE exited without producing HTML'),
+            error: Object.assign(
+              new Error(
+                message.error || 'Save Page WE exited without producing HTML',
+              ),
+              { code: message.code || 'savepage_exit' },
+            ),
           });
         }
         break;

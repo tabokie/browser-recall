@@ -1,0 +1,15 @@
+- The snapshot for <http://hintjens.com/blog:99> says 15 resources unavailable, and the page opens up blank. This problem has been occurring frequently recently. And for this particular page, Save Page WE was able to take a working snapshot and having only 3 failed resources. Let's investigate this issue thoroughly and improve the robustness of snapshot capture.
+- What else can be improved compared to Save Page WE? Was the fixed behavior introduced in a new version of Save Page WE? Or is it caused by drift after the fork?
+- Some of those are probably intentionally to reduce snapshot size. Trace the commits that introduce them and see if there's solid case.
+- Sounds good. For the intentional gaps, make sure they are documented near the upstream fork description.
+- Go ahead and improve based on your observations
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) 
+- Fix them
+- Please review my uncommitted changes
+- Fix them
+- [$mold](/Users/xyt/dev/skills/mold/SKILL.md) the snapshot part involved in this session
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.6 Sol
+- As code comments
+- Sure
+- Sure
+- Sure

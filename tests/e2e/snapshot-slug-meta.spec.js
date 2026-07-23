@@ -78,6 +78,97 @@ async function getActionBadgeForUrl(helper, url) {
 }
 
 test.describe('Snapshot slug meta tag', () => {
+  test('repairs legacy snapshot HTML when it is read for replay', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
+    void setupDir;
+    const originalUrl = 'https://example.com/legacy-snapshot-repair';
+    const slug = getSlugForUrl(originalUrl);
+    const timestamp = Date.now();
+    const nestedLegacyHtml =
+      '<!doctype html><html><body><legacy-inner-card id="legacy-inner-card"><template data-savepage-shadowroot=""><p id="legacy-inner-copy">Legacy nested shadow content</p></template></legacy-inner-card></body></html>';
+    const escapedNestedLegacyHtml = nestedLegacyHtml
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;');
+
+    await resetAndSeed(extContext, extensionId, [
+      settingsCheckpoint(),
+      {
+        path: pageCheckpointPath(slug),
+        data: pageEntityFixture({
+          slug,
+          url: originalUrl,
+          title: 'Legacy Snapshot Repair',
+          parentIds: [],
+          childIds: [`snapshot:${slug}-${timestamp}`],
+          timestamps: { 'test-device': timestamp },
+        }),
+      },
+      {
+        path: snapshotSidecarPath(slug, timestamp, 'html'),
+        content: `<!doctype html><html><head>
+          <link rel="stylesheet" href="https://unavailable.example/legacy.css">
+          <script id="savepage-shadowloader">savepage_ShadowLoader(5);</script>
+        </head><body><p>Legacy snapshot body</p>
+          <legacy-outer-card id="legacy-outer-card">
+            <template data-savepage-shadowroot="">
+              <iframe id="legacy-nested-shadow-frame" srcdoc="${escapedNestedLegacyHtml}"></iframe>
+            </template>
+          </legacy-outer-card>
+        </body></html>`,
+      },
+      {
+        path: snapshotSidecarPath(slug, timestamp, 'md'),
+        content: 'Legacy snapshot body',
+      },
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+    const response = await helper.evaluate(
+      ({ pageSlug, ts }) =>
+        chrome.runtime.sendMessage({
+          action: 'getSnapshotHtml',
+          slug: pageSlug,
+          timestamp: ts,
+        }),
+      { pageSlug: slug, ts: timestamp },
+    );
+    expect(response.success).toBe(true);
+    expect(response.html).toContain(
+      'data-browser-recall-unavailable-href="https://unavailable.example/legacy.css"',
+    );
+    expect(response.html).not.toContain('id="savepage-shadowloader"');
+    expect(response.html).toContain(
+      `<meta name="x-browser-recall-slug" content="${slug}">`,
+    );
+
+    const viewer = await extContext.newPage();
+    await viewer.goto(
+      `chrome-extension://${extensionId}/snapshot-viewer.html?slug=${encodeURIComponent(slug)}&ts=${timestamp}`,
+    );
+    const frame = viewer.frameLocator('#frame');
+    await expect
+      .poll(() =>
+        frame.locator('#legacy-outer-card').evaluate((outerCard) => {
+          const nestedFrame = outerCard.shadowRoot?.querySelector(
+            '#legacy-nested-shadow-frame',
+          );
+          const innerCard =
+            nestedFrame?.contentDocument?.querySelector('#legacy-inner-card');
+          return (
+            innerCard?.shadowRoot?.querySelector('#legacy-inner-copy')
+              ?.textContent ?? null
+          );
+        }),
+      )
+      .toBe('Legacy nested shadow content');
+
+    await viewer.close();
+    await helper.close();
+  });
+
   test('snapshot shortcut reconnects during connector cold start', async ({
     extContext,
     extensionId,

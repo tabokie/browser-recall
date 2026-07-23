@@ -160,7 +160,9 @@ var platformArch;
 
 var installType;
 
-var maxTotalSize;  /* MB */
+var maxEncodedSnapshotSize;  /* JSON-encoded HTML bytes */
+var maxConcurrentResourceLoads;
+var captureBudget;
 
 var showWarning,showResources,promptComments,skipWarningsComments,useNewSaveMethod;
 var loadLazyContent,lazyLoadType,loadLazyImages,retainCrossFrames,mergeCSSImages,executeScripts,removeUnsavedURLs,removeElements,rehideElements,includeInfoBar,includeSummary,formatHTML;
@@ -218,6 +220,12 @@ var resourceRemembered = [];
 var resourceReplaced = [];
 var resourceCSSRemembered = [];  /* number of times CSS image remembered */
 var resourceCSSFrameKeys = [];  /* keys of frames in which CSS image remembered */
+var resourceLoadQueue = [];
+var resourceLoadState = [];
+var resourceLoadsActive = 0;
+var resourceReadMaximumBytes = [];
+var resourceReadReservationBytes = [];
+var provisionalResourceEncodedBytes = 0;
 
 var firstIconLocation;  /* location of first favicon in document head */
 var rootIconLocation;  /* location of favicon in website root */
@@ -244,8 +252,6 @@ isFirefox = (typeof browser !== "undefined");
 platformOS = navigator.platform.startsWith("Win") ? "win" : navigator.platform.startsWith("Linux") ? "linux" : "mac";
 platformArch = "x86-64";
 installType = "normal";
-maxTotalSize = 200;
-
 /* Options hardcoded for our use case */
 showWarning = false;
 showResources = false;
@@ -331,6 +337,26 @@ function addListeners()
             case "performAction":
 
                 captureId = message.captureId;
+                maxEncodedSnapshotSize = message.maxEncodedSnapshotBytes;
+                maxConcurrentResourceLoads = message.maxConcurrentResourceLoads;
+                if (!globalThis.browserRecallBoundedResponse ||
+                    typeof globalThis.browserRecallBoundedResponse.readBoundedResponse != "function" ||
+                    !globalThis.browserRecallSnapshotCaptureBudget ||
+                    typeof globalThis.browserRecallSnapshotCaptureBudget.createSnapshotCaptureBudget != "function" ||
+                    typeof globalThis.browserRecallSnapshotCaptureBudget.estimateEmbeddedResourceBytes != "function" ||
+                    typeof globalThis.browserRecallSnapshotCaptureBudget.jsonStringEncodedBytes != "function" ||
+                    !Number.isSafeInteger(maxEncodedSnapshotSize) || maxEncodedSnapshotSize <= 0 ||
+                    !Number.isSafeInteger(maxConcurrentResourceLoads) || maxConcurrentResourceLoads <= 0)
+                {
+                    chrome.runtime.sendMessage({
+                        type: "saveExit",
+                        captureId: captureId,
+                        code: "invalid_capture_runtime",
+                        error: "Snapshot capture runtime or desktop-derived budget is unavailable"
+                    });
+                    break;
+                }
+                captureBudget = null;
                 menuAction = message.menuaction;
                 savedItems = message.saveditems;
                 toggleLazy = message.togglelazy;
@@ -349,7 +375,7 @@ function addListeners()
 
             case "loadSuccess":
 
-                if (message.captureId == captureId) loadSuccess(message.index,message.reason,message.content,message.mimetype,message.charset);
+                if (message.captureId == captureId) loadSuccess(message.index,message.reason,message.content,message.mimetype,message.charset,message.bytesRead);
 
                 break;
 
@@ -636,6 +662,12 @@ function initializeBeforeSave()
     resourceReplaced.length = 0;
     resourceCSSRemembered.length = 0;
     resourceCSSFrameKeys.length = 0;
+    resourceLoadQueue.length = 0;
+    resourceLoadState.length = 0;
+    resourceReadMaximumBytes.length = 0;
+    resourceReadReservationBytes.length = 0;
+    resourceLoadsActive = 0;
+    provisionalResourceEncodedBytes = 0;
     
     firstIconLocation = "";
     rootIconLocation = "";
@@ -661,8 +693,62 @@ function initializeBeforeSave()
                         // (frameURL[i] + "                                                            ").replace(/\:/g,"").substr(0,80));
         // }
         
-        gatherStyleSheets();
+        if (initializeCaptureBudgetFromStructure()) gatherStyleSheets();
     });
+}
+
+/************************************************************************/
+
+/* Measure the resource-free serializer output after retained frames reply */
+
+function initializeCaptureBudgetFromStructure()
+{
+    var baseEncodedBytes;
+
+    htmlStrings.length = 0;
+    htmlStrings[0] = "\uFEFF";
+
+    try
+    {
+        /* Measure serializer output, not outerHTML: retained frame replies and shadow roots */
+        /* only enter the archive here, and the daemon limit applies after JSON encoding. */
+        extractHTML(0,window,document.documentElement,false,false,"0",0,0);
+        baseEncodedBytes = globalThis.browserRecallSnapshotCaptureBudget.jsonStringEncodedBytes(htmlStrings.join("")) + 256*1024;
+    }
+    catch (e)
+    {
+        htmlStrings.length = 0;
+        htmlStrings[0] = "\uFEFF";
+        saveState = -1;
+        chrome.runtime.sendMessage({
+            type: "saveExit",
+            captureId: captureId,
+            code: "snapshot_structure_measurement_failed",
+            error: "Snapshot structure could not be measured before resources were embedded"
+        });
+        return false;
+    }
+
+    htmlStrings.length = 0;
+    htmlStrings[0] = "\uFEFF";
+
+    if (baseEncodedBytes >= maxEncodedSnapshotSize)
+    {
+        saveState = -1;
+        chrome.runtime.sendMessage({
+            type: "saveExit",
+            captureId: captureId,
+            code: "snapshot_budget_exceeded",
+            error: "Page structure exceeds the desktop snapshot capture budget before resources are embedded"
+        });
+        return false;
+    }
+
+    captureBudget = globalThis.browserRecallSnapshotCaptureBudget.createSnapshotCaptureBudget({
+        maxEncodedBytes: maxEncodedSnapshotSize,
+        baseEncodedBytes: baseEncodedBytes
+    });
+    return true;
 }
 
 /************************************************************************/
@@ -1717,16 +1803,91 @@ function loadResources()
     else
     {
         for (i = 0; i < resourceLocation.length; i++)
-        {
-            if (resourceStatus[i] == "pending") 
-            {
-                if (safeContentOrAllowedMixedContent(i))
-                {
-                     loadResource(i,resourceLocation[i],resourceReferrer[i],getReferrerPolicy());
-                }
-                else loadFailure(i,"mixed");
-            }
-        }
+            if (resourceStatus[i] == "pending") queueResourceLoad(i);
+
+        pumpResourceLoadQueue();
+    }
+}
+
+function queueResourceLoad(index)
+{
+    if (!safeContentOrAllowedMixedContent(index))
+    {
+        loadFailure(index,"mixed");
+        return;
+    }
+    if (resourceLoadState[index] == "queued" || resourceLoadState[index] == "active") return;
+    resourceLoadState[index] = "queued";
+    resourceLoadQueue.push(index);
+}
+
+function pumpResourceLoadQueue()
+{
+    var index;
+
+    while (resourceLoadsActive < maxConcurrentResourceLoads && resourceLoadQueue.length > 0)
+    {
+        index = resourceLoadQueue.shift();
+        if (resourceLoadState[index] != "queued") continue;
+        resourceLoadState[index] = "active";
+        resourceLoadsActive++;
+        loadResource(index,resourceLocation[index],resourceReferrer[index],getReferrerPolicy());
+    }
+}
+
+function finishResourceLoad(index)
+{
+    if (resourceLoadState[index] == "active")
+    {
+        resourceLoadsActive--;
+        resourceLoadState[index] = "done";
+        pumpResourceLoadQueue();
+    }
+}
+
+function expectedResourceCharset(index,charset)
+{
+    if (charset != "") return charset;
+    if (resourceCharSet[index] != "") return resourceCharSet[index];
+    if (resourceMimeType[index] == "text/css" || resourceMimeType[index] == "text/javascript" || resourceMimeType[index] == "image/svg+xml") return "utf-8";
+    return "";
+}
+
+function maximumResourceReadBytes(index,charset)
+{
+    var i,available,encodedshare,referencecount,maximum,unreservedactive,reservation;
+
+    if (Number.isSafeInteger(resourceReadMaximumBytes[index])) return resourceReadMaximumBytes[index];
+
+    available = captureBudget.remainingBytes()-provisionalResourceEncodedBytes;
+    unreservedactive = 0;
+    for (i = 0; i < resourceLoadState.length; i++)
+        if (resourceLoadState[i] == "active" && !Number.isSafeInteger(resourceReadMaximumBytes[i])) unreservedactive++;
+    encodedshare = Math.floor(available/Math.max(1,unreservedactive));
+    referencecount = Math.max(1,resourceRemembered[index] || 1);
+    if (expectedResourceCharset(index,charset) == "") maximum = Math.floor((encodedshare/referencecount)*3/4);
+    else maximum = Math.floor(encodedshare/referencecount/3);
+    maximum = Math.min(maxResourceSize*1024*1024,maximum);
+    if (maximum <= 0) return 0;
+
+    reservation = globalThis.browserRecallSnapshotCaptureBudget.estimateEmbeddedResourceBytes({
+        bytesRead: maximum,
+        charset: expectedResourceCharset(index,charset),
+        referenceCount: referencecount
+    });
+    resourceReadMaximumBytes[index] = maximum;
+    resourceReadReservationBytes[index] = reservation;
+    provisionalResourceEncodedBytes += reservation;
+    return maximum;
+}
+
+function releaseResourceReadReservation(index)
+{
+    if (Number.isSafeInteger(resourceReadReservationBytes[index]))
+    {
+        provisionalResourceEncodedBytes -= resourceReadReservationBytes[index];
+        resourceReadReservationBytes[index] = null;
+        resourceReadMaximumBytes[index] = null;
     }
 }
 
@@ -1765,15 +1926,21 @@ async function loadResource(index,location,referrer,referrerPolicy)
             if (matches != null) charset = matches[1].toLowerCase();
             else charset = "";
 
-            body = await globalThis.browserRecallBoundedResponse.readBoundedResponse(response,maxResourceSize*1024*1024);
+            var maximumBytes = maximumResourceReadBytes(index,charset);
+            if (maximumBytes <= 0)
+            {
+                loadFailure(index,"budget");
+                return;
+            }
+            body = await globalThis.browserRecallBoundedResponse.readBoundedResponse(response,maximumBytes);
 
             if (body.status == "maxsize")
             {
-                loadFailure(index,"maxsize");
+                loadFailure(index,maximumBytes < maxResourceSize*1024*1024 ? "budget" : "maxsize");
             }
             else
             {
-                loadSuccess(index,"",body.content,mimetype,charset);
+                loadSuccess(index,"",body.content,mimetype,charset,body.bytesRead);
             }
         }
         else  /* load resource in background script */
@@ -1787,8 +1954,22 @@ async function loadResource(index,location,referrer,referrerPolicy)
             else
             {
                 /* Most likely resource for <link>/<script>/<img>/<audio>/<video> element with crossorigin attribute requiring background fetch */
-                
-                chrome.runtime.sendMessage({ type: "loadResource", captureId: captureId, index: index, location: location, referrer: referrer, referrerPolicy: referrerPolicy });
+
+                maximumBytes = maximumResourceReadBytes(index,expectedResourceCharset(index,""));
+                if (maximumBytes <= 0)
+                {
+                    loadFailure(index,"budget");
+                    return;
+                }
+                chrome.runtime.sendMessage({
+                    type: "loadResource",
+                    captureId: captureId,
+                    index: index,
+                    location: location,
+                    referrer: referrer,
+                    referrerPolicy: referrerPolicy,
+                    maxBytes: maximumBytes
+                });
             }
         }
     }
@@ -1809,8 +1990,22 @@ async function loadResource(index,location,referrer,referrerPolicy)
             else
             {
                 /* Most likely resource for <link>/<script>/<img>/<audio>/<video> element with crossorigin attribute requiring background fetch */
-                
-                chrome.runtime.sendMessage({ type: "loadResource", captureId: captureId, index: index, location: location, referrer: referrer, referrerPolicy: referrerPolicy });
+
+                maximumBytes = maximumResourceReadBytes(index,expectedResourceCharset(index,""));
+                if (maximumBytes <= 0)
+                {
+                    loadFailure(index,"budget");
+                    return;
+                }
+                chrome.runtime.sendMessage({
+                    type: "loadResource",
+                    captureId: captureId,
+                    index: index,
+                    location: location,
+                    referrer: referrer,
+                    referrerPolicy: referrerPolicy,
+                    maxBytes: maximumBytes
+                });
             }
         }
     }
@@ -1820,9 +2015,9 @@ async function loadResource(index,location,referrer,referrerPolicy)
     }
 }
 
-function loadSuccess(index,reason,content,mimetype,charset)
+function loadSuccess(index,reason,content,mimetype,charset,bytesRead)
 {
-    var i,resourceURL,frameURL,csstext,baseuri,regex,documentURL;
+    var i,resourceURL,frameURL,csstext,baseuri,regex,documentURL,encodedBytes,referencecount;
     var matches = [];
 
     /* Guard against undefined resource slot (e.g. CSP blocked base-uri injection) */
@@ -1963,7 +2158,7 @@ function loadSuccess(index,reason,content,mimetype,charset)
                         
                         if (safeContentOrAllowedMixedContent(i))
                         { 
-                            loadResource(i,resourceLocation[i],resourceReferrer[i],getReferrerPolicy());
+                            queueResourceLoad(i);
                         }
                         else loadFailure(i,"mixed");
                     }
@@ -1973,10 +2168,26 @@ function loadSuccess(index,reason,content,mimetype,charset)
             break;
     }
     
+    referencecount = Math.max(1,resourceRemembered[index] || 1);
+    releaseResourceReadReservation(index);
+    /* Reserve encoded expansion for every retained reference, not raw response bytes. */
+    encodedBytes = globalThis.browserRecallSnapshotCaptureBudget.estimateEmbeddedResourceBytes({
+        bytesRead: Math.max(Number.isSafeInteger(bytesRead) ? bytesRead : 0,resourceContent[index].length),
+        charset: resourceCharSet[index],
+        referenceCount: referencecount
+    });
+    if (!captureBudget.reserve(encodedBytes))
+    {
+        loadFailure(index,"budget");
+        return;
+    }
+
     resourceStatus[index] = "success";
     
     resourceReason[index] = reason;
     
+    finishResourceLoad(index);
+
     if (--resourceCount <= 0)
     {
         timeFinish[passNumber+3] = performance.now();
@@ -1988,18 +2199,23 @@ function loadSuccess(index,reason,content,mimetype,charset)
 
 function loadFailure(index,reason)
 {
-    var normalizedReason;
+    var normalizedReason,location;
 
     normalizedReason = String(reason).replace(/\*$/,"");
-    if (normalizedReason == "maxtime" || normalizedReason == "maxsize" || normalizedReason == "fetcherr" || normalizedReason.substr(0,5) == "load:")
+    location = resourceLocation[index];
+    if (typeof location == "string" && /^https?:/i.test(location))
     {
-        chrome.runtime.sendMessage({ type: "resourceFailure", captureId: captureId, location: resourceLocation[index], reason: normalizedReason });
+        chrome.runtime.sendMessage({ type: "resourceFailure", captureId: captureId, location: location, reason: normalizedReason });
     }
 
     resourceStatus[index] = "failure";
     
     resourceReason[index] = reason;
+
+    releaseResourceReadReservation(index);
     
+    finishResourceLoad(index);
+
     if (--resourceCount <= 0)
     {
         timeFinish[passNumber+3] = performance.now();
@@ -2150,6 +2366,12 @@ function generateHTML()
     resourceReplaced.length = 0;
     resourceCSSRemembered.length = 0;
     resourceCSSFrameKeys.length = 0;
+    resourceLoadQueue.length = 0;
+    resourceLoadState.length = 0;
+    resourceReadMaximumBytes.length = 0;
+    resourceReadReservationBytes.length = 0;
+    resourceLoadsActive = 0;
+    provisionalResourceEncodedBytes = 0;
 
     firstIconLocation = "";
     rootIconLocation = "";
@@ -2172,6 +2394,18 @@ function generateHTML()
 
         htmlStrings.length = 0;
 
+        if (globalThis.browserRecallSnapshotCaptureBudget.jsonStringEncodedBytes(html) > maxEncodedSnapshotSize)
+        {
+            saveState = -1;
+            chrome.runtime.sendMessage({
+                type: "saveExit",
+                captureId: captureId,
+                code: "snapshot_budget_exceeded",
+                error: "Generated snapshot HTML exceeds the desktop snapshot capture budget"
+            });
+            return;
+        }
+
         saveState = 6;
 
         chrome.runtime.sendMessage({ type: "savepageDone", captureId: captureId, html: html });
@@ -2190,7 +2424,7 @@ function extractHTML(depth,frame,element,crossframe,nosrcframe,framekey,parentpr
 {
     var i,j,tagName,startTag,textContent,endTag,inline,preserve,style,display,position,whitespace,displayed,csstext,baseuri,documenturi,separator,origurl,datauri,origstr,dupelement,dupsheet,location,newurl;
     var visible,width,height,currentsrc,svgstr,parser,svgdoc,svgfragid,svgelement,svghref,subframekey,startindex,endindex,htmltext,origsrcdoc,origsandbox,framedoc,prefix,shadowroot;
-    var doctype,target,text,asciistring,date,datestr,pubelement,pubstr,pubzone,pubdate,pubdatestr,pageurl,state;
+    var doctype,target,text,asciistring,date,datestr,pubelement,pubstr,pubzone,pubdate,pubdatestr,pageurl,state,childnodes;
     var pubmatches = [];
     var metadataElements = ["base","link","meta","noscript","script","style","template","title"];  /* HTML Living Standard 3.2.5.2.1 Metadata Content */
     var voidElements = ["area","base","br","col","command","embed","frame","hr","img","input","keygen","link","menuitem","meta","param","source","track","wbr"];  /* W3C HTML5 2011 4.3 Elements + menuitem */
@@ -3267,6 +3501,8 @@ function extractHTML(depth,frame,element,crossframe,nosrcframe,framekey,parentpr
                         if (element.hasAttribute("srcdoc"))
                         {
                             origsrcdoc = element.getAttribute("srcdoc");
+                            origsrcdoc = origsrcdoc.replace(/&/g,"&amp;");
+                            origsrcdoc = origsrcdoc.replace(/"/g,"&quot;");
                             
                             origstr = " data-savepage-srcdoc=\"" + origsrcdoc + "\"";
                             
@@ -3318,6 +3554,8 @@ function extractHTML(depth,frame,element,crossframe,nosrcframe,framekey,parentpr
                             if (element.hasAttribute("srcdoc"))
                             {
                                 origsrcdoc = element.getAttribute("srcdoc");
+                                origsrcdoc = origsrcdoc.replace(/&/g,"&amp;");
+                                origsrcdoc = origsrcdoc.replace(/"/g,"&quot;");
                                 
                                 origstr = " data-savepage-srcdoc=\"" + origsrcdoc + "\"";
                                 
@@ -3557,7 +3795,7 @@ function extractHTML(depth,frame,element,crossframe,nosrcframe,framekey,parentpr
                         indent += 2;
                     }
                     
-                    htmlStrings[htmlStrings.length] = "<template data-savepage-shadowroot=\"\">";
+                    htmlStrings[htmlStrings.length] = "<template data-savepage-shadowroot=\"\" shadowrootmode=\"open\">";
                     
                     for (i = 0; i < shadowroot.childNodes.length; i++)
                     {
@@ -3617,46 +3855,48 @@ function extractHTML(depth,frame,element,crossframe,nosrcframe,framekey,parentpr
             }
             
             /* Handle normal child nodes */
-            
-            for (i = 0; i < element.childNodes.length; i++)
+
+            childnodes = (element.localName == "template") ? element.content.childNodes : element.childNodes;
+
+            for (i = 0; i < childnodes.length; i++)
             {
-                if (element.childNodes[i] != null)  /* in case web page not fully loaded before extracting */
+                if (childnodes[i] != null)  /* in case web page not fully loaded before extracting */
                 {
-                    if (element.childNodes[i].nodeType == 1)  /* element node */
+                    if (childnodes[i].nodeType == 1)  /* element node */
                     {
                         if (depth == 0)
                         {
-                            if (element.childNodes[i].localName == "iframe" && element.childNodes[i].id.substr(0,8) == "savepage") continue;
-                            if (element.childNodes[i].localName == "script" && element.childNodes[i].id.substr(0,8) == "savepage") continue;
-                            if (element.childNodes[i].localName == "meta" && element.childNodes[i].name.substr(0,8) == "savepage") continue;
+                            if (childnodes[i].localName == "iframe" && childnodes[i].id.substr(0,8) == "savepage") continue;
+                            if (childnodes[i].localName == "script" && childnodes[i].id.substr(0,8) == "savepage") continue;
+                            if (childnodes[i].localName == "meta" && childnodes[i].name.substr(0,8) == "savepage") continue;
                         }
                         
                         /* Handle other element nodes */
                         
-                        extractHTML(depth,frame,element.childNodes[i],crossframe,nosrcframe,framekey,preserve,indent+2);
+                        extractHTML(depth,frame,childnodes[i],crossframe,nosrcframe,framekey,preserve,indent+2);
                     }
-                    else if (element.childNodes[i].nodeType == 3)  /* text node */
+                    else if (childnodes[i].nodeType == 3)  /* text node */
                     {
-                        text = element.childNodes[i].textContent;
+                        text = childnodes[i].textContent;
                         
                         /* Skip text nodes before skipped elements/comments and at end of <head>/<body> elements */
                         
                         if (pageType > 0 && formatHTML && depth == 0)
                         {
-                            if (text.trim() == "" && (i+1) < element.childNodes.length && element.childNodes[i+1].nodeType == 1)
+                            if (text.trim() == "" && (i+1) < childnodes.length && childnodes[i+1].nodeType == 1)
                             {
-                                if (element.childNodes[i+1].localName == "base") continue;
-                                if (element.childNodes[i+1].localName == "iframe" && element.childNodes[i+1].id.substr(0,8) == "savepage") continue;
-                                if (element.childNodes[i+1].localName == "script" && element.childNodes[i+1].id.substr(0,8) == "savepage") continue;
-                                if (element.childNodes[i+1].localName == "meta" && element.childNodes[i+1].name.substr(0,8) == "savepage") continue;
+                                if (childnodes[i+1].localName == "base") continue;
+                                if (childnodes[i+1].localName == "iframe" && childnodes[i+1].id.substr(0,8) == "savepage") continue;
+                                if (childnodes[i+1].localName == "script" && childnodes[i+1].id.substr(0,8) == "savepage") continue;
+                                if (childnodes[i+1].localName == "meta" && childnodes[i+1].name.substr(0,8) == "savepage") continue;
                             }
                                 
-                            if (text.trim() == "" && (i+1) < element.childNodes.length && element.childNodes[i+1].nodeType == 8)
+                            if (text.trim() == "" && (i+1) < childnodes.length && childnodes[i+1].nodeType == 8)
                             {
-                                if (element.childNodes[i+1].textContent.indexOf("SAVE PAGE WE") >= 0) continue;
+                                if (childnodes[i+1].textContent.indexOf("SAVE PAGE WE") >= 0) continue;
                             }
                             
-                            if (text.trim() == "" && i == element.childNodes.length-1)
+                            if (text.trim() == "" && i == childnodes.length-1)
                             {
                                 if (element.localName == "head") continue;
                                 if (element.localName == "body") continue;
@@ -3684,9 +3924,9 @@ function extractHTML(depth,frame,element,crossframe,nosrcframe,framekey,parentpr
                         
                         htmlStrings[htmlStrings.length] = text;
                     }
-                    else if (element.childNodes[i].nodeType == 8)  /* comment node */
+                    else if (childnodes[i].nodeType == 8)  /* comment node */
                     {
-                        text = element.childNodes[i].textContent;
+                        text = childnodes[i].textContent;
                         
                         /* Skip existing Save Page WE metrics and resource summary comment */
                         

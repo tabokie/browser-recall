@@ -136,6 +136,29 @@ describe('extension staged assets', () => {
     expect(
       readFileSync(join(outDir, 'core/snapshot-html.js'), 'utf8'),
     ).toContain('export function prepareSnapshotHtml');
+    const boundedResponseSource = readFileSync(
+      join(outDir, 'browser-recall-bounded-response.js'),
+      'utf8',
+    );
+    expect(boundedResponseSource).toContain(
+      'globalThis.browserRecallBoundedResponse',
+    );
+    expect(
+      readFileSync(
+        join(outDir, 'browser-recall-snapshot-capture-budget.js'),
+        'utf8',
+      ),
+    ).toContain('globalThis.browserRecallSnapshotCaptureBudget');
+    expect(
+      readFileSync(join(outDir, 'snapshot-capture-budget.js'), 'utf8'),
+    ).toBe("export * from './core/snapshot-capture-budget.js';\n");
+    const savepageBridgeSource = readFileSync(
+      join(outDir, 'savepage-bridge.js'),
+      'utf8',
+    );
+    expect(savepageBridgeSource).toContain(
+      "'browser-recall-bounded-response.js',\n      'browser-recall-snapshot-capture-budget.js',\n      'savepage/content.js'",
+    );
   });
 
   it('stages browser-native extension localization files', () => {

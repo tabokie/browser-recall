@@ -40,11 +40,39 @@ test('capture reconstructs serialized shadow DOM in the trusted snapshot viewer'
 }) => {
   void setupDir;
 
+  const crossOrigin = await startServer((_request, response) => {
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    response.end(`<!doctype html><html><body>
+      <cross-snapshot-card id="cross-snapshot-card"></cross-snapshot-card>
+      <script>
+        customElements.define('cross-snapshot-card', class extends HTMLElement {
+          constructor() {
+            super();
+            const root = this.attachShadow({ mode: 'open' });
+            root.innerHTML = '<p id="cross-shadow-copy">Cross-origin captured shadow content</p>';
+          }
+        });
+      </script>
+    </body></html>`);
+  });
   localServer.addPage('/shadow-dom-snapshot', {
     title: 'Shadow DOM snapshot',
     body: `
       <link rel="icon" href="data:image/png;base64,iVBORw0KGgo=">
       <snapshot-card id="snapshot-card"></snapshot-card>
+      <iframe id="nested-shadow-frame" srcdoc="<!doctype html><html><body>
+        <nested-snapshot-card id='nested-snapshot-card'></nested-snapshot-card>
+        <script>
+          customElements.define('nested-snapshot-card', class extends HTMLElement {
+            constructor() {
+              super();
+              const root = this.attachShadow({ mode: 'open' });
+              root.innerHTML = '<p id=&quot;nested-shadow-copy&quot;>Nested captured shadow content</p>';
+            }
+          });
+        <\/script>
+      </body></html>"></iframe>
+      <iframe id="cross-origin-shadow-frame" src="http://127.0.0.1:${crossOrigin.port}/"></iframe>
       <script>
         customElements.define('snapshot-card', class extends HTMLElement {
           constructor() {
@@ -122,7 +150,7 @@ test('capture reconstructs serialized shadow DOM in the trusted snapshot viewer'
     );
     expect(snapshotResponse.success).toBe(true);
     expect(snapshotResponse.html).toContain(
-      '<template data-savepage-shadowroot="">',
+      '<template data-savepage-shadowroot="" shadowrootmode="open">',
     );
     expect(snapshotResponse.html).toContain('Captured shadow content');
     expect(snapshotResponse.html).not.toContain('id="savepage-shadowloader"');
@@ -152,12 +180,49 @@ test('capture reconstructs serialized shadow DOM in the trusted snapshot viewer'
       'color',
       'rgb(35, 87, 133)',
     );
+    const nestedCard = frame
+      .frameLocator('#nested-shadow-frame')
+      .locator('#nested-snapshot-card');
+    await expect
+      .poll(() =>
+        nestedCard.evaluate((element) => ({
+          shadowText:
+            element.shadowRoot?.querySelector('#nested-shadow-copy')
+              ?.textContent ?? null,
+          templateCount: element.querySelectorAll(
+            ':scope > template[data-savepage-shadowroot]',
+          ).length,
+        })),
+      )
+      .toEqual({
+        shadowText: 'Nested captured shadow content',
+        templateCount: 0,
+      });
+    const crossOriginCard = frame
+      .frameLocator('#cross-origin-shadow-frame')
+      .locator('#cross-snapshot-card');
+    await expect
+      .poll(() =>
+        crossOriginCard.evaluate((element) => ({
+          shadowText:
+            element.shadowRoot?.querySelector('#cross-shadow-copy')
+              ?.textContent ?? null,
+          templateCount: element.querySelectorAll(
+            ':scope > template[data-savepage-shadowroot]',
+          ).length,
+        })),
+      )
+      .toEqual({
+        shadowText: 'Cross-origin captured shadow content',
+        templateCount: 0,
+      });
   } finally {
     await Promise.all([
       helper?.close().catch(() => {}),
       page?.close().catch(() => {}),
       viewer?.close().catch(() => {}),
     ]);
+    await crossOrigin.close();
   }
 });
 
@@ -279,6 +344,95 @@ test('capture embeds nested cross-origin CSS imports through the extension fallb
   }
 });
 
+test('capture bounds concurrent resource loads', async ({
+  extContext,
+  extensionId,
+  setupDir,
+}) => {
+  void setupDir;
+  const resourceCount = 12;
+  let activeCaptureRequests = 0;
+  let maxActiveCaptureRequests = 0;
+  let completedCaptureRequests = 0;
+  const pageOrigin = await startServer((request, response) => {
+    if (request.url === '/') {
+      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      response.end(`<!doctype html><html><body>
+        ${Array.from(
+          { length: resourceCount },
+          (_, index) => `<img src="/bounded-${index}.png" alt="${index}">`,
+        ).join('')}
+      </body></html>`);
+      return;
+    }
+    if (
+      request.url?.startsWith('/bounded-') &&
+      request.headers['sec-fetch-dest'] === 'empty'
+    ) {
+      activeCaptureRequests++;
+      maxActiveCaptureRequests = Math.max(
+        maxActiveCaptureRequests,
+        activeCaptureRequests,
+      );
+      setTimeout(() => {
+        response.writeHead(200, { 'Content-Type': 'image/png' });
+        response.end(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+        activeCaptureRequests--;
+        completedCaptureRequests++;
+      }, 100);
+      return;
+    }
+    response.writeHead(200, { 'Content-Type': 'image/png' });
+    response.end(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  });
+
+  let helper;
+  let page;
+  try {
+    page = await extContext.newPage();
+    const pageUrl = `http://127.0.0.1:${pageOrigin.port}/`;
+    await page.goto(pageUrl);
+    helper = await openHelperPage(extContext, extensionId);
+    await page.bringToFront();
+    await expect
+      .poll(() =>
+        helper.evaluate(async () => {
+          const [tab] = await chrome.tabs.query({
+            active: true,
+            currentWindow: true,
+          });
+          if (!tab) return null;
+          try {
+            return await chrome.tabs.sendMessage(tab.id, {
+              action: 'isPdfPage',
+            });
+          } catch {
+            return null;
+          }
+        }),
+      )
+      .toEqual({ isPdf: false });
+
+    const capture = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' }),
+    );
+    expect(capture).toEqual(
+      expect.objectContaining({
+        success: true,
+      }),
+    );
+    expect(completedCaptureRequests).toBe(resourceCount);
+    expect(maxActiveCaptureRequests).toBeGreaterThan(1);
+    expect(maxActiveCaptureRequests).toBeLessThanOrEqual(6);
+  } finally {
+    await Promise.all([
+      helper?.close().catch(() => {}),
+      page?.close().catch(() => {}),
+    ]);
+    await pageOrigin.close();
+  }
+});
+
 test('capture skips resource bodies that exceed the resource time limit', async ({
   extContext,
   extensionId,
@@ -379,6 +533,8 @@ test('capture skips resource bodies that exceed the resource time limit', async 
           expect.objectContaining({
             location: expect.stringContaining('/same-origin.css'),
             reason: 'maxtime',
+            category: 'network',
+            intentional: false,
           }),
           expect.objectContaining({
             location: expect.stringContaining('/same-origin.png'),
