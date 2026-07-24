@@ -863,6 +863,10 @@
     "message": "Surligner la sélection",
     "description": "Selection context menu label."
   },
+  "extensionHideMarkup": {
+    "message": "Masquer le marquage",
+    "description": "Popup button that temporarily hides applied highlight markup."
+  },
   "extensionResumeTracing": {
     "message": "Reprendre le suivi",
     "description": "Extension popup recording resume title."
@@ -1200,10 +1204,6 @@
     "message": "Filtres",
     "description": "Localized UI text."
   },
-  "desktopFirstSeen": {
-    "message": "Vu pour la première fois",
-    "description": "Localized UI text."
-  },
   "desktopFirstVisit": {
     "message": "Première visite",
     "description": "Localized UI text."
@@ -1488,16 +1488,12 @@
     "message": "Synchronisation ignorée",
     "description": "Localized UI text."
   },
-  "desktopTime": {
-    "message": "Temps",
-    "description": "Localized UI text."
-  },
   "desktopToggleFailed": {
     "message": "Échec de la bascule : $1",
     "description": "Sync device toggle failure."
   },
   "desktopVisitedMultipleTimes": {
-    "message": "Visité plusieurs fois",
+    "message": "Visité plusieurs jours",
     "description": "Localized UI text."
   },
   "desktopVisits": {

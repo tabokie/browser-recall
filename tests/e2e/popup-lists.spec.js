@@ -136,7 +136,7 @@ async function waitForContentScript(helper, page, url) {
   throw new Error(`content script did not load for ${url}`);
 }
 
-test('popup shows reload guidance when page identity receiver is stale', async ({
+test('popup shows identity failure detail when the receiver is stale', async ({
   extContext,
   extensionId,
   setupDir,
@@ -155,6 +155,8 @@ test('popup shows reload guidance when page identity receiver is stale', async (
   await page.waitForLoadState('domcontentloaded');
   const helper = await openHelperPage(extContext, extensionId);
   const reloadMessage = await getExtensionMessage(helper, 'extensionReloaded');
+  const receiverError =
+    'Could not establish connection. Receiving end does not exist.';
   const prepared = await helper.evaluate(async (pageUrl) => {
     const [tab] = await chrome.tabs.query({ url: pageUrl });
     if (!tab?.id) throw new Error('Source tab not found');
@@ -183,6 +185,9 @@ test('popup shows reload guidance when page identity receiver is stale', async (
   );
   await expect(popup.locator('#pageDiagnosticDetail')).toContainText(
     'reason: popup-page-identity-failed',
+  );
+  await expect(popup.locator('#pageDiagnosticDetail')).toContainText(
+    `error: ${receiverError}`,
   );
 
   await popup.close();
@@ -369,6 +374,99 @@ test.describe('Popup list chip behavior', () => {
     );
 
     await popup.close();
+    await page.close();
+  });
+
+  test('popup hides applied highlight markup without deleting the saved note', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    const highlightText = 'Hide this highlighted markup.';
+    localServer.addPage('/hide-highlight-markup', {
+      title: 'Hide Highlight Markup',
+      body: `<main><p>${highlightText}</p></main>`,
+    });
+    const url = localServer.url('/hide-highlight-markup');
+    const slug = getSlugForUrl(url);
+    const noteSlug = 'hide-highlight-markup-note';
+
+    await resetAndSeed(extContext, extensionId, [
+      settingsCheckpoint(),
+      {
+        path: pageCheckpointPath(slug),
+        data: pageEntityFixture({
+          slug,
+          url,
+          title: 'Hide Highlight Markup',
+          childIds: [`note:${noteSlug}`],
+        }),
+      },
+      {
+        path: `objects/notes/${noteSlug}.json`,
+        data: noteEntityFixture({
+          slug: noteSlug,
+          excerpt: [highlightText],
+          note: '',
+          cssPath: ['main > p'],
+          url,
+        }),
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await expect(page.locator('mark.browser-recall-highlight')).toHaveText(
+      highlightText,
+    );
+
+    const helper = await openHelperPage(extContext, extensionId);
+    const hideMarkupLabel = await getExtensionMessage(
+      helper,
+      'extensionHideMarkup',
+    );
+    await helper.close();
+    const popup = await openPopupForUrl(extContext, extensionId, {
+      url,
+      title: 'Hide Highlight Markup',
+    });
+    await expect(popup.locator('#pageNoteAddBtn')).toBeVisible();
+    await expect(popup.locator('#hideMarkupBtn')).toHaveText(hideMarkupLabel);
+
+    const actionOrder = await popup
+      .locator('#pageNoteAddBtn, #hideMarkupBtn')
+      .evaluateAll((buttons) =>
+        buttons.map((button) => ({
+          id: button.id,
+          top: button.getBoundingClientRect().top,
+        })),
+      );
+    expect(actionOrder.map(({ id }) => id)).toEqual([
+      'pageNoteAddBtn',
+      'hideMarkupBtn',
+    ]);
+    expect(actionOrder[1].top).toBeCloseTo(actionOrder[0].top, 1);
+
+    await popup.locator('#hideMarkupBtn').click();
+
+    await expect(page.locator('mark.browser-recall-highlight')).toHaveCount(0);
+    await page.evaluate(() => {
+      document.body.append(document.createElement('aside'));
+    });
+    await page.waitForTimeout(250);
+    await expect(page.locator('mark.browser-recall-highlight')).toHaveCount(0);
+    await expect(page.locator('main')).toHaveText(highlightText);
+    await expect(popup.locator('.highlight-item')).toHaveCount(1);
+
+    await popup.close();
+    const reopenedPopup = await openPopupForUrl(extContext, extensionId, {
+      url,
+      title: 'Hide Highlight Markup',
+    });
+    await expect(reopenedPopup.locator('.highlight-item')).toHaveCount(1);
+    await reopenedPopup.close();
     await page.close();
   });
 

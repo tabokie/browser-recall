@@ -889,9 +889,26 @@ function renderPageNoteWrap(globalNote) {
   const noteSlug = globalNote?.slug || '';
 
   if (!noteText && !noteSlug) {
-    wrap.innerHTML = `<button class="page-note-add" id="pageNoteAddBtn">${escapeHtml(tr('extensionAddPageNote', '+ Page note'))}</button>`;
+    wrap.innerHTML = `<div class="page-note-empty-actions">
+      <button class="page-note-add" id="pageNoteAddBtn">${escapeHtml(tr('extensionAddPageNote', '+ Page note'))}</button>
+      <button class="page-note-add" id="hideMarkupBtn">${escapeHtml(tr('extensionHideMarkup', 'Hide markup'))}</button>
+    </div>`;
     wrap.querySelector('#pageNoteAddBtn').addEventListener('click', () => {
       openPageNoteEditor(wrap, '', '');
+    });
+    wrap.querySelector('#hideMarkupBtn').addEventListener('click', () => {
+      void runPopupUiMutation('hide-highlight-markup', async () => {
+        const tabId = currentPage.tab?.id;
+        if (!Number.isInteger(tabId)) {
+          throw new Error(
+            tr('extensionNoTargetTab', 'No target tab', undefined),
+          );
+        }
+        const response = await chrome.tabs.sendMessage(tabId, {
+          action: 'hideHighlightMarkup',
+        });
+        requireSuccessfulResponse(response, 'hideHighlightMarkup');
+      }).catch((error) => showErrorBubble(error.message));
     });
   } else {
     wrap.innerHTML = `<div class="page-note-display">

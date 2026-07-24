@@ -268,11 +268,98 @@ async function commitDateSelection(chartEl, resultsContainer, activeDates) {
   syncChartHighlights();
 }
 
+function bindChartMarquee(chartEl, barsEl, resultsContainer) {
+  if (barsEl._chartMarqueeBound) return;
+  barsEl._chartMarqueeBound = true;
+
+  barsEl.addEventListener('mousedown', (event) => {
+    if (event.button !== 0 || !event.target.closest('.chart-bars-row')) return;
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const additive = event.shiftKey || event.ctrlKey || event.metaKey;
+    const initiallyActive = collectActiveDates(chartEl);
+    let band = null;
+    let didDrag = false;
+
+    const onMouseMove = (moveEvent) => {
+      if (
+        !didDrag &&
+        Math.abs(moveEvent.clientX - startX) <= 3 &&
+        Math.abs(moveEvent.clientY - startY) <= 3
+      ) {
+        return;
+      }
+      didDrag = true;
+      moveEvent.preventDefault();
+
+      const bounds = barsEl.getBoundingClientRect();
+      const left = Math.max(bounds.left, Math.min(startX, moveEvent.clientX));
+      const right = Math.min(bounds.right, Math.max(startX, moveEvent.clientX));
+      const top = Math.max(bounds.top, Math.min(startY, moveEvent.clientY));
+      const bottom = Math.min(
+        bounds.bottom,
+        Math.max(startY, moveEvent.clientY),
+      );
+
+      if (!band) {
+        band = document.createElement('div');
+        band.className = 'chart-select-band';
+        document.body.appendChild(band);
+      }
+      band.style.left = `${left}px`;
+      band.style.top = `${top}px`;
+      band.style.width = `${Math.max(0, right - left)}px`;
+      band.style.height = `${Math.max(0, bottom - top)}px`;
+
+      const activeDates = additive ? new Set(initiallyActive) : new Set();
+      chartEl.querySelectorAll('.chart-bar-group.has-data').forEach((group) => {
+        const rect = group.getBoundingClientRect();
+        if (
+          rect.right > left &&
+          rect.left < right &&
+          rect.bottom > top &&
+          rect.top < bottom
+        ) {
+          activeDates.add(group.dataset.date);
+        }
+        group.classList.toggle('active', activeDates.has(group.dataset.date));
+      });
+    };
+
+    const onMouseUp = async () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      band?.remove();
+      if (!didDrag) return;
+
+      barsEl._chartDragJustFinished = true;
+      setTimeout(() => {
+        barsEl._chartDragJustFinished = false;
+      }, 0);
+      await commitDateSelection(
+        chartEl,
+        resultsContainer,
+        collectActiveDates(chartEl),
+      );
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
+}
+
 export function bindChartBarClick(chartEl, resultsContainer) {
   const barsEl = chartEl.querySelector('.chart-bars');
   if (!barsEl || barsEl._chartClickBound) return;
   barsEl._chartClickBound = true;
+  bindChartMarquee(chartEl, barsEl, resultsContainer);
   barsEl.addEventListener('click', async (e) => {
+    if (barsEl._chartDragJustFinished) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     const bar = e.target.closest('.chart-bar');
     if (!bar) return;
     const group = bar.closest('.chart-bar-group');

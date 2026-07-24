@@ -129,12 +129,12 @@ Config: `vitest.config.js`. Tests: `tests/**/*.test.js`.
 npx playwright test                          # run all E2E tests
 npx playwright test tests/e2e/lists.spec.js  # run a specific file
 npx playwright test --headed                 # visible browser
-npm run test:visual                          # build desktop UI and run desktop visual E2E
+npm run test:visual                          # build desktop UI; run full Chromium and tagged WebKit visual E2E
 ```
 
-Config: `playwright.config.js`. Tests: `tests/e2e/*.spec.js`. Single worker, chromium channel.
+Config: `playwright.config.js`. Tests: `tests/e2e/*.spec.js`. Runs use one worker; Chromium is the default channel, and the tagged desktop visual pass selects WebKit explicitly.
 
-`npm run test:visual` is the canonical full desktop visual check. It first stages `dist/desktop/ui/`, then runs `tests/e2e/desktop-visual.spec.js`.
+`npm run test:visual` is the canonical desktop visual check. It first stages `dist/desktop/ui/`, runs the full `tests/e2e/desktop-visual.spec.js` suite in Chromium, then runs its `@webkit` cases against WebKit. Install both browsers with `npm run ci:install-desktop-visual-browsers`.
 
 The native macOS lifecycle test registers a real status item and must never run in a persistent personal login session. Run it only in an ephemeral macOS user or disposable CI runner:
 

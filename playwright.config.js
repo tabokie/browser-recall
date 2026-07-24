@@ -1,5 +1,12 @@
 import { defineConfig } from '@playwright/test';
 
+const browserEngine = process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE;
+if (browserEngine && browserEngine !== 'webkit') {
+  throw new Error(
+    `Unsupported BROWSER_RECALL_PLAYWRIGHT_ENGINE: ${browserEngine}`,
+  );
+}
+
 export default defineConfig({
   testDir: './tests/e2e',
   timeout: 30000,
@@ -7,6 +14,6 @@ export default defineConfig({
   retries: 0,
   workers: 1, // extensions require serial execution (one persistent context)
   use: {
-    channel: 'chromium',
+    channel: browserEngine === 'webkit' ? undefined : 'chromium',
   },
 });

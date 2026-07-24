@@ -625,12 +625,22 @@
       }
 
       .chart-bars {
+        position: relative;
         overflow-x: auto;
         overflow-y: visible;
         min-height: 60px; /* chart-bars-row (44px) + gap (4px) + chart-axis (12px) */
         padding-top: 3px;
         display: flex;
         align-items: flex-start;
+        user-select: none;
+      }
+
+      .chart-select-band {
+        position: fixed;
+        background: var(--accent-primary-soft);
+        border: 1px solid var(--accent-primary-glow);
+        pointer-events: none;
+        z-index: 100;
       }
 
       .chart-content {
@@ -1533,11 +1543,46 @@
         height: 12px;
         border-width: 1.5px;
       }
+
       .content-search-spinner {
-        display: flex;
-        align-items: center;
-        padding: 4px 12px;
+        display: none;
+        position: absolute;
+        inset: -2px;
+        width: calc(100% + 4px);
+        height: calc(100% + 4px);
+        overflow: visible;
+        pointer-events: none;
+        z-index: 2;
+        filter: drop-shadow(0 0 4px var(--accent-primary-glow));
       }
+
+      html[data-searching='true'] .content-search-spinner {
+        display: block;
+      }
+
+      .content-search-spinner rect {
+        fill: none;
+        stroke: var(--accent-primary);
+        stroke-width: 1.5;
+        stroke-linecap: round;
+        vector-effect: non-scaling-stroke;
+      }
+
+      html[data-color-scheme='mono'] .content-search-spinner {
+        filter: none;
+      }
+
+      html[data-color-scheme='mono'] .content-search-spinner rect {
+        stroke-width: 1.25;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .content-search-spinner rect {
+          opacity: 0.7;
+          stroke-dasharray: none;
+        }
+      }
+
       .card-tag-match-note {
         background: var(--accent-blue-soft);
         color: var(--accent-blue);
@@ -2584,9 +2629,12 @@
         display: flex;
         flex: 1;
         min-width: 0;
+        isolation: isolate;
       }
 
       .search-draft-input {
+        position: relative;
+        z-index: 1;
         flex: 1;
         width: 100%;
         min-width: 0;
@@ -2634,6 +2682,7 @@
         right: 8px;
         top: 50%;
         transform: translateY(-50%);
+        z-index: 3;
         display: none;
         align-items: center;
         justify-content: center;
@@ -2781,18 +2830,6 @@
         letter-spacing: 0.4px;
         padding-bottom: 4px;
         border-bottom: 1px solid var(--border-section);
-      }
-
-      .filter-range {
-        display: flex;
-        flex-direction: column;
-        gap: 5px;
-      }
-
-      .filter-range-label {
-        font-size: 11px;
-        color: var(--text-secondary);
-        font-weight: 500;
       }
 
       .filter-checkboxes {
@@ -3032,83 +3069,6 @@
       .qb-value-input:focus {
         border-color: var(--accent-primary);
         box-shadow: 0 0 0 1px var(--accent-primary);
-      }
-
-      /* Dual-range slider */
-      .qb-dual-range {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        min-width: 240px;
-        flex: 1;
-        max-width: 360px;
-      }
-      .qb-dual-range-track {
-        position: relative;
-        flex: 1;
-        height: 5px;
-        background: var(--border-subtle);
-        border-radius: 3px;
-        box-shadow: inset 0 0.5px 1px rgba(var(--shadow-color), 0.08);
-      }
-      .qb-dual-range-track.inverted {
-        direction: rtl;
-      }
-      .qb-dual-range-fill {
-        position: absolute;
-        height: 100%;
-        background: linear-gradient(
-          90deg,
-          var(--accent-primary-glow),
-          var(--accent-primary)
-        );
-        border-radius: 3px;
-        box-shadow: 0 0 4px var(--accent-primary-soft);
-      }
-      .qb-dual-range input[type='range'] {
-        position: absolute;
-        top: -7px;
-        left: 0;
-        width: 100%;
-        height: 18px;
-        -webkit-appearance: none;
-        appearance: none;
-        background: transparent;
-        pointer-events: none;
-        margin: 0;
-      }
-      .qb-dual-range input[type='range']::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        width: 14px;
-        height: 14px;
-        background: #fff;
-        border-radius: 50%;
-        cursor: pointer;
-        pointer-events: auto;
-        border: 2.5px solid var(--accent-primary);
-        box-shadow:
-          0 1px 3px rgba(var(--shadow-color), 0.15),
-          0 0 0 1px var(--border-glass);
-        transition:
-          box-shadow 0.15s,
-          transform 0.15s;
-      }
-      .qb-dual-range input[type='range']::-webkit-slider-thumb:hover {
-        box-shadow:
-          0 1px 4px rgba(var(--shadow-color), 0.2),
-          0 0 0 3px var(--accent-primary-soft);
-        transform: scale(1.1);
-      }
-      .qb-dual-range-label {
-        font-size: 10px;
-        font-weight: 600;
-        color: var(--text-secondary);
-        white-space: nowrap;
-        min-width: 30px;
-        text-align: center;
-        background: var(--bg-surface);
-        padding: 2px 5px;
-        border-radius: var(--radius-sm);
       }
 
       .qb-remove-btn {
@@ -4571,13 +4531,6 @@
             id="relatedChartBars"
           ></div>
           <div class="chart-tooltip" id="relatedChartTooltip"></div>
-        </div>
-        <div
-          id="contentSearchSpinner"
-          class="content-search-spinner"
-          style="display: none"
-        >
-          <span class="spinner"></span>
         </div>
         <div class="section-results-wrapper" id="relatedResultsWrapper">
           <div class="results-container" id="relatedResults"></div>

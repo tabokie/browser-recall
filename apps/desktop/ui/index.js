@@ -865,7 +865,6 @@ let allListPins = {}; // listId -> [{ url, title, pinnedAt }]
 let lastClickedRow = null; // for shift-click range select
 const cardDataByUrl = new Map(); // url → { attDetail, timestamps } for detail overlay
 const listNameById = new Map(); // listId → display name, populated by renderLists()
-let listsReadyPromise = Promise.resolve();
 let marqueeActive = false; // suppress click during marquee drag
 let draggedSidebarListId = null;
 let sidebarDragScrollFrame = 0;
@@ -901,105 +900,6 @@ function normalizeFieldToArray(field) {
   if (!field || field === 'any') return [...KEYWORD_FIELDS];
   if (Array.isArray(field)) return field;
   return [field];
-}
-
-// Range filter field configs. Bounds always come from authoritative history data.
-function daysAgoToDate(v) {
-  const d = new Date(Date.now() - v * 86400000);
-  return d.toISOString().slice(0, 10);
-}
-const RANGE_CONFIGS = {
-  lastVisit: {
-    step: 1,
-    format: daysAgoToDate,
-    isDaysAgo: true,
-  },
-  firstVisit: {
-    step: 1,
-    format: daysAgoToDate,
-    isDaysAgo: true,
-  },
-};
-let cachedFieldRanges = null; // { field: { min, max } } — computed from data
-
-// Compute actual data ranges for date range fields (lightweight scan)
-function computeFieldRanges(entries) {
-  const byUrl = new Map();
-  for (const i of entries) {
-    if (!byUrl.has(i.url)) byUrl.set(i.url, []);
-    byUrl.get(i.url).push(i);
-  }
-  const ranges = {};
-  for (const key of Object.keys(RANGE_CONFIGS)) {
-    ranges[key] = { min: Infinity, max: -Infinity };
-  }
-  for (const [, group] of byUrl) {
-    const timestamps = group.map((i) => i.timestamp);
-    const lastVisit = (Date.now() - Math.max(...timestamps)) / 86400000;
-    const firstVisit = (Date.now() - Math.min(...timestamps)) / 86400000;
-    const vals = { lastVisit, firstVisit };
-    for (const [key, v] of Object.entries(vals)) {
-      if (v < ranges[key].min) ranges[key].min = v;
-      if (v > ranges[key].max) ranges[key].max = v;
-    }
-  }
-  for (const [field, r] of Object.entries(ranges)) {
-    const step = RANGE_CONFIGS[field].step;
-    r.min = Math.floor(r.min / step) * step;
-    r.max = Math.ceil(r.max / step) * step;
-    if (r.min >= r.max) r.max = r.min + step;
-  }
-  return ranges;
-}
-
-function getFieldRanges() {
-  if (cachedFieldRanges) return cachedFieldRanges;
-  if (historyState.byUrl.size === 0 && historyState.files.length === 0)
-    return null;
-  cachedFieldRanges =
-    historyState.byUrl.size > 0
-      ? computeFieldRanges(Array.from(historyState.byUrl.values()))
-      : null;
-  // File names provide authoritative date bounds even when their entries are unloaded.
-  if (historyState.files.length > 0) {
-    const fileDays = historyState.files.map((filename) => {
-      const match = /^(\d{4}-\d{2}-\d{2})\.jsonl$/.exec(filename);
-      if (!match) throw new Error(`Invalid history filename: ${filename}`);
-      const timestamp = Date.parse(`${match[1]}T00:00:00Z`);
-      if (!Number.isFinite(timestamp)) {
-        throw new Error(`Invalid history date: ${filename}`);
-      }
-      return (Date.now() - timestamp) / 86400000;
-    });
-    for (const key of ['lastVisit', 'firstVisit']) {
-      const step = RANGE_CONFIGS[key].step;
-      const fileMin = Math.floor(Math.min(...fileDays) / step) * step;
-      const fileMax = Math.ceil(Math.max(...fileDays) / step) * step;
-      const range = cachedFieldRanges?.[key] ?? {
-        min: fileMin,
-        max: fileMax,
-      };
-      range.min = Math.min(range.min, fileMin);
-      range.max = Math.max(range.max, fileMax);
-      if (range.min >= range.max) range.max = range.min + step;
-      cachedFieldRanges ??= {};
-      cachedFieldRanges[key] = range;
-    }
-  }
-  return cachedFieldRanges;
-}
-
-function getRangeConfig(field) {
-  const cfg = RANGE_CONFIGS[field];
-  if (!cfg) throw new Error(`Unknown range field: ${field}`);
-  const dataRanges = getFieldRanges();
-  const dr = dataRanges?.[field];
-  if (!dr) throw new Error(`Range field ${field} requires history data`);
-  return {
-    ...cfg,
-    min: dr.min,
-    max: dr.max,
-  };
 }
 
 // --- Search Module ---
@@ -1311,13 +1211,7 @@ async function renderProgressiveResults(gen) {
   // Apply filters
   let results = searchState.results;
   if (!isDefaultFilterState(filterState)) {
-    const notFilterEnriched = results.filter((r) => !r._filterEnriched);
-    if (notFilterEnriched.length > 0) {
-      await enrichForFilters(notFilterEnriched);
-      if (gen !== searchState.generation) return;
-      for (const r of notFilterEnriched) r._filterEnriched = true;
-    }
-    results = await applyFilters([...results]);
+    results = applyFilters([...results]);
     if (gen !== searchState.generation) return;
   }
 
@@ -1344,14 +1238,59 @@ async function renderFirstAvailableSearchResults(gen) {
   await renderProgressiveResults(gen);
 }
 
+const searchMotionPreference = window.matchMedia(
+  '(prefers-reduced-motion: reduce)',
+);
+
+function syncSearchSpinnerGeometry() {
+  const spinner = document.getElementById('contentSearchSpinner');
+  const path = spinner?.querySelector('rect');
+  const control = spinner?.closest('.search-draft-control');
+  if (!spinner || !path || !control) return;
+  const { width, height } = control.getBoundingClientRect();
+  if (width <= 0 || height <= 0) return;
+  const svgWidth = width + 4;
+  const svgHeight = height + 4;
+  const pathWidth = svgWidth - 2;
+  const pathHeight = svgHeight - 2;
+  spinner.setAttribute('viewBox', `0 0 ${svgWidth} ${svgHeight}`);
+  path.setAttribute('width', String(pathWidth));
+  path.setAttribute('height', String(pathHeight));
+  path.setAttribute('rx', String(pathHeight / 2));
+  const perimeter = 2 * (pathWidth - pathHeight) + Math.PI * pathHeight;
+  const segment = Math.min(48, perimeter * 0.12);
+  path.setAttribute('stroke-dasharray', `${segment} ${perimeter - segment}`);
+  path.getAnimations().forEach((animation) => animation.cancel());
+  if (
+    document.documentElement.dataset.searching === 'true' &&
+    !searchMotionPreference.matches
+  ) {
+    path.animate(
+      [{ strokeDashoffset: '0px' }, { strokeDashoffset: `${-perimeter}px` }],
+      {
+        duration: 1200,
+        iterations: Infinity,
+        easing: 'linear',
+      },
+    );
+  }
+}
+
 function showSearchSpinner() {
-  const el = document.getElementById('contentSearchSpinner');
-  if (el) el.style.display = '';
+  document.documentElement.dataset.searching = 'true';
+  syncSearchSpinnerGeometry();
 }
 function hideSearchSpinner() {
-  const el = document.getElementById('contentSearchSpinner');
-  if (el) el.style.display = 'none';
+  delete document.documentElement.dataset.searching;
+  document
+    .querySelectorAll('#contentSearchSpinner rect')
+    .forEach((path) =>
+      path.getAnimations().forEach((animation) => animation.cancel()),
+    );
 }
+
+window.addEventListener('resize', syncSearchSpinnerGeometry);
+searchMotionPreference.addEventListener('change', syncSearchSpinnerGeometry);
 
 async function waitForMainViewport() {
   const main = document.querySelector('.main');
@@ -1641,7 +1580,6 @@ async function mergeHistoryMutationsIntoActiveSearch(entries) {
         existing.deviceIds.add(entry.deviceId);
       }
       delete existing._enriched;
-      delete existing._filterEnriched;
       delete existing.visitCount;
     }
 
@@ -1854,7 +1792,6 @@ async function loadHistoryBatch() {
       `[I/O] loadHistoryBatch: ${batch.length} files, ${batchEntries.length} items, ${newItems.length} new in ${(performance.now() - t0).toFixed(1)}ms`,
     );
     for (const file of batch) historyState.loadedFiles.add(file);
-    if (newItems.length > 0) cachedFieldRanges = null;
     // Calibrate avg entry size from loaded file data
     historyState.batchRawCount += batchEntries.length;
     const loadedSize = [...historyState.loadedFiles].reduce((sum, file) => {
@@ -1908,7 +1845,6 @@ function resetHistory() {
   historyState.avgEntrySize = DEFAULT_AVG_ENTRY_SIZE;
   historyState.batchRawCount = 0;
   historyState._mutationWatermark = 0;
-  cachedFieldRanges = null;
   allListPins = {};
 
   cancelActiveHistorySearch();
@@ -2203,10 +2139,7 @@ function wordsMatchItem(words, item) {
 
 function createDefaultFilterState() {
   return {
-    firstSeen: { lo: null, hi: null }, // null = unbounded (days ago)
-    lastSeen: { lo: null, hi: null },
     devices: {}, // { deviceId: true } — only stores enabled devices; empty = show all
-    lists: {}, // { listSlug: true } — only stores enabled lists; empty = show all
     hasHighlights: null, // null=any, true=require
     hasSnapshots: null,
     liked: null,
@@ -2216,10 +2149,7 @@ function createDefaultFilterState() {
 
 function validateFilterState(state, key) {
   const expectedKeys = [
-    'firstSeen',
-    'lastSeen',
     'devices',
-    'lists',
     'hasHighlights',
     'hasSnapshots',
     'liked',
@@ -2236,32 +2166,14 @@ function validateFilterState(state, key) {
   ) {
     throw new Error(`Stored filter state ${key} has an invalid shape`);
   }
-  for (const rangeKey of ['firstSeen', 'lastSeen']) {
-    const range = state[rangeKey];
-    if (
-      !range ||
-      typeof range !== 'object' ||
-      Array.isArray(range) ||
-      Object.keys(range).length !== 2 ||
-      !Object.prototype.hasOwnProperty.call(range, 'lo') ||
-      !Object.prototype.hasOwnProperty.call(range, 'hi') ||
-      [range.lo, range.hi].some(
-        (value) => value !== null && !Number.isFinite(value),
-      )
-    ) {
-      throw new Error(`Stored filter state ${key}.${rangeKey} is invalid`);
-    }
-  }
-  for (const mapKey of ['devices', 'lists']) {
-    const map = state[mapKey];
-    if (
-      !map ||
-      typeof map !== 'object' ||
-      Array.isArray(map) ||
-      Object.values(map).some((value) => value !== true)
-    ) {
-      throw new Error(`Stored filter state ${key}.${mapKey} is invalid`);
-    }
+  const devices = state.devices;
+  if (
+    !devices ||
+    typeof devices !== 'object' ||
+    Array.isArray(devices) ||
+    Object.values(devices).some((value) => value !== true)
+  ) {
+    throw new Error(`Stored filter state ${key}.devices is invalid`);
   }
   for (const booleanKey of [
     'hasHighlights',
@@ -2278,12 +2190,7 @@ function validateFilterState(state, key) {
 
 function isDefaultFilterState(state) {
   return (
-    state.firstSeen.lo === null &&
-    state.firstSeen.hi === null &&
-    state.lastSeen.lo === null &&
-    state.lastSeen.hi === null &&
     Object.keys(state.devices).length === 0 &&
-    Object.keys(state.lists).length === 0 &&
     state.hasHighlights === null &&
     state.hasSnapshots === null &&
     state.liked === null &&
@@ -2291,68 +2198,18 @@ function isDefaultFilterState(state) {
   );
 }
 
-async function applyFilters(results) {
+function applyFilters(results) {
   if (isDefaultFilterState(filterState)) return results;
-  const now = Date.now();
-  const enabledDevices = Object.entries(filterState.devices)
-    .filter(([, v]) => v === true)
-    .map(([k]) => k);
-  const enabledLists = Object.entries(filterState.lists)
-    .filter(([, v]) => v === true)
-    .map(([k]) => k);
+  const enabledDevices = Object.keys(filterState.devices);
   return results.filter((item) => {
     // Device filter: when bubbles are active, only show items from at least one enabled device
     if (enabledDevices.length > 0) {
       if (!item.deviceIds || !enabledDevices.some((d) => item.deviceIds.has(d)))
         return false;
     }
-    // List filter: when list bubbles active, only show items belonging to at least one enabled list
-    if (enabledLists.length > 0) {
-      if (!Array.isArray(item.listSlugs)) {
-        throw new Error(`Filtered result ${item.url} has no list projection`);
-      }
-      const itemListSlugs = item.listSlugs.filter(
-        (slug) => !slug.startsWith('system/'),
-      );
-      if (!enabledLists.some((ls) => itemListSlugs.includes(ls))) return false;
-    }
-    // Time filters (days ago)
-    if (filterState.lastSeen.lo !== null || filterState.lastSeen.hi !== null) {
-      const lastTs = item.timestamps?.[0];
-      if (!Number.isFinite(lastTs)) {
-        throw new Error(`Filtered result ${item.url} has no last timestamp`);
-      }
-      const daysAgo = (now - lastTs) / 86400000;
-      if (filterState.lastSeen.lo !== null && daysAgo < filterState.lastSeen.lo)
-        return false;
-      if (filterState.lastSeen.hi !== null && daysAgo > filterState.lastSeen.hi)
-        return false;
-    }
-    if (
-      filterState.firstSeen.lo !== null ||
-      filterState.firstSeen.hi !== null
-    ) {
-      const firstTs =
-        item.firstTimestamp ?? item.timestamps?.[item.timestamps.length - 1];
-      if (!Number.isFinite(firstTs)) {
-        throw new Error(`Filtered result ${item.url} has no first timestamp`);
-      }
-      const daysAgo = (now - firstTs) / 86400000;
-      if (
-        filterState.firstSeen.lo !== null &&
-        daysAgo < filterState.firstSeen.lo
-      )
-        return false;
-      if (
-        filterState.firstSeen.hi !== null &&
-        daysAgo > filterState.firstSeen.hi
-      )
-        return false;
-    }
     // Page-specific booleans
     if (filterState.hasHighlights === true) {
-      if (!item.notes || !item.notes.some((n) => n.excerpt !== null))
-        return false;
+      if (item.hasHighlightNotes !== true) return false;
     }
     if (filterState.hasSnapshots === true) {
       if (!item.hasSnapshots) return false;
@@ -2930,7 +2787,7 @@ async function showExplore({ hydrate = true, markReady = true } = {}) {
     draftSearchInput = committedSearchQuery;
 
     await loadFilterState();
-    await renderSearchPanel({ deferFilterPanel: true });
+    renderSearchPanel({ deferFilterPanel: true });
     markShellReady();
     _timer('renderSearchPanel');
 
@@ -3032,7 +2889,7 @@ async function showList(list) {
     if (pins.length === 0) {
       listPinsData = [];
       listPinsListId = listId;
-      await renderSearchPanel();
+      renderSearchPanel();
       document.getElementById('relatedResults').innerHTML =
         `<div class="no-results">${escapeHtml(tr('desktopNoPinnedPages', 'No pinned pages'))}</div>`;
       document.getElementById('relatedChart').classList.remove('visible');
@@ -3725,7 +3582,7 @@ let listPinsListId = null;
 async function renderListPinView(allPins, listId) {
   listPinsData = allPins;
   listPinsListId = listId;
-  await renderSearchPanel();
+  renderSearchPanel();
   await runListPinFilter();
 }
 
@@ -3766,9 +3623,9 @@ async function runListPinFilter() {
 
   // Apply structured filters (same as explore)
   if (!isDefaultFilterState(filterState)) {
-    await enrichForFilters(filtered);
+    await enrichFromEntityStorage(filtered);
   }
-  filtered = await applyFilters(filtered);
+  filtered = applyFilters(filtered);
 
   renderFilteredPins(filtered, listPinsListId, allQueries.join(' '));
 }
@@ -3961,16 +3818,12 @@ function renderFilteredPins(pins, listId, searchQuery) {
 
 // recalculateRelatedResults removed — pinned section no longer has related pages
 
-async function renderListSearchFilters() {
-  await hydrateExploreSearchResults();
-}
-
 async function hydrateExploreSearchResults() {
   await initHistoryFiles();
   if (!isActiveExploreView()) return;
   await loadHistoryBatch();
   if (!isActiveExploreView()) return;
-  await refreshFilterPanelIfHydrated();
+  refreshFilterPanelIfHydrated();
 
   await runSearchFilterPipeline();
 }
@@ -4057,66 +3910,20 @@ async function enrichFromEntityStorage(entries, opts = {}) {
     entry.hasSnapshots = page.hasSnapshots === true;
     entry.listSlugs = context.lists.map((list) => list.slug);
     entry.likes = page.likes ?? 0;
+    if (!entry.deviceIds || entry.deviceIds.size === 0) {
+      entry.deviceIds = new Set(Object.keys(page.timestamps));
+    }
     entry.attScore = attentionStrength(page);
     entry.attDetail = page;
     if (page.createdAt && !entry.createdAt) entry.createdAt = page.createdAt;
     if (includeVisitDates && entry.dateScope !== 'row' && page.visitDates) {
       entry.visitDates = page.visitDates;
     }
+    entry.visitCount = page.visitDates.length;
     // Check if any child note is a non-deleted highlight note (excerpt !== null)
     entry.hasHighlightNotes = context.notes.some(
       (note) => note.excerpt !== null,
     );
-  }
-}
-
-// Enrich results with daemon-projected note, snapshot, list, and visit context.
-// Only called when non-default filters are active.
-async function enrichForFilters(entries) {
-  const slugs = [...new Set(entries.map((r) => r.slug).filter(Boolean))];
-  if (slugs.length === 0) return;
-  const { contexts, pages } = await loadProjectedPages(slugs);
-  // Pre-compute URL→visit-count map once (O(N)) instead of per-entry scan (O(N²))
-  let visitCountMap = null;
-  for (const entry of entries) {
-    const page = pages[entry.slug];
-    if (!page) continue;
-    const context = contexts[entry.slug];
-    const notes = context.notes;
-    if (notes.length > 0) entry.notes = notes;
-    entry.hasSnapshots = page.hasSnapshots === true;
-    entry.listSlugs = context.lists.map((list) => list.slug);
-    if (entry.dateScope !== 'row' && page.visitDates) {
-      entry.visitDates = page.visitDates;
-    }
-    if (page.timestamps && Object.keys(page.timestamps).length > 0) {
-      if (!entry.deviceIds || entry.deviceIds.size === 0) {
-        entry.deviceIds = new Set(Object.keys(page.timestamps));
-      }
-      const tsValues = Object.values(page.timestamps).filter(
-        (ts) => typeof ts === 'number',
-      );
-      if (
-        tsValues.length > 0 &&
-        (!Array.isArray(entry.timestamps) || entry.timestamps.length === 0)
-      ) {
-        entry.timestamps = tsValues.sort((a, b) => b - a);
-        entry.latestTs = entry.timestamps[0];
-        entry.timestamp = entry.latestTs;
-        delete entry._maxTs;
-        delete entry._minTs;
-      }
-    }
-    if (entry.visitCount === undefined) {
-      if (!visitCountMap) {
-        visitCountMap = new Map();
-        for (const h of historyState.allEntries) {
-          if (h.url)
-            visitCountMap.set(h.url, (visitCountMap.get(h.url) || 0) + 1);
-        }
-      }
-      entry.visitCount = visitCountMap.get(entry.url) || 0;
-    }
   }
 }
 
@@ -7498,7 +7305,6 @@ chrome.runtime.onMessage.addListener((request) => {
       }
       historyState._mutationWatermark = maxTs;
       if (changed) {
-        cachedFieldRanges = null;
         if (activeView.type === 'explore') {
           const mergedIntoSearch =
             await mergeHistoryMutationsIntoActiveSearch(changedEntries);
@@ -7618,7 +7424,6 @@ document.addEventListener('visibilitychange', async () => {
   }
 
   if (historyChanged) {
-    cachedFieldRanges = null;
     if (activeView.type === 'explore' || activeView.type === 'list') {
       if (!shouldPreserveCommittedSearchOnVisibilityRefresh()) {
         await waitForMainViewport();
@@ -7637,29 +7442,32 @@ function renderSearchDraftControlHtml() {
   const clearSvg =
     '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.25 4.25l7.5 7.5M11.75 4.25l-7.5 7.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
   return `
-    <div class="search-draft-control">
+    <div class="search-draft-control" id="searchDraftControl">
       <input type="search" class="search-draft-input" id="searchDraftInput" placeholder="${SEARCH_INPUT_PLACEHOLDER}" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="none">
+      <svg class="content-search-spinner" id="contentSearchSpinner" viewBox="0 0 100 34" aria-hidden="true" focusable="false">
+        <rect x="1" y="1" width="98" height="32" rx="16"></rect>
+      </svg>
       <button class="search-draft-clear" id="searchDraftClearBtn" type="button" title="${escapeHtml(tr('desktopClearSearch', 'Clear search'))}" aria-label="${escapeHtml(tr('desktopClearSearch', 'Clear search'))}">${clearSvg}</button>
     </div>
   `;
 }
 
-async function ensureFilterPanelRendered(container) {
+function ensureFilterPanelRendered(container) {
   const panel = container.querySelector('#filterPanel');
   if (!panel || panel.dataset.hydrated === 'true') return;
-  panel.innerHTML = await renderFilterPanelHtml();
+  panel.innerHTML = renderFilterPanelHtml();
   panel.dataset.hydrated = 'true';
 }
 
-async function refreshFilterPanelIfHydrated() {
+function refreshFilterPanelIfHydrated() {
   const container = document.getElementById('listQueryBuilder');
   const panel = container?.querySelector('#filterPanel');
   if (!container || !panel || panel.dataset.hydrated !== 'true') return;
-  panel.innerHTML = await renderFilterPanelHtml();
+  panel.innerHTML = renderFilterPanelHtml();
   if (filterVisible) bindFilterEvents(container);
 }
 
-async function renderSearchPanel({ deferFilterPanel = false } = {}) {
+function renderSearchPanel({ deferFilterPanel = false } = {}) {
   const container = document.getElementById('listQueryBuilder');
   container.style.display = 'block';
 
@@ -7674,12 +7482,13 @@ async function renderSearchPanel({ deferFilterPanel = false } = {}) {
 
   const shouldDeferFilterPanel = deferFilterPanel && !filterVisible;
   html += `<div class="filter-panel" id="filterPanel" data-hydrated="${shouldDeferFilterPanel ? 'false' : 'true'}" style="display:${filterVisible ? 'flex' : 'none'}">`;
-  html += shouldDeferFilterPanel ? '' : await renderFilterPanelHtml();
+  html += shouldDeferFilterPanel ? '' : renderFilterPanelHtml();
   html += '</div>';
 
   html += '</div>';
 
   container.innerHTML = html;
+  syncSearchSpinnerGeometry();
   const draftEl = container.querySelector('#searchDraftInput');
   if (draftEl) draftEl.value = draftSearchInput;
   updateSearchDraftClearButton(container);
@@ -7687,8 +7496,7 @@ async function renderSearchPanel({ deferFilterPanel = false } = {}) {
   if (filterVisible) bindFilterEvents(container);
 }
 
-async function renderFilterPanelHtml() {
-  await listsReadyPromise;
+function renderFilterPanelHtml() {
   const hasFilters = !isDefaultFilterState(filterState);
   let html = `<div class="filter-panel-header"><div class="filter-panel-title">${escapeHtml(tr('desktopFilters', 'Filters'))}</div><button class="filter-clear-btn" id="filterClearBtn" type="button"${hasFilters ? '' : ' disabled'}>${escapeHtml(tr('commonClear', 'Clear'))}</button></div>`;
   const isListView = activeView.type === 'list';
@@ -7723,31 +7531,6 @@ async function renderFilterPanelHtml() {
     html += '</div></div>';
   }
 
-  // List bubbles (explore view only, when lists exist)
-  if (!isListView && listNameById.size > 0) {
-    html += `<div class="filter-section"><div class="filter-section-label">${escapeHtml(tr('commonLists', 'Lists'))}</div>`;
-    html += '<div class="filter-bubbles">';
-    for (const [slug, name] of listNameById) {
-      const active = filterState.lists?.[slug] === true;
-      html += `<button class="filter-bubble${active ? ' active' : ''}" data-list-slug="${escapeHtml(slug)}">${escapeHtml(name)}</button>`;
-    }
-    html += '</div></div>';
-  }
-
-  // Time filters
-  html += `<div class="filter-section"><div class="filter-section-label">${escapeHtml(tr('desktopTime', 'Time'))}</div>`;
-  html += renderDualRangeFilter(
-    'lastSeen',
-    tr('desktopLastSeen', 'Last seen'),
-    filterState.lastSeen,
-  );
-  html += renderDualRangeFilter(
-    'firstSeen',
-    tr('desktopFirstSeen', 'First seen'),
-    filterState.firstSeen,
-  );
-  html += '</div>';
-
   // Page-specific booleans
   html += `<div class="filter-section"><div class="filter-section-label">${escapeHtml(tr('desktopPageProperties', 'Page properties'))}</div>`;
   html += '<div class="filter-checkboxes">';
@@ -7768,48 +7551,12 @@ async function renderFilterPanelHtml() {
   );
   html += renderCheckboxFilter(
     'visitedMultipleTimes',
-    tr('desktopVisitedMultipleTimes', 'Visited multiple times'),
+    tr('desktopVisitedMultipleTimes', 'Visited on multiple days'),
     filterState.visitedMultipleTimes,
   );
   html += '</div>';
   html += '</div>';
 
-  return html;
-}
-
-function renderDualRangeFilter(stateKey, label, state, rangeField) {
-  const field =
-    rangeField ||
-    (stateKey === 'lastSeen'
-      ? 'lastVisit'
-      : stateKey === 'firstSeen'
-        ? 'firstVisit'
-        : 'timeOnPage');
-  const cfg = getRangeConfig(field);
-  const lo = state.lo !== null ? state.lo : cfg.min;
-  const hi = state.hi !== null ? state.hi : cfg.max;
-  const range = cfg.max - cfg.min;
-  const loPercent = range > 0 ? ((lo - cfg.min) / range) * 100 : 0;
-  const hiPercent = range > 0 ? ((cfg.max - hi) / range) * 100 : 0;
-
-  // isDaysAgo: visually invert so left = older date, right = more recent date
-  const inverted = cfg.isDaysAgo;
-  const leftLabel = inverted ? cfg.format(hi) : cfg.format(lo);
-  const rightLabel = inverted ? cfg.format(lo) : cfg.format(hi);
-  const fillLeft = inverted ? hiPercent : loPercent;
-  const fillRight = inverted ? loPercent : hiPercent;
-
-  let html = `<div class="filter-range" data-key="${stateKey}">`;
-  html += `<span class="filter-range-label">${escapeHtml(label)}</span>`;
-  html += `<div class="qb-dual-range">`;
-  html += `<span class="qb-dual-range-label qb-dual-range-lo-label">${leftLabel}</span>`;
-  html += `<div class="qb-dual-range-track${inverted ? ' inverted' : ''}">`;
-  html += `<div class="qb-dual-range-fill" style="left:${fillLeft}%;right:${fillRight}%"></div>`;
-  html += `<input type="range" class="filter-range-lo" data-key="${stateKey}" min="${cfg.min}" max="${cfg.max}" step="${cfg.step}" value="${lo}">`;
-  html += `<input type="range" class="filter-range-hi" data-key="${stateKey}" min="${cfg.min}" max="${cfg.max}" step="${cfg.step}" value="${hi}">`;
-  html += `</div>`;
-  html += `<span class="qb-dual-range-label qb-dual-range-hi-label">${rightLabel}</span>`;
-  html += `</div></div>`;
   return html;
 }
 
@@ -7925,7 +7672,7 @@ function bindSearchDraftOutsideClickExit() {
   );
 }
 
-async function commitSearchDraft(draftInput) {
+function commitSearchDraft(draftInput) {
   const nextQuery = draftInput.value.trim();
   const previousQuery = committedSearchQuery.trim();
   const hadQuery = Boolean(previousQuery);
@@ -7937,7 +7684,7 @@ async function commitSearchDraft(draftInput) {
   if (hadQuery && !committedSearchQuery) {
     runActiveSearchPipeline._preserveScroll = true;
   }
-  await renderSearchPanel();
+  renderSearchPanel();
   saveSearchQuery();
   runActiveSearchPipeline();
   focusSearchDraftInputWithoutDraftMode();
@@ -7968,7 +7715,7 @@ function bindSearchEvents(container) {
       }
       if (e.key === 'Enter') {
         e.preventDefault();
-        await commitSearchDraft(draftInput);
+        commitSearchDraft(draftInput);
       }
     });
     draftInput.addEventListener('blur', () => {
@@ -7999,11 +7746,11 @@ function bindSearchEvents(container) {
   // Filter toggle
   const filterBtn = container.querySelector('#filterToggleBtn');
   if (filterBtn) {
-    filterBtn.addEventListener('click', async () => {
+    filterBtn.addEventListener('click', () => {
       filterVisible = !filterVisible;
       const panel = container.querySelector('#filterPanel');
       if (panel) {
-        if (filterVisible) await ensureFilterPanelRendered(container);
+        if (filterVisible) ensureFilterPanelRendered(container);
         panel.style.display = filterVisible ? 'flex' : 'none';
         filterBtn.classList.toggle('active', filterVisible);
         if (filterVisible) bindFilterEvents(container);
@@ -8015,11 +7762,11 @@ function bindSearchEvents(container) {
 function bindFilterEvents(container) {
   const clearBtn = container.querySelector('#filterClearBtn');
   if (clearBtn) {
-    clearBtn.addEventListener('click', async () => {
+    clearBtn.addEventListener('click', () => {
       if (isDefaultFilterState(filterState)) return;
       filterState = createDefaultFilterState();
       saveFilterState();
-      await renderSearchPanel();
+      renderSearchPanel();
       runActiveSearchPipeline();
     });
   }
@@ -8045,61 +7792,6 @@ function bindFilterEvents(container) {
     });
   });
 
-  // Dual-range sliders
-  container
-    .querySelectorAll('.filter-range-lo, .filter-range-hi')
-    .forEach((input) => {
-      input.addEventListener('input', () => {
-        const key = input.dataset.key;
-        const rangeDiv = input.closest('.filter-range');
-        const loInput = rangeDiv.querySelector('.filter-range-lo');
-        const hiInput = rangeDiv.querySelector('.filter-range-hi');
-        let lo = parseFloat(loInput.value);
-        let hi = parseFloat(hiInput.value);
-        // Prevent crossover
-        if (lo > hi) {
-          if (input.classList.contains('filter-range-lo')) {
-            lo = hi;
-            loInput.value = lo;
-          } else {
-            hi = lo;
-            hiInput.value = hi;
-          }
-        }
-        const field =
-          key === 'lastSeen'
-            ? 'lastVisit'
-            : key === 'firstSeen'
-              ? 'firstVisit'
-              : 'timeOnPage';
-        const cfg = getRangeConfig(field);
-        const inverted = cfg.isDaysAgo;
-        const loPercent = ((lo - cfg.min) / (cfg.max - cfg.min)) * 100;
-        const hiPercent = 100 - ((hi - cfg.min) / (cfg.max - cfg.min)) * 100;
-        // Update fill bar
-        const fill = rangeDiv.querySelector('.qb-dual-range-fill');
-        if (fill) {
-          fill.style.left = (inverted ? hiPercent : loPercent) + '%';
-          fill.style.right = (inverted ? loPercent : hiPercent) + '%';
-        }
-        // Update labels (inverted: left=hi/older, right=lo/recent)
-        const loLabel = rangeDiv.querySelector('.qb-dual-range-lo-label');
-        const hiLabel = rangeDiv.querySelector('.qb-dual-range-hi-label');
-        if (loLabel)
-          loLabel.textContent = inverted ? cfg.format(hi) : cfg.format(lo);
-        if (hiLabel)
-          hiLabel.textContent = inverted ? cfg.format(lo) : cfg.format(hi);
-        // Update state: null if at boundary (= unbounded)
-        filterState[key] = {
-          lo: lo > cfg.min ? lo : null,
-          hi: hi < cfg.max ? hi : null,
-        };
-        saveFilterState();
-        updateFilterPanelActions(container);
-        runActiveSearchPipeline();
-      });
-    });
-
   // Checkbox filters
   container.querySelectorAll('.filter-checkbox input').forEach((input) => {
     input.addEventListener('change', () => {
@@ -8111,12 +7803,12 @@ function bindFilterEvents(container) {
     });
   });
 
-  // Filter bubble toggles
-  container.querySelectorAll('.filter-bubble').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const deviceId = btn.dataset.deviceId;
-      const listSlug = btn.dataset.listSlug;
-      if (deviceId) {
+  // Device filter bubbles
+  container
+    .querySelectorAll('.filter-bubble[data-device-id]')
+    .forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const deviceId = btn.dataset.deviceId;
         if (filterState.devices[deviceId] === true) {
           delete filterState.devices[deviceId];
           btn.classList.remove('active');
@@ -8124,25 +7816,16 @@ function bindFilterEvents(container) {
           filterState.devices[deviceId] = true;
           btn.classList.add('active');
         }
-      } else if (listSlug) {
-        if (filterState.lists[listSlug] === true) {
-          delete filterState.lists[listSlug];
-          btn.classList.remove('active');
-        } else {
-          filterState.lists[listSlug] = true;
-          btn.classList.add('active');
-        }
-      }
-      saveFilterState();
-      updateFilterPanelActions(container);
-      runActiveSearchPipeline();
+        saveFilterState();
+        updateFilterPanelActions(container);
+        runActiveSearchPipeline();
+      });
     });
-  });
 }
 
 // Entity-scan filter: scan page checkpoints instead of all history JSONL files.
-// Page projections contain materialized visit state plus semantic relationships
-// sufficient to answer all filters without loading raw event logs.
+// Page projections contain the materialized visit state and page properties
+// needed by filters without loading raw event logs.
 async function runEntityScanFilter(pinnedSlugs) {
   showSearchSpinner();
   const contexts = await loadAllPageContext();
@@ -8200,8 +7883,6 @@ async function runEntityScanFilter(pinnedSlugs) {
       createdAt: page.createdAt,
       hasHighlightNotes: notes.some((note) => note.excerpt !== null),
       visitCount: page.visitDates.length,
-      firstTimestamp: page.createdAt ?? latestTs,
-      timeOnPage: page.timeOnPage ?? 0,
       relevance: 0,
     });
   }
@@ -8266,7 +7947,7 @@ async function runSearchFilterPipeline() {
     // Page projections are the authoritative filter input.
     results = await runEntityScanFilter(pinnedSlugs);
     entityScanUsed = true;
-    results = await applyFilters(results);
+    results = applyFilters(results);
     hideSearchSpinner();
   } else {
     results = processHistoryForDisplay(
@@ -8354,8 +8035,7 @@ async function runSearchFilterPipeline() {
           if (newResults.length > 0) {
             if (hasActiveFilters) {
               await enrichFromEntityStorage(newResults);
-              await enrichForFilters(newResults);
-              newResults = await applyFilters(newResults);
+              newResults = applyFilters(newResults);
             }
             if (newResults.length > 0) {
               const sort = relatedSortState.column
@@ -8658,6 +8338,7 @@ function initSidebarResize() {
       sidebar.style.width =
         Math.max(180, Math.min(500, startWidth + ev.clientX - startX)) + 'px';
       sidebar.style.minWidth = sidebar.style.width;
+      syncSearchSpinnerGeometry();
     };
     const onUp = () => {
       handle.classList.remove('active');
@@ -8921,13 +8602,13 @@ async function initializeMain(currentTheme, deviceResp = null) {
 
   // Load fold state and restore sidebar width before rendering lists
   await loadFoldState();
-  restoreSidebarWidth();
+  await restoreSidebarWidth();
   initSidebarResize();
   initSidebarToggle();
   _timer('sidebarInit');
 
   // Render sidebar concurrently with heavy data (don't block on sidebar)
-  listsReadyPromise = renderLists().catch((err) => showFatalError(err.message));
+  void renderLists().catch((err) => showFatalError(err.message));
   initRulesPanel();
   _timer('renderSidebar (fire-and-forget)');
 

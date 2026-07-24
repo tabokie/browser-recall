@@ -863,6 +863,10 @@
     "message": "선택 항목 강조 표시",
     "description": "Selection context menu label."
   },
+  "extensionHideMarkup": {
+    "message": "마크업 숨기기",
+    "description": "Popup button that temporarily hides applied highlight markup."
+  },
   "extensionResumeTracing": {
     "message": "추적 재개",
     "description": "Extension popup recording resume title."
@@ -1200,10 +1204,6 @@
     "message": "필터",
     "description": "Localized UI text."
   },
-  "desktopFirstSeen": {
-    "message": "처음 본",
-    "description": "Localized UI text."
-  },
   "desktopFirstVisit": {
     "message": "첫 방문",
     "description": "Localized UI text."
@@ -1488,16 +1488,12 @@
     "message": "동기화를 건너뛰었습니다.",
     "description": "Localized UI text."
   },
-  "desktopTime": {
-    "message": "시간",
-    "description": "Localized UI text."
-  },
   "desktopToggleFailed": {
     "message": "토글 실패: $1",
     "description": "Sync device toggle failure."
   },
   "desktopVisitedMultipleTimes": {
-    "message": "여러 번 방문함",
+    "message": "여러 날 방문함",
     "description": "Localized UI text."
   },
   "desktopVisits": {

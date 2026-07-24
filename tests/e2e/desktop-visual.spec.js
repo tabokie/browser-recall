@@ -2699,7 +2699,7 @@ test.describe('desktop visual regression', () => {
     });
   });
 
-  test('explore device filters render from log device directories', async ({
+  test('explore filters omit lists and time and render devices from log directories', async ({
     page,
   }) => {
     const now = Date.now();
@@ -2719,6 +2719,13 @@ test.describe('desktop visual regression', () => {
       });
 
       await page.locator('#filterToggleBtn').click();
+      await expect(
+        page.locator('#filterPanel .filter-section-label'),
+      ).toHaveText(['Devices', 'Page properties']);
+      await expect(page.locator('#filterPanel [data-list-slug]')).toHaveCount(
+        0,
+      );
+      await expect(page.locator('#filterPanel .filter-range')).toHaveCount(0);
       await expect(
         page
           .locator('#filterPanel .filter-section-label')
@@ -2912,7 +2919,7 @@ test.describe('desktop visual regression', () => {
     });
   });
 
-  test('history search keeps loaded results interactive and merges live visits without restarting', async ({
+  test('history search keeps loaded results interactive and merges live visits without restarting @webkit', async ({
     page,
   }) => {
     const now = Date.now();
@@ -2943,7 +2950,7 @@ test.describe('desktop visual regression', () => {
                 },
               ],
             },
-            { delay: 1500, results: [] },
+            { delay: 4000, results: [] },
           ],
         },
       });
@@ -2955,11 +2962,128 @@ test.describe('desktop visual regression', () => {
       await expect(loadedRow).toHaveClass(/selected/);
 
       await page.waitForTimeout(600);
-      await expect(page.locator('#contentSearchSpinner')).toBeVisible();
+      const searchProgress = page.locator('#contentSearchSpinner');
+      await expect(searchProgress).toBeVisible();
+      await expect(searchProgress).toHaveJSProperty(
+        'namespaceURI',
+        'http://www.w3.org/2000/svg',
+      );
+      await expect(
+        page.locator('#searchDraftControl > #contentSearchSpinner'),
+      ).toHaveCount(1);
+      const tracePath = searchProgress.locator('rect');
+      await expect(searchProgress).toHaveCSS('position', 'absolute');
+      await expect(tracePath).toHaveCount(1);
+      await expect(searchProgress).not.toHaveCSS('filter', 'none');
+      const activeSearchColors = await page.evaluate(() => {
+        const input = document.getElementById('searchDraftInput');
+        const tracer = document.querySelector('#contentSearchSpinner rect');
+        return {
+          inputBorder: getComputedStyle(input).borderTopColor,
+          tracerStroke: getComputedStyle(tracer).stroke,
+        };
+      });
+      expect(activeSearchColors.tracerStroke).not.toBe(
+        activeSearchColors.inputBorder,
+      );
+      const traceGeometry = await tracePath.evaluate((rect) => ({
+        perimeter: rect.getTotalLength(),
+        authoredDashes: rect.getAttribute('stroke-dasharray'),
+        dashes: getComputedStyle(rect)
+          .strokeDasharray.split(/[,\s]+/)
+          .filter(Boolean)
+          .map((value) => Number.parseFloat(value)),
+      }));
+      expect(traceGeometry.authoredDashes).toMatch(
+        /^\d+(?:\.\d+)? \d+(?:\.\d+)?$/,
+      );
+      expect(traceGeometry.dashes).toHaveLength(2);
+      expect(
+        Math.abs(
+          traceGeometry.dashes[0] +
+            traceGeometry.dashes[1] -
+            traceGeometry.perimeter,
+        ),
+      ).toBeLessThan(2);
+      const firstTraceOffset = await tracePath.evaluate((rect) =>
+        Number.parseFloat(getComputedStyle(rect).strokeDashoffset),
+      );
+      await page.waitForTimeout(120);
+      const secondTraceOffset = await tracePath.evaluate((rect) =>
+        Number.parseFloat(getComputedStyle(rect).strokeDashoffset),
+      );
+      expect(secondTraceOffset).not.toBeCloseTo(firstTraceOffset, 0);
+      const initialTraceWidth = await page
+        .locator('#searchDraftControl')
+        .evaluate((control) => control.getBoundingClientRect().width);
+      const resizeHandleBox = await page
+        .locator('#sidebarResizeHandle')
+        .boundingBox();
+      expect(resizeHandleBox).not.toBeNull();
+      await page.mouse.move(
+        resizeHandleBox.x + resizeHandleBox.width / 2,
+        resizeHandleBox.y + resizeHandleBox.height / 2,
+      );
+      await page.mouse.down();
+      await page.mouse.move(
+        resizeHandleBox.x + resizeHandleBox.width / 2 + 80,
+        resizeHandleBox.y + resizeHandleBox.height / 2,
+      );
+      await page.mouse.up();
+      const resizedTraceGeometry = await page.evaluate(() => {
+        const control = document.getElementById('searchDraftControl');
+        const spinner = document.getElementById('contentSearchSpinner');
+        return {
+          controlWidth: control.getBoundingClientRect().width,
+          viewBoxWidth: spinner.viewBox.baseVal.width,
+        };
+      });
+      expect(resizedTraceGeometry.controlWidth).not.toBeCloseTo(
+        initialTraceWidth,
+        0,
+      );
+      expect(resizedTraceGeometry.viewBoxWidth).toBeCloseTo(
+        resizedTraceGeometry.controlWidth + 4,
+        1,
+      );
+      await tracePath.evaluate((rect) => {
+        for (const animation of rect.getAnimations()) {
+          animation.pause();
+          animation.currentTime = 300;
+        }
+      });
+      await expect(page.locator('#listQueryBuilder')).toHaveScreenshot(
+        'desktop-search-tracer-amber.png',
+        {
+          animations: 'allow',
+          maxDiffPixelRatio: 0.01,
+        },
+      );
+      await page.evaluate(() => {
+        document.documentElement.setAttribute('data-color-scheme', 'mono');
+      });
+      await expect(searchProgress).toHaveCSS('filter', 'none');
+      await expect(tracePath).toHaveCSS('stroke-width', '1.25px');
+      await expect(page.locator('#listQueryBuilder')).toHaveScreenshot(
+        'desktop-search-tracer-mono.png',
+        {
+          animations: 'allow',
+          maxDiffPixelRatio: 0.01,
+        },
+      );
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await expect(tracePath).toHaveCSS('stroke-dasharray', 'none');
+      await expect
+        .poll(() => tracePath.evaluate((rect) => rect.getAnimations().length))
+        .toBe(0);
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      await page.evaluate(() => {
+        document.documentElement.setAttribute('data-color-scheme', 'amber');
+      });
       await expect(loadedRow).toHaveClass(/selected/);
 
-      await expect(page.locator('#contentSearchSpinner')).toBeHidden({
-        timeout: 3000,
+      await expect(searchProgress).toBeHidden({
+        timeout: 5000,
       });
       await expect(page.getByText('Steady streamed result')).toBeVisible();
       await expect(loadedRow).toHaveClass(/selected/);
@@ -3006,6 +3130,11 @@ test.describe('desktop visual regression', () => {
     page,
   }) => {
     const now = Date.now();
+    const previousVisitTimestamp = now - 2 * 86_400_000;
+    const previousVisitDate = visitDateInt(
+      new Date(previousVisitTimestamp).toISOString().slice(0, 10),
+    );
+    const currentVisitDate = visitDateInt(todayKey());
     const url = 'https://example.com/incremental-filtered-result';
     const slug = generateSlugFromUrl(url);
     const title = 'Incremental filtered result';
@@ -3020,13 +3149,13 @@ test.describe('desktop visual regression', () => {
           {
             url,
             title,
-            timestamp: now - 2000,
+            timestamp: previousVisitTimestamp,
             deviceId: 'device-a',
           },
           {
             url: secondUrl,
             title: secondTitle,
-            timestamp: now - 3000,
+            timestamp: previousVisitTimestamp - 1000,
             deviceId: 'device-a',
           },
         ],
@@ -3037,9 +3166,9 @@ test.describe('desktop visual regression', () => {
             title,
             parentIds: [],
             childIds: [],
-            timestamps: { 'device-a': now - 2000 },
-            visitDates: [visitDateInt(todayKey())],
-            createdAt: now - 2000,
+            timestamps: { 'device-a': previousVisitTimestamp },
+            visitDates: [previousVisitDate],
+            createdAt: previousVisitTimestamp,
           },
           [pageKey(secondSlug)]: {
             slug: secondSlug,
@@ -3047,9 +3176,9 @@ test.describe('desktop visual regression', () => {
             title: secondTitle,
             parentIds: [],
             childIds: [],
-            timestamps: { 'device-a': now - 3000 },
-            visitDates: [visitDateInt(todayKey())],
-            createdAt: now - 3000,
+            timestamps: { 'device-a': previousVisitTimestamp - 1000 },
+            visitDates: [previousVisitDate],
+            createdAt: previousVisitTimestamp - 1000,
           },
         },
       });
@@ -3062,6 +3191,11 @@ test.describe('desktop visual regression', () => {
         page.locator(`.result-row[data-url="${secondUrl}"]`),
       ).toBeVisible();
       await page.locator('#filterToggleBtn').click();
+      await expect(
+        page
+          .locator('.filter-checkbox')
+          .filter({ has: page.locator('[data-key="visitedMultipleTimes"]') }),
+      ).toContainText('Visited on multiple days');
       await page
         .locator('.filter-checkbox input[data-key="visitedMultipleTimes"]')
         .click();
@@ -3079,7 +3213,7 @@ test.describe('desktop visual regression', () => {
         window.__desktopVisualHarness.searchHistoryInvocationCount(),
       );
       await page.evaluate(
-        ({ entries, timestamp }) => {
+        ({ entries, timestamp, visitDates }) => {
           for (const entry of entries) {
             window.__desktopVisualHarness.updateSessionValue(entry.pageKey, {
               slug: entry.slug,
@@ -3088,15 +3222,8 @@ test.describe('desktop visual regression', () => {
               parentIds: [],
               childIds: [],
               timestamps: { 'device-a': timestamp },
-              visitDates: [
-                Number(
-                  new Date(timestamp)
-                    .toISOString()
-                    .slice(0, 10)
-                    .replaceAll('-', ''),
-                ),
-              ],
-              createdAt: timestamp - 3000,
+              visitDates,
+              createdAt: entry.createdAt,
             });
             window.__desktopVisualHarness.emitRuntimeMessage({
               action: 'mutation',
@@ -3118,15 +3245,23 @@ test.describe('desktop visual regression', () => {
         },
         {
           entries: [
-            { pageKey: pageKey(slug), slug, url, title },
+            {
+              pageKey: pageKey(slug),
+              slug,
+              url,
+              title,
+              createdAt: previousVisitTimestamp,
+            },
             {
               pageKey: pageKey(secondSlug),
               slug: secondSlug,
               url: secondUrl,
               title: secondTitle,
+              createdAt: previousVisitTimestamp - 1000,
             },
           ],
           timestamp: now,
+          visitDates: [previousVisitDate, currentVisitDate],
         },
       );
 
@@ -3381,6 +3516,69 @@ test.describe('desktop visual regression', () => {
       );
 
       await expect(neutralRow).toHaveCount(0, { timeout: 3000 });
+    });
+  });
+
+  test('repeat-visit filtering uses the same page projection with and without a query', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const url = 'https://example.com/single-projected-visit';
+    const slug = generateSlugFromUrl(url);
+    const title = 'Single projected visit';
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        historyEntries: [
+          {
+            action: 'visit_page',
+            url,
+            title,
+            timestamp: now - 2000,
+            deviceId: 'device-a',
+          },
+          {
+            action: 'leave_page',
+            url,
+            title,
+            timestamp: now - 1000,
+            deviceId: 'device-a',
+          },
+        ],
+        extraSession: {
+          [pageKey(slug)]: {
+            slug,
+            url,
+            title,
+            parentIds: [],
+            childIds: [],
+            timestamps: { 'device-a': now - 1000 },
+            visitDates: [visitDateInt(todayKey())],
+            createdAt: now - 2000,
+          },
+        },
+      });
+
+      await page.locator('#filterToggleBtn').click();
+      await page
+        .locator('.filter-checkbox input[data-key="visitedMultipleTimes"]')
+        .click();
+      await expect(page.locator(`.result-row[data-url="${url}"]`)).toHaveCount(
+        0,
+      );
+
+      await commitDesktopSearch(page, 'single projected visit');
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness.searchHistoryInvocationCount(),
+          ),
+        )
+        .toBe(1);
+      await expect(page.locator('#contentSearchSpinner')).toBeHidden();
+      await expect(page.locator(`.result-row[data-url="${url}"]`)).toHaveCount(
+        0,
+      );
     });
   });
 
@@ -5141,6 +5339,88 @@ test.describe('desktop visual regression', () => {
         return scroller.data.map((item) => item.url);
       });
       expect(visibleUrls).toEqual([revisitedUrl]);
+    });
+  });
+
+  test('explore time chart marquee selects every intersected date', async ({
+    page,
+  }) => {
+    const dates = Array.from({ length: 5 }, (_, index) =>
+      new Date(Date.now() - (6 - index) * 86_400_000)
+        .toISOString()
+        .slice(0, 10),
+    );
+    const historyEntriesByDate = Object.fromEntries(
+      dates.map((date, index) => [
+        date,
+        [
+          {
+            url: `https://example.com/chart-marquee-${index}`,
+            title: `Chart marquee ${index}`,
+            timestamp: new Date(`${date}T12:00:00Z`).getTime(),
+            deviceId: 'device-a',
+          },
+        ],
+      ]),
+    );
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: [],
+        historyEntriesByDate,
+      });
+
+      await expect(page.locator('#relatedResults .result-row')).toHaveCount(
+        dates.length,
+      );
+      const firstSelectedGroup = page.locator(
+        `#relatedChartBars .chart-bar-group[data-date="${dates[1]}"]`,
+      );
+      const lastSelectedGroup = page.locator(
+        `#relatedChartBars .chart-bar-group[data-date="${dates[3]}"]`,
+      );
+      await expect(firstSelectedGroup.locator('.chart-bar')).toBeVisible();
+      await expect(lastSelectedGroup.locator('.chart-bar')).toBeVisible();
+      const firstBox = await firstSelectedGroup.boundingBox();
+      const lastBox = await lastSelectedGroup.boundingBox();
+      expect(firstBox).not.toBeNull();
+      expect(lastBox).not.toBeNull();
+
+      await page.mouse.move(firstBox.x + 2, firstBox.y + 4);
+      await page.mouse.down();
+      await page.mouse.move(
+        lastBox.x + lastBox.width - 2,
+        lastBox.y + lastBox.height - 4,
+      );
+      await expect(page.locator('.chart-select-band')).toBeVisible();
+      await page.mouse.up();
+
+      const activeGroups = page.locator(
+        '#relatedChartBars .chart-bar-group.active',
+      );
+      await expect(activeGroups).toHaveCount(3);
+      expect(
+        await activeGroups.evaluateAll((groups) =>
+          groups.map((group) => group.dataset.date),
+        ),
+      ).toEqual(dates.slice(1, 4));
+      await expect(page.locator('.chart-select-band')).toHaveCount(0);
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            document
+              .getElementById('relatedResults')
+              ._virtualScroller.data.map((item) => item.url),
+          ),
+        )
+        .toEqual(
+          dates
+            .slice(1, 4)
+            .map((_, index) => `https://example.com/chart-marquee-${index + 1}`)
+            .reverse(),
+        );
     });
   });
 

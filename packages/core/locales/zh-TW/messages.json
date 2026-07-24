@@ -863,6 +863,10 @@
     "message": "醒目提示所選內容",
     "description": "Selection context menu label."
   },
+  "extensionHideMarkup": {
+    "message": "隱藏標記",
+    "description": "Popup button that temporarily hides applied highlight markup."
+  },
   "extensionResumeTracing": {
     "message": "繼續追蹤",
     "description": "Extension popup recording resume title."
@@ -1200,10 +1204,6 @@
     "message": "過濾器",
     "description": "Localized UI text."
   },
-  "desktopFirstSeen": {
-    "message": "第一次見到",
-    "description": "Localized UI text."
-  },
   "desktopFirstVisit": {
     "message": "第一次訪問",
     "description": "Localized UI text."
@@ -1488,16 +1488,12 @@
     "message": "同步已跳過",
     "description": "Localized UI text."
   },
-  "desktopTime": {
-    "message": "時間",
-    "description": "Localized UI text."
-  },
   "desktopToggleFailed": {
     "message": "切換失敗：$1",
     "description": "Sync device toggle failure."
   },
   "desktopVisitedMultipleTimes": {
-    "message": "多次訪問",
+    "message": "多日造訪",
     "description": "Localized UI text."
   },
   "desktopVisits": {

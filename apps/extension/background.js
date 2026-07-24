@@ -1544,6 +1544,9 @@ async function preparePopupBootstrapForTab(tab) {
   try {
     identity = await resolveTabPageIdentity(tab);
   } catch (error) {
+    const identityError = String(
+      error?.message || error || 'Popup page identity failed',
+    );
     return {
       mode: 'data-unavailable',
       tab,
@@ -1551,6 +1554,7 @@ async function preparePopupBootstrapForTab(tab) {
       diagnostic: {
         reason: 'popup-page-identity-failed',
         url: tab.url,
+        error: identityError,
       },
     };
   }

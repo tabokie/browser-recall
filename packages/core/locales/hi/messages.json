@@ -863,6 +863,10 @@
     "message": "चयनित टेक्स्ट हाइलाइट करें",
     "description": "Selection context menu label."
   },
+  "extensionHideMarkup": {
+    "message": "मार्कअप छिपाएँ",
+    "description": "Popup button that temporarily hides applied highlight markup."
+  },
   "extensionResumeTracing": {
     "message": "ट्रेसिंग फिर शुरू करें",
     "description": "Extension popup recording resume title."
@@ -1200,10 +1204,6 @@
     "message": "फिल्टर",
     "description": "Localized UI text."
   },
-  "desktopFirstSeen": {
-    "message": "पहली बार देखा",
-    "description": "Localized UI text."
-  },
   "desktopFirstVisit": {
     "message": "पहली यात्रा",
     "description": "Localized UI text."
@@ -1488,16 +1488,12 @@
     "message": "समन्वयन छोड़ दिया गया",
     "description": "Localized UI text."
   },
-  "desktopTime": {
-    "message": "समय",
-    "description": "Localized UI text."
-  },
   "desktopToggleFailed": {
     "message": "टॉगल विफल: $1",
     "description": "Sync device toggle failure."
   },
   "desktopVisitedMultipleTimes": {
-    "message": "कई बार दौरा किया",
+    "message": "कई दिनों में देखा गया",
     "description": "Localized UI text."
   },
   "desktopVisits": {

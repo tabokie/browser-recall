@@ -13,10 +13,11 @@
     "packages/*"
   ],
   "scripts": {
-    "ci": "npm run ci:test && npm run ci:test-rust && npm run ci:install-playwright && npm run ci:test-desktop-visual && npm run ci:cold-scripts && npm run ci:lint-js && npm run ci:lint-rust",
+    "ci": "npm run ci:test && npm run ci:test-rust && npm run ci:install-desktop-visual-browsers && npm run ci:test-desktop-visual && npm run ci:cold-scripts && npm run ci:lint-js && npm run ci:lint-rust",
     "ci:test": "npm test",
     "ci:test-rust": "npm run build:desktop-ui && cargo test --workspace",
     "ci:install-playwright": "playwright install --no-shell chromium",
+    "ci:install-desktop-visual-browsers": "playwright install --no-shell chromium webkit",
     "ci:test-desktop-visual": "npm run test:visual",
     "ci:cold-scripts": "npm run test:cold-scripts && npm run coverage",
     "ci:lint-js": "npm run fmt:check && npm run lint:unused && npm run lint:duplicates",
@@ -33,7 +34,9 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:firefox:smoke": "playwright test --config playwright.smoke.config.js tests/smoke/firefox-extension.spec.js",
-    "test:visual": "npm run build:desktop-ui && playwright test tests/e2e/desktop-visual.spec.js",
+    "test:visual": "npm run build:desktop-ui && npm run test:visual:chromium && npm run test:visual:webkit",
+    "test:visual:chromium": "playwright test tests/e2e/desktop-visual.spec.js",
+    "test:visual:webkit": "BROWSER_RECALL_PLAYWRIGHT_ENGINE=webkit playwright test tests/e2e/desktop-visual.spec.js --browser=webkit --grep @webkit",
     "test:cold-scripts": "cargo build --quiet -p browser-recall-daemon && playwright test tests/e2e/manual-seed-workflow.spec.js",
     "test:desktop-native": "npm run build --workspace @browser-recall/desktop && node tests/smoke/macos-desktop-window-lifecycle.mjs",
     "coverage": "npm run coverage:js && npm run coverage:rust && npm run coverage:monitor",

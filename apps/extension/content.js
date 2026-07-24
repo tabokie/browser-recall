@@ -1191,6 +1191,10 @@ function initContentScript() {
         highlightLifecycle.remove({ text: request.text });
       }
       sendResponse({ success: true });
+    } else if (request.action === 'hideHighlightMarkup') {
+      document.getElementById('browser-recall-highlight-overlay')?.remove();
+      highlightLifecycle.dispose({ clearExisting: true });
+      sendResponse({ success: true });
     } else if (request.action === 'showHighlightsPanel') {
       if (!Array.isArray(request.notes)) {
         sendResponse({

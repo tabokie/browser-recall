@@ -38,7 +38,7 @@ describe('GitHub CI prerequisites', () => {
     [
       'test-desktop-visual',
       'cold-scripts',
-      'ci:install-playwright ci:test-desktop-visual',
+      'ci:install-desktop-visual-browsers ci:test-desktop-visual',
     ],
     ['cold-scripts', 'test-desktop-native-bundle', 'ci:cold-scripts'],
     ['lint-js', 'lint-rust', 'ci:lint-js'],
@@ -52,10 +52,22 @@ describe('GitHub CI prerequisites', () => {
 
   test('local CI composes every locally safe GitHub CI job', () => {
     expect(packageJson.scripts.ci).toBe(
-      'npm run ci:test && npm run ci:test-rust && npm run ci:install-playwright && npm run ci:test-desktop-visual && npm run ci:cold-scripts && npm run ci:lint-js && npm run ci:lint-rust',
+      'npm run ci:test && npm run ci:test-rust && npm run ci:install-desktop-visual-browsers && npm run ci:test-desktop-visual && npm run ci:cold-scripts && npm run ci:lint-js && npm run ci:lint-rust',
     );
     expect(packageJson.scripts['ci:install-playwright']).toBe(
       'playwright install --no-shell chromium',
+    );
+    expect(packageJson.scripts['ci:install-desktop-visual-browsers']).toBe(
+      'playwright install --no-shell chromium webkit',
+    );
+    expect(packageJson.scripts['test:visual']).toBe(
+      'npm run build:desktop-ui && npm run test:visual:chromium && npm run test:visual:webkit',
+    );
+    expect(packageJson.scripts['test:visual:chromium']).toBe(
+      'playwright test tests/e2e/desktop-visual.spec.js',
+    );
+    expect(packageJson.scripts['test:visual:webkit']).toBe(
+      'BROWSER_RECALL_PLAYWRIGHT_ENGINE=webkit playwright test tests/e2e/desktop-visual.spec.js --browser=webkit --grep @webkit',
     );
     const nativeJob = jobBody('test-desktop-native-bundle', 'lint-js');
     expect(nativeJob).toContain(

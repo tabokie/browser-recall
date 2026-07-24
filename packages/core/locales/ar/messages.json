@@ -863,6 +863,10 @@
     "message": "تمييز النص المحدد",
     "description": "Selection context menu label."
   },
+  "extensionHideMarkup": {
+    "message": "إخفاء العلامات",
+    "description": "Popup button that temporarily hides applied highlight markup."
+  },
   "extensionResumeTracing": {
     "message": "استئناف التتبع",
     "description": "Extension popup recording resume title."
@@ -1200,10 +1204,6 @@
     "message": "المرشحات",
     "description": "Localized UI text."
   },
-  "desktopFirstSeen": {
-    "message": "شوهد لأول مرة",
-    "description": "Localized UI text."
-  },
   "desktopFirstVisit": {
     "message": "الزيارة الأولى",
     "description": "Localized UI text."
@@ -1488,16 +1488,12 @@
     "message": "تم تخطي المزامنة",
     "description": "Localized UI text."
   },
-  "desktopTime": {
-    "message": "الوقت",
-    "description": "Localized UI text."
-  },
   "desktopToggleFailed": {
     "message": "فشل التبديل: $1",
     "description": "Sync device toggle failure."
   },
   "desktopVisitedMultipleTimes": {
-    "message": "تمت زيارتها عدة مرات",
+    "message": "تمت زيارته في أيام متعددة",
     "description": "Localized UI text."
   },
   "desktopVisits": {
