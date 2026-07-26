@@ -93,8 +93,9 @@ async fn run() -> Result<(), Box<dyn Error>> {
     println!("  {} entries", steps.len());
 
     println!("Loading base note store...");
-    let base_store = load_base_note_store(&args.data_dir)?;
-    println!("  {} notes", base_store.len());
+    let logged_note_paths = logged_note_paths(&steps);
+    let base_store = load_base_note_store(&args.data_dir, &logged_note_paths)?;
+    println!("  {} unlogged notes", base_store.len());
 
     println!("Replaying...");
     let store = replay(steps, base_store).await?;
@@ -192,7 +193,29 @@ fn load_log_steps(data_dir: &Path) -> Result<Vec<ReplayStep>, Box<dyn Error>> {
     Ok(steps)
 }
 
-fn load_base_note_store(data_dir: &Path) -> Result<BTreeMap<String, Entity>, Box<dyn Error>> {
+fn logged_note_paths(steps: &[ReplayStep]) -> BTreeSet<String> {
+    let mut paths = BTreeSet::new();
+    for step in steps {
+        match &step.entry {
+            LogEntry::CreateNote { path, .. }
+            | LogEntry::DeleteNote { path, .. }
+            | LogEntry::RestoreNote { path, .. } => {
+                paths.insert(path.clone());
+            }
+            LogEntry::ReplaceNote { path, old_path, .. } => {
+                paths.insert(path.clone());
+                paths.insert(old_path.clone());
+            }
+            _ => {}
+        }
+    }
+    paths
+}
+
+fn load_base_note_store(
+    data_dir: &Path,
+    logged_note_paths: &BTreeSet<String>,
+) -> Result<BTreeMap<String, Entity>, Box<dyn Error>> {
     let mut store = BTreeMap::new();
     let notes_dir = data_dir.join("objects").join("notes");
     if !notes_dir.exists() {
@@ -206,6 +229,13 @@ fn load_base_note_store(data_dir: &Path) -> Result<BTreeMap<String, Entity>, Box
             .file_stem()
             .and_then(|value| value.to_str())
             .ok_or_else(|| format!("invalid note filename: {}", path.display()))?;
+        let relative_path = format!("objects/notes/{slug}.json");
+        // Logged notes must start from their events. Seeding a current tombstone
+        // can make an idempotent delete short-circuit before replaying its
+        // page, list, and orphan-manifest side effects.
+        if logged_note_paths.contains(&relative_path) {
+            continue;
+        }
         let raw = fs::read_to_string(&path)?;
         let note: NoteEntity =
             serde_json::from_str(&raw).map_err(|error| format!("{}: {error}", path.display()))?;
@@ -501,6 +531,15 @@ fn classify_field_diff(
     replayed: Option<&Value>,
     existing: Option<&Value>,
 ) -> DiffCategory {
+    if field == "createdAt"
+        && replayed.and_then(Value::as_i64).is_some()
+        && existing.and_then(Value::as_i64).is_some()
+    {
+        return DiffCategory::TimingDrift;
+    }
+    if field == "localeOverride" && replayed.is_none() && existing.is_some_and(Value::is_string) {
+        return DiffCategory::SchemaGap;
+    }
     if matches!(field, "createdAt" | "visitDates") && existing.is_none() {
         return DiffCategory::SchemaGap;
     }

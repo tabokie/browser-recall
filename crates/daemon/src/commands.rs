@@ -349,19 +349,21 @@ pub(crate) fn note_text_value(
             if !values.iter().all(Value::is_string) {
                 return Err(format!("{field_name} array must contain strings only"));
             }
-            if values.iter().any(|value| {
-                value
-                    .as_str()
-                    .is_some_and(|text| text.is_empty() || text != text.trim())
-            }) {
+            if values.is_empty()
+                || values.iter().any(|value| {
+                    value
+                        .as_str()
+                        .is_some_and(|text| text.is_empty() || text != text.trim())
+                })
+            {
                 return Err(format!(
                     "{field_name} array must contain canonical non-empty strings"
                 ));
             }
             Ok(Some(Value::Array(values.clone())))
         }
-        Some(Value::Null) | None => Ok(None),
-        Some(_) => Err(format!("{field_name} must be a string array or null")),
+        Some(Value::Null) | None => Err(format!("{field_name} must be a non-empty string array")),
+        Some(_) => Err(format!("{field_name} must be a non-empty string array")),
     }
 }
 
@@ -371,24 +373,20 @@ pub(crate) fn note_css_path_value(value: Option<&Value>) -> Result<Option<Value>
             if !values.iter().all(Value::is_string) {
                 return Err("cssPath array must contain strings only".to_string());
             }
-            if values.is_empty() {
-                Ok(None)
-            } else {
-                if values.iter().any(|value| {
-                    value
-                        .as_str()
-                        .is_some_and(|path| !path.is_empty() && path != path.trim())
-                }) {
-                    return Err(
-                        "cssPath array must contain canonical strings without outer whitespace"
-                            .to_string(),
-                    );
-                }
-                Ok(Some(Value::Array(values.clone())))
+            if values.iter().any(|value| {
+                value
+                    .as_str()
+                    .is_some_and(|path| !path.is_empty() && path != path.trim())
+            }) {
+                return Err(
+                    "cssPath array must contain canonical strings without outer whitespace"
+                        .to_string(),
+                );
             }
+            Ok(Some(Value::Array(values.clone())))
         }
-        Some(Value::Null) | None => Ok(None),
-        Some(_) => Err("cssPath must be a string array or null".to_string()),
+        Some(Value::Null) | None => Err("cssPath must be a string array".to_string()),
+        Some(_) => Err("cssPath must be a string array".to_string()),
     }
 }
 
@@ -397,20 +395,19 @@ pub(crate) fn validate_note_anchor(
     css_path: &Option<Value>,
 ) -> Result<(), String> {
     match (excerpt, css_path) {
-        (None, None) => Ok(()),
         (Some(Value::Array(excerpts)), Some(Value::Array(paths)))
-            if excerpts.len() == paths.len() =>
+            if !excerpts.is_empty() && excerpts.len() == paths.len() =>
         {
             Ok(())
         }
         _ => Err(
-            "Highlight excerpt and cssPath must both be arrays with the same length, or both null"
+            "Highlight excerpt and cssPath must both be non-empty arrays with the same length"
                 .to_string(),
         ),
     }
 }
 
-fn note_slug_text(value: Option<&Value>) -> Result<Option<String>, String> {
+fn note_slug_text(value: Option<&Value>) -> Result<String, String> {
     match value {
         Some(Value::Array(values)) => {
             if !values.iter().all(Value::is_string) {
@@ -426,13 +423,15 @@ fn note_slug_text(value: Option<&Value>) -> Result<Option<String>, String> {
                 .filter(|value| !value.is_empty())
                 .collect::<Vec<_>>();
             if parts.is_empty() {
-                Ok(None)
+                Err("Persisted note excerpt must contain non-empty strings".to_string())
             } else {
-                Ok(Some(parts.join(" ")))
+                Ok(parts.join(" "))
             }
         }
-        Some(Value::Null) | None => Ok(None),
-        Some(_) => Err("Persisted note excerpt must be a string array or null".to_string()),
+        Some(Value::Null) | None => {
+            Err("Persisted note excerpt must be a non-empty string array".to_string())
+        }
+        Some(_) => Err("Persisted note excerpt must be a non-empty string array".to_string()),
     }
 }
 
@@ -478,15 +477,17 @@ fn generate_slug_like_js(text: &str, hash_input: &str) -> String {
     slug.chars().take(80).collect()
 }
 
-fn generate_note_slug(timestamp: i64, excerpt: Option<&str>) -> Result<String, String> {
+fn generate_note_slug(timestamp: i64, excerpt: &str) -> Result<String, String> {
     let datetime = chrono::Local
         .timestamp_millis_opt(timestamp)
         .single()
         .ok_or_else(|| format!("note timestamp is outside the supported range: {timestamp}"))?;
-    let text = excerpt.unwrap_or("note");
     let yy = datetime.format("%y%m%d").to_string();
-    let hash_input = format!("{text}{timestamp}");
-    Ok(format!("{yy}-{}", generate_slug_like_js(text, &hash_input)))
+    let hash_input = format!("{excerpt}{timestamp}");
+    Ok(format!(
+        "{yy}-{}",
+        generate_slug_like_js(excerpt, &hash_input)
+    ))
 }
 
 fn parse_parent_list_id(parent_path: Option<&str>) -> Result<Option<String>, String> {
@@ -740,7 +741,7 @@ pub async fn create_note(
             None
         };
         let slug_text = note_slug_text(excerpt.as_ref())?;
-        let note_slug = generate_note_slug(timestamp, slug_text.as_deref())?;
+        let note_slug = generate_note_slug(timestamp, &slug_text)?;
         let page_url = page
             .as_ref()
             .and_then(|value| value.url.clone())
@@ -836,10 +837,10 @@ pub async fn update_note(
 
     let mut timestamp = storage.next_command_timestamp_millis();
     let slug_text = note_slug_text(old_note.excerpt.as_ref())?;
-    let mut new_note_slug = generate_note_slug(timestamp, slug_text.as_deref())?;
+    let mut new_note_slug = generate_note_slug(timestamp, &slug_text)?;
     while new_note_slug == note_slug {
         timestamp += 1;
-        new_note_slug = generate_note_slug(timestamp, slug_text.as_deref())?;
+        new_note_slug = generate_note_slug(timestamp, &slug_text)?;
     }
     replay_entries_in_transaction(
         transaction,

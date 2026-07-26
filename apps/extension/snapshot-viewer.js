@@ -313,7 +313,7 @@ function attachMarkClickHandler(doc, mark, highlightLifecycle) {
       .sendMessage({ action: 'loadPageNotes', slug })
       .then((resp) => {
         if (resp?.success !== true || !Array.isArray(resp.notes)) {
-          throw new Error(resp?.error || 'Could not load page notes');
+          throw new Error(resp?.error || 'Could not load notes');
         }
         const notes = resp.notes;
         const match = notes.find((note) => note.slug === noteSlug);

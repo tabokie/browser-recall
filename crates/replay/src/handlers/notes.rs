@@ -47,6 +47,7 @@ where
         note_body,
         css_path,
     } = request;
+    validate_highlight_anchor(&excerpt, &css_path)?;
     let note_slug = note_slug_from_path(path)?;
     let note_key = format!("{NOTE_PREFIX}{note_slug}");
 
@@ -190,6 +191,7 @@ where
         note_body,
         css_path,
     } = request;
+    validate_highlight_anchor(&excerpt, &css_path)?;
     let old_note_slug = note_slug_from_path(old_path)?;
     let new_note_slug = note_slug_from_path(path)?;
     let old_note_key = format!("{NOTE_PREFIX}{old_note_slug}");
@@ -273,4 +275,20 @@ where
     }
 
     Ok(result)
+}
+
+fn validate_highlight_anchor(
+    excerpt: &Option<Value>,
+    css_path: &Option<Value>,
+) -> Result<(), ReplayError> {
+    match (excerpt, css_path) {
+        (Some(Value::Array(excerpts)), Some(Value::Array(paths)))
+            if !excerpts.is_empty() && excerpts.len() == paths.len() =>
+        {
+            Ok(())
+        }
+        _ => Err(ReplayError::InvalidEntry(
+            "highlight excerpt and cssPath must be aligned non-empty arrays".to_string(),
+        )),
+    }
 }

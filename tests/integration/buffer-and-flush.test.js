@@ -979,9 +979,9 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     };
 
     await wsClient.enqueueDesktopCommand('createNote', {
-      excerpt: null,
-      note: 'Page note body',
-      cssPath: null,
+      excerpt: ['Popup overlap highlight'],
+      note: 'Highlight note body',
+      cssPath: ['body'],
       url,
       title: 'Popup Overlap',
     });
@@ -1000,7 +1000,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(summary.notes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          note: 'Page note body',
+          note: 'Highlight note body',
         }),
       ]),
     );

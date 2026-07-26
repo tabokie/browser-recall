@@ -1,0 +1,24 @@
+- The "hide markup" button should flip to "show markup" with inverse color when clicked.
+- Replace the red number at the start of each highlight, into a large red icon-like double quote. The annotation for each highlight has no extra indentation, they start at the same x-position as the double quote icon.
+- The quote has the right size, but I want it to be black and be in a consistent style, which is pointy and print-like.
+- Actually, I changed my mind, let's use markdown style to decorate quote (> text), and quotes and annotations are using the same indentation as if they were written in a plain text editor (but selection will not include the markdown quotes). Also I noticed the page-level note is not layout-ed entirely same as the highlights (e.g. the edit button is not aligned), let's make them share the same style.
+- The markdown quote should be multi-line quote. The actual quote text is using normal text style (no italic no grey-out color). The delete button and edit button should be aligned, not sure how you managed to make them misalign, the CSS styling involved should be simple and minimalist.
+- I don't see the multi-line working, do I need to update desktop app as well?
+- If a line is wrapped into multiple lines, it should have multiple quotes too.
+- 1. Remove the "page note" from the code as well as from existing data at ~/browser-data.
+2. In popup UI, move the highlight note edit button to the bottom-right of each entry, and when editing, don't show an explicit text edit box but show a cursor directly, and change the editing button to a checkmark button.
+3. Align the highlight UI when viewing PDF to the popup' style.
+- Remove the "no annotation" text when note is empty. Hide the scroll gutter in the PDF highlight viewer. Increase the padding below the "hide markup" button. Then let's try change the markdown quote symbol to a long quotation line instead, the line is red.
+- Make the line thicker, and increase the distance between quote and note.
+- I noticed when I click edit note, the layout slightly changes (height of the entry increases), why is that?
+- Fix it
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them all, including the scope gap
+- Please review my uncommitted changes
+- Fix them
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.6 Sol
+- Investigate now
+- As code comment somewhere
+- As code comment
+- As code comment
+- Continue

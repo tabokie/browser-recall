@@ -22,11 +22,7 @@ const SHORTCUT_ORDER = [
 
 const SHORTCUT_LABELS = {
   'highlight-selection': () =>
-    tr(
-      'commandHighlightSelection',
-      'Highlight selected text or add a page note',
-      undefined,
-    ),
+    tr('commandHighlightSelection', 'Highlight selected text', undefined),
 };
 
 openButton.addEventListener('click', () => {

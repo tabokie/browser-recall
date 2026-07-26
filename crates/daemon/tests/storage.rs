@@ -368,7 +368,7 @@ async fn sync_file_roundtrip_collects_expected_files_and_refreshes_reads() {
                     slug: "sync-note".to_string(),
                     excerpt: Some(serde_json::json!(["remote excerpt"])),
                     note: Some("remote note".to_string()),
-                    css_path: None,
+                    css_path: Some(serde_json::json!(["body > p"])),
                     url: Some("https://example.com/sync-a".to_string()),
                     deleted: false,
                     deleted_ts: None,

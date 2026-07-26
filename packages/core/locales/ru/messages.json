@@ -12,7 +12,7 @@
     "description": "Extension store and browser management description."
   },
   "commandHighlightSelection": {
-    "message": "Выделите выделенный текст или добавьте заметку на странице",
+    "message": "Выделите выбранный текст",
     "description": "Browser command description."
   },
   "commandCaptureSnapshot": {
@@ -106,10 +106,6 @@
   "desktopAddRule": {
     "message": "Добавить правило",
     "description": "Desktop inbox rule add button title."
-  },
-  "desktopAddPageNote": {
-    "message": "+ Добавить примечание к странице",
-    "description": "Page detail add page note button."
   },
   "desktopAdvanced": {
     "message": "Расширенный",
@@ -379,10 +375,6 @@
     "message": "Примечание ($1)",
     "description": "Recycle bin note display name with slug."
   },
-  "desktopNoAnnotation": {
-    "message": "Нет аннотации",
-    "description": "Empty note annotation placeholder."
-  },
   "desktopOnboardingDataHeading": {
     "message": "Выберите папку с данными",
     "description": "Onboarding data-folder heading."
@@ -543,10 +535,6 @@
     "message": "Не удалось отозвать браузер: $1.",
     "description": "Paired browser revoke failure."
   },
-  "desktopPageNotePrefix": {
-    "message": "Примечание к странице:",
-    "description": "Prefix for page-note recycle bin display names."
-  },
   "desktopSelectBookmarkFile": {
     "message": "Выберите экспортированный файл закладок для предварительного просмотра папок.",
     "description": "Bookmark import placeholder."
@@ -667,14 +655,6 @@
     "message": "Добавить заметку... Esc, чтобы сохранить.",
     "description": "Extension note placeholder with keyboard hint."
   },
-  "extensionAddPageNote": {
-    "message": "+ Примечание к странице",
-    "description": "Popup page note add button."
-  },
-  "extensionAddPageNoteEsc": {
-    "message": "Добавить заметку к странице... Esc, чтобы сохранить.",
-    "description": "Extension page note placeholder with keyboard hint."
-  },
   "extensionAddToList": {
     "message": "Добавить в список",
     "description": "Popup add to list title."
@@ -771,10 +751,6 @@
     "message": "Создать \"$1\"",
     "description": "List picker create option."
   },
-  "extensionCreateNoteFailed": {
-    "message": "Создать заметку не удалось",
-    "description": "Create note failure."
-  },
   "extensionDeleteHighlight": {
     "message": "Удалить выделение",
     "description": "Delete highlight button title."
@@ -867,6 +843,10 @@
     "message": "Скрыть разметку",
     "description": "Popup button that temporarily hides applied highlight markup."
   },
+  "extensionShowMarkup": {
+    "message": "Показать разметку",
+    "description": "Popup button that reapplies hidden highlight markup."
+  },
   "extensionResumeTracing": {
     "message": "Возобновить отслеживание",
     "description": "Extension popup recording resume title."
@@ -955,10 +935,6 @@
     "message": "Управление в настройках",
     "description": "Popup settings action."
   },
-  "extensionNoAnnotation": {
-    "message": "Нет аннотации",
-    "description": "Popup no annotation placeholder."
-  },
   "extensionNoLists": {
     "message": "Нет списков",
     "description": "Popup no lists message."
@@ -978,10 +954,6 @@
   "extensionPageDataUnavailable": {
     "message": "Данные страницы недоступны",
     "description": "Popup page data unavailable title."
-  },
-  "extensionPageNote": {
-    "message": "Примечание к странице",
-    "description": "Page note overlay title."
   },
   "extensionRatePageFailed": {
     "message": "Ошибка страницы ставки",
@@ -1062,7 +1034,12 @@
   "extensionSnapshotCapturedWithWarnings": {
     "message": "Снимок сохранён, но $COUNT$ ресурсов были недоступны.",
     "description": "Snapshot capture partial-success warning for multiple unavailable resources.",
-    "placeholders": { "count": { "content": "$1", "example": "2" } }
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
   },
   "extensionSomethingWentWrong": {
     "message": "Что-то пошло не так",
@@ -1107,10 +1084,6 @@
   "extensionToggleRecording": {
     "message": "Переключить запись",
     "description": "Extension popup recording toggle accessibility label."
-  },
-  "desktopAddPageNotePlaceholder": {
-    "message": "Добавить примечание к странице...",
-    "description": "Localized UI text."
   },
   "desktopAlreadyPaired": {
     "message": "Chrome уже сопряжён с Browser Recall Desktop",
@@ -1353,7 +1326,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "Выделите текст и нажмите <kbd>Alt+H</kbd>, чтобы подсветить его. Нажмите <kbd>Alt+H</kbd> без выделения, чтобы добавить заметку к текущей странице.",
+    "message": "Выделите текст и нажмите <kbd>Alt+H</kbd>, чтобы подсветить его.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {

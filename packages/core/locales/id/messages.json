@@ -12,7 +12,7 @@
     "description": "Extension store and browser management description."
   },
   "commandHighlightSelection": {
-    "message": "Sorot teks yang dipilih atau tambahkan catatan halaman",
+    "message": "Sorot teks yang dipilih",
     "description": "Browser command description."
   },
   "commandCaptureSnapshot": {
@@ -106,10 +106,6 @@
   "desktopAddRule": {
     "message": "Tambahkan aturan",
     "description": "Desktop inbox rule add button title."
-  },
-  "desktopAddPageNote": {
-    "message": "+ Tambahkan catatan halaman",
-    "description": "Page detail add page note button."
   },
   "desktopAdvanced": {
     "message": "Lanjutan",
@@ -379,10 +375,6 @@
     "message": "Catatan ($1)",
     "description": "Recycle bin note display name with slug."
   },
-  "desktopNoAnnotation": {
-    "message": "Tidak ada anotasi",
-    "description": "Empty note annotation placeholder."
-  },
   "desktopOnboardingDataHeading": {
     "message": "Pilih folder data Anda",
     "description": "Onboarding data-folder heading."
@@ -543,10 +535,6 @@
     "message": "Gagal mencabut browser: $1",
     "description": "Paired browser revoke failure."
   },
-  "desktopPageNotePrefix": {
-    "message": "Catatan halaman:",
-    "description": "Prefix for page-note recycle bin display names."
-  },
   "desktopSelectBookmarkFile": {
     "message": "Pilih file bookmark yang diekspor untuk melihat folder.",
     "description": "Bookmark import placeholder."
@@ -667,14 +655,6 @@
     "message": "Tambahkan catatan... Esc untuk menyimpan.",
     "description": "Extension note placeholder with keyboard hint."
   },
-  "extensionAddPageNote": {
-    "message": "+ Catatan halaman",
-    "description": "Popup page note add button."
-  },
-  "extensionAddPageNoteEsc": {
-    "message": "Tambahkan catatan halaman... Esc untuk menyimpan.",
-    "description": "Extension page note placeholder with keyboard hint."
-  },
   "extensionAddToList": {
     "message": "Tambahkan ke daftar",
     "description": "Popup add to list title."
@@ -771,10 +751,6 @@
     "message": "Buat \"$1\"",
     "description": "List picker create option."
   },
-  "extensionCreateNoteFailed": {
-    "message": "Gagal membuat catatan",
-    "description": "Create note failure."
-  },
   "extensionDeleteHighlight": {
     "message": "Hapus sorotan",
     "description": "Delete highlight button title."
@@ -867,6 +843,10 @@
     "message": "Sembunyikan markup",
     "description": "Popup button that temporarily hides applied highlight markup."
   },
+  "extensionShowMarkup": {
+    "message": "Tampilkan markup",
+    "description": "Popup button that reapplies hidden highlight markup."
+  },
   "extensionResumeTracing": {
     "message": "Lanjutkan pelacakan",
     "description": "Extension popup recording resume title."
@@ -955,10 +935,6 @@
     "message": "Kelola di Pengaturan",
     "description": "Popup settings action."
   },
-  "extensionNoAnnotation": {
-    "message": "Tidak ada anotasi",
-    "description": "Popup no annotation placeholder."
-  },
   "extensionNoLists": {
     "message": "Tidak ada daftar",
     "description": "Popup no lists message."
@@ -978,10 +954,6 @@
   "extensionPageDataUnavailable": {
     "message": "Data Halaman Tidak Tersedia",
     "description": "Popup page data unavailable title."
-  },
-  "extensionPageNote": {
-    "message": "Catatan Halaman",
-    "description": "Page note overlay title."
   },
   "extensionRatePageFailed": {
     "message": "ratePage gagal",
@@ -1062,7 +1034,12 @@
   "extensionSnapshotCapturedWithWarnings": {
     "message": "Cuplikan disimpan, tetapi $COUNT$ sumber daya tidak tersedia.",
     "description": "Snapshot capture partial-success warning for multiple unavailable resources.",
-    "placeholders": { "count": { "content": "$1", "example": "2" } }
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
   },
   "extensionSomethingWentWrong": {
     "message": "Ada yang tidak beres",
@@ -1107,10 +1084,6 @@
   "extensionToggleRecording": {
     "message": "Alihkan rekaman",
     "description": "Extension popup recording toggle accessibility label."
-  },
-  "desktopAddPageNotePlaceholder": {
-    "message": "Tambahkan catatan halaman...",
-    "description": "Localized UI text."
   },
   "desktopAlreadyPaired": {
     "message": "Chrome sudah dipasangkan dengan Browser Recall Desktop",
@@ -1353,7 +1326,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "Pilih teks dan tekan <kbd>Alt+H</kbd> untuk menyorotnya, atau tekan <kbd>Alt+H</kbd> tanpa pilihan untuk menambahkan catatan ke halaman saat ini.",
+    "message": "Pilih teks dan tekan <kbd>Alt+H</kbd> untuk menyorotnya.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {

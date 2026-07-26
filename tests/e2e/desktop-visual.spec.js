@@ -199,7 +199,6 @@ function desktopVisualSeed(colorScheme = 'amber', options = {}) {
             title: 'Product research notes',
             parentIds: [researchListKey],
             childIds: [
-              'note:page-note-product-research',
               'note:highlight-product-research',
               'note:highlight-product-research-array',
               `snapshot:${productResearchSlug}-${now - 30_000}`,
@@ -214,12 +213,6 @@ function desktopVisualSeed(colorScheme = 'amber', options = {}) {
           },
           [`detailNotes:${productResearchSlug}`]: [
             {
-              slug: 'page-note-product-research',
-              excerpt: null,
-              note: 'Page note for product research',
-              url: productResearchUrl,
-            },
-            {
               slug: 'highlight-product-research',
               excerpt: [
                 'Important highlighted passage\nwith original line break',
@@ -230,18 +223,10 @@ function desktopVisualSeed(colorScheme = 'amber', options = {}) {
             {
               slug: 'highlight-product-research-array',
               excerpt: ['Array highlighted passage', 'with grouped line break'],
-              note: 'Grouped highlight note',
+              note: '',
               url: productResearchUrl,
             },
           ],
-          'note:page-note-product-research': {
-            slug: 'page-note-product-research',
-            excerpt: null,
-            cssPath: null,
-            note: 'Page note for product research',
-            url: productResearchUrl,
-            deleted: false,
-          },
           'note:highlight-product-research': {
             slug: 'highlight-product-research',
             excerpt: [
@@ -256,7 +241,7 @@ function desktopVisualSeed(colorScheme = 'amber', options = {}) {
             slug: 'highlight-product-research-array',
             excerpt: ['Array highlighted passage', 'with grouped line break'],
             cssPath: ['', ''],
-            note: 'Grouped highlight note',
+            note: '',
             url: productResearchUrl,
             deleted: false,
           },
@@ -1890,9 +1875,8 @@ test.describe('desktop visual regression', () => {
 
       await expect(page.locator('.page-detail-card')).toBeVisible();
       await expect(page.locator('.detail-list-tag')).toContainText('Research');
-      await expect(page.locator('.detail-page-note-display')).toContainText(
-        'Page note for product research',
-      );
+      await expect(page.locator('.detail-page-note-wrap')).toHaveCount(0);
+      await expect(page.locator('.detail-page-note-display')).toHaveCount(0);
       await expect(page.locator('.detail-notes-section')).toContainText(
         'Important highlighted passage',
       );
@@ -1914,6 +1898,11 @@ test.describe('desktop visual regression', () => {
           whiteSpace: 'pre-wrap',
         },
       ]);
+      const emptyHighlightNote = page.locator('.detail-note-entry').nth(1);
+      await expect(emptyHighlightNote).not.toContainText('No annotation');
+      await expect(
+        emptyHighlightNote.locator('.detail-note-action-btn.edit'),
+      ).toBeVisible();
       await expect(page.locator('.detail-snapshot-badge.html')).toHaveText(
         'HTML',
       );
@@ -1925,8 +1914,6 @@ test.describe('desktop visual regression', () => {
         [...el.querySelectorAll(':scope > .detail-section')]
           .map((section) => {
             if (section.querySelector('.detail-list-tag')) return 'lists';
-            if (section.querySelector('.detail-page-note-wrap'))
-              return 'page-note';
             if (section.classList.contains('detail-notes-section'))
               return 'highlights';
             if (section.querySelector('.detail-snapshots')) return 'snapshots';
@@ -1935,15 +1922,10 @@ test.describe('desktop visual regression', () => {
             return 'other';
           })
           .filter((name) =>
-            ['lists', 'page-note', 'highlights', 'snapshots'].includes(name),
+            ['lists', 'highlights', 'snapshots'].includes(name),
           ),
       );
-      expect(sectionOrder).toEqual([
-        'lists',
-        'page-note',
-        'highlights',
-        'snapshots',
-      ]);
+      expect(sectionOrder).toEqual(['lists', 'highlights', 'snapshots']);
     });
   });
 
@@ -1975,7 +1957,7 @@ test.describe('desktop visual regression', () => {
 
       await expect(page.locator('.page-detail-card')).toBeVisible();
       await expect(page.locator('.detail-url a')).toHaveText(url);
-      await expect(page.locator('.detail-page-note-add')).toBeVisible();
+      await expect(page.locator('.detail-page-note-add')).toHaveCount(0);
       await expect(page.locator('.page-detail-body')).not.toContainText(
         'Failed to load page details',
       );

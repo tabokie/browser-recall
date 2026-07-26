@@ -12,7 +12,7 @@
     "description": "Extension store and browser management description."
   },
   "commandHighlightSelection": {
-    "message": "चयनित टेक्स्ट को हाइलाइट करें या पेज नोट जोड़ें",
+    "message": "चयनित टेक्स्ट को हाइलाइट करें",
     "description": "Browser command description."
   },
   "commandCaptureSnapshot": {
@@ -106,10 +106,6 @@
   "desktopAddRule": {
     "message": "नियम जोड़ें",
     "description": "Desktop inbox rule add button title."
-  },
-  "desktopAddPageNote": {
-    "message": "+ पेज नोट जोड़ें",
-    "description": "Page detail add page note button."
   },
   "desktopAdvanced": {
     "message": "उन्नत",
@@ -379,10 +375,6 @@
     "message": "नोट ($1)",
     "description": "Recycle bin note display name with slug."
   },
-  "desktopNoAnnotation": {
-    "message": "कोई टिप्पणी नहीं",
-    "description": "Empty note annotation placeholder."
-  },
   "desktopOnboardingDataHeading": {
     "message": "अपना डेटा फ़ोल्डर चुनें",
     "description": "Onboarding data-folder heading."
@@ -543,10 +535,6 @@
     "message": "ब्राउज़र को निरस्त करने में विफल: $1",
     "description": "Paired browser revoke failure."
   },
-  "desktopPageNotePrefix": {
-    "message": "पेज नोट:",
-    "description": "Prefix for page-note recycle bin display names."
-  },
   "desktopSelectBookmarkFile": {
     "message": "फ़ोल्डरों का पूर्वावलोकन करने के लिए निर्यात की गई बुकमार्क फ़ाइल का चयन करें।",
     "description": "Bookmark import placeholder."
@@ -667,14 +655,6 @@
     "message": "एक नोट जोड़ें... सहेजने के लिए Esc.",
     "description": "Extension note placeholder with keyboard hint."
   },
-  "extensionAddPageNote": {
-    "message": "+ पेज नोट",
-    "description": "Popup page note add button."
-  },
-  "extensionAddPageNoteEsc": {
-    "message": "एक पेज नोट जोड़ें... सहेजने के लिए Esc।",
-    "description": "Extension page note placeholder with keyboard hint."
-  },
   "extensionAddToList": {
     "message": "सूची में जोड़ें",
     "description": "Popup add to list title."
@@ -771,10 +751,6 @@
     "message": "\"$1\" बनाएं",
     "description": "List picker create option."
   },
-  "extensionCreateNoteFailed": {
-    "message": "नोट बनाना विफल रहा",
-    "description": "Create note failure."
-  },
   "extensionDeleteHighlight": {
     "message": "हाइलाइट हटाएँ",
     "description": "Delete highlight button title."
@@ -867,6 +843,10 @@
     "message": "मार्कअप छिपाएँ",
     "description": "Popup button that temporarily hides applied highlight markup."
   },
+  "extensionShowMarkup": {
+    "message": "मार्कअप दिखाएँ",
+    "description": "Popup button that reapplies hidden highlight markup."
+  },
   "extensionResumeTracing": {
     "message": "ट्रेसिंग फिर शुरू करें",
     "description": "Extension popup recording resume title."
@@ -955,10 +935,6 @@
     "message": "सेटिंग्स में प्रबंधित करें",
     "description": "Popup settings action."
   },
-  "extensionNoAnnotation": {
-    "message": "कोई टिप्पणी नहीं",
-    "description": "Popup no annotation placeholder."
-  },
   "extensionNoLists": {
     "message": "कोई सूची नहीं",
     "description": "Popup no lists message."
@@ -978,10 +954,6 @@
   "extensionPageDataUnavailable": {
     "message": "पेज डेटा अनुपलब्ध",
     "description": "Popup page data unavailable title."
-  },
-  "extensionPageNote": {
-    "message": "पेज नोट",
-    "description": "Page note overlay title."
   },
   "extensionRatePageFailed": {
     "message": "रेटपेज विफल",
@@ -1062,7 +1034,12 @@
   "extensionSnapshotCapturedWithWarnings": {
     "message": "स्नैपशॉट सहेजा गया, लेकिन $COUNT$ संसाधन उपलब्ध नहीं थे।",
     "description": "Snapshot capture partial-success warning for multiple unavailable resources.",
-    "placeholders": { "count": { "content": "$1", "example": "2" } }
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
   },
   "extensionSomethingWentWrong": {
     "message": "कुछ ग़लत हो गया",
@@ -1107,10 +1084,6 @@
   "extensionToggleRecording": {
     "message": "रिकॉर्डिंग टॉगल करें",
     "description": "Extension popup recording toggle accessibility label."
-  },
-  "desktopAddPageNotePlaceholder": {
-    "message": "एक पेज नोट जोड़ें...",
-    "description": "Localized UI text."
   },
   "desktopAlreadyPaired": {
     "message": "Chrome पहले से Browser Recall Desktop के साथ पेयर है",
@@ -1353,7 +1326,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "टेक्स्ट चुनकर उसे हाइलाइट करने के लिए <kbd>Alt+H</kbd> दबाएँ। कुछ भी चुने बिना <kbd>Alt+H</kbd> दबाने पर वर्तमान पृष्ठ में नोट जुड़ता है।",
+    "message": "टेक्स्ट चुनकर उसे हाइलाइट करने के लिए <kbd>Alt+H</kbd> दबाएँ।",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {

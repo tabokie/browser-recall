@@ -15,10 +15,9 @@ describe('formatHighlightExcerpt', () => {
       'first',
       'second',
     ]);
-    expect(highlightExcerptParts(null)).toEqual([]);
-    for (const excerpt of ['first\nsecond', ['valid', ''], [1]]) {
+    for (const excerpt of [null, [], 'first\nsecond', ['valid', ''], [1]]) {
       expect(() => highlightExcerptParts(excerpt)).toThrow(
-        'Highlight excerpt must be a non-empty string array or null',
+        'Highlight excerpt must be a non-empty string array',
       );
     }
   });

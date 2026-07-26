@@ -12,7 +12,7 @@
     "description": "Extension store and browser management description."
   },
   "commandHighlightSelection": {
-    "message": "Highlight selected text or add a page note",
+    "message": "Highlight selected text",
     "description": "Browser command description."
   },
   "commandCaptureSnapshot": {
@@ -106,10 +106,6 @@
   "desktopAddRule": {
     "message": "Add rule",
     "description": "Desktop inbox rule add button title."
-  },
-  "desktopAddPageNote": {
-    "message": "+ Add page note",
-    "description": "Page detail add page note button."
   },
   "desktopAdvanced": {
     "message": "Advanced",
@@ -379,10 +375,6 @@
     "message": "Note ($1)",
     "description": "Recycle bin note display name with slug."
   },
-  "desktopNoAnnotation": {
-    "message": "No annotation",
-    "description": "Empty note annotation placeholder."
-  },
   "desktopOnboardingDataHeading": {
     "message": "Choose your data folder",
     "description": "Onboarding data-folder heading."
@@ -571,10 +563,6 @@
     "message": "Failed to revoke browser: $1",
     "description": "Paired browser revoke failure."
   },
-  "desktopPageNotePrefix": {
-    "message": "Page note: ",
-    "description": "Prefix for page-note recycle bin display names."
-  },
   "desktopSelectBookmarkFile": {
     "message": "Select an exported bookmarks file to preview folders.",
     "description": "Bookmark import placeholder."
@@ -695,14 +683,6 @@
     "message": "Add a note... Esc to save.",
     "description": "Extension note placeholder with keyboard hint."
   },
-  "extensionAddPageNote": {
-    "message": "+ Page note",
-    "description": "Popup page note add button."
-  },
-  "extensionAddPageNoteEsc": {
-    "message": "Add a page note... Esc to save.",
-    "description": "Extension page note placeholder with keyboard hint."
-  },
   "extensionAddToList": {
     "message": "Add to list",
     "description": "Popup add to list title."
@@ -799,10 +779,6 @@
     "message": "Create \"$1\"",
     "description": "List picker create option."
   },
-  "extensionCreateNoteFailed": {
-    "message": "Create note failed",
-    "description": "Create note failure."
-  },
   "extensionDeleteHighlight": {
     "message": "Delete highlight",
     "description": "Delete highlight button title."
@@ -895,6 +871,10 @@
     "message": "Hide markup",
     "description": "Popup button that temporarily hides applied highlight markup."
   },
+  "extensionShowMarkup": {
+    "message": "Show markup",
+    "description": "Popup button that reapplies hidden highlight markup."
+  },
   "extensionResumeTracing": {
     "message": "Resume tracing",
     "description": "Extension popup recording resume title."
@@ -983,10 +963,6 @@
     "message": "Manage in Settings",
     "description": "Popup settings action."
   },
-  "extensionNoAnnotation": {
-    "message": "No annotation",
-    "description": "Popup no annotation placeholder."
-  },
   "extensionNoLists": {
     "message": "No lists",
     "description": "Popup no lists message."
@@ -1006,10 +982,6 @@
   "extensionPageDataUnavailable": {
     "message": "Page Data Unavailable",
     "description": "Popup page data unavailable title."
-  },
-  "extensionPageNote": {
-    "message": "Page Note",
-    "description": "Page note overlay title."
   },
   "extensionRatePageFailed": {
     "message": "ratePage failed",
@@ -1140,10 +1112,6 @@
   "extensionToggleRecording": {
     "message": "Toggle recording",
     "description": "Extension popup recording toggle accessibility label."
-  },
-  "desktopAddPageNotePlaceholder": {
-    "message": "Add a page note...",
-    "description": "Localized UI text."
   },
   "desktopAlreadyPaired": {
     "message": "Chrome is already paired with Browser Recall Desktop",
@@ -1386,7 +1354,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "Select text and press <kbd>Alt+H</kbd> to highlight it, or press <kbd>Alt+H</kbd> with no selection to add a note to the current page.",
+    "message": "Select text and press <kbd>Alt+H</kbd> to highlight it.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {
@@ -1575,7 +1543,7 @@
   },
   "extensionCouldNotLoadNotes": {
     "message": "Could not load notes.",
-    "description": "Error shown when page notes cannot be loaded."
+    "description": "Error shown when notes cannot be loaded."
   },
   "extensionCouldNotLoadHighlights": {
     "message": "Could not load highlights.",
@@ -1601,7 +1569,10 @@
     "message": "Clear search",
     "description": "Clear search button label."
   },
-  "desktopExpand": { "message": "Expand", "description": "Expand list title." },
+  "desktopExpand": {
+    "message": "Expand",
+    "description": "Expand list title."
+  },
   "desktopListNamePlaceholder": {
     "message": "List name...",
     "description": "New list name input placeholder."

@@ -227,6 +227,7 @@ cargo clippy --workspace --all-targets -- -D warnings  # Rust lints
 ## Replay Verification
 
 Replays the full JSONL event log through `effectOf` and diffs the result against on-disk checkpoints. Useful for validating that the replay engine reproduces the expected state.
+Existing note objects are used as replay base state only when no log event references them. Notes with log history are rebuilt from those events so tombstone idempotence does not hide their related replay effects. Differences caused by selective checkpoint timing, including an earlier `createdAt` recovered from visit logs, are reported separately from genuine data discrepancies.
 
 ```bash
 cargo run -q -p browser-recall-replay --bin replay-verify --                         # default output

@@ -1004,6 +1004,7 @@ mod tests {
         let mut react_note = NoteEntity::new("react-note".to_string());
         react_note.url = Some("https://example.com/react".to_string());
         react_note.excerpt = Some(json!(["first match", "second excerpt"]));
+        react_note.css_path = Some(json!(["body > p", "body > p"]));
         react_note.note = Some("Remember the batching caveat".to_string());
         fs::write(
             notes_dir.join("react-note.json"),
@@ -1013,6 +1014,7 @@ mod tests {
         let mut other_note = NoteEntity::new("other".to_string());
         other_note.url = Some("https://example.com/other".to_string());
         other_note.excerpt = Some(json!(["nothing relevant here"]));
+        other_note.css_path = Some(json!(["body > p"]));
         fs::write(
             notes_dir.join("other.json"),
             serde_json::to_string(&other_note).unwrap(),

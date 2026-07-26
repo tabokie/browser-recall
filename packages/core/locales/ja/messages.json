@@ -12,7 +12,7 @@
     "description": "Extension store and browser management description."
   },
   "commandHighlightSelection": {
-    "message": "選択したテキストを強調表示するか、ページメモを追加します",
+    "message": "選択したテキストを強調表示します",
     "description": "Browser command description."
   },
   "commandCaptureSnapshot": {
@@ -106,10 +106,6 @@
   "desktopAddRule": {
     "message": "ルールの追加",
     "description": "Desktop inbox rule add button title."
-  },
-  "desktopAddPageNote": {
-    "message": "+ ページメモを追加",
-    "description": "Page detail add page note button."
   },
   "desktopAdvanced": {
     "message": "上級者向け",
@@ -379,10 +375,6 @@
     "message": "注 ($1)",
     "description": "Recycle bin note display name with slug."
   },
-  "desktopNoAnnotation": {
-    "message": "注釈なし",
-    "description": "Empty note annotation placeholder."
-  },
   "desktopOnboardingDataHeading": {
     "message": "データフォルダーを選択してください",
     "description": "Onboarding data-folder heading."
@@ -543,10 +535,6 @@
     "message": "ブラウザの取り消しに失敗しました: $1",
     "description": "Paired browser revoke failure."
   },
-  "desktopPageNotePrefix": {
-    "message": "ページメモ:",
-    "description": "Prefix for page-note recycle bin display names."
-  },
   "desktopSelectBookmarkFile": {
     "message": "エクスポートされたブックマーク ファイルを選択してフォルダーをプレビューします。",
     "description": "Bookmark import placeholder."
@@ -667,14 +655,6 @@
     "message": "メモを追加... Esc キーを押して保存します。",
     "description": "Extension note placeholder with keyboard hint."
   },
-  "extensionAddPageNote": {
-    "message": "+ ページメモ",
-    "description": "Popup page note add button."
-  },
-  "extensionAddPageNoteEsc": {
-    "message": "ページメモを追加... Esc キーを押して保存します。",
-    "description": "Extension page note placeholder with keyboard hint."
-  },
   "extensionAddToList": {
     "message": "リストに追加",
     "description": "Popup add to list title."
@@ -771,10 +751,6 @@
     "message": "「$1」を作成します",
     "description": "List picker create option."
   },
-  "extensionCreateNoteFailed": {
-    "message": "メモの作成に失敗しました",
-    "description": "Create note failure."
-  },
   "extensionDeleteHighlight": {
     "message": "ハイライトの削除",
     "description": "Delete highlight button title."
@@ -867,6 +843,10 @@
     "message": "マークアップを非表示",
     "description": "Popup button that temporarily hides applied highlight markup."
   },
+  "extensionShowMarkup": {
+    "message": "マークアップを表示",
+    "description": "Popup button that reapplies hidden highlight markup."
+  },
   "extensionResumeTracing": {
     "message": "トレースを再開する",
     "description": "Extension popup recording resume title."
@@ -955,10 +935,6 @@
     "message": "設定で管理",
     "description": "Popup settings action."
   },
-  "extensionNoAnnotation": {
-    "message": "注釈なし",
-    "description": "Popup no annotation placeholder."
-  },
   "extensionNoLists": {
     "message": "リストなし",
     "description": "Popup no lists message."
@@ -978,10 +954,6 @@
   "extensionPageDataUnavailable": {
     "message": "ページデータが利用できません",
     "description": "Popup page data unavailable title."
-  },
-  "extensionPageNote": {
-    "message": "ページメモ",
-    "description": "Page note overlay title."
   },
   "extensionRatePageFailed": {
     "message": "rateページが失敗しました",
@@ -1062,7 +1034,12 @@
   "extensionSnapshotCapturedWithWarnings": {
     "message": "スナップショットを保存しましたが、$COUNT$ 件のリソースを取得できませんでした。",
     "description": "Snapshot capture partial-success warning for multiple unavailable resources.",
-    "placeholders": { "count": { "content": "$1", "example": "2" } }
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
   },
   "extensionSomethingWentWrong": {
     "message": "何か問題が発生しました",
@@ -1107,10 +1084,6 @@
   "extensionToggleRecording": {
     "message": "録画の切り替え",
     "description": "Extension popup recording toggle accessibility label."
-  },
-  "desktopAddPageNotePlaceholder": {
-    "message": "ページメモを追加...",
-    "description": "Localized UI text."
   },
   "desktopAlreadyPaired": {
     "message": "Chrome はすでに Browser Recall Desktop とペアリングされています",
@@ -1353,7 +1326,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "テキストを選択して <kbd>Alt+H</kbd> を押すとハイライトできます。何も選択せずに <kbd>Alt+H</kbd> を押すと、現在のページにメモを追加できます。",
+    "message": "テキストを選択して <kbd>Alt+H</kbd> を押すとハイライトできます。",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {

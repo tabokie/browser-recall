@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 
@@ -44,7 +44,7 @@ impl PageEntity {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct NoteEntity {
     pub slug: String,
@@ -60,6 +60,67 @@ pub struct NoteEntity {
     pub deletion_reason: Option<String>,
     #[serde(rename = "replacedBy")]
     pub replaced_by: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedNoteEntity {
+    slug: String,
+    excerpt: Value,
+    note: Option<String>,
+    #[serde(rename = "cssPath")]
+    css_path: Value,
+    url: Option<String>,
+    deleted: bool,
+    #[serde(rename = "deletedTs")]
+    deleted_ts: Option<i64>,
+    #[serde(rename = "deletionReason")]
+    deletion_reason: Option<String>,
+    #[serde(rename = "replacedBy")]
+    replaced_by: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for NoteEntity {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let persisted = PersistedNoteEntity::deserialize(deserializer)?;
+        let (excerpt, css_path) = match (persisted.excerpt, persisted.css_path) {
+            (Value::Null, Value::Null) if persisted.deleted && persisted.deleted_ts.is_some() => {
+                (None, None)
+            }
+            (Value::Array(excerpts), Value::Array(paths))
+                if !excerpts.is_empty()
+                    && excerpts.len() == paths.len()
+                    && excerpts.iter().all(|value| {
+                        value
+                            .as_str()
+                            .is_some_and(|text| !text.is_empty() && text == text.trim())
+                    })
+                    && paths.iter().all(Value::is_string) =>
+            {
+                (Some(Value::Array(excerpts)), Some(Value::Array(paths)))
+            }
+            _ => {
+                return Err(serde::de::Error::custom(
+                    "live note anchors must be aligned non-empty string arrays; only deleted tombstones may omit both anchors",
+                ));
+            }
+        };
+
+        Ok(Self {
+            slug: persisted.slug,
+            excerpt,
+            note: persisted.note,
+            css_path,
+            url: persisted.url,
+            deleted: persisted.deleted,
+            deleted_ts: persisted.deleted_ts,
+            deletion_reason: persisted.deletion_reason,
+            replaced_by: persisted.replaced_by,
+        })
+    }
 }
 
 impl NoteEntity {

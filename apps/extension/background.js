@@ -1927,9 +1927,9 @@ async function handleCreateNote(request, sender) {
     pageSlug: request.pageSlug ?? null,
     url: request.url ?? sender?.tab?.url ?? null,
     title: request.title ?? null,
-    excerpt: request.excerpt ?? null,
+    excerpt: request.excerpt,
     note: request.note ?? null,
-    cssPath: request.cssPath ?? null,
+    cssPath: request.cssPath,
   });
   if (!response.success) return response;
   return response;

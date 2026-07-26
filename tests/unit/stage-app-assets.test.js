@@ -362,8 +362,17 @@ describe('extension staged assets', () => {
     expect(extensionSurfaceSource).toContain('--br-text-primary: #171713');
     expect(extensionSurfaceSource).toContain('br-note-label');
     expect(extensionSurfaceSource).toContain('br-note-excerpt');
+    expect(extensionSurfaceSource).toContain('highlightEntryHtml');
+    expect(extensionSurfaceSource).toContain('openHighlightNoteEditor');
+    expect(extensionSurfaceSource).toContain(
+      'border-left: 3px solid var(--br-accent-red, var(--accent-red));',
+    );
     expect(extensionSurfaceSource).toContain('positionNearRect');
-    expect(contentSource).toContain('data-note-index');
+    expect(contentSource).not.toContain('data-note-index');
+    expect(contentSource).toContain(
+      '.panel::-webkit-scrollbar { display: none; width: 0; height: 0; }',
+    );
+    expect(contentSource).not.toContain('extensionNoAnnotation');
     expect(contentSource).toContain('var(--br-border-section)');
     expect(contentSource).not.toContain(
       '.delete-btn:hover { background: var(--br-accent-red-soft)',

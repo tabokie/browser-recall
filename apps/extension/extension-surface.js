@@ -31,6 +31,136 @@
     }
   `;
 
+  const HIGHLIGHT_ENTRY_CSS = `
+    .highlight-item {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      padding: 9px var(--br-highlight-side-padding, 0px);
+      border: 0;
+      border-top: 1px dotted var(--br-border-section, var(--border-section));
+      border-radius: 0;
+      background: transparent;
+      overflow: visible;
+    }
+
+    .note-display-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      color: var(--br-text-primary, var(--text-primary));
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .highlight-quote {
+      flex: 1;
+      min-width: 0;
+      padding-left: 10px;
+      border-left: 3px solid var(--br-accent-red, var(--accent-red));
+    }
+
+    .highlight-quote-line {
+      min-width: 0;
+      min-height: 1.45em;
+    }
+
+    .highlight-excerpt {
+      min-width: 0;
+      color: var(--br-text-primary, var(--text-primary));
+      font-style: normal;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .highlight-note-row {
+      min-height: 1.45em;
+      margin-top: 8px;
+      padding-right: 22px;
+    }
+
+    .highlight-note-text {
+      flex: 1;
+      min-width: 0;
+      color: var(--br-text-primary, var(--text-primary));
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .highlight-note-editor {
+      display: block;
+      width: 100%;
+      min-width: 0;
+      min-height: 1.45em;
+      padding: 0;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--br-text-primary, var(--text-primary));
+      font: inherit;
+      line-height: inherit;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      caret-color: var(--br-text-primary, var(--text-primary));
+    }
+
+    .highlight-note-editor:empty::before {
+      content: attr(data-placeholder);
+      color: var(--br-text-muted, var(--text-muted));
+      font-size: 10px;
+      font-style: italic;
+      pointer-events: none;
+    }
+
+    .note-action-btn {
+      flex-shrink: 0;
+      width: 16px;
+      height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      border: 0;
+      border-radius: 2px;
+      background: none;
+      color: var(--br-text-muted, var(--text-muted));
+      cursor: pointer;
+      font: inherit;
+      line-height: 1;
+    }
+
+    .note-action-btn:hover {
+      background: var(--br-bg-surface-active, var(--bg-surface-active));
+      color: var(--br-text-primary, var(--text-primary));
+    }
+
+    .note-action-btn:disabled {
+      cursor: default;
+      opacity: 0.55;
+    }
+
+    .note-action-btn svg {
+      display: block;
+      width: 12px;
+      height: 12px;
+    }
+
+    .highlight-edit-action {
+      position: absolute;
+      right: var(--br-highlight-side-padding, 0px);
+      bottom: 9px;
+    }
+  `;
+
+  const HIGHLIGHT_ICON_EDIT =
+    '<svg data-icon="edit" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 1.5l3 3L5 14H2v-3z"/></svg>';
+  const HIGHLIGHT_ICON_DELETE =
+    '<svg data-icon="delete" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>';
+  const HIGHLIGHT_ICON_CONFIRM =
+    '<svg data-icon="checkmark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter"><path d="M2.5 8.5l3.2 3.2L13.5 4"/></svg>';
+
   function escapeHtml(value) {
     return String(value)
       .replace(/&/g, '&amp;')
@@ -44,16 +174,127 @@
   }
 
   function highlightExcerptParts(excerpt) {
-    if (excerpt === null) return [];
     if (
       !Array.isArray(excerpt) ||
+      excerpt.length === 0 ||
       !excerpt.every((part) => typeof part === 'string' && part)
     ) {
-      throw new Error(
-        'Highlight excerpt must be a non-empty string array or null',
-      );
+      throw new Error('Highlight excerpt must be a non-empty string array');
     }
     return excerpt;
+  }
+
+  function highlightEntryHtml(note, labels = {}) {
+    const quoteLines = formatHighlightExcerpt(note.excerpt)
+      .split('\n')
+      .map(
+        (line) =>
+          `<div class="highlight-quote-line"><span class="highlight-excerpt">${escapeHtml(line)}</span></div>`,
+      )
+      .join('');
+    const noteDisplay = note.note
+      ? `<span class="highlight-note-text">${escapeHtml(note.note)}</span>`
+      : '';
+    return `<div class="highlight-item" data-note-slug="${escapeHtml(note.slug)}">
+      <div class="highlight-quote-row note-display-row">
+        <div class="highlight-quote">${quoteLines}</div>
+        <button class="note-action-btn delete" title="${escapeHtml(labels.deleteTitle || '')}">${HIGHLIGHT_ICON_DELETE}</button>
+      </div>
+      <div class="highlight-note-row note-display-row">${noteDisplay}</div>
+      <button class="note-action-btn highlight-edit-action edit" title="${escapeHtml(labels.editTitle || '')}">${HIGHLIGHT_ICON_EDIT}</button>
+    </div>`;
+  }
+
+  function installHighlightEntryStyles(doc = document) {
+    if (doc.getElementById('browser-recall-highlight-entry-styles')) return;
+    const style = doc.createElement('style');
+    style.id = 'browser-recall-highlight-entry-styles';
+    style.textContent = HIGHLIGHT_ENTRY_CSS;
+    (doc.head || doc.documentElement).appendChild(style);
+  }
+
+  function openHighlightNoteEditor({
+    item,
+    note,
+    placeholder,
+    confirmTitle,
+    editTitle,
+    save,
+    onSaved = () => {},
+    onError = () => {},
+    view = window,
+  }) {
+    const row = item?.querySelector('.highlight-note-row');
+    const action = item?.querySelector('.highlight-edit-action');
+    const deleteAction = item?.querySelector('.note-action-btn.delete');
+    if (!row || !action || action.classList.contains('confirm')) return;
+
+    row.innerHTML = `<span class="highlight-note-editor" contenteditable="plaintext-only" role="textbox" aria-multiline="true" data-placeholder="${escapeHtml(placeholder || '')}">${escapeHtml(note.note || '')}</span>`;
+    const editor = row.querySelector('.highlight-note-editor');
+    action.classList.remove('edit');
+    action.classList.add('confirm');
+    action.title = confirmTitle || '';
+    action.innerHTML = HIGHLIGHT_ICON_CONFIRM;
+
+    let saving = false;
+    let finished = false;
+
+    const finish = (displayNote) => {
+      if (finished) return;
+      finished = true;
+      action.removeEventListener('click', saveCurrent);
+      row.innerHTML = displayNote
+        ? `<span class="highlight-note-text">${escapeHtml(displayNote)}</span>`
+        : '';
+      action.classList.remove('confirm');
+      action.classList.add('edit');
+      action.title = editTitle || '';
+      action.innerHTML = HIGHLIGHT_ICON_EDIT;
+      action.disabled = false;
+      if (deleteAction) deleteAction.disabled = false;
+    };
+
+    const saveCurrent = async () => {
+      if (saving || finished) return;
+      saving = true;
+      action.disabled = true;
+      // Saving replaces the note slug. Keep sibling deletion locked until the
+      // caller has installed the committed identity returned by save().
+      if (deleteAction) deleteAction.disabled = true;
+      const nextNote = editor.innerText.replace(/\r\n/g, '\n');
+      try {
+        const result = await save(nextNote);
+        note.note = nextNote;
+        await onSaved(result, nextNote);
+        if (item.isConnected) finish(nextNote);
+      } catch (error) {
+        onError(error);
+        if (item.isConnected) {
+          saving = false;
+          action.disabled = false;
+          if (deleteAction) deleteAction.disabled = false;
+          editor.focus();
+        }
+      }
+    };
+
+    action.addEventListener('click', saveCurrent);
+    editor.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !saving) {
+        event.preventDefault();
+        finish(note.note || '');
+      } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        void saveCurrent();
+      }
+    });
+    editor.focus();
+    const selection = view.getSelection();
+    const range = view.document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
   }
 
   function positionNearRect(host, rect, win = window, options = {}) {
@@ -100,7 +341,7 @@
       ? `<div class="br-note-label">${escapeHtml(title)}</div>`
       : '';
     const quote =
-      excerpt === undefined || excerpt === null
+      excerpt === undefined
         ? ''
         : `<div class="br-note-excerpt">${escapeHtml(excerpt)}</div>`;
     return `
@@ -118,8 +359,12 @@
   globalThis.browserRecallExtensionSurface = {
     escapeHtml,
     formatHighlightExcerpt,
+    highlightEntryCss: HIGHLIGHT_ENTRY_CSS,
+    highlightEntryHtml,
     highlightExcerptParts,
+    installHighlightEntryStyles,
     noteOverlayHtml,
+    openHighlightNoteEditor,
     positionNearRect,
     shadowCss: SHADOW_CSS,
     trashButtonHtml,

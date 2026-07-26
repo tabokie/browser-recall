@@ -277,13 +277,7 @@ function validatePageContexts(pages, action) {
           `${action} response page ${slug} note ${noteIndex} is invalid`,
         );
       }
-      if (note.excerpt === null) {
-        if (note.cssPath !== null) {
-          throw new Error(
-            `${action} response page ${slug} page note must have null cssPath`,
-          );
-        }
-      } else if (
+      if (
         !Array.isArray(note.excerpt) ||
         !note.excerpt.every(
           (part) => typeof part === 'string' && part.length > 0,

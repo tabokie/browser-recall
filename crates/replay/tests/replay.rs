@@ -27,6 +27,8 @@ fn page(slug: &str) -> PageEntity {
 
 fn note(slug: &str, url: &str) -> NoteEntity {
     let mut note = NoteEntity::new(slug.to_string());
+    note.excerpt = Some(json!(["hello"]));
+    note.css_path = Some(json!(["body"]));
     note.url = Some(url.to_string());
     note
 }
@@ -269,6 +271,34 @@ fn note_log_schema_accepts_only_string_array_text_values() {
         "cssPath": null
     }));
     assert!(invalid.is_err());
+
+    for invalid_anchor in [
+        json!({
+            "timestamp": 100,
+            "action": "create_note",
+            "url": "https://a.com",
+            "path": "objects/notes/n1.json",
+            "title": null,
+            "excerpt": null,
+            "note": "",
+            "cssPath": null
+        }),
+        json!({
+            "timestamp": 100,
+            "action": "create_note",
+            "url": "https://a.com",
+            "path": "objects/notes/n1.json",
+            "title": null,
+            "excerpt": [],
+            "note": "",
+            "cssPath": []
+        }),
+    ] {
+        assert!(
+            serde_json::from_value::<LogEntry>(invalid_anchor).is_err(),
+            "page-note and empty highlight anchors must not parse"
+        );
+    }
 }
 
 #[tokio::test]
@@ -871,9 +901,9 @@ async fn create_note_links_note_on_existing_page() {
             url: "https://a.com".to_string(),
             path: "objects/notes/n1.json".to_string(),
             title: None,
-            excerpt: None,
-            note: None,
-            css_path: None,
+            excerpt: Some(json!(["hello"])),
+            note: Some(String::new()),
+            css_path: Some(json!(["body"])),
         },
         load_from(store),
         context(),
@@ -904,9 +934,9 @@ async fn create_note_preserves_existing_created_at() {
             url: "https://a.com".to_string(),
             path: "objects/notes/n1.json".to_string(),
             title: Some("Ignored".to_string()),
-            excerpt: None,
-            note: None,
-            css_path: None,
+            excerpt: Some(json!(["hello"])),
+            note: Some(String::new()),
+            css_path: Some(json!(["body"])),
         },
         load_from(store),
         context(),
@@ -935,7 +965,7 @@ async fn delete_note_unlinks_note_and_tombstones_ineligible_page() {
             slug: "n1".to_string(),
             excerpt: Some(serde_json::json!(["hello"])),
             note: Some("world".to_string()),
-            css_path: None,
+            css_path: Some(json!(["body"])),
             url: Some("https://a.com".to_string()),
             deleted: false,
             deleted_ts: None,
@@ -971,6 +1001,34 @@ async fn delete_note_unlinks_note_and_tombstones_ineligible_page() {
         .entries
         .iter()
         .any(|entry| { entry.key == "note:n1" && entry.url.as_deref() == Some("https://a.com") }));
+}
+
+#[tokio::test]
+async fn delete_missing_note_tombstone_round_trips_checkpoint_schema() {
+    let result = effect_of(
+        LogEntry::DeleteNote {
+            timestamp: 200,
+            url: Some("https://a.com".to_string()),
+            path: "objects/notes/missing.json".to_string(),
+        },
+        |_| ready(None),
+        context(),
+    )
+    .await
+    .expect("delete of missing note replays");
+
+    let note = result
+        .get("note:missing")
+        .and_then(EntityEffect::as_note)
+        .expect("anchorless tombstone written");
+    assert!(note.deleted);
+    assert_eq!(note.excerpt, None);
+    assert_eq!(note.css_path, None);
+
+    let checkpoint = serde_json::to_value(note).expect("tombstone serializes");
+    let restored: NoteEntity =
+        serde_json::from_value(checkpoint).expect("serialized tombstone must remain readable");
+    assert_eq!(&restored, note);
 }
 
 #[tokio::test]
@@ -1080,7 +1138,7 @@ async fn restore_note_relinks_and_clears_deleted_flag() {
             slug: "n1".to_string(),
             excerpt: Some(serde_json::json!(["hello"])),
             note: Some("world".to_string()),
-            css_path: None,
+            css_path: Some(json!(["body"])),
             url: Some("https://a.com".to_string()),
             deleted: true,
             deleted_ts: Some(100),
@@ -3850,7 +3908,7 @@ async fn note_delete_then_restore_converges_to_restored_state() {
                 slug: "n1".to_string(),
                 excerpt: Some(serde_json::json!(["hello"])),
                 note: Some("world".to_string()),
-                css_path: None,
+                css_path: Some(json!(["body"])),
                 url: Some("https://a.com".to_string()),
                 deleted: false,
                 deleted_ts: None,
@@ -3922,18 +3980,18 @@ async fn two_devices_replacing_same_note_preserves_both_new_notes() {
         url: Some("https://a.com".to_string()),
         path: "objects/notes/newY.json".to_string(),
         old_path: "objects/notes/n1.json".to_string(),
-        excerpt: None,
-        note: None,
-        css_path: None,
+        excerpt: Some(json!(["hello"])),
+        note: Some(String::new()),
+        css_path: Some(json!(["body"])),
     };
     let second = LogEntry::ReplaceNote {
         timestamp: 20,
         url: Some("https://a.com".to_string()),
         path: "objects/notes/newZ.json".to_string(),
         old_path: "objects/notes/n1.json".to_string(),
-        excerpt: None,
-        note: None,
-        css_path: None,
+        excerpt: Some(json!(["hello"])),
+        note: Some(String::new()),
+        css_path: Some(json!(["body"])),
     };
 
     let state_a = replay_sequence(
@@ -3989,9 +4047,9 @@ async fn replace_and_delete_note_converge_with_new_note_preserved() {
         url: Some("https://a.com".to_string()),
         path: "objects/notes/newY.json".to_string(),
         old_path: "objects/notes/n1.json".to_string(),
-        excerpt: None,
-        note: None,
-        css_path: None,
+        excerpt: Some(json!(["hello"])),
+        note: Some(String::new()),
+        css_path: Some(json!(["body"])),
     };
     let delete = LogEntry::DeleteNote {
         timestamp: 20,
@@ -4031,7 +4089,7 @@ async fn note_restore_then_delete_converges_to_deleted_state() {
                 slug: "n1".to_string(),
                 excerpt: Some(serde_json::json!(["hello"])),
                 note: Some("world".to_string()),
-                css_path: None,
+                css_path: Some(json!(["body"])),
                 url: Some("https://a.com".to_string()),
                 deleted: true,
                 deleted_ts: Some(5),
@@ -4634,9 +4692,9 @@ async fn replace_delete_restore_note_converges_across_all_orderings() {
             url: Some("https://a.com".to_string()),
             path: "objects/notes/newY.json".to_string(),
             old_path: "objects/notes/n1.json".to_string(),
-            excerpt: None,
-            note: None,
-            css_path: None,
+            excerpt: Some(json!(["hello"])),
+            note: Some(String::new()),
+            css_path: Some(json!(["body"])),
         },
         LogEntry::DeleteNote {
             timestamp: 20,

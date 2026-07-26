@@ -12,7 +12,7 @@
     "description": "Extension store and browser management description."
   },
   "commandHighlightSelection": {
-    "message": "선택한 텍스트를 강조 표시하거나 페이지 메모를 추가하세요.",
+    "message": "선택한 텍스트를 강조 표시하세요.",
     "description": "Browser command description."
   },
   "commandCaptureSnapshot": {
@@ -106,10 +106,6 @@
   "desktopAddRule": {
     "message": "규칙 추가",
     "description": "Desktop inbox rule add button title."
-  },
-  "desktopAddPageNote": {
-    "message": "+ 페이지 메모 추가",
-    "description": "Page detail add page note button."
   },
   "desktopAdvanced": {
     "message": "고급",
@@ -379,10 +375,6 @@
     "message": "참고 ($1)",
     "description": "Recycle bin note display name with slug."
   },
-  "desktopNoAnnotation": {
-    "message": "주석 없음",
-    "description": "Empty note annotation placeholder."
-  },
   "desktopOnboardingDataHeading": {
     "message": "데이터 폴더를 선택하세요",
     "description": "Onboarding data-folder heading."
@@ -543,10 +535,6 @@
     "message": "브라우저 취소 실패: $1",
     "description": "Paired browser revoke failure."
   },
-  "desktopPageNotePrefix": {
-    "message": "페이지 참고사항:",
-    "description": "Prefix for page-note recycle bin display names."
-  },
   "desktopSelectBookmarkFile": {
     "message": "폴더를 미리 보려면 내보낸 북마크 파일을 선택하세요.",
     "description": "Bookmark import placeholder."
@@ -667,14 +655,6 @@
     "message": "메모 추가... 저장하려면 Esc를 누르세요.",
     "description": "Extension note placeholder with keyboard hint."
   },
-  "extensionAddPageNote": {
-    "message": "+ 페이지 노트",
-    "description": "Popup page note add button."
-  },
-  "extensionAddPageNoteEsc": {
-    "message": "페이지 메모를 추가하세요... 저장하려면 Esc를 누르세요.",
-    "description": "Extension page note placeholder with keyboard hint."
-  },
   "extensionAddToList": {
     "message": "목록에 추가",
     "description": "Popup add to list title."
@@ -771,10 +751,6 @@
     "message": "\"$1\" 생성",
     "description": "List picker create option."
   },
-  "extensionCreateNoteFailed": {
-    "message": "메모 작성 실패",
-    "description": "Create note failure."
-  },
   "extensionDeleteHighlight": {
     "message": "하이라이트 삭제",
     "description": "Delete highlight button title."
@@ -867,6 +843,10 @@
     "message": "마크업 숨기기",
     "description": "Popup button that temporarily hides applied highlight markup."
   },
+  "extensionShowMarkup": {
+    "message": "마크업 표시",
+    "description": "Popup button that reapplies hidden highlight markup."
+  },
   "extensionResumeTracing": {
     "message": "추적 재개",
     "description": "Extension popup recording resume title."
@@ -955,10 +935,6 @@
     "message": "설정에서 관리",
     "description": "Popup settings action."
   },
-  "extensionNoAnnotation": {
-    "message": "주석 없음",
-    "description": "Popup no annotation placeholder."
-  },
   "extensionNoLists": {
     "message": "목록 없음",
     "description": "Popup no lists message."
@@ -978,10 +954,6 @@
   "extensionPageDataUnavailable": {
     "message": "페이지 데이터를 사용할 수 없음",
     "description": "Popup page data unavailable title."
-  },
-  "extensionPageNote": {
-    "message": "페이지 참고",
-    "description": "Page note overlay title."
   },
   "extensionRatePageFailed": {
     "message": "rate페이지 실패",
@@ -1062,7 +1034,12 @@
   "extensionSnapshotCapturedWithWarnings": {
     "message": "스냅샷을 저장했지만 리소스 $COUNT$개를 사용할 수 없습니다.",
     "description": "Snapshot capture partial-success warning for multiple unavailable resources.",
-    "placeholders": { "count": { "content": "$1", "example": "2" } }
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
   },
   "extensionSomethingWentWrong": {
     "message": "문제가 발생했습니다.",
@@ -1107,10 +1084,6 @@
   "extensionToggleRecording": {
     "message": "녹화 전환",
     "description": "Extension popup recording toggle accessibility label."
-  },
-  "desktopAddPageNotePlaceholder": {
-    "message": "페이지 메모 추가...",
-    "description": "Localized UI text."
   },
   "desktopAlreadyPaired": {
     "message": "Chrome은 이미 Browser Recall Desktop과 페어링되어 있습니다",
@@ -1353,7 +1326,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "텍스트를 선택하고 <kbd>Alt+H</kbd>를 누르면 강조 표시됩니다. 아무것도 선택하지 않고 <kbd>Alt+H</kbd>를 누르면 현재 페이지에 메모가 추가됩니다.",
+    "message": "텍스트를 선택하고 <kbd>Alt+H</kbd>를 누르면 강조 표시됩니다.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {
@@ -1568,7 +1541,10 @@
     "message": "검색 지우기",
     "description": "검색 지우기 버튼 레이블."
   },
-  "desktopExpand": { "message": "펼치기", "description": "목록 펼치기 제목." },
+  "desktopExpand": {
+    "message": "펼치기",
+    "description": "목록 펼치기 제목."
+  },
   "desktopFailedToLoadPageDetails": {
     "message": "페이지 세부 정보를 불러오지 못했습니다",
     "description": "Page detail load failure."

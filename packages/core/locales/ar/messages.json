@@ -12,7 +12,7 @@
     "description": "Extension store and browser management description."
   },
   "commandHighlightSelection": {
-    "message": "قم بتمييز النص المحدد أو أضف ملاحظة بالصفحة",
+    "message": "قم بتمييز النص المحدد",
     "description": "Browser command description."
   },
   "commandCaptureSnapshot": {
@@ -106,10 +106,6 @@
   "desktopAddRule": {
     "message": "أضف القاعدة",
     "description": "Desktop inbox rule add button title."
-  },
-  "desktopAddPageNote": {
-    "message": "+ إضافة ملاحظة الصفحة",
-    "description": "Page detail add page note button."
   },
   "desktopAdvanced": {
     "message": "متقدم",
@@ -379,10 +375,6 @@
     "message": "ملاحظة ($1)",
     "description": "Recycle bin note display name with slug."
   },
-  "desktopNoAnnotation": {
-    "message": "لا يوجد تعليق توضيحي",
-    "description": "Empty note annotation placeholder."
-  },
   "desktopOnboardingDataHeading": {
     "message": "اختر مجلد البيانات الخاص بك",
     "description": "Onboarding data-folder heading."
@@ -543,10 +535,6 @@
     "message": "فشل في إبطال المتصفح: $1",
     "description": "Paired browser revoke failure."
   },
-  "desktopPageNotePrefix": {
-    "message": "ملاحظة الصفحة:",
-    "description": "Prefix for page-note recycle bin display names."
-  },
   "desktopSelectBookmarkFile": {
     "message": "حدد ملف الإشارات المرجعية الذي تم تصديره لمعاينة المجلدات.",
     "description": "Bookmark import placeholder."
@@ -667,14 +655,6 @@
     "message": "أضف ملاحظة... Esc للحفظ.",
     "description": "Extension note placeholder with keyboard hint."
   },
-  "extensionAddPageNote": {
-    "message": "+ ملاحظة الصفحة",
-    "description": "Popup page note add button."
-  },
-  "extensionAddPageNoteEsc": {
-    "message": "أضف ملاحظة صفحة... Esc للحفظ.",
-    "description": "Extension page note placeholder with keyboard hint."
-  },
   "extensionAddToList": {
     "message": "أضف إلى القائمة",
     "description": "Popup add to list title."
@@ -771,10 +751,6 @@
     "message": "إنشاء \"$1\"",
     "description": "List picker create option."
   },
-  "extensionCreateNoteFailed": {
-    "message": "فشل إنشاء ملاحظة",
-    "description": "Create note failure."
-  },
   "extensionDeleteHighlight": {
     "message": "حذف التمييز",
     "description": "Delete highlight button title."
@@ -867,6 +843,10 @@
     "message": "إخفاء العلامات",
     "description": "Popup button that temporarily hides applied highlight markup."
   },
+  "extensionShowMarkup": {
+    "message": "إظهار العلامات",
+    "description": "Popup button that reapplies hidden highlight markup."
+  },
   "extensionResumeTracing": {
     "message": "استئناف التتبع",
     "description": "Extension popup recording resume title."
@@ -955,10 +935,6 @@
     "message": "إدارة في الإعدادات",
     "description": "Popup settings action."
   },
-  "extensionNoAnnotation": {
-    "message": "لا يوجد تعليق توضيحي",
-    "description": "Popup no annotation placeholder."
-  },
   "extensionNoLists": {
     "message": "لا توجد قوائم",
     "description": "Popup no lists message."
@@ -978,10 +954,6 @@
   "extensionPageDataUnavailable": {
     "message": "بيانات الصفحة غير متاحة",
     "description": "Popup page data unavailable title."
-  },
-  "extensionPageNote": {
-    "message": "ملاحظة الصفحة",
-    "description": "Page note overlay title."
   },
   "extensionRatePageFailed": {
     "message": "فشل معدل الصفحة",
@@ -1062,7 +1034,12 @@
   "extensionSnapshotCapturedWithWarnings": {
     "message": "تم حفظ اللقطة، لكن $COUNT$ من الموارد لم تكن متاحة.",
     "description": "Snapshot capture partial-success warning for multiple unavailable resources.",
-    "placeholders": { "count": { "content": "$1", "example": "2" } }
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
   },
   "extensionSomethingWentWrong": {
     "message": "حدث خطأ ما",
@@ -1107,10 +1084,6 @@
   "extensionToggleRecording": {
     "message": "تبديل التسجيل",
     "description": "Extension popup recording toggle accessibility label."
-  },
-  "desktopAddPageNotePlaceholder": {
-    "message": "إضافة ملاحظة للصفحة...",
-    "description": "Localized UI text."
   },
   "desktopAlreadyPaired": {
     "message": "Chrome مقترن بالفعل بتطبيق Browser Recall Desktop",
@@ -1353,7 +1326,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "حدد النص واضغط <kbd>Alt+H</kbd> لتمييزه، أو اضغط على <kbd>Alt+H</kbd> مع عدم وجود تحديد لإضافة ملاحظة إلى الصفحة الحالية.",
+    "message": "حدد النص واضغط <kbd>Alt+H</kbd> لتمييزه.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {

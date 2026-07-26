@@ -21,6 +21,7 @@ async fn list_display_resolves_page_and_note_pins_from_coordinated_disk_reads() 
 
     let mut note = NoteEntity::new("note-a".to_string());
     note.excerpt = Some(serde_json::json!(["Highlighted text"]));
+    note.css_path = Some(serde_json::json!(["body"]));
     writer.save_note("note-a", &note).await.expect("note");
 
     let mut list = ListEntity::new(

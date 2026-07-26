@@ -12,7 +12,7 @@
     "description": "Extension store and browser management description."
   },
   "commandHighlightSelection": {
-    "message": "反白顯示所選文字或新增頁面註釋",
+    "message": "反白顯示所選文字",
     "description": "Browser command description."
   },
   "commandCaptureSnapshot": {
@@ -106,10 +106,6 @@
   "desktopAddRule": {
     "message": "新增規則",
     "description": "Desktop inbox rule add button title."
-  },
-  "desktopAddPageNote": {
-    "message": "+ 新增頁面註釋",
-    "description": "Page detail add page note button."
   },
   "desktopAdvanced": {
     "message": "進階",
@@ -379,10 +375,6 @@
     "message": "註（$1）",
     "description": "Recycle bin note display name with slug."
   },
-  "desktopNoAnnotation": {
-    "message": "無註釋",
-    "description": "Empty note annotation placeholder."
-  },
   "desktopOnboardingDataHeading": {
     "message": "選擇您的資料資料夾",
     "description": "Onboarding data-folder heading."
@@ -543,10 +535,6 @@
     "message": "無法撤銷瀏覽器：$1",
     "description": "Paired browser revoke failure."
   },
-  "desktopPageNotePrefix": {
-    "message": "頁面註釋：",
-    "description": "Prefix for page-note recycle bin display names."
-  },
   "desktopSelectBookmarkFile": {
     "message": "選擇匯出的書籤檔案以預覽資料夾。",
     "description": "Bookmark import placeholder."
@@ -667,14 +655,6 @@
     "message": "新增註解... Esc 進行儲存。",
     "description": "Extension note placeholder with keyboard hint."
   },
-  "extensionAddPageNote": {
-    "message": "+ 頁面註釋",
-    "description": "Popup page note add button."
-  },
-  "extensionAddPageNoteEsc": {
-    "message": "新增頁面註解... Esc 儲存。",
-    "description": "Extension page note placeholder with keyboard hint."
-  },
   "extensionAddToList": {
     "message": "添加到列表",
     "description": "Popup add to list title."
@@ -771,10 +751,6 @@
     "message": "創建“$1”",
     "description": "List picker create option."
   },
-  "extensionCreateNoteFailed": {
-    "message": "建立筆記失敗",
-    "description": "Create note failure."
-  },
   "extensionDeleteHighlight": {
     "message": "刪除突出顯示",
     "description": "Delete highlight button title."
@@ -867,6 +843,10 @@
     "message": "隱藏標記",
     "description": "Popup button that temporarily hides applied highlight markup."
   },
+  "extensionShowMarkup": {
+    "message": "顯示標記",
+    "description": "Popup button that reapplies hidden highlight markup."
+  },
   "extensionResumeTracing": {
     "message": "繼續追蹤",
     "description": "Extension popup recording resume title."
@@ -955,10 +935,6 @@
     "message": "在設定中管理",
     "description": "Popup settings action."
   },
-  "extensionNoAnnotation": {
-    "message": "無註釋",
-    "description": "Popup no annotation placeholder."
-  },
   "extensionNoLists": {
     "message": "沒有列表",
     "description": "Popup no lists message."
@@ -978,10 +954,6 @@
   "extensionPageDataUnavailable": {
     "message": "頁面資料不可用",
     "description": "Popup page data unavailable title."
-  },
-  "extensionPageNote": {
-    "message": "頁註",
-    "description": "Page note overlay title."
   },
   "extensionRatePageFailed": {
     "message": "評分頁面失敗",
@@ -1062,7 +1034,12 @@
   "extensionSnapshotCapturedWithWarnings": {
     "message": "快照已儲存，但有 $COUNT$ 個資源無法使用。",
     "description": "Snapshot capture partial-success warning for multiple unavailable resources.",
-    "placeholders": { "count": { "content": "$1", "example": "2" } }
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
   },
   "extensionSomethingWentWrong": {
     "message": "出了點問題",
@@ -1107,10 +1084,6 @@
   "extensionToggleRecording": {
     "message": "切換錄音",
     "description": "Extension popup recording toggle accessibility label."
-  },
-  "desktopAddPageNotePlaceholder": {
-    "message": "新增頁面註釋...",
-    "description": "Localized UI text."
   },
   "desktopAlreadyPaired": {
     "message": "Chrome 已與 Browser Recall Desktop 配對",
@@ -1353,7 +1326,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "選取文字並按 <kbd>Alt+H</kbd> 即可醒目提示；未選取文字時按 <kbd>Alt+H</kbd>，即可在目前頁面新增筆記。",
+    "message": "選取文字並按 <kbd>Alt+H</kbd> 即可醒目提示。",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {
@@ -1568,7 +1541,10 @@
     "message": "清除搜尋",
     "description": "清除搜尋按鈕標籤。"
   },
-  "desktopExpand": { "message": "展開", "description": "展開清單標題。" },
+  "desktopExpand": {
+    "message": "展開",
+    "description": "展開清單標題。"
+  },
   "desktopFailedToLoadPageDetails": {
     "message": "無法載入頁面詳細資料",
     "description": "Page detail load failure."

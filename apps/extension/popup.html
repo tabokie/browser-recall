@@ -421,22 +421,12 @@
         flex-direction: column;
       }
 
-      /* Page note: add button when empty, read-only display otherwise */
-      .page-note-wrap {
-        margin-bottom: 6px;
-      }
-
-      #notesSection.is-empty .page-note-wrap {
+      .markup-controls {
         margin-bottom: 0;
+        padding-bottom: 14px;
       }
 
-      .page-note-empty-actions {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 6px;
-      }
-
-      .page-note-add {
+      .markup-toggle-btn {
         width: 100%;
         background: transparent;
         border: 1px solid var(--text-primary);
@@ -458,188 +448,19 @@
           color 0.16s var(--ease-smooth);
       }
 
-      .page-note-add:hover {
+      .markup-toggle-btn:hover {
         background: var(--text-primary);
         color: var(--bg-base);
       }
 
-      .page-note-display {
-        display: flex;
-        align-items: flex-start;
-        gap: 6px;
-        padding: 4px 0;
-        font-size: 12px;
-        line-height: 1.5;
-        color: var(--text-secondary);
+      .markup-toggle-btn.is-markup-hidden {
+        background: var(--text-primary);
+        color: var(--bg-base);
       }
 
-      .page-note-display .note-body {
-        flex: 1;
-        min-width: 0;
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-
-      .page-note-edit-textarea {
-        width: 100%;
-        font-size: 12px;
-        line-height: 1.5;
-        padding: 8px 10px;
-        border: 1px solid var(--accent-primary);
-        border-radius: var(--radius-sm);
-        font-family: var(--font-body);
-        resize: vertical;
-        overflow: hidden;
-        box-sizing: border-box;
-        min-height: 48px;
-        background: var(--bg-input);
-        color: var(--text-primary);
-        box-shadow: 0 0 0 3px var(--accent-primary-soft);
-      }
-
-      .page-note-edit-textarea:focus {
-        outline: none;
-      }
-
-      /* Shared icon buttons for notes */
-      .note-action-btn {
-        width: 22px;
-        height: 22px;
-        border: none;
-        background: none;
-        border-radius: var(--radius-sm);
-        cursor: pointer;
-        color: var(--text-muted);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-        font-size: 12px;
-        line-height: 1;
-        padding: 0;
-        transition:
-          color 0.15s,
-          background 0.15s;
-      }
-
-      .note-action-btn:hover {
-        background: var(--bg-surface-active);
-        color: var(--text-primary);
-      }
-
-      .note-action-btn.delete:hover {
-        background: var(--bg-surface-active);
-        color: var(--text-primary);
-      }
-
-      /* Highlight cards */
       .highlight-list {
         display: flex;
         flex-direction: column;
-      }
-
-      .highlight-item {
-        display: grid;
-        grid-template-columns: 18px 1fr;
-        column-gap: 8px;
-        row-gap: 0;
-        padding: 9px 0;
-        background: transparent;
-        border: 0;
-        border-top: 1px dotted var(--border-section);
-        border-radius: 0;
-        overflow: visible;
-        transition: border-color 0.15s;
-      }
-
-      .highlight-item::before {
-        content: attr(data-note-index);
-        color: var(--recording-hot);
-        font-weight: 900;
-      }
-
-      .highlight-item:hover {
-        border-color: var(--border-hover);
-      }
-
-      .highlight-header {
-        display: flex;
-        align-items: flex-start;
-        gap: 4px;
-        padding: 0;
-        background: transparent;
-        border-left: 0;
-      }
-
-      .highlight-excerpt {
-        flex: 1;
-        min-width: 0;
-        padding: 0;
-        color: var(--text-muted);
-        font-style: italic;
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-
-      .highlight-body {
-        grid-column: 2;
-        padding: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 0;
-      }
-
-      .highlight-note-row {
-        display: flex;
-        align-items: flex-start;
-        gap: 6px;
-      }
-
-      .highlight-note-text {
-        flex: 1;
-        min-width: 0;
-        color: var(--text-primary);
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-
-      .highlight-note-placeholder {
-        flex: 1;
-        font-size: 10px;
-        color: var(--text-muted);
-        font-style: italic;
-      }
-
-      .highlight-note-edit-textarea {
-        width: 100%;
-        font-size: 11px;
-        line-height: 1.5;
-        padding: 4px 8px;
-        border: 1px solid var(--accent-primary);
-        border-radius: var(--radius-sm);
-        font-family: var(--font-body);
-        resize: none;
-        overflow: hidden;
-        box-sizing: border-box;
-        min-height: 1.5em;
-        background: var(--bg-input);
-        color: var(--text-primary);
-        box-shadow: 0 0 0 3px var(--accent-primary-soft);
-      }
-
-      .highlight-note-edit-textarea:focus {
-        outline: none;
-      }
-
-      .highlight-actions {
-        display: flex;
-        gap: 2px;
-        flex-shrink: 0;
-      }
-
-      .highlight-item .note-action-btn {
-        width: 16px;
-        height: 16px;
       }
 
       .highlight-label {
@@ -1361,7 +1182,7 @@
 
         <div class="section" id="notesSection" style="display: none">
           <div class="notes-scroll">
-            <div class="page-note-wrap" id="pageNoteWrap"></div>
+            <div class="markup-controls" id="markupControls"></div>
             <div class="highlight-list" id="highlightList"></div>
           </div>
         </div>
@@ -1408,6 +1229,7 @@
     </div>
 
     <script src="browser-api.js"></script>
+    <script src="extension-surface.js"></script>
     <script type="module" src="popup.js"></script>
   </body>
 </html>

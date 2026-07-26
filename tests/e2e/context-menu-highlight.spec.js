@@ -240,6 +240,8 @@ test.describe('Context menu highlight', () => {
     const pageUrl = localServer.url('/ctx-multi');
     const slug = getSlugForUrl(pageUrl);
     const now = Date.now();
+    const wrappedQuoteLine =
+      'first line deliberately long enough to wrap across multiple visual lines inside the highlights panel';
 
     await resetAndSeed(extContext, extensionId, [
       settingsCheckpoint(),
@@ -264,7 +266,7 @@ test.describe('Context menu highlight', () => {
         path: 'objects/notes/note-a.json',
         data: noteEntityFixture({
           slug: 'note-a',
-          excerpt: ['first line\nfirst second line'],
+          excerpt: [`${wrappedQuoteLine}\nfirst second line`],
           note: 'my note',
           cssPath: [''],
           url: pageUrl,
@@ -316,26 +318,93 @@ test.describe('Context menu highlight', () => {
       const items = [
         ...(panel?.shadowRoot?.querySelectorAll('.highlight-item') || []),
       ];
-      const firstExcerpt = panel?.shadowRoot?.querySelector('.excerpt');
+      const firstItem = items.find(
+        (item) => item.dataset.noteSlug === 'note-a',
+      );
+      const firstQuote = firstItem?.querySelector('.highlight-quote');
+      const firstQuoteLines = [
+        ...(firstQuote?.querySelectorAll('.highlight-quote-line') || []),
+      ];
+      const firstExcerpts = firstQuoteLines.map((line) =>
+        line.querySelector('.highlight-excerpt'),
+      );
+      const quoteStyle = getComputedStyle(firstQuote);
+      const colorProbe = document.createElement('span');
+      colorProbe.style.color = 'var(--br-text-primary)';
+      panel?.shadowRoot?.appendChild(colorProbe);
+      const textPrimary = getComputedStyle(colorProbe).color;
+      colorProbe.style.color = 'var(--br-accent-red)';
+      const accentRed = getComputedStyle(colorProbe).color;
+      colorProbe.remove();
+      const range = document.createRange();
+      range.selectNodeContents(firstQuote);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      const selectedText = selection.toString();
+      selection.removeAllRanges();
       return {
         count: items.length,
-        texts: items.map(
-          (item) => item.querySelector('.excerpt')?.textContent || '',
+        texts: items.map((item) =>
+          [...item.querySelectorAll('.highlight-excerpt')]
+            .map((excerpt) => excerpt.textContent || '')
+            .join('\n'),
         ),
-        firstWhiteSpace: firstExcerpt
-          ? getComputedStyle(firstExcerpt).whiteSpace
+        firstWhiteSpaces: firstExcerpts.map(
+          (excerpt) => getComputedStyle(excerpt).whiteSpace,
+        ),
+        firstLineCount: firstQuoteLines.length,
+        firstVisualLineCount: firstExcerpts[0]?.getClientRects().length,
+        quoteBorderColor: quoteStyle.borderLeftColor,
+        quoteBorderStyle: quoteStyle.borderLeftStyle,
+        quoteBorderWidth: quoteStyle.borderLeftWidth,
+        quoteHeight: firstQuote.getBoundingClientRect().height,
+        firstHardLineHeight: firstQuoteLines[0].getBoundingClientRect().height,
+        accentRed,
+        textPrimary,
+        excerptColors: firstExcerpts.map(
+          (excerpt) => getComputedStyle(excerpt).color,
+        ),
+        excerptFontStyles: firstExcerpts.map(
+          (excerpt) => getComputedStyle(excerpt).fontStyle,
+        ),
+        selectedText,
+        markerLeft: firstItem
+          ? firstItem.getBoundingClientRect().left +
+            Number.parseFloat(getComputedStyle(firstItem).paddingLeft)
           : null,
+        excerptLeft: firstExcerpts[0]?.getBoundingClientRect().left,
+        annotationLeft: firstItem
+          ?.querySelector('.highlight-note-row')
+          ?.getBoundingClientRect().left,
       };
     });
     expect(panelDetails.count).toBe(3);
     expect(panelDetails.texts).toEqual(
       expect.arrayContaining([
-        'first line\nfirst second line',
+        `${wrappedQuoteLine}\nfirst second line`,
         'second',
         'third',
       ]),
     );
-    expect(panelDetails.firstWhiteSpace).toBe('pre-wrap');
+    expect(panelDetails.firstWhiteSpaces).toEqual(['pre-wrap', 'pre-wrap']);
+    expect(panelDetails).toMatchObject({
+      firstLineCount: 2,
+      quoteBorderColor: panelDetails.accentRed,
+      quoteBorderStyle: 'solid',
+      quoteBorderWidth: '3px',
+      excerptColors: [panelDetails.textPrimary, panelDetails.textPrimary],
+      excerptFontStyles: ['normal', 'normal'],
+    });
+    expect(panelDetails.firstVisualLineCount).toBeGreaterThan(1);
+    expect(panelDetails.quoteHeight).toBeGreaterThan(
+      panelDetails.firstHardLineHeight,
+    );
+    expect(panelDetails.selectedText).not.toContain('>');
+    expect(panelDetails.annotationLeft).toBeCloseTo(panelDetails.markerLeft, 1);
+    expect(panelDetails.excerptLeft).toBeGreaterThan(
+      panelDetails.annotationLeft,
+    );
 
     await page.close();
     await helper.close();

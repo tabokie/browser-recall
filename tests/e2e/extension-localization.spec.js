@@ -183,7 +183,7 @@ test('packaged extension renders a real Japanese popup workflow', async ({
 
     const localized = await page.evaluate(() => ({
       locale: chrome.i18n.getMessage('@@ui_locale'),
-      addPageNote: chrome.i18n.getMessage('extensionAddPageNote'),
+      highlightCommand: chrome.i18n.getMessage('commandHighlightSelection'),
     }));
     const catalog = JSON.parse(
       fs.readFileSync(
@@ -198,7 +198,9 @@ test('packaged extension renders a real Japanese popup workflow', async ({
     );
 
     expect(localized.locale.replaceAll('_', '-')).toBe(TARGET_LOCALE);
-    expect(localized.addPageNote).toBe(catalog.extensionAddPageNote.message);
+    expect(localized.highlightCommand).toBe(
+      catalog.commandHighlightSelection.message,
+    );
 
     localServer.addPage('/localized-extension', {
       title: 'Localized Extension',
@@ -221,9 +223,7 @@ test('packaged extension renders a real Japanese popup workflow', async ({
     const popup = await context.newPage();
     await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
     await expect(popup.locator('#dashboard')).toBeVisible();
-    await expect(popup.locator('#pageNoteAddBtn')).toHaveText(
-      catalog.extensionAddPageNote.message,
-    );
+    await expect(popup.locator('#pageNoteAddBtn')).toHaveCount(0);
 
     localServer.addPage('/localized-extension.pdf', {
       title: 'Localized PDF Extension',

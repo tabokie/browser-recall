@@ -260,7 +260,33 @@ test('loading popup follows navigation committed during identity resolution', as
   const destinationUrl = localServer.url(
     '/loading-popup-navigation-destination',
   );
-  await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+  const destinationSlug = getSlugForUrl(destinationUrl);
+  const noteSlug = 'loading-destination-highlight';
+  const now = Date.now();
+  await resetAndSeed(extContext, extensionId, [
+    settingsCheckpoint(),
+    {
+      path: pageCheckpointPath(destinationSlug),
+      data: pageEntityFixture({
+        slug: destinationSlug,
+        url: destinationUrl,
+        title: 'Loading Navigation Destination',
+        timestamps: { 'test-device': now },
+        parentIds: [],
+        childIds: [`note:${noteSlug}`],
+      }),
+    },
+    {
+      path: `objects/notes/${noteSlug}.json`,
+      data: noteEntityFixture({
+        slug: noteSlug,
+        excerpt: ['Receiver-less loading-page highlight'],
+        note: '',
+        cssPath: ['body'],
+        url: destinationUrl,
+      }),
+    },
+  ]);
 
   const page = await extContext.newPage();
   await page.goto(sourceUrl, { waitUntil: 'commit' });
@@ -294,6 +320,10 @@ test('loading popup follows navigation committed during identity resolution', as
     'Loading Navigation Destination',
   );
   await expect(popup.locator('#pageUrl')).toHaveText(destinationUrl);
+  await expect(popup.locator('.highlight-excerpt')).toHaveText(
+    'Receiver-less loading-page highlight',
+  );
+  await expect(popup.locator('#hideMarkupBtn')).toHaveCount(0);
 
   await popup.close();
   await page.close();
@@ -424,18 +454,18 @@ test.describe('Popup list chip behavior', () => {
     });
   }
 
-  test('localizes the dynamically rendered add page note button', async ({
+  test('popup omits page-note controls while keeping localized popup actions', async ({
     extContext,
     extensionId,
     setupDir,
     localServer,
   }) => {
     void setupDir;
-    localServer.addPage('/localized-page-note', {
-      title: 'Localized Page Note',
-      body: '<main>Localized page note</main>',
+    localServer.addPage('/localized-popup-actions', {
+      title: 'Localized Popup Actions',
+      body: '<main>Localized popup actions</main>',
     });
-    const url = localServer.url('/localized-page-note');
+    const url = localServer.url('/localized-popup-actions');
 
     await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
 
@@ -443,18 +473,18 @@ test.describe('Popup list chip behavior', () => {
     await page.goto(url);
     const popup = await openPopupForUrl(extContext, extensionId, {
       url,
-      title: 'Localized Page Note',
+      title: 'Localized Popup Actions',
       locale: 'zh-CN',
       messages: {
-        extensionAddPageNote: '+ 页面笔记',
-        extensionAddPageNoteEsc: '添加页面笔记...按 Esc 保存。',
         extensionAddToList: '添加到列表',
         extensionSearchOrCreate: '搜索或创建...',
         extensionPauseTracing: '暂停跟踪',
       },
     });
 
-    await expect(popup.locator('#pageNoteAddBtn')).toHaveText('+ 页面笔记');
+    await expect(popup.locator('#notesSection')).toBeHidden();
+    await expect(popup.locator('#pageNoteAddBtn')).toHaveCount(0);
+    await expect(popup.locator('.page-note-edit-textarea')).toHaveCount(0);
     await expect(popup.locator('#recordingToggle')).toHaveAttribute(
       'title',
       '暂停跟踪',
@@ -463,13 +493,6 @@ test.describe('Popup list chip behavior', () => {
       'title',
       '添加到列表',
     );
-
-    await popup.locator('#pageNoteAddBtn').click();
-    await expect(popup.locator('.page-note-edit-textarea')).toHaveAttribute(
-      'placeholder',
-      '添加页面笔记...按 Esc 保存。',
-    );
-    await popup.locator('.page-note-edit-textarea').blur();
 
     await popup.locator('#listAddBtn').click();
     await expect(popup.locator('#listSearchInput')).toHaveAttribute(
@@ -531,31 +554,75 @@ test.describe('Popup list chip behavior', () => {
       helper,
       'extensionHideMarkup',
     );
+    const showMarkupLabel = await getExtensionMessage(
+      helper,
+      'extensionShowMarkup',
+    );
     await helper.close();
     const popup = await openPopupForUrl(extContext, extensionId, {
       url,
       title: 'Hide Highlight Markup',
     });
-    await expect(popup.locator('#pageNoteAddBtn')).toBeVisible();
-    await expect(popup.locator('#hideMarkupBtn')).toHaveText(hideMarkupLabel);
-
-    const actionOrder = await popup
-      .locator('#pageNoteAddBtn, #hideMarkupBtn')
-      .evaluateAll((buttons) =>
-        buttons.map((button) => ({
-          id: button.id,
-          top: button.getBoundingClientRect().top,
-        })),
+    const markupButton = popup.locator('#hideMarkupBtn');
+    await expect(markupButton).toHaveText(hideMarkupLabel);
+    await expect(
+      popup.locator('.highlight-item .highlight-note-row'),
+    ).toHaveText('');
+    await expect(
+      popup.locator('.highlight-item .highlight-note-placeholder'),
+    ).toHaveCount(0);
+    const markupPaddingBottom = await popup
+      .locator('#markupControls')
+      .evaluate((controls) =>
+        Number.parseFloat(getComputedStyle(controls).paddingBottom),
       );
-    expect(actionOrder.map(({ id }) => id)).toEqual([
-      'pageNoteAddBtn',
-      'hideMarkupBtn',
-    ]);
-    expect(actionOrder[1].top).toBeCloseTo(actionOrder[0].top, 1);
+    expect(markupPaddingBottom).toBe(14);
+    const emptyHighlight = popup.locator('.highlight-item').first();
+    const viewHeight = await emptyHighlight.evaluate(
+      (item) => item.getBoundingClientRect().height,
+    );
+    await emptyHighlight.locator('.note-action-btn.edit').click();
+    const emptyEditor = emptyHighlight.locator(
+      '.highlight-note-editor[contenteditable="plaintext-only"]',
+    );
+    await expect(emptyEditor).toBeFocused();
+    const editHeight = await emptyHighlight.evaluate(
+      (item) => item.getBoundingClientRect().height,
+    );
+    expect(Math.abs(editHeight - viewHeight)).toBeLessThan(0.1);
+    await emptyEditor.press('Escape');
+    const visibleButtonColors = await markupButton.evaluate((button) => {
+      const style = getComputedStyle(button);
+      return {
+        backgroundColor: style.backgroundColor,
+        color: style.color,
+      };
+    });
 
-    await popup.locator('#hideMarkupBtn').click();
+    await expect(popup.locator('#pageNoteAddBtn')).toHaveCount(0);
+    await expect(popup.locator('#markupControls')).toHaveCount(1);
+
+    await markupButton.click();
 
     await expect(page.locator('mark.browser-recall-highlight')).toHaveCount(0);
+    await expect(markupButton).toHaveText(showMarkupLabel);
+    await expect(markupButton).toHaveClass(/is-markup-hidden/);
+    await expect
+      .poll(() =>
+        markupButton.evaluate((button) => {
+          const style = getComputedStyle(button);
+          return {
+            backgroundColor: style.backgroundColor,
+            color: style.color,
+          };
+        }),
+      )
+      .toEqual({
+        backgroundColor: visibleButtonColors.color,
+        color: await popup
+          .locator('body')
+          .evaluate((body) => getComputedStyle(body).backgroundColor),
+      });
     await page.evaluate(() => {
       document.body.append(document.createElement('aside'));
     });
@@ -570,6 +637,15 @@ test.describe('Popup list chip behavior', () => {
       title: 'Hide Highlight Markup',
     });
     await expect(reopenedPopup.locator('.highlight-item')).toHaveCount(1);
+    const reopenedMarkupButton = reopenedPopup.locator('#hideMarkupBtn');
+    await expect(reopenedMarkupButton).toHaveText(showMarkupLabel);
+    await expect(reopenedMarkupButton).toHaveClass(/is-markup-hidden/);
+    await reopenedMarkupButton.click();
+    await expect(page.locator('mark.browser-recall-highlight')).toHaveText(
+      highlightText,
+    );
+    await expect(reopenedMarkupButton).toHaveText(hideMarkupLabel);
+    await expect(reopenedMarkupButton).not.toHaveClass(/is-markup-hidden/);
     await reopenedPopup.close();
     await page.close();
   });
@@ -2428,7 +2504,7 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
-  test('popup highlight excerpts preserve original newlines', async ({
+  test('popup highlight excerpts mark hard and soft-wrapped lines', async ({
     extContext,
     extensionId,
     setupDir,
@@ -2442,6 +2518,8 @@ test.describe('Popup list chip behavior', () => {
     const url = localServer.url('/popup-highlight-newlines');
     const slug = getSlugForUrl(url);
     const stringNoteSlug = 'popup-string-newline-note';
+    const wrappedQuoteLine =
+      'String first line deliberately long enough to wrap across multiple visual lines inside the popup highlight area';
 
     await resetAndSeed(extContext, extensionId, [
       settingsCheckpoint(),
@@ -2464,7 +2542,7 @@ test.describe('Popup list chip behavior', () => {
         path: `objects/notes/${stringNoteSlug}.json`,
         data: noteEntityFixture({
           slug: stringNoteSlug,
-          excerpt: ['String first line\nString second line'],
+          excerpt: [`${wrappedQuoteLine}\nString second line`],
           note: 'String note',
           cssPath: [''],
           url,
@@ -2482,10 +2560,9 @@ test.describe('Popup list chip behavior', () => {
       url,
     );
     expect(summary.success, JSON.stringify(summary)).toBe(true);
-    expect(summary).toMatchObject({
-      success: true,
-      notes: [{ slug: stringNoteSlug }],
-    });
+    expect(summary.notes.map(({ slug: noteSlug }) => noteSlug)).toEqual([
+      stringNoteSlug,
+    ]);
     const popup = await openPopupForUrl(extContext, extensionId, {
       url,
       title: 'Popup Highlight Newlines',
@@ -2503,10 +2580,173 @@ test.describe('Popup list chip behavior', () => {
 
     expect(excerpts).toEqual([
       {
-        text: 'String first line\nString second line',
+        text: wrappedQuoteLine,
+        whiteSpace: 'pre-wrap',
+      },
+      {
+        text: 'String second line',
         whiteSpace: 'pre-wrap',
       },
     ]);
+    const highlightVisual = await popup
+      .locator('.highlight-item')
+      .evaluate((item) => {
+        const quote = item.querySelector('.highlight-quote');
+        const quoteLines = [...quote.querySelectorAll('.highlight-quote-line')];
+        const quoteStyle = getComputedStyle(quote);
+        const excerptStyle = getComputedStyle(
+          quote.querySelector('.highlight-excerpt'),
+        );
+        const colorProbe = document.createElement('span');
+        colorProbe.style.color = 'var(--text-primary)';
+        document.body.appendChild(colorProbe);
+        const textPrimary = getComputedStyle(colorProbe).color;
+        colorProbe.style.color = 'var(--accent-red)';
+        const accentRed = getComputedStyle(colorProbe).color;
+        colorProbe.remove();
+        const range = document.createRange();
+        range.selectNodeContents(quote);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        const selectedText = selection.toString();
+        selection.removeAllRanges();
+        const actionGeometry = (button) => {
+          const rect = button.getBoundingClientRect();
+          return {
+            left: rect.left,
+            right: rect.right,
+            top: rect.top,
+            bottom: rect.bottom,
+            width: rect.width,
+            height: rect.height,
+          };
+        };
+        const itemRect = item.getBoundingClientRect();
+        const noteRowRect = item
+          .querySelector('.highlight-note-row')
+          .getBoundingClientRect();
+        const quoteRect = quote.getBoundingClientRect();
+        return {
+          lineCount: quoteLines.length,
+          firstVisualLineCount: quoteLines[0]
+            .querySelector('.highlight-excerpt')
+            .getClientRects().length,
+          quoteBorderColor: quoteStyle.borderLeftColor,
+          quoteBorderStyle: quoteStyle.borderLeftStyle,
+          quoteBorderWidth: quoteStyle.borderLeftWidth,
+          quoteHeight: quote.getBoundingClientRect().height,
+          firstHardLineHeight: quoteLines[0].getBoundingClientRect().height,
+          quoteNoteGap: noteRowRect.top - quoteRect.bottom,
+          accentRed,
+          textPrimary,
+          excerptColor: excerptStyle.color,
+          excerptFontStyle: excerptStyle.fontStyle,
+          selectedText,
+          itemLeft: itemRect.left,
+          itemRight: itemRect.right,
+          itemTop: itemRect.top,
+          itemBottom: itemRect.bottom,
+          excerptLeft: quoteLines[0]
+            .querySelector('.highlight-excerpt')
+            .getBoundingClientRect().left,
+          annotationLeft: item
+            .querySelector('.highlight-note-row')
+            .getBoundingClientRect().left,
+          deleteAction: actionGeometry(
+            item.querySelector('.note-action-btn.delete'),
+          ),
+          editAction: actionGeometry(
+            item.querySelector('.note-action-btn.edit'),
+          ),
+        };
+      });
+
+    expect(highlightVisual).toMatchObject({
+      lineCount: 2,
+      quoteBorderColor: highlightVisual.accentRed,
+      quoteBorderStyle: 'solid',
+      quoteBorderWidth: '3px',
+      quoteNoteGap: 8,
+      excerptColor: highlightVisual.textPrimary,
+      excerptFontStyle: 'normal',
+    });
+    expect(highlightVisual.firstVisualLineCount).toBeGreaterThan(1);
+    expect(highlightVisual.quoteHeight).toBeGreaterThan(
+      highlightVisual.firstHardLineHeight,
+    );
+    expect(highlightVisual.selectedText).not.toContain('>');
+    expect(highlightVisual.annotationLeft).toBeCloseTo(
+      highlightVisual.itemLeft,
+      1,
+    );
+    expect(highlightVisual.excerptLeft).toBeGreaterThan(
+      highlightVisual.annotationLeft,
+    );
+    expect(highlightVisual.deleteAction.right).toBeCloseTo(
+      highlightVisual.itemRight,
+      1,
+    );
+    expect(highlightVisual.editAction.right).toBeCloseTo(
+      highlightVisual.itemRight,
+      1,
+    );
+    expect(highlightVisual.deleteAction.top).toBeLessThan(
+      highlightVisual.editAction.top,
+    );
+    expect(highlightVisual.itemBottom - highlightVisual.editAction.bottom).toBe(
+      9,
+    );
+    await popup.evaluate(() => {
+      const sendMessage = chrome.runtime.sendMessage.bind(chrome.runtime);
+      let rejectNextUpdate = true;
+      chrome.runtime.sendMessage = (request, ...args) => {
+        if (request?.action === 'updateNote' && rejectNextUpdate) {
+          rejectNextUpdate = false;
+          return Promise.resolve({
+            success: false,
+            error: 'forced popup note update failure',
+          });
+        }
+        return sendMessage(request, ...args);
+      };
+    });
+    await popup.locator('.highlight-item .note-action-btn.edit').click();
+    const editor = popup.locator(
+      '.highlight-note-editor[contenteditable="plaintext-only"]',
+    );
+    await expect(editor).toBeVisible();
+    await expect(editor).toBeFocused();
+    await expect(popup.locator('.highlight-note-edit-textarea')).toHaveCount(0);
+    const confirmButton = popup.locator(
+      '.highlight-item .note-action-btn.confirm',
+    );
+    await expect(confirmButton).toBeVisible();
+    await expect(confirmButton.locator('svg')).toHaveAttribute(
+      'data-icon',
+      'checkmark',
+    );
+    await editor.fill('Updated string note');
+    await confirmButton.click();
+    await expect(editor).toBeVisible();
+    await expect(confirmButton).toBeVisible();
+    await confirmButton.click();
+    await expect(popup.locator('.highlight-note-text')).toHaveText(
+      'Updated string note',
+    );
+    await expect
+      .poll(async () => {
+        const response = await helper.evaluate(
+          (pageSlug) =>
+            chrome.runtime.sendMessage({
+              action: 'loadPageNotes',
+              slug: pageSlug,
+            }),
+          slug,
+        );
+        return response.notes.map((note) => note.note);
+      })
+      .toEqual(['Updated string note']);
 
     await popup.close();
     await helper.close();

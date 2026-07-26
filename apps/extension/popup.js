@@ -4,7 +4,6 @@ import {
   escapeHtml,
   isInternalBrowserUrl,
 } from './utils.js';
-import { formatHighlightExcerpt } from './highlight-format.js';
 import { logDebug, logError } from './logger.js';
 import { applyTheme } from './theme.js';
 import { pageKey } from './entity-types.js';
@@ -25,6 +24,17 @@ import {
   tr,
 } from '../../packages/core/i18n.js';
 
+const extensionSurface = globalThis.browserRecallExtensionSurface;
+if (
+  !extensionSurface?.highlightEntryHtml ||
+  !extensionSurface?.openHighlightNoteEditor
+) {
+  throw new Error(
+    'Browser Recall highlight entry helper was not loaded before popup.js',
+  );
+}
+extensionSurface.installHighlightEntryStyles(document);
+
 const currentPage = {
   slug: '',
   notes: [],
@@ -33,12 +43,13 @@ const currentPage = {
   url: '',
   title: '',
   tab: null,
+  markupHidden: false,
+  markupStateAvailable: false,
   generation: 0,
   loadInFlight: null,
   pageSummaryState: 'idle',
 };
 let frozenChipOrder = null; // Array of list slugs — frozen on first render to keep order stable
-let _noteSaveTimeout = null;
 let desktopConnectInFlight = false;
 const recordingUiState = {
   hydrated: false,
@@ -57,7 +68,6 @@ const popupUiMutationState = {
 const boundListSearchCaptureInputs = new WeakSet();
 let popupUiMutationQueue = Promise.resolve();
 let popupUiMutationActiveIdleResolvers = [];
-let focusedAutosaveQueue = Promise.resolve();
 let listChipsClickBound = false;
 let liveListRefreshQueued = false;
 let pendingLiveListMutation = null;
@@ -70,6 +80,8 @@ function resetCurrentPageIdentity({ slug, url, title, tab }) {
       entry: null,
       summary: null,
       notes: [],
+      markupHidden: false,
+      markupStateAvailable: false,
     },
   );
 }
@@ -191,9 +203,7 @@ function setPopupInteractionDisabled(disabled) {
         '.capture-once-btn',
         '.delete-btn',
         '.note-action-btn',
-        '.page-note-add',
-        '.page-note-edit-textarea',
-        '.highlight-note-edit-textarea',
+        '.markup-toggle-btn',
         '.page-title-input',
         '#listSearchInput',
       ].join(','),
@@ -286,23 +296,6 @@ function enqueuePopupUiMutation(action, task) {
       );
       updatePopupUiMutationState();
     });
-  return queued;
-}
-
-function enqueueFocusedAutosave(task) {
-  const runWhenCommandIdle = async () => {
-    while (hasActivePopupUiMutation()) {
-      await waitForActivePopupUiMutation();
-    }
-    await task();
-  };
-  const queued = focusedAutosaveQueue.then(
-    runWhenCommandIdle,
-    runWhenCommandIdle,
-  );
-  // Keep a fulfilled serialization tail; the autosave caller still receives
-  // `queued` and observes its own rejection.
-  focusedAutosaveQueue = queued.catch(() => {});
   return queued;
 }
 
@@ -691,8 +684,8 @@ function resetDashboardSections() {
   if (listChips) listChips.innerHTML = '';
   const listCount = document.getElementById('listCount');
   if (listCount) listCount.textContent = '00';
-  const pageNote = document.getElementById('pageNoteWrap');
-  if (pageNote) pageNote.innerHTML = '';
+  const markupControls = document.getElementById('markupControls');
+  if (markupControls) markupControls.innerHTML = '';
   const highlights = document.getElementById('highlightList');
   if (highlights) highlights.innerHTML = '';
   const annotationCount = document.getElementById('annotationCount');
@@ -878,190 +871,101 @@ function renderVisitsAndLikes(entry) {
   }
 }
 
-const ICON_EDIT =
-  '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 1.5l3 3L5 14H2v-3z"/></svg>';
-const ICON_DELETE =
-  '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>';
-
-function renderPageNoteWrap(globalNote) {
-  const wrap = document.getElementById('pageNoteWrap');
-  const noteText = globalNote?.note || '';
-  const noteSlug = globalNote?.slug || '';
-
-  if (!noteText && !noteSlug) {
-    wrap.innerHTML = `<div class="page-note-empty-actions">
-      <button class="page-note-add" id="pageNoteAddBtn">${escapeHtml(tr('extensionAddPageNote', '+ Page note'))}</button>
-      <button class="page-note-add" id="hideMarkupBtn">${escapeHtml(tr('extensionHideMarkup', 'Hide markup'))}</button>
-    </div>`;
-    wrap.querySelector('#pageNoteAddBtn').addEventListener('click', () => {
-      openPageNoteEditor(wrap, '', '');
-    });
-    wrap.querySelector('#hideMarkupBtn').addEventListener('click', () => {
-      void runPopupUiMutation('hide-highlight-markup', async () => {
-        const tabId = currentPage.tab?.id;
-        if (!Number.isInteger(tabId)) {
-          throw new Error(
-            tr('extensionNoTargetTab', 'No target tab', undefined),
-          );
-        }
-        const response = await chrome.tabs.sendMessage(tabId, {
-          action: 'hideHighlightMarkup',
-        });
-        requireSuccessfulResponse(response, 'hideHighlightMarkup');
-      }).catch((error) => showErrorBubble(error.message));
-    });
-  } else {
-    wrap.innerHTML = `<div class="page-note-display">
-      <span class="note-body">${escapeHtml(noteText)}</span>
-      <button class="note-action-btn edit" title="${escapeHtml(tr('extensionEdit', 'Edit', undefined))}">${ICON_EDIT}</button>
-    </div>`;
-    wrap
-      .querySelector('.note-action-btn.edit')
-      .addEventListener('click', () => {
-        openPageNoteEditor(wrap, noteText, noteSlug);
-      });
+async function refreshHighlightMarkupState() {
+  const tabId = currentPage.tab?.id;
+  if (!Number.isInteger(tabId)) {
+    throw new Error(tr('extensionNoTargetTab', 'No target tab', undefined));
   }
-  wrap.dataset.noteSlug = noteSlug;
-}
-
-function openPageNoteEditor(wrap, text, slug) {
-  document.getElementById('notesSection')?.classList.remove('is-empty');
-  wrap.innerHTML = `<textarea class="page-note-edit-textarea" placeholder="${escapeHtml(tr('extensionAddPageNoteEsc', 'Add a page note... Esc to save.', undefined))}">${escapeHtml(text)}</textarea>`;
-  const ta = wrap.querySelector('textarea');
-  ta.dataset.noteSlug = slug;
-  autoResizeTextarea(ta);
-  ta.focus();
-
-  let saveTimeout = null;
-  ta.addEventListener('input', () => {
-    autoResizeTextarea(ta);
-    clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(() => savePageNoteWithoutLock(ta), 500);
-  });
-  ta.addEventListener('blur', () => {
-    clearTimeout(saveTimeout);
-    savePageNote(ta).then(() => {
-      const notes = currentPage.notes;
-      const note = notes.find((n) => n.excerpt === null);
-      if (note) {
-        note.note = ta.value;
-        note.slug = ta.dataset.noteSlug;
-      } else if (ta.value && ta.dataset.noteSlug) {
-        notes.push({
-          excerpt: null,
-          note: ta.value,
-          slug: ta.dataset.noteSlug,
-        });
-      }
-      if (!ta.value) {
-        currentPage.notes = currentPage.notes.filter((n) => n.excerpt !== null);
-      }
-      renderPageNoteWrap(currentPage.notes.find((n) => n.excerpt === null));
+  let response;
+  try {
+    response = await chrome.tabs.sendMessage(tabId, {
+      action: 'getHighlightMarkupState',
     });
-  });
-}
-
-async function sendPageNoteSave(ta) {
-  const note = ta.value;
-  const noteSlug = ta.dataset.noteSlug;
-  if (noteSlug) {
-    const resp = requireSuccessfulResponse(
-      await chrome.runtime.sendMessage({
-        action: 'updateNote',
-        noteSlug,
-        note,
-      }),
-      'updateNote',
-    );
-    if (typeof resp.noteSlug !== 'string' || !resp.noteSlug) {
-      throw new Error('updateNote response missing noteSlug');
+  } catch (error) {
+    // This tab RPC gates only the markup toggle. Authoritative notes come from
+    // the desktop and must still render when a loading/restricted tab has no
+    // content-script receiver.
+    if (globalThis.browserRecallWebExtension?.isRuntimeFailure?.(error)) {
+      currentPage.markupStateAvailable = false;
+      return false;
     }
-    if (resp.noteSlug !== noteSlug) {
-      ta.dataset.noteSlug = resp.noteSlug;
-    }
-  } else if (note) {
-    const resp = requireSuccessfulResponse(
-      await chrome.runtime.sendMessage({
-        action: 'createNote',
-        pageSlug: currentPage.slug,
-        url: currentPage.url,
-        excerpt: null,
-        note,
-        cssPath: null,
-      }),
-      'createNote',
-    );
-    if (typeof resp.noteSlug !== 'string' || !resp.noteSlug) {
-      throw new Error('createNote response missing noteSlug');
-    }
-    ta.dataset.noteSlug = resp.noteSlug;
+    throw error;
   }
+  requireSuccessfulResponse(response, 'getHighlightMarkupState');
+  if (typeof response.hidden !== 'boolean') {
+    throw new Error('getHighlightMarkupState response missing hidden');
+  }
+  currentPage.markupHidden = response.hidden;
+  currentPage.markupStateAvailable = true;
+  return true;
 }
 
-async function savePageNote(ta) {
-  return enqueuePopupUiMutation('save-page-note', async () => {
-    await sendPageNoteSave(ta);
-  }).catch((error) => {
-    logError('[popup] Page note save error:', error);
-  });
-}
-
-async function savePageNoteWithoutLock(ta) {
-  return enqueueFocusedAutosave(async () => {
-    await sendPageNoteSave(ta);
-  }).catch((error) => {
-    logError('[popup] Page note save error:', error);
+function renderMarkupControls() {
+  const wrap = document.getElementById('markupControls');
+  if (!currentPage.markupStateAvailable) {
+    wrap.innerHTML = '';
+    return;
+  }
+  wrap.innerHTML = `<button class="markup-toggle-btn" id="hideMarkupBtn" aria-pressed="false">${escapeHtml(tr('extensionHideMarkup', 'Hide markup'))}</button>`;
+  const markupButton = wrap.querySelector('#hideMarkupBtn');
+  const renderMarkupButtonState = () => {
+    markupButton.classList.toggle('is-markup-hidden', currentPage.markupHidden);
+    markupButton.setAttribute(
+      'aria-pressed',
+      currentPage.markupHidden ? 'true' : 'false',
+    );
+    markupButton.textContent = currentPage.markupHidden
+      ? tr('extensionShowMarkup', 'Show markup')
+      : tr('extensionHideMarkup', 'Hide markup');
+  };
+  renderMarkupButtonState();
+  markupButton.addEventListener('click', () => {
+    void runPopupUiMutation('hide-highlight-markup', async () => {
+      const tabId = currentPage.tab?.id;
+      if (!Number.isInteger(tabId)) {
+        throw new Error(tr('extensionNoTargetTab', 'No target tab', undefined));
+      }
+      const action = currentPage.markupHidden
+        ? 'showHighlightMarkup'
+        : 'hideHighlightMarkup';
+      const response = await chrome.tabs.sendMessage(tabId, { action });
+      requireSuccessfulResponse(response, action);
+      currentPage.markupHidden = !currentPage.markupHidden;
+      renderMarkupButtonState();
+    }).catch((error) => showErrorBubble(error.message));
   });
 }
 
 function renderNotes(notes) {
-  if (_noteSaveTimeout) {
-    clearTimeout(_noteSaveTimeout);
-    _noteSaveTimeout = null;
-  }
   const container = document.getElementById('highlightList');
   const section = document.getElementById('notesSection');
   if (!Array.isArray(notes)) {
     throw new Error('Popup note projection must be an array');
   }
   currentPage.notes = notes;
-
-  const globalNote = currentPage.notes.find((n) => n.excerpt === null);
-  renderPageNoteWrap(globalNote);
-
-  const textNotes = currentPage.notes.filter((n) => n.excerpt !== null);
-  const hasPageNote = Boolean(globalNote?.note || globalNote?.slug);
-  section?.classList.toggle('is-empty', !hasPageNote && textNotes.length === 0);
+  renderMarkupControls();
+  const textNotes = currentPage.notes;
+  section?.classList.toggle('is-empty', textNotes.length === 0);
   const count = document.getElementById('annotationCount');
   if (count) count.textContent = String(textNotes.length).padStart(2, '0');
 
   if (textNotes.length === 0) {
     container.innerHTML = '';
-    showSection('notesSection');
+    hideSection('notesSection');
     return;
   }
 
   container.innerHTML = textNotes
-    .map((n, index) => {
-      const displayText = formatHighlightExcerpt(n.excerpt);
-      const noteText = n.note || '';
-      const noteDisplay = noteText
-        ? `<span class="highlight-note-text">${escapeHtml(noteText)}</span>`
-        : `<span class="highlight-note-placeholder">${escapeHtml(tr('extensionNoAnnotation', 'No annotation', undefined))}</span>`;
-      return `
-      <div class="highlight-item" data-note-slug="${escapeHtml(n.slug)}" data-note-index="${String(index + 1).padStart(2, '0')}">
-        <div class="highlight-header">
-          <div class="highlight-excerpt">${escapeHtml(displayText)}</div>
-          <button class="note-action-btn delete" data-note-slug="${escapeHtml(n.slug)}" title="${escapeHtml(tr('extensionDeleteHighlight', 'Delete highlight', undefined))}">${ICON_DELETE}</button>
-        </div>
-        <div class="highlight-body">
-          <div class="highlight-note-row">
-            ${noteDisplay}
-            <button class="note-action-btn edit" title="${escapeHtml(tr('extensionEditNote', 'Edit note', undefined))}">${ICON_EDIT}</button>
-          </div>
-        </div>
-      </div>`;
-    })
+    .map((note) =>
+      extensionSurface.highlightEntryHtml(note, {
+        deleteTitle: tr(
+          'extensionDeleteHighlight',
+          'Delete highlight',
+          undefined,
+        ),
+        editTitle: tr('extensionEditNote', 'Edit note', undefined),
+      }),
+    )
     .join('');
 
   bindHighlightActions(container);
@@ -1072,7 +976,7 @@ function bindHighlightActions(container) {
   container.querySelectorAll('.note-action-btn.delete').forEach((btn) => {
     btn.addEventListener('click', () => {
       void runPopupUiMutation('delete-note', async () => {
-        const noteSlug = btn.dataset.noteSlug;
+        const noteSlug = btn.closest('.highlight-item')?.dataset.noteSlug;
         if (!noteSlug) return;
         const response = await chrome.runtime.sendMessage({
           action: 'deleteNote',
@@ -1103,6 +1007,7 @@ function bindHighlightActions(container) {
 
   container.querySelectorAll('.note-action-btn.edit').forEach((btn) => {
     btn.addEventListener('click', () => {
+      if (!btn.classList.contains('edit')) return;
       const item = btn.closest('.highlight-item');
       const noteSlug = item?.dataset.noteSlug;
       const note = currentPage.notes.find((n) => n.slug === noteSlug);
@@ -1113,49 +1018,34 @@ function bindHighlightActions(container) {
 }
 
 function openHighlightNoteEditor(item, note) {
-  const body = item.querySelector('.highlight-body');
-  body.innerHTML = `<textarea class="highlight-note-edit-textarea" placeholder="${escapeHtml(tr('extensionAddNote', 'Add a note...', undefined))}">${escapeHtml(note.note || '')}</textarea>`;
-  const ta = body.querySelector('textarea');
-  autoResizeTextarea(ta);
-  ta.focus();
-
-  ta.addEventListener('input', () => {
-    autoResizeTextarea(ta);
-    note.note = ta.value;
-    clearTimeout(_noteSaveTimeout);
-    _noteSaveTimeout = setTimeout(async () => {
-      const slug = item.dataset.noteSlug;
-      logDebug(`[popup] Saving note for slug=${slug}`);
-      try {
-        await saveHighlightNoteWithoutLock({ item, note, textarea: ta, slug });
-      } catch (error) {
-        logError('[popup] Note save error:', error);
-      }
-    }, 500);
-  });
-
-  ta.addEventListener('blur', () => {
-    renderNotes(currentPage.notes);
-  });
-}
-
-async function saveHighlightNoteWithoutLock({ item, note, textarea, slug }) {
-  return enqueueFocusedAutosave(async () => {
-    const resp = requireSuccessfulResponse(
-      await chrome.runtime.sendMessage({
-        action: 'updateNote',
-        noteSlug: slug,
-        note: textarea.value,
+  extensionSurface.openHighlightNoteEditor({
+    item,
+    note,
+    placeholder: tr('extensionAddNote', 'Add a note...', undefined),
+    confirmTitle: tr('commonConfirm', 'Confirm', undefined),
+    editTitle: tr('extensionEditNote', 'Edit note', undefined),
+    save: (nextNote) =>
+      runPopupUiMutation('save-highlight-note', async () => {
+        const response = requireSuccessfulResponse(
+          await chrome.runtime.sendMessage({
+            action: 'updateNote',
+            noteSlug: item.dataset.noteSlug,
+            note: nextNote,
+          }),
+          'updateNote',
+        );
+        if (typeof response.noteSlug !== 'string' || !response.noteSlug) {
+          throw new Error('updateNote response missing noteSlug');
+        }
+        return response;
       }),
-      'updateNote',
-    );
-    if (typeof resp.noteSlug !== 'string' || !resp.noteSlug) {
-      throw new Error('updateNote response missing noteSlug');
-    }
-    if (resp.noteSlug !== slug) {
-      item.dataset.noteSlug = resp.noteSlug;
-      note.slug = resp.noteSlug;
-    }
+    onSaved(response) {
+      note.slug = response.noteSlug;
+      renderNotes(currentPage.notes);
+    },
+    onError(error) {
+      showErrorBubble(error.message);
+    },
   });
 }
 
@@ -2346,6 +2236,10 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
       if (renderSections) {
         renderVisitsAndLikes(page);
         renderSnapshots(summary.snapshots);
+        if (summary.notes.length > 0) {
+          await refreshHighlightMarkupState();
+          if (generation !== currentPage.generation) return false;
+        }
         renderNotes(summary.notes);
       }
       logDebug(
@@ -2487,13 +2381,7 @@ function showDashboardUI(options = {}) {
     globalThis.requestAnimationFrame ||
     globalThis.window?.requestAnimationFrame ||
     ((callback) => setTimeout(callback, 0));
-  const doc = document;
   frame(() => {
-    doc
-      .querySelectorAll(
-        '.page-note-edit-textarea, .highlight-note-edit-textarea',
-      )
-      .forEach((ta) => autoResizeTextarea(ta));
     focusListSearchCapture();
   });
 }
@@ -2766,6 +2654,10 @@ async function renderPreparedDashboard(bootstrap) {
   document.getElementById('pageUrl').textContent = currentPage.url;
   renderVisitsAndLikes(page);
   renderSnapshots(summary.snapshots);
+  if (summary.notes.length > 0) {
+    await refreshHighlightMarkupState();
+    if (generation !== currentPage.generation) return;
+  }
   renderNotes(summary.notes);
   await renderListChips(summary.lists);
   if (generation !== currentPage.generation) return;

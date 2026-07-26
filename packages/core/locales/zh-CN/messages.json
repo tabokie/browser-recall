@@ -12,7 +12,7 @@
     "description": "Extension store and browser management description."
   },
   "commandHighlightSelection": {
-    "message": "高亮选中文本或添加页面笔记",
+    "message": "高亮选中文本",
     "description": "Browser command description."
   },
   "commandCaptureSnapshot": {
@@ -106,10 +106,6 @@
   "desktopAddRule": {
     "message": "添加规则",
     "description": "Desktop inbox rule add button title."
-  },
-  "desktopAddPageNote": {
-    "message": "+ 添加页面笔记",
-    "description": "Page detail add page note button."
   },
   "desktopAdvanced": {
     "message": "高级",
@@ -379,10 +375,6 @@
     "message": "笔记（$1）",
     "description": "Recycle bin note display name with slug."
   },
-  "desktopNoAnnotation": {
-    "message": "无批注",
-    "description": "Empty note annotation placeholder."
-  },
   "desktopOnboardingDataHeading": {
     "message": "选择数据文件夹",
     "description": "Onboarding data-folder heading."
@@ -543,10 +535,6 @@
     "message": "撤销浏览器授权失败：$1",
     "description": "Paired browser revoke failure."
   },
-  "desktopPageNotePrefix": {
-    "message": "页面笔记：",
-    "description": "Prefix for page-note recycle bin display names."
-  },
   "desktopSelectBookmarkFile": {
     "message": "选择导出的书签文件以预览文件夹。",
     "description": "Bookmark import placeholder."
@@ -667,14 +655,6 @@
     "message": "添加笔记...按 Esc 保存。",
     "description": "Extension note placeholder with keyboard hint."
   },
-  "extensionAddPageNote": {
-    "message": "+ 页面笔记",
-    "description": "Popup page note add button."
-  },
-  "extensionAddPageNoteEsc": {
-    "message": "添加页面笔记...按 Esc 保存。",
-    "description": "Extension page note placeholder with keyboard hint."
-  },
   "extensionAddToList": {
     "message": "添加到列表",
     "description": "Popup add to list title."
@@ -771,10 +751,6 @@
     "message": "创建“$1”",
     "description": "List picker create option."
   },
-  "extensionCreateNoteFailed": {
-    "message": "创建笔记失败",
-    "description": "Create note failure."
-  },
   "extensionDeleteHighlight": {
     "message": "删除高亮",
     "description": "Delete highlight button title."
@@ -867,6 +843,10 @@
     "message": "隐藏标记",
     "description": "Popup button that temporarily hides applied highlight markup."
   },
+  "extensionShowMarkup": {
+    "message": "显示标记",
+    "description": "Popup button that reapplies hidden highlight markup."
+  },
   "extensionResumeTracing": {
     "message": "恢复跟踪",
     "description": "Extension popup recording resume title."
@@ -955,10 +935,6 @@
     "message": "在设置中管理",
     "description": "Popup settings action."
   },
-  "extensionNoAnnotation": {
-    "message": "无批注",
-    "description": "Popup no annotation placeholder."
-  },
   "extensionNoLists": {
     "message": "没有列表",
     "description": "Popup no lists message."
@@ -978,10 +954,6 @@
   "extensionPageDataUnavailable": {
     "message": "页面数据不可用",
     "description": "Popup page data unavailable title."
-  },
-  "extensionPageNote": {
-    "message": "页面笔记",
-    "description": "Page note overlay title."
   },
   "extensionRatePageFailed": {
     "message": "ratePage 失败",
@@ -1062,7 +1034,12 @@
   "extensionSnapshotCapturedWithWarnings": {
     "message": "快照已保存，但有 $COUNT$ 个资源不可用。",
     "description": "Snapshot capture partial-success warning for multiple unavailable resources.",
-    "placeholders": { "count": { "content": "$1", "example": "2" } }
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
   },
   "extensionSomethingWentWrong": {
     "message": "出了点问题",
@@ -1107,10 +1084,6 @@
   "extensionToggleRecording": {
     "message": "切换记录",
     "description": "Extension popup recording toggle accessibility label."
-  },
-  "desktopAddPageNotePlaceholder": {
-    "message": "添加页面笔记...",
-    "description": "Localized UI text."
   },
   "desktopAlreadyPaired": {
     "message": "Chrome 已与 Browser Recall Desktop 配对",
@@ -1353,7 +1326,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "选择文本并按 <kbd>Alt+H</kbd> 可高亮；没有选择文本时按 <kbd>Alt+H</kbd> 可给当前页面添加笔记。",
+    "message": "选择文本并按 <kbd>Alt+H</kbd> 可高亮。",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {
@@ -1568,7 +1541,10 @@
     "message": "清除搜索",
     "description": "清除搜索按钮标签。"
   },
-  "desktopExpand": { "message": "展开", "description": "展开列表标题。" },
+  "desktopExpand": {
+    "message": "展开",
+    "description": "展开列表标题。"
+  },
   "desktopFailedToLoadPageDetails": {
     "message": "无法加载页面详情",
     "description": "Page detail load failure."

@@ -2671,7 +2671,6 @@ function matchKeyword(item, field, value) {
     fields.includes('highlights') &&
     item.notes &&
     item.notes.some((n) => {
-      if (n.excerpt === null) return false; // skip global notes
       const quotes = Array.isArray(n.excerpt) ? n.excerpt : [];
       return quotes.some((t) => textMatches(t, q, exact));
     })
@@ -3920,10 +3919,7 @@ async function enrichFromEntityStorage(entries, opts = {}) {
       entry.visitDates = page.visitDates;
     }
     entry.visitCount = page.visitDates.length;
-    // Check if any child note is a non-deleted highlight note (excerpt !== null)
-    entry.hasHighlightNotes = context.notes.some(
-      (note) => note.excerpt !== null,
-    );
+    entry.hasHighlightNotes = context.notes.length > 0;
   }
 }
 
@@ -3996,7 +3992,6 @@ function buildDetailHtml(url, attDetail, notes, likes = 0) {
   if (notes && notes.length > 0) {
     html += '<div class="detail-notes">';
     for (const n of notes.slice(0, 5)) {
-      if (n.excerpt === null) continue; // skip global notes
       const text = formatHighlightExcerpt(n.excerpt);
       if (text)
         html += `<div class="detail-note-item">${escapeHtml(text)}</div>`;
@@ -4111,23 +4106,7 @@ function renderExtraDetailHtml(extra, cardTimestamp) {
     html += '</div>';
   }
 
-  const globalNote = extra.notes.find((n) => n.excerpt === null);
-  const pageNoteText = globalNote?.note || '';
-  const pageNoteSlug = globalNote?.slug || '';
-  html += `<div class="detail-section"><div class="detail-page-note-wrap" data-note-slug="${escapeHtml(pageNoteSlug)}" data-page-slug="${escapeHtml(extra.slug)}">`;
-  if (!pageNoteText && !pageNoteSlug) {
-    html += `<button class="detail-page-note-add">${escapeHtml(tr('desktopAddPageNote', '+ Add page note'))}</button>`;
-  } else {
-    html += `<div class="detail-page-note-display">
-      <span class="note-body">${escapeHtml(pageNoteText)}</span>
-      <button class="detail-note-action-btn edit" title="${escapeHtml(tr('extensionEdit', 'Edit'))}">${DETAIL_ICON_EDIT}</button>
-    </div>`;
-  }
-  html += `</div></div>`;
-
-  const highlightNotes = extra.notes.filter(
-    (n) => !n.deleted && n.excerpt !== null,
-  );
+  const highlightNotes = extra.notes.filter((n) => !n.deleted);
   if (highlightNotes.length > 0) {
     html += `<div class="detail-section detail-notes-section" data-slug="${escapeHtml(extra.slug)}">`;
     for (const n of highlightNotes.slice(0, 20)) {
@@ -4136,7 +4115,7 @@ function renderExtraDetailHtml(extra, cardTimestamp) {
       const rawQuote = formatHighlightExcerpt(n.excerpt);
       const noteBody = noteText
         ? `<span class="detail-note-content">${escapeHtml(noteText)}</span>`
-        : `<em>${escapeHtml(tr('desktopNoAnnotation', 'No annotation'))}</em>`;
+        : '';
       html += `<div class="detail-note-entry" data-note-slug="${escapeHtml(noteSlug)}">
         <div class="detail-note-header">
           <div class="detail-note-excerpt">${escapeHtml(rawQuote)}</div>
@@ -4226,11 +4205,8 @@ function bindNoteDeleteButtons(container) {
 
 function openDetailNoteEditor(entry, noteSlug) {
   const body = entry.querySelector('.detail-note-body');
-  const contentEl = body.querySelector('.detail-note-content, em');
-  const currentText =
-    contentEl?.textContent === tr('desktopNoAnnotation', 'No annotation')
-      ? ''
-      : contentEl?.textContent || '';
+  const contentEl = body.querySelector('.detail-note-content');
+  const currentText = contentEl?.textContent || '';
   body.innerHTML = `<textarea class="detail-note-edit-textarea" placeholder="${escapeHtml(tr('extensionAddNote', 'Add a note...'))}">${escapeHtml(currentText)}</textarea>`;
   const ta = body.querySelector('textarea');
   autoResizeTextarea(ta);
@@ -4275,7 +4251,7 @@ function openDetailNoteEditor(entry, noteSlug) {
     const noteText = ta.value;
     const noteBody = noteText
       ? `<span class="detail-note-content">${escapeHtml(noteText)}</span>`
-      : `<em>${escapeHtml(tr('desktopNoAnnotation', 'No annotation'))}</em>`;
+      : '';
     body.innerHTML = `${noteBody}
       <button class="detail-note-action-btn edit" title="${escapeHtml(tr('extensionEditNote', 'Edit note'))}">${DETAIL_ICON_EDIT}</button>`;
     bindNoteDeleteButtons(
@@ -4326,109 +4302,6 @@ function bindSnapshotClickHandlers(container) {
       await refreshRecycleBinUi();
     });
   });
-}
-
-function bindPageNoteHandler(container, url) {
-  const wrap = container.querySelector('.detail-page-note-wrap');
-  if (!wrap) return;
-
-  const addBtn = wrap.querySelector('.detail-page-note-add');
-  if (addBtn) {
-    addBtn.addEventListener('click', () => {
-      openDetailPageNoteEditor(wrap, '', wrap.dataset.noteSlug || '', url);
-    });
-  }
-
-  const editBtn = wrap.querySelector(
-    '.detail-page-note-display .detail-note-action-btn.edit',
-  );
-  if (editBtn) {
-    editBtn.addEventListener('click', () => {
-      const bodyEl = wrap.querySelector('.note-body');
-      openDetailPageNoteEditor(
-        wrap,
-        bodyEl?.textContent || '',
-        wrap.dataset.noteSlug || '',
-        url,
-      );
-    });
-  }
-}
-
-function openDetailPageNoteEditor(wrap, text, noteSlug, url) {
-  const pageSlug = wrap.dataset.pageSlug;
-  wrap.innerHTML = `<textarea class="detail-page-note-textarea" placeholder="${escapeHtml(tr('desktopAddPageNotePlaceholder', 'Add a page note...'))}">${escapeHtml(text)}</textarea>`;
-  const ta = wrap.querySelector('textarea');
-  autoResizeTextarea(ta);
-  ta.focus();
-
-  let saveTimeout = null;
-  ta.addEventListener('input', () => {
-    autoResizeTextarea(ta);
-    clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(() => {
-      void saveDetailPageNote(ta, wrap, pageSlug, url).catch((error) =>
-        surfaceBackgroundError('Could not save page note', error),
-      );
-    }, 500);
-  });
-
-  ta.addEventListener('blur', async () => {
-    clearTimeout(saveTimeout);
-    try {
-      await saveDetailPageNote(ta, wrap, pageSlug, url);
-      const noteText = ta.value;
-      const currentSlug = wrap.dataset.noteSlug || '';
-      if (!noteText && !currentSlug) {
-        wrap.innerHTML = `<button class="detail-page-note-add">${escapeHtml(tr('desktopAddPageNote', '+ Add page note'))}</button>`;
-        bindPageNoteHandler(
-          wrap.closest('.detail-section').parentElement || wrap.parentElement,
-          url,
-        );
-      } else if (noteText) {
-        wrap.innerHTML = `<div class="detail-page-note-display">
-          <span class="note-body">${escapeHtml(noteText)}</span>
-          <button class="detail-note-action-btn edit" title="${escapeHtml(tr('extensionEdit', 'Edit'))}">${DETAIL_ICON_EDIT}</button>
-        </div>`;
-        bindPageNoteHandler(
-          wrap.closest('.detail-section').parentElement || wrap.parentElement,
-          url,
-        );
-      } else {
-        wrap.innerHTML = `<button class="detail-page-note-add">${escapeHtml(tr('desktopAddPageNote', '+ Add page note'))}</button>`;
-        bindPageNoteHandler(
-          wrap.closest('.detail-section').parentElement || wrap.parentElement,
-          url,
-        );
-      }
-    } catch (error) {
-      surfaceBackgroundError('Could not save page note', error);
-    }
-  });
-}
-
-async function saveDetailPageNote(ta, wrap, pageSlug, url) {
-  const note = ta.value;
-  const noteSlug = wrap.dataset.noteSlug;
-  if (noteSlug) {
-    const resp = await sendAction({ action: 'updateNote', noteSlug, note });
-    if (resp?.noteSlug && resp.noteSlug !== noteSlug) {
-      wrap.dataset.noteSlug = resp.noteSlug;
-    }
-  } else if (note) {
-    const resp = await sendAction({
-      action: 'createNote',
-      pageSlug,
-      url,
-      excerpt: null,
-      note,
-      cssPath: null,
-    });
-    if (!resp?.noteSlug) {
-      throw new Error('createNote response missing noteSlug');
-    }
-    wrap.dataset.noteSlug = resp.noteSlug;
-  }
 }
 
 function attentionLevel(normalized) {
@@ -4704,7 +4577,6 @@ function openPageDetailCard(
       bindDetailUrlHandlers(body);
       bindNoteDeleteButtons(body);
       bindSnapshotClickHandlers(body);
-      bindPageNoteHandler(body, url);
     })
     .catch((error) => {
       surfaceBackgroundError('Failed to load page details', error);
@@ -7881,7 +7753,7 @@ async function runEntityScanFilter(pinnedSlugs) {
       listSlugs: contexts[slug].lists.map((list) => list.slug),
       likes: page.likes,
       createdAt: page.createdAt,
-      hasHighlightNotes: notes.some((note) => note.excerpt !== null),
+      hasHighlightNotes: notes.length > 0,
       visitCount: page.visitDates.length,
       relevance: 0,
     });

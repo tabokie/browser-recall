@@ -759,6 +759,7 @@ mod tests {
         let mut note = browser_recall_replay::entities::NoteEntity::new("note-a".to_string());
         note.url = Some("https://example.com/article".to_string());
         note.excerpt = Some(json!(["banana excerpt"]));
+        note.css_path = Some(json!(["body"]));
         fs::write(
             notes_dir.join("note-a.json"),
             serde_json::to_string(&note).unwrap(),

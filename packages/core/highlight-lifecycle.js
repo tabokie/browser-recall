@@ -278,9 +278,8 @@ export function createHighlightLifecycle(options) {
   }
 
   function excerptParts(note) {
-    if (note?.excerpt === null) return [];
-    if (!Array.isArray(note?.excerpt)) {
-      throw new Error('Saved note excerpt must be a string array or null');
+    if (!Array.isArray(note?.excerpt) || note.excerpt.length === 0) {
+      throw new Error('Saved note excerpt must be a string array');
     }
     if (!note.excerpt.every((part) => typeof part === 'string' && part)) {
       throw new Error('Saved note excerpt must contain non-empty strings');
@@ -290,7 +289,6 @@ export function createHighlightLifecycle(options) {
 
   function markSavedNote(note, root = doc.body) {
     const excerpts = excerptParts(note);
-    if (excerpts.length === 0) return [];
     if (
       !Array.isArray(note.cssPath) ||
       note.cssPath.length !== excerpts.length ||

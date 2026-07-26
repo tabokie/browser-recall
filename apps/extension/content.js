@@ -55,6 +55,7 @@ function initContentScript() {
   let maxScrollDepth = 0;
   let lastActiveTime = Date.now(); // reset on visibility→visible; null after leave report
   let _panelDismissed = false;
+  let markupHidden = false;
 
   // Track scroll depth (throttled via rAF to avoid layout thrash on every scroll event)
   let _scrollRafPending = false;
@@ -318,66 +319,6 @@ function initContentScript() {
     return { host, shadow, textarea, close, dismiss };
   }
 
-  // Show overlay for global page note (no text selection required)
-  function showGlobalNoteOverlay(existingNote, existingNoteSlug, pageSlug) {
-    createNoteOverlay({
-      positionStyle:
-        'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);',
-      bodyHtml: extensionSurface.noteOverlayHtml({
-        title: tr('extensionPageNote', 'Page Note'),
-        placeholder: tr(
-          'extensionAddPageNoteEsc',
-          'Add a page note... Esc to save.',
-        ),
-      }),
-      placeholder: tr(
-        'extensionAddPageNoteEsc',
-        'Add a page note... Esc to save.',
-      ),
-      existingNote,
-      async onClose(note) {
-        if (note === (existingNote || '')) return;
-
-        try {
-          if (existingNoteSlug) {
-            const response = await chrome.runtime.sendMessage({
-              action: 'updateNote',
-              noteSlug: existingNoteSlug,
-              note,
-            });
-            if (
-              showUserActionFailureFromResponse(
-                response,
-                tr('extensionUpdateFailed', 'Update failed'),
-                ['noteSlug'],
-              )
-            ) {
-              return;
-            }
-            if (response?.noteSlug) existingNoteSlug = response.noteSlug;
-            return;
-          }
-
-          const response = await chrome.runtime.sendMessage({
-            action: 'createNote',
-            pageSlug,
-            url: window.location.href,
-            excerpt: null,
-            note,
-            cssPath: null,
-          });
-          showUserActionFailureFromResponse(
-            response,
-            tr('extensionCreateNoteFailed', 'Create note failed'),
-            ['noteSlug'],
-          );
-        } catch (error) {
-          showExtensionReloadNotification(error);
-        }
-      },
-    });
-  }
-
   // Highlight lifecycle behavior is supplied by the generated classic-script
   // artifact. This file adapts browser messages and daemon reads to that module.
   const highlightLifecycle = highlightLifecycleModule.create({
@@ -388,7 +329,7 @@ function initContentScript() {
     onMark: attachMarkClickHandler,
     formatExcerpt: extensionSurface.formatHighlightExcerpt,
     getCssPath,
-    reapplyDisabled: isPdfPage,
+    reapplyDisabled: () => isPdfPage() || markupHidden,
   });
 
   function getStructuredSelectionPayload() {
@@ -601,6 +542,7 @@ function initContentScript() {
     maxScrollDepth = 0;
     lastActiveTime = Date.now();
     reportInitialVisit(nextUrl, previousUrl);
+    markupHidden = false;
     reapplyHighlights({ clearExisting: true });
   }
 
@@ -865,7 +807,7 @@ function initContentScript() {
 
   function showHighlightsPanel(notes, pageSlug, { hint } = {}) {
     const existing = document.getElementById('browser-recall-highlights-panel');
-    const excerptNotes = notes.filter((n) => n.excerpt !== null);
+    const excerptNotes = notes;
     if (excerptNotes.length === 0 && !hint) return;
 
     const host = existing || document.createElement('div');
@@ -881,22 +823,12 @@ function initContentScript() {
     shadow.innerHTML = `
     <style>
       ${extensionSurface.shadowCss}
-      .panel { width: 300px; max-height: 400px; overflow-y: auto; background: var(--br-bg-base); border: var(--br-floating-border); border-radius: 2px; color: var(--br-text-primary); font-family: var(--br-font-body); font-size: 12px; line-height: 1.45; }
+      ${extensionSurface.highlightEntryCss}
+      .panel { --br-highlight-side-padding: 12px; width: 300px; max-height: 400px; overflow-y: auto; scrollbar-width: none; background: var(--br-bg-base); border: var(--br-floating-border); border-radius: 2px; color: var(--br-text-primary); font-family: var(--br-font-body); font-size: 12px; line-height: 1.45; }
+      .panel::-webkit-scrollbar { display: none; width: 0; height: 0; }
       .panel-header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--br-bg-base); border-bottom: 1px solid var(--br-border-section); color: var(--br-text-primary); cursor: move; font-size: 10px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; user-select: none; }
       .close-btn { width: 22px; height: 22px; background: none; border: none; border-radius: 2px; cursor: pointer; color: var(--br-text-muted); font-size: 16px; line-height: 1; padding: 0; }
       .close-btn:hover { background: var(--br-bg-surface-active); color: var(--br-text-primary); }
-      .highlight-item { display: grid; grid-template-columns: 18px 1fr; column-gap: 8px; padding: 9px 12px; border-bottom: 1px dotted var(--br-border-section); }
-      .highlight-item::before { content: attr(data-note-index); color: var(--br-accent-red); font-weight: 900; }
-      .highlight-item:last-child { border-bottom: none; }
-      .excerpt { color: var(--br-text-muted); font-style: italic; line-height: 1.45; margin-bottom: 5px; white-space: pre-wrap; word-break: break-word; }
-      .note-row { display: flex; align-items: flex-start; gap: 6px; }
-      textarea { flex: 1; min-height: 24px; height: 24px; border: 1px solid var(--br-border-section); border-radius: 2px; padding: 3px 6px; background: transparent; color: var(--br-text-primary); font-family: inherit; font-size: 11px; resize: none; box-sizing: border-box; line-height: 16px; overflow: hidden; }
-      textarea::placeholder { color: var(--br-text-muted); }
-      textarea:focus { outline: none; border-color: var(--br-accent-primary); box-shadow: 0 0 0 3px var(--br-accent-soft); }
-      .delete-btn { flex-shrink: 0; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; background: none; border: none; border-radius: 2px; cursor: pointer; color: var(--br-text-muted); padding: 0; }
-      .delete-btn:hover { background: var(--br-bg-surface-active); color: var(--br-text-primary); }
-      .delete-btn svg { width: 14px; height: 14px; fill: currentColor; }
-      .highlight-body { min-width: 0; }
       .hint { padding: 8px 12px; border-top: 1px solid var(--br-border-section); font-size: 11px; color: var(--br-text-muted); line-height: 1.4; }
     </style>
     <div class="panel">
@@ -905,18 +837,12 @@ function initContentScript() {
         <button class="close-btn" title="${extensionSurface.escapeHtml(tr('commonClose', 'Close'))}">&times;</button>
       </div>
       ${excerptNotes
-        .map((n, index) => {
-          const text = extensionSurface.formatHighlightExcerpt(n.excerpt);
-          return `<div class="highlight-item" data-note-slug="${n.slug}" data-note-index="${String(index + 1).padStart(2, '0')}">
-          <div class="highlight-body">
-          <div class="excerpt">${extensionSurface.escapeHtml(text)}</div>
-          <div class="note-row">
-            <textarea placeholder="${extensionSurface.escapeHtml(tr('extensionAddNote', 'Add a note...'))}">${extensionSurface.escapeHtml(n.note || '')}</textarea>
-            <button class="delete-btn" title="${extensionSurface.escapeHtml(tr('commonDelete', 'Delete'))}"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></button>
-          </div>
-          </div>
-        </div>`;
-        })
+        .map((note) =>
+          extensionSurface.highlightEntryHtml(note, {
+            deleteTitle: tr('extensionDeleteHighlight', 'Delete highlight'),
+            editTitle: tr('extensionEditNote', 'Edit note'),
+          }),
+        )
         .join('')}
       ${hint ? `<div class="hint">${extensionSurface.escapeHtml(hint)}</div>` : ''}
     </div>
@@ -930,70 +856,95 @@ function initContentScript() {
       teardownPanel();
     });
 
-    shadow.querySelectorAll('textarea').forEach((ta) => {
-      function autoResize() {
-        ta.style.height = '24px';
-        if (ta.scrollHeight > 24) ta.style.height = ta.scrollHeight + 'px';
-      }
-      if (ta.value) autoResize();
-      ta.addEventListener('input', autoResize);
-    });
-
     shadow.querySelectorAll('.highlight-item').forEach((item) => {
       let noteSlug = item.dataset.noteSlug;
-      const ta = item.querySelector('textarea');
-      const origValue = ta.value;
-      ta.addEventListener('blur', () => {
-        if (ta.value !== origValue)
-          chrome.runtime
-            .sendMessage({ action: 'updateNote', noteSlug, note: ta.value })
-            .then((resp) => {
-              if (
-                showUserActionFailureFromResponse(
-                  resp,
-                  tr('extensionUpdateFailed', 'Update failed'),
-                  ['noteSlug'],
-                )
-              ) {
-                return;
-              }
-              if (resp?.noteSlug) {
-                const oldSlug = noteSlug;
-                noteSlug = resp.noteSlug;
-                item.dataset.noteSlug = resp.noteSlug;
-                // Update matching mark(s) in the page so re-click uses the new slug
-                document
-                  .querySelectorAll(
-                    `mark.browser-recall-highlight[data-note-slug="${oldSlug}"]`,
-                  )
-                  .forEach((m) => {
-                    m.dataset.noteSlug = resp.noteSlug;
-                  });
-              }
-            })
-            .catch((error) => {
-              showExtensionReloadNotification(error);
+      const note = excerptNotes.find(
+        (candidate) => candidate.slug === noteSlug,
+      );
+      item
+        .querySelector('.note-action-btn.delete')
+        .addEventListener('click', async (event) => {
+          const action = event.currentTarget;
+          action.disabled = true;
+          try {
+            const response = await chrome.runtime.sendMessage({
+              action: 'deleteNote',
+              noteSlug,
             });
-      });
-      ta.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') ta.blur();
-      });
-      item.querySelector('.delete-btn').addEventListener('click', () => {
-        chrome.runtime
-          .sendMessage({ action: 'deleteNote', noteSlug })
-          .catch((error) => {
+            if (
+              showUserActionFailureFromResponse(
+                response,
+                tr('extensionSomethingWentWrong', 'Something went wrong'),
+              )
+            ) {
+              action.disabled = false;
+              return;
+            }
+          } catch (error) {
+            action.disabled = false;
             showExtensionReloadNotification(error);
+            return;
+          }
+          removeHighlightMarksByNoteSlug(noteSlug);
+          const noteIndex = notes.findIndex(
+            (candidate) => candidate.slug === noteSlug,
+          );
+          if (noteIndex >= 0) notes.splice(noteIndex, 1);
+          item.remove();
+          const remaining = shadow.querySelectorAll('.highlight-item').length;
+          shadow.querySelector('.panel-header span').textContent = tr(
+            'extensionHighlightsCount',
+            `Highlights (${remaining})`,
+            [remaining],
+          );
+          if (remaining === 0) teardownPanel();
+        });
+      item
+        .querySelector('.note-action-btn.edit')
+        .addEventListener('click', (event) => {
+          const action = event.currentTarget;
+          if (!action.classList.contains('edit') || !note) return;
+          extensionSurface.openHighlightNoteEditor({
+            item,
+            note,
+            placeholder: tr('extensionAddNote', 'Add a note...'),
+            confirmTitle: tr('commonConfirm', 'Confirm'),
+            editTitle: tr('extensionEditNote', 'Edit note'),
+            async save(nextNote) {
+              const response = await chrome.runtime.sendMessage({
+                action: 'updateNote',
+                noteSlug,
+                note: nextNote,
+              });
+              if (
+                response?.success !== true ||
+                typeof response.noteSlug !== 'string' ||
+                !response.noteSlug
+              ) {
+                throw new Error(
+                  response?.error ||
+                    tr('extensionUpdateFailed', 'Update failed'),
+                );
+              }
+              return response;
+            },
+            onSaved(response) {
+              const oldSlug = noteSlug;
+              noteSlug = response.noteSlug;
+              note.slug = response.noteSlug;
+              document
+                .querySelectorAll(
+                  `mark.browser-recall-highlight[data-note-slug="${cssEscape(oldSlug)}"]`,
+                )
+                .forEach((mark) => {
+                  mark.dataset.noteSlug = response.noteSlug;
+                });
+            },
+            onError(error) {
+              showErrorNotification(error.message);
+            },
           });
-        removeHighlightMarksByNoteSlug(noteSlug);
-        item.remove();
-        const remaining = shadow.querySelectorAll('.highlight-item').length;
-        shadow.querySelector('.panel-header span').textContent = tr(
-          'extensionHighlightsCount',
-          `Highlights (${remaining})`,
-          [remaining],
-        );
-        if (remaining === 0) teardownPanel();
-      });
+        });
     });
 
     // Drag support
@@ -1051,7 +1002,7 @@ function initContentScript() {
         ...payload,
       });
     } else if (request.action === 'highlightSelection') {
-      // Highlight selected text or open global note (triggered by Alt+H)
+      // Highlight selected text (triggered by Alt+H)
       const selection = window.getSelection();
       const selectedText = selection.toString().trim();
       console.log(
@@ -1158,28 +1109,10 @@ function initContentScript() {
         }
         sendResponse({ success: true });
       } else {
-        // No selection — open global page note
-        console.log('[content] No text selected, opening global note');
-        const slug = getSlugForCurrentPage();
-        if (!slug) {
-          sendResponse({ success: false });
-          return;
-        }
-        requestPageNotes(slug)
-          .then((notes) => {
-            if (!notes) return;
-            const globalNote = notes.find((n) => n.excerpt === null);
-            showGlobalNoteOverlay(
-              globalNote?.note || '',
-              globalNote?.slug || null,
-              slug,
-            );
-          })
-          .catch((error) => {
-            showExtensionReloadNotification(error) ||
-              showGlobalNoteOverlay('', null, slug);
-          });
-        sendResponse({ success: true });
+        sendResponse({
+          success: false,
+          error: 'Select text before creating a highlight',
+        });
       }
     } else if (request.action === 'removeHighlightMark') {
       // Remove visual highlight marks — by timestamp for grouped highlights, by text for singles
@@ -1193,8 +1126,22 @@ function initContentScript() {
       sendResponse({ success: true });
     } else if (request.action === 'hideHighlightMarkup') {
       document.getElementById('browser-recall-highlight-overlay')?.remove();
+      markupHidden = true;
       highlightLifecycle.dispose({ clearExisting: true });
       sendResponse({ success: true });
+    } else if (request.action === 'showHighlightMarkup') {
+      markupHidden = false;
+      reapplyHighlights({ clearExisting: true })
+        .then(() => sendResponse({ success: true }))
+        .catch((error) => {
+          markupHidden = true;
+          sendResponse({
+            success: false,
+            error: error?.message || String(error),
+          });
+        });
+    } else if (request.action === 'getHighlightMarkupState') {
+      sendResponse({ success: true, hidden: markupHidden });
     } else if (request.action === 'showHighlightsPanel') {
       if (!Array.isArray(request.notes)) {
         sendResponse({

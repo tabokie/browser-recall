@@ -47,23 +47,47 @@ pub(crate) const REFERRER_CAP: usize = 50;
 
 pub type EntityMap = BTreeMap<String, EntityEffect>;
 
-fn deserialize_string_array_value<'de, D>(deserializer: D) -> Result<Option<Value>, D::Error>
+fn deserialize_non_empty_excerpt<'de, D>(deserializer: D) -> Result<Option<Value>, D::Error>
 where
     D: Deserializer<'de>,
 {
     let value = Option::<Value>::deserialize(deserializer)?;
     match value {
-        None => Ok(None),
-        Some(Value::Array(values)) => {
-            if values.iter().all(Value::is_string) {
+        Some(Value::Array(values)) if !values.is_empty() => {
+            if values.iter().all(|value| {
+                value
+                    .as_str()
+                    .is_some_and(|text| !text.is_empty() && text == text.trim())
+            }) {
                 Ok(Some(Value::Array(values)))
             } else {
                 Err(serde::de::Error::custom(
-                    "array values must contain strings only",
+                    "excerpt must contain canonical non-empty strings",
                 ))
             }
         }
-        Some(_) => Err(serde::de::Error::custom("value must be a string array")),
+        _ => Err(serde::de::Error::custom(
+            "excerpt must be a non-empty string array",
+        )),
+    }
+}
+
+fn deserialize_non_empty_css_path<'de, D>(deserializer: D) -> Result<Option<Value>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<Value>::deserialize(deserializer)?;
+    match value {
+        Some(Value::Array(values)) if !values.is_empty() => {
+            if values.iter().all(Value::is_string) {
+                Ok(Some(Value::Array(values)))
+            } else {
+                Err(serde::de::Error::custom("cssPath must contain strings"))
+            }
+        }
+        _ => Err(serde::de::Error::custom(
+            "cssPath must be a non-empty string array",
+        )),
     }
 }
 
@@ -275,13 +299,13 @@ pub enum LogEntry {
         path: String,
         #[serde(deserialize_with = "deserialize_required_option")]
         title: Option<String>,
-        #[serde(deserialize_with = "deserialize_string_array_value")]
+        #[serde(deserialize_with = "deserialize_non_empty_excerpt")]
         excerpt: Option<Value>,
         #[serde(deserialize_with = "deserialize_required_option")]
         note: Option<String>,
         #[serde(
             rename = "cssPath",
-            deserialize_with = "deserialize_string_array_value"
+            deserialize_with = "deserialize_non_empty_css_path"
         )]
         css_path: Option<Value>,
     },
@@ -304,13 +328,13 @@ pub enum LogEntry {
         path: String,
         #[serde(rename = "oldPath")]
         old_path: String,
-        #[serde(deserialize_with = "deserialize_string_array_value")]
+        #[serde(deserialize_with = "deserialize_non_empty_excerpt")]
         excerpt: Option<Value>,
         #[serde(deserialize_with = "deserialize_required_option")]
         note: Option<String>,
         #[serde(
             rename = "cssPath",
-            deserialize_with = "deserialize_string_array_value"
+            deserialize_with = "deserialize_non_empty_css_path"
         )]
         css_path: Option<Value>,
     },

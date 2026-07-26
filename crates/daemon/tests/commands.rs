@@ -463,7 +463,7 @@ async fn note_and_snapshot_payloads_reflect_storage_state() {
             title: Some("Example Page".to_string()),
             excerpt: Some(serde_json::json!(["excerpt text"])),
             note: Some("note body".to_string()),
-            css_path: None,
+            css_path: Some(serde_json::json!(["body"])),
         },
     )
     .await
@@ -584,7 +584,7 @@ async fn permanent_delete_repairs_note_and_list_relationship_metadata() {
             title: Some("Page A".to_string()),
             excerpt: Some(serde_json::json!(["highlight"])),
             note: Some("note body".to_string()),
-            css_path: None,
+            css_path: Some(serde_json::json!(["body"])),
         },
     )
     .await
@@ -1008,33 +1008,48 @@ async fn create_note_rejects_incomplete_highlight_anchors() {
         .await
         .expect("storage layout");
 
-    for request in [
-        serde_json::json!({
-            "url": "https://example.com/missing-css-path",
-            "excerpt": ["highlight"],
-            "cssPath": null,
-            "note": "note",
-        }),
-        serde_json::json!({
-            "url": "https://example.com/missing-excerpt",
-            "excerpt": null,
-            "cssPath": ["body > p"],
-            "note": "note",
-        }),
-        serde_json::json!({
-            "url": "https://example.com/misaligned-anchor",
-            "excerpt": ["one", "two"],
-            "cssPath": ["body > p"],
-            "note": "note",
-        }),
+    for (request, expected_error) in [
+        (
+            serde_json::json!({
+                "url": "https://example.com/page-note",
+                "excerpt": null,
+                "cssPath": null,
+                "note": "removed page-note shape",
+            }),
+            "excerpt must be a non-empty string array",
+        ),
+        (
+            serde_json::json!({
+                "url": "https://example.com/missing-css-path",
+                "excerpt": ["highlight"],
+                "cssPath": null,
+                "note": "note",
+            }),
+            "cssPath must be a string array",
+        ),
+        (
+            serde_json::json!({
+                "url": "https://example.com/missing-excerpt",
+                "excerpt": null,
+                "cssPath": ["body > p"],
+                "note": "note",
+            }),
+            "excerpt must be a non-empty string array",
+        ),
+        (
+            serde_json::json!({
+                "url": "https://example.com/misaligned-anchor",
+                "excerpt": ["one", "two"],
+                "cssPath": ["body > p"],
+                "note": "note",
+            }),
+            "Highlight excerpt and cssPath must both be non-empty arrays with the same length",
+        ),
     ] {
         let error = create_note(&storage, "device-a", &request)
             .await
-            .expect_err("incomplete highlight anchor must fail");
-        assert!(
-            error.contains("excerpt and cssPath"),
-            "unexpected error: {error}"
-        );
+            .expect_err("non-highlight note anchor must fail");
+        assert_eq!(error, expected_error);
     }
 }
 
@@ -1660,7 +1675,7 @@ async fn command_error_and_normalization_paths_are_explicit() {
         )
         .await
         .expect_err("legacy string excerpt fails"),
-        "excerpt must be a string array or null"
+        "excerpt must be a non-empty string array"
     );
     assert_eq!(
         create_note(
@@ -1675,7 +1690,7 @@ async fn command_error_and_normalization_paths_are_explicit() {
         )
         .await
         .expect_err("legacy string css path fails"),
-        "cssPath must be a string array or null"
+        "cssPath must be a string array"
     );
     assert_eq!(
         create_note(

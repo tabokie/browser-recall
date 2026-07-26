@@ -122,11 +122,22 @@ export function noteEntityFixture({ slug, url, ...state }) {
   if (typeof url !== 'string' || url.length === 0) {
     throw new Error('Note entity fixture requires a non-empty url');
   }
+  if (!Array.isArray(state.excerpt) || state.excerpt.length === 0) {
+    throw new Error('Note entity fixture requires a non-empty excerpt array');
+  }
+  if (
+    !Array.isArray(state.cssPath) ||
+    state.cssPath.length !== state.excerpt.length
+  ) {
+    throw new Error(
+      'Note entity fixture requires cssPath aligned with excerpt',
+    );
+  }
+  if (typeof state.note !== 'string') {
+    throw new Error('Note entity fixture requires a note string');
+  }
   return {
     slug,
-    excerpt: null,
-    note: null,
-    cssPath: null,
     url,
     deleted: false,
     deletedTs: null,

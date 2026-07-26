@@ -850,55 +850,6 @@ test.describe('extension navigation regressions', () => {
     await helper.close();
   });
 
-  test('content script shows reload hint when page note cannot load after runtime reload', async ({
-    extContext,
-    extensionId,
-    setupDir,
-    localServer,
-  }) => {
-    void setupDir;
-    localServer.addPage('/runtime-invalidated-page-note', {
-      title: 'Runtime Invalidated Page Note',
-      body: '<main><p>No selected text opens a page note.</p></main>',
-    });
-    const url = localServer.url('/runtime-invalidated-page-note');
-    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
-
-    const helper = await openHelperPage(extContext, extensionId);
-    const reloadMessage = await getExtensionMessage(
-      helper,
-      'extensionReloaded',
-    );
-    const page = await extContext.newPage();
-    await page.goto(url);
-    await waitForContentScript(helper, page, url);
-    await page.evaluate(() => getSelection().removeAllRanges());
-    await helper.evaluate(async (pageUrl) => {
-      const [tab] = await chrome.tabs.query({ url: pageUrl });
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        world: 'ISOLATED',
-        func: () => {
-          chrome.runtime.sendMessage = () =>
-            Promise.reject(
-              new Error(
-                "The service worker navigation preload request was cancelled before 'preloadResponse' settled.",
-              ),
-            );
-        },
-      });
-      await chrome.tabs.sendMessage(tab.id, { action: 'highlightSelection' });
-    }, url);
-
-    await expect(page.getByLabel(reloadMessage, { exact: true })).toBeVisible();
-    await expect(page.locator('#browser-recall-highlight-overlay')).toHaveCount(
-      0,
-    );
-
-    await page.close();
-    await helper.close();
-  });
-
   test('passive page activity failure after extension reload does not show reload warning', async ({
     extContext,
     extensionId,

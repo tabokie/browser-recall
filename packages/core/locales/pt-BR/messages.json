@@ -12,7 +12,7 @@
     "description": "Extension store and browser management description."
   },
   "commandHighlightSelection": {
-    "message": "Destaque o texto selecionado ou adicione uma nota de página",
+    "message": "Destaque o texto selecionado",
     "description": "Browser command description."
   },
   "commandCaptureSnapshot": {
@@ -106,10 +106,6 @@
   "desktopAddRule": {
     "message": "Adicionar regra",
     "description": "Desktop inbox rule add button title."
-  },
-  "desktopAddPageNote": {
-    "message": "+ Adicionar nota de página",
-    "description": "Page detail add page note button."
   },
   "desktopAdvanced": {
     "message": "Avançado",
@@ -379,10 +375,6 @@
     "message": "Nota ($1)",
     "description": "Recycle bin note display name with slug."
   },
-  "desktopNoAnnotation": {
-    "message": "Sem anotação",
-    "description": "Empty note annotation placeholder."
-  },
   "desktopOnboardingDataHeading": {
     "message": "Escolha sua pasta de dados",
     "description": "Onboarding data-folder heading."
@@ -543,10 +535,6 @@
     "message": "Falha ao revogar o navegador: $1",
     "description": "Paired browser revoke failure."
   },
-  "desktopPageNotePrefix": {
-    "message": "Nota da página:",
-    "description": "Prefix for page-note recycle bin display names."
-  },
   "desktopSelectBookmarkFile": {
     "message": "Selecione um arquivo de favoritos exportado para visualizar as pastas.",
     "description": "Bookmark import placeholder."
@@ -667,14 +655,6 @@
     "message": "Adicione uma nota... Esc para salvar.",
     "description": "Extension note placeholder with keyboard hint."
   },
-  "extensionAddPageNote": {
-    "message": "+ Nota da página",
-    "description": "Popup page note add button."
-  },
-  "extensionAddPageNoteEsc": {
-    "message": "Adicione uma nota de página... Esc para salvar.",
-    "description": "Extension page note placeholder with keyboard hint."
-  },
   "extensionAddToList": {
     "message": "Adicionar à lista",
     "description": "Popup add to list title."
@@ -771,10 +751,6 @@
     "message": "Crie \"$1\"",
     "description": "List picker create option."
   },
-  "extensionCreateNoteFailed": {
-    "message": "Falha ao criar nota",
-    "description": "Create note failure."
-  },
   "extensionDeleteHighlight": {
     "message": "Excluir destaque",
     "description": "Delete highlight button title."
@@ -867,6 +843,10 @@
     "message": "Ocultar marcações",
     "description": "Popup button that temporarily hides applied highlight markup."
   },
+  "extensionShowMarkup": {
+    "message": "Mostrar marcações",
+    "description": "Popup button that reapplies hidden highlight markup."
+  },
   "extensionResumeTracing": {
     "message": "Retomar rastreamento",
     "description": "Extension popup recording resume title."
@@ -955,10 +935,6 @@
     "message": "Gerenciar nas configurações",
     "description": "Popup settings action."
   },
-  "extensionNoAnnotation": {
-    "message": "Sem anotação",
-    "description": "Popup no annotation placeholder."
-  },
   "extensionNoLists": {
     "message": "Nenhuma lista",
     "description": "Popup no lists message."
@@ -978,10 +954,6 @@
   "extensionPageDataUnavailable": {
     "message": "Dados da página indisponíveis",
     "description": "Popup page data unavailable title."
-  },
-  "extensionPageNote": {
-    "message": "Nota da página",
-    "description": "Page note overlay title."
   },
   "extensionRatePageFailed": {
     "message": "taxaPage falhou",
@@ -1062,7 +1034,12 @@
   "extensionSnapshotCapturedWithWarnings": {
     "message": "Instantâneo salvo, mas $COUNT$ recursos não estavam disponíveis.",
     "description": "Snapshot capture partial-success warning for multiple unavailable resources.",
-    "placeholders": { "count": { "content": "$1", "example": "2" } }
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
+    }
   },
   "extensionSomethingWentWrong": {
     "message": "Algo deu errado",
@@ -1107,10 +1084,6 @@
   "extensionToggleRecording": {
     "message": "Alternar gravação",
     "description": "Extension popup recording toggle accessibility label."
-  },
-  "desktopAddPageNotePlaceholder": {
-    "message": "Adicionar uma nota de página...",
-    "description": "Localized UI text."
   },
   "desktopAlreadyPaired": {
     "message": "Chrome já está emparelhado com Browser Recall Desktop",
@@ -1353,7 +1326,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "Selecione o texto e pressione <kbd>Alt+H</kbd> para destacá-lo ou pressione <kbd>Alt+H</kbd> sem seleção para adicionar uma nota à página atual.",
+    "message": "Selecione o texto e pressione <kbd>Alt+H</kbd> para destacá-lo.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {

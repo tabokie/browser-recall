@@ -420,7 +420,7 @@ test.describe('Highlight note edit', () => {
         data: noteEntityFixture({
           slug: noteSlug,
           excerpt: [`PDF panel highlight text ${index + 1}`],
-          note: '',
+          note: index === 0 ? 'PDF annotation 1' : '',
           cssPath: [''],
           url: pageUrl,
         }),
@@ -460,6 +460,25 @@ test.describe('Highlight note edit', () => {
       panel.scrollTop = panel.scrollHeight;
       const header = panel.querySelector('.panel-header');
       const closeButton = panel.querySelector('.close-btn');
+      const firstItem = panel.querySelector('.highlight-item');
+      const emptyItem = panel.querySelectorAll('.highlight-item')[1];
+      const quoteRow = firstItem?.querySelector('.highlight-quote-row');
+      const quote = firstItem?.querySelector('.highlight-quote');
+      const noteRow = firstItem?.querySelector('.highlight-note-row');
+      const deleteButton = firstItem?.querySelector('.note-action-btn.delete');
+      const editButton = firstItem?.querySelector('.note-action-btn.edit');
+      const itemRect = firstItem?.getBoundingClientRect();
+      const itemStyle = firstItem ? getComputedStyle(firstItem) : null;
+      const deleteRect = deleteButton?.getBoundingClientRect();
+      const editRect = editButton?.getBoundingClientRect();
+      const colorProbe = document.createElement('span');
+      colorProbe.style.color = 'var(--br-accent-red)';
+      panel.appendChild(colorProbe);
+      const accentRed = getComputedStyle(colorProbe).color;
+      colorProbe.remove();
+      const quoteStyle = quote ? getComputedStyle(quote) : null;
+      const quoteRect = quote?.getBoundingClientRect();
+      const noteRowRect = noteRow?.getBoundingClientRect();
       return {
         scrollTop: panel.scrollTop,
         markCount: panel.querySelectorAll('mark.browser-recall-highlight')
@@ -469,6 +488,45 @@ test.describe('Highlight note edit', () => {
         headerTop: header?.getBoundingClientRect().top ?? null,
         headerPosition: header ? getComputedStyle(header).position : null,
         closeButtonTop: closeButton?.getBoundingClientRect().top ?? null,
+        textareaCount: firstItem?.querySelectorAll('textarea').length ?? null,
+        emptyAnnotationText:
+          emptyItem
+            ?.querySelector('.highlight-note-row')
+            ?.textContent?.trim() ?? null,
+        emptyPlaceholderCount:
+          emptyItem?.querySelectorAll('.highlight-note-placeholder').length ??
+          null,
+        hasPopupRows: Boolean(quoteRow && noteRow),
+        scrollbarWidth: getComputedStyle(panel).scrollbarWidth,
+        scrollbarDisplay: getComputedStyle(panel, '::-webkit-scrollbar')
+          .display,
+        quoteBorderColor: quoteStyle?.borderLeftColor ?? null,
+        quoteBorderStyle: quoteStyle?.borderLeftStyle ?? null,
+        quoteBorderWidth: quoteStyle?.borderLeftWidth ?? null,
+        quoteNoteGap:
+          quoteRect && noteRowRect ? noteRowRect.top - quoteRect.bottom : null,
+        accentRed,
+        actionSizes: [deleteRect, editRect].map((rect) => ({
+          width: rect?.width ?? null,
+          height: rect?.height ?? null,
+        })),
+        actionsRightAligned:
+          itemRect && itemStyle && deleteRect && editRect
+            ? Math.abs(
+                itemRect.right -
+                  Number.parseFloat(itemStyle.paddingRight) -
+                  deleteRect.right,
+              ) <= 1 &&
+              Math.abs(
+                itemRect.right -
+                  Number.parseFloat(itemStyle.paddingRight) -
+                  editRect.right,
+              ) <= 1
+            : false,
+        editIsBelowDelete:
+          deleteRect && editRect ? editRect.top > deleteRect.top : false,
+        editBottomInset:
+          itemRect && editRect ? itemRect.bottom - editRect.bottom : null,
       };
     });
 
@@ -483,7 +541,180 @@ test.describe('Highlight note edit', () => {
     expect(panelState.closeButtonTop).toBeGreaterThanOrEqual(
       panelState.panelTop,
     );
+    expect(panelState.textareaCount).toBe(0);
+    expect(panelState.emptyAnnotationText).toBe('');
+    expect(panelState.emptyPlaceholderCount).toBe(0);
+    expect(panelState.hasPopupRows).toBe(true);
+    expect(panelState.scrollbarWidth).toBe('none');
+    expect(panelState.scrollbarDisplay).toBe('none');
+    expect(panelState.quoteBorderColor).toBe(panelState.accentRed);
+    expect(panelState.quoteBorderStyle).toBe('solid');
+    expect(panelState.quoteBorderWidth).toBe('3px');
+    expect(panelState.quoteNoteGap).toBe(8);
+    expect(panelState.actionSizes).toEqual([
+      { width: 16, height: 16 },
+      { width: 16, height: 16 },
+    ]);
+    expect(panelState.actionsRightAligned).toBe(true);
+    expect(panelState.editIsBelowDelete).toBe(true);
+    expect(panelState.editBottomInset).toBeCloseTo(9, 1);
+
+    const highlightsPanelHost = page.locator(
+      '#browser-recall-highlights-panel',
+    );
     const helper = await openHelperPage(extContext, extensionId);
+    await helper.evaluate(async (pageUrl) => {
+      const [tab] = await chrome.tabs.query({ url: pageUrl });
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'ISOLATED',
+        func: () => {
+          const sendMessage = chrome.runtime.sendMessage.bind(chrome.runtime);
+          let updateAttempts = 0;
+          let rejectNextDelete = true;
+          chrome.runtime.sendMessage = (request, ...args) => {
+            if (request?.action === 'updateNote') {
+              updateAttempts++;
+              if (updateAttempts === 1) {
+                return Promise.resolve({
+                  success: false,
+                  error: 'forced PDF note update failure',
+                });
+              }
+              if (updateAttempts === 2) {
+                return new Promise((resolve, reject) => {
+                  globalThis.__releaseBrowserRecallPdfNoteUpdate = () => {
+                    delete globalThis.__releaseBrowserRecallPdfNoteUpdate;
+                    sendMessage(request, ...args).then(resolve, reject);
+                  };
+                });
+              }
+            }
+            if (request?.action === 'deleteNote' && rejectNextDelete) {
+              rejectNextDelete = false;
+              return Promise.resolve({
+                success: false,
+                error: 'forced PDF note delete failure',
+              });
+            }
+            return sendMessage(request, ...args);
+          };
+        },
+      });
+    }, pageUrl);
+    const emptyHighlight = highlightsPanelHost
+      .locator('.highlight-item')
+      .nth(1);
+    const emptyViewHeight = await emptyHighlight.evaluate(
+      (item) => item.getBoundingClientRect().height,
+    );
+    await emptyHighlight.locator('.note-action-btn.edit').click();
+    const emptyEditor = emptyHighlight.locator(
+      '.highlight-note-editor[contenteditable="plaintext-only"]',
+    );
+    await expect(emptyEditor).toBeFocused();
+    const emptyEditHeight = await emptyHighlight.evaluate(
+      (item) => item.getBoundingClientRect().height,
+    );
+    expect(Math.abs(emptyEditHeight - emptyViewHeight)).toBeLessThan(0.1);
+    await emptyEditor.press('Escape');
+
+    await highlightsPanelHost
+      .locator('.highlight-item .note-action-btn.edit')
+      .first()
+      .click();
+    const editor = highlightsPanelHost.locator(
+      '.highlight-item .highlight-note-editor[contenteditable="plaintext-only"]',
+    );
+    await expect(editor).toBeVisible();
+    await expect(editor).toBeFocused();
+    await expect(
+      highlightsPanelHost.locator('.highlight-item textarea'),
+    ).toHaveCount(0);
+    const confirmButton = highlightsPanelHost.locator(
+      '.highlight-item .note-action-btn.confirm',
+    );
+    await expect(confirmButton.locator('svg')).toHaveAttribute(
+      'data-icon',
+      'checkmark',
+    );
+    await editor.fill('Updated PDF annotation');
+    await confirmButton.click();
+    await expect(editor).toBeVisible();
+    await expect(confirmButton).toBeVisible();
+    await confirmButton.click();
+    const editedItem = highlightsPanelHost.locator('.highlight-item').first();
+    await expect(editedItem.locator('.note-action-btn.delete')).toBeDisabled();
+    const releasedUpdate = await helper.evaluate(async (pageUrl) => {
+      const [tab] = await chrome.tabs.query({ url: pageUrl });
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'ISOLATED',
+        func: () => {
+          const release = globalThis.__releaseBrowserRecallPdfNoteUpdate;
+          if (typeof release !== 'function') {
+            return { success: false, error: 'delayed update is not pending' };
+          }
+          release();
+          return { success: true };
+        },
+      });
+      return result.result;
+    }, pageUrl);
+    expect(releasedUpdate).toEqual({ success: true });
+    await expect(
+      highlightsPanelHost
+        .locator('.highlight-item .highlight-note-text')
+        .first(),
+    ).toHaveText('Updated PDF annotation');
+
+    await expect
+      .poll(async () => {
+        const response = await helper.evaluate(
+          (pageSlug) =>
+            chrome.runtime.sendMessage({
+              action: 'loadPageNotes',
+              slug: pageSlug,
+            }),
+          slug,
+        );
+        return response.notes.find((note) =>
+          note.excerpt?.includes('PDF panel highlight text 1'),
+        )?.note;
+      })
+      .toBe('Updated PDF annotation');
+    const itemCountBeforeRejectedDelete = await highlightsPanelHost
+      .locator('.highlight-item')
+      .count();
+    const rejectedDeleteItem = highlightsPanelHost
+      .locator('.highlight-item')
+      .nth(2);
+    const rejectedDeleteSlug =
+      await rejectedDeleteItem.getAttribute('data-note-slug');
+    await rejectedDeleteItem.locator('.note-action-btn.delete').click();
+    await expect(highlightsPanelHost.locator('.highlight-item')).toHaveCount(
+      itemCountBeforeRejectedDelete,
+    );
+    await expect(rejectedDeleteItem).toBeVisible();
+    await expect
+      .poll(async () => {
+        const response = await helper.evaluate(
+          (pageSlug) =>
+            chrome.runtime.sendMessage({
+              action: 'loadPageNotes',
+              slug: pageSlug,
+            }),
+          slug,
+        );
+        return response.notes.some((note) => note.slug === rejectedDeleteSlug);
+      })
+      .toBe(true);
+    await page.evaluate(() => {
+      const panel = document
+        .getElementById('browser-recall-highlights-panel')
+        ?.shadowRoot?.querySelector('.panel');
+      if (panel) panel.scrollTop = panel.scrollHeight;
+    });
     await page.evaluate(() => {
       const paragraph = document.getElementById('new-highlight');
       const range = document.createRange();
