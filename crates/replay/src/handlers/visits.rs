@@ -1,8 +1,8 @@
 use std::future::Future;
 
 use crate::{
-    append_capped, default_page, entities::Entity, load_page, local_visit_date, touch_timestamp,
-    Context, EntityEffect, EntityMap, ReplayError, PAGE_PREFIX,
+    append_capped_page_reference, default_page, entities::Entity, load_page, local_visit_date,
+    touch_timestamp, Context, EntityEffect, EntityMap, ReplayError, PAGE_PREFIX,
 };
 
 pub(crate) async fn handle_visit_page<L, Fut>(
@@ -41,7 +41,7 @@ where
         .transpose()?
         .map(|slug| format!("{PAGE_PREFIX}{slug}"));
     if let Some(parent_key) = &parent_key {
-        append_capped(&mut page.parent_ids, parent_key.clone());
+        append_capped_page_reference(&mut page.parent_ids, parent_key.clone());
     }
     result.insert(page_key.clone(), EntityEffect::Upsert(Entity::Page(page)));
 
@@ -49,7 +49,7 @@ where
         if parent_key != page_key {
             if let Some(mut parent) = load_page(load, &parent_key).await {
                 touch_timestamp(&mut parent, &context.device_id, timestamp);
-                append_capped(&mut parent.child_ids, page_key);
+                append_capped_page_reference(&mut parent.child_ids, page_key);
                 result.insert(parent_key, EntityEffect::Upsert(Entity::Page(parent)));
             }
         }

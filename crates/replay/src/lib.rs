@@ -1008,13 +1008,21 @@ pub(crate) fn retain_page_or_delete(result: &mut EntityMap, key: String, page: P
     result.insert(key, effect);
 }
 
-pub(crate) fn append_capped(items: &mut Vec<String>, value: String) {
+pub(crate) fn append_capped_page_reference(items: &mut Vec<String>, value: String) {
     if items.contains(&value) {
         return;
     }
     items.push(value);
-    if items.len() > REFERRER_CAP {
-        items.remove(0);
+    if items
+        .iter()
+        .filter(|item| item.starts_with(PAGE_PREFIX))
+        .count()
+        > REFERRER_CAP
+    {
+        if let Some(oldest_page_index) = items.iter().position(|item| item.starts_with(PAGE_PREFIX))
+        {
+            items.remove(oldest_page_index);
+        }
     }
 }
 

@@ -1,0 +1,8 @@
+- When a page is loading and I open the popup UI, it reports "popup-page-identity-failed" even though we have the page URL to work with.
+- On desktop app, the distance between page results and time chart is widened when for the first time a page is selected.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them
+- Please review my uncommitted changes
+- Fix it
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.6 Sol
+- As code comment somewhere

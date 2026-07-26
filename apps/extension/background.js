@@ -67,6 +67,7 @@ const CONNECTOR_STATE_REFRESH_TIMEOUT_MS = 1000;
 const POPUP_PREPARE_TIMEOUT_MS = 1500;
 const POPUP_BOOTSTRAP_TTL_MS = 30_000;
 const POPUP_ACTION_MAPPING_FALLBACK_CLEAR_MS = 5000;
+const POPUP_IDENTITY_NAVIGATION_RETRIES = 2;
 const BROWSER_CAPABILITIES = getBrowserCapabilities();
 
 let lastLogTimestamp = 0;
@@ -1451,7 +1452,58 @@ function popupTabIsUnavailable(tab) {
   );
 }
 
-async function resolveTabPageIdentity(tab) {
+async function loadingTabPageIdentity(tab) {
+  let pageIdentity = null;
+  try {
+    const [execution] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      injectImmediately: true,
+      func: () => ({
+        documentUrl: window.location.href,
+        embeddedSlug:
+          document.querySelector('meta[name="x-browser-recall-slug"]')
+            ?.content ?? null,
+        embeddedUrl:
+          document.querySelector('meta[name="x-browser-recall-url"]')
+            ?.content ?? null,
+      }),
+    });
+    pageIdentity = execution?.result ?? null;
+  } catch {
+    // A loading tab may not have committed an injectable document yet. Its
+    // browser-reported URL is still the authoritative identity available now.
+  }
+
+  const currentTab = await chrome.tabs.get(tab.id);
+  // Document inspection is asynchronous: always validate it against a fresh
+  // tab snapshot so a navigation cannot make the popup use stale identity.
+  if (currentTab.url !== tab.url || currentTab.status !== tab.status) {
+    return { currentTab, identity: null };
+  }
+
+  if (pageIdentity?.documentUrl === tab.url && pageIdentity.embeddedSlug) {
+    return {
+      currentTab,
+      identity: {
+        success: true,
+        embedded: true,
+        slug: pageIdentity.embeddedSlug,
+        url: pageIdentity.embeddedUrl,
+      },
+    };
+  }
+  return {
+    currentTab,
+    identity: {
+      success: true,
+      embedded: false,
+      slug: generateSlugFromUrl(tab.url),
+      url: tab.url,
+    },
+  };
+}
+
+async function resolveTabPageIdentity(tab, navigationRetries = 0) {
   let effectiveUrl = tab.url;
   let effectiveSlug = null;
   let effectiveTitle = typeof tab.title === 'string' ? tab.title : '';
@@ -1473,9 +1525,29 @@ async function resolveTabPageIdentity(tab) {
     effectiveUrl = pageInfo.entry.url;
     if (pageInfo.entry.title) effectiveTitle = pageInfo.entry.title;
   } else if (tab.id != null) {
-    const identity = await chrome.tabs.sendMessage(tab.id, {
-      action: 'getPageIdentity',
-    });
+    let identity;
+    if (tab.status === 'loading') {
+      const loadingIdentity = await loadingTabPageIdentity(tab);
+      if (!loadingIdentity.identity) {
+        if (navigationRetries >= POPUP_IDENTITY_NAVIGATION_RETRIES) {
+          throw new Error(
+            'Page kept navigating while popup identity was resolving',
+          );
+        }
+        return resolveTabPageIdentity(
+          loadingIdentity.currentTab,
+          navigationRetries + 1,
+        );
+      }
+      identity = loadingIdentity.identity;
+      if (typeof loadingIdentity.currentTab.title === 'string') {
+        effectiveTitle = loadingIdentity.currentTab.title;
+      }
+    } else {
+      identity = await chrome.tabs.sendMessage(tab.id, {
+        action: 'getPageIdentity',
+      });
+    }
     if (
       identity?.success !== true ||
       typeof identity.embedded !== 'boolean' ||

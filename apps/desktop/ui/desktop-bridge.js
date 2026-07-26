@@ -9,7 +9,22 @@ async function invokeBridgeAction(request) {
 }
 
 export async function sendAction(msg) {
-  const resp = await invokeBridgeAction(msg);
+  let resp;
+  try {
+    resp = await invokeBridgeAction(msg);
+  } catch (rejection) {
+    if (rejection instanceof Error) throw rejection;
+    if (typeof rejection === 'string' && rejection.trim()) {
+      throw new Error(rejection);
+    }
+    let detail;
+    try {
+      detail = JSON.stringify(rejection);
+    } catch {
+      detail = String(rejection);
+    }
+    throw new Error(`${msg.action} bridge rejected with ${detail}`);
+  }
   if (!resp || typeof resp !== 'object' || Array.isArray(resp)) {
     throw new Error(`${msg.action} returned an invalid response`);
   }

@@ -496,21 +496,9 @@ async function installDesktopBridgeMock(page, options = {}) {
               timestamps: {},
             };
           }
-          return {
-            kind: 'missing',
-            slug,
-            pinnedAt: pin.pinnedAt,
-            source: pin.source,
-            url: null,
-            title: null,
-            userTitle: null,
-            isNote: false,
-            hasSnapshots: false,
-            hasHighlightNotes: false,
-            listSlugs: [],
-            visitDates: [],
-            timestamps: {},
-          };
+          throw new Error(
+            `list ${listId} pin ${String(pin.id)} references a missing entity`,
+          );
         });
         return {
           slug: list.slug || listId,
@@ -1174,8 +1162,13 @@ async function installDesktopBridgeMock(page, options = {}) {
       window.__TAURI__ = {
         core: {
           async invoke(command, payload = {}) {
-            if (command === 'bridge_action')
-              return bridgeAction(payload.request);
+            if (command === 'bridge_action') {
+              try {
+                return await bridgeAction(payload.request);
+              } catch (error) {
+                throw error instanceof Error ? error.message : String(error);
+              }
+            }
             if (command === 'search_history_stream') {
               const request = payload.request || {};
               searchHistoryInvocations.push(clone(request));
@@ -1356,6 +1349,42 @@ test.describe('desktop visual regression', () => {
         animations: 'disabled',
         maxDiffPixelRatio: 0.01,
       });
+    });
+  });
+
+  test('list projection failures show the native error instead of a substitution token', async ({
+    page,
+  }) => {
+    const missingPageSlug = 'missing-hubs-page';
+    const projectionError =
+      'list research pin page:missing-hubs-page references a missing entity';
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        extraSession: {
+          'list:research': {
+            slug: 'research',
+            name: 'Hubs',
+            pins: [
+              {
+                id: `page:${missingPageSlug}`,
+                pinnedAt: Date.now(),
+                source: null,
+              },
+            ],
+            rules: [],
+          },
+        },
+      });
+
+      await page.locator('.sidebar-item[data-list-id="research"]').click();
+
+      await expect(page.locator('#mainTitle')).toHaveText('Hubs');
+      await expect(page.locator('#relatedResults')).toContainText(
+        `Error: ${projectionError}`,
+      );
+      await expect(page.locator('#relatedResults')).not.toContainText('$1');
     });
   });
 
@@ -5084,18 +5113,19 @@ test.describe('desktop visual regression', () => {
     });
   });
 
-  test('chart to result gap remains stable after selecting rows and resizing', async ({
+  test('chart to result gap remains stable after selecting rows and resizing @webkit', async ({
     page,
   }) => {
     const now = Date.now();
     const historyEntries = Array.from({ length: 80 }, (_, i) => ({
       url: `https://example.com/stable-layout-${i}`,
       title: `Stable layout ${i}`,
-      timestamp: now - i * 1000,
+      timestamp: now - i * 7 * 24 * 60 * 60 * 1000,
       deviceId: 'device-a',
     }));
 
     await serveDesktopUi(async (desktopUrl) => {
+      await page.setViewportSize({ width: 900, height: 560 });
       await openDesktopUi(page, desktopUrl, {
         setupComplete: true,
         colorScheme: 'amber',
@@ -5106,32 +5136,54 @@ test.describe('desktop visual regression', () => {
         () => document.querySelectorAll('#relatedResults .result-row').length,
       );
 
-      const measureGap = async () =>
+      const measureLayout = async () =>
         page.evaluate(() => {
           const chart = document.getElementById('relatedChart');
+          const chartBars = document.getElementById('relatedChartBars');
+          const chartContent = chartBars.querySelector('.chart-content');
+          const resultsWrapper = document.getElementById(
+            'relatedResultsWrapper',
+          );
           const firstItem = document.querySelector(
             '#relatedResults .result-item',
           );
           const chartRect = chart.getBoundingClientRect();
+          const chartBarsRect = chartBars.getBoundingClientRect();
+          const chartContentRect = chartContent.getBoundingClientRect();
           const itemRect = firstItem.getBoundingClientRect();
-          return Math.round(itemRect.top - chartRect.bottom);
+          return {
+            outerGap: Math.round(itemRect.top - chartRect.bottom),
+            visibleGap: Math.round(itemRect.top - chartContentRect.bottom),
+            chartBarsHeight: Math.round(chartBarsRect.height),
+            resultsWrapperHeight: Math.round(
+              resultsWrapper.getBoundingClientRect().height,
+            ),
+            resultsWrapperScrollHeight: resultsWrapper.scrollHeight,
+          };
         });
 
-      const initialGap = await measureGap();
-      expect(initialGap).toBeGreaterThanOrEqual(0);
-      expect(initialGap).toBeLessThanOrEqual(12);
+      const initialLayout = await measureLayout();
+      expect(initialLayout.outerGap).toBeGreaterThanOrEqual(0);
+      expect(initialLayout.outerGap).toBeLessThanOrEqual(12);
+      expect(initialLayout.resultsWrapperHeight).toBe(
+        initialLayout.resultsWrapperScrollHeight,
+      );
 
       await page.locator('#relatedResults .result-row').first().click();
       await expect(
         page.locator('#relatedResults .result-row.selected'),
       ).toHaveCount(1);
-      await expect.poll(measureGap).toBe(initialGap);
-
-      await page.setViewportSize({ width: 900, height: 560 });
-      await expect.poll(measureGap).toBe(initialGap);
+      const firstSelectionLayouts = [];
+      for (let sample = 0; sample < 10; sample += 1) {
+        await page.waitForTimeout(50);
+        firstSelectionLayouts.push(await measureLayout());
+      }
+      expect(firstSelectionLayouts).toEqual(
+        Array.from({ length: 10 }, () => initialLayout),
+      );
 
       await page.setViewportSize({ width: 1280, height: 820 });
-      await expect.poll(measureGap).toBe(initialGap);
+      await expect.poll(measureLayout).toEqual(initialLayout);
     });
   });
 

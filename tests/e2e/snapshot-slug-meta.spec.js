@@ -334,7 +334,7 @@ test.describe('Snapshot slug meta tag', () => {
     await page.close();
   });
 
-  test('popup resolves snapshot pages through the same embedded slug identity as highlights', async ({
+  test('popup preserves embedded snapshot identity while the page is still loading', async ({
     extContext,
     extensionId,
     setupDir,
@@ -349,6 +349,7 @@ test.describe('Snapshot slug meta tag', () => {
     localServer.addPage('/snapshot-popup-view', {
       title: 'Stored Snapshot',
       body: `<meta name="x-browser-recall-slug" content="${slug}"><meta name="x-browser-recall-url" content="${originalUrl}"><p>This page contains a ${highlightText}.</p>`,
+      endDelayMs: 3_000,
     });
 
     await resetAndSeed(extContext, extensionId, [
@@ -390,15 +391,22 @@ test.describe('Snapshot slug meta tag', () => {
 
     const snapshotUrl = localServer.url('/snapshot-popup-view');
     const snapshotPage = await extContext.newPage();
-    await snapshotPage.goto(snapshotUrl);
-    await snapshotPage.waitForSelector('mark', { timeout: 5000 });
+    await snapshotPage.goto(snapshotUrl, { waitUntil: 'commit' });
 
     const helper = await openHelperPage(extContext, extensionId);
     const snapshotTab = await helper.evaluate(async (url) => {
       const [tab] = await chrome.tabs.query({ url });
-      return tab ? { id: tab.id, url: tab.url, title: tab.title } : null;
+      return tab
+        ? {
+            id: tab.id,
+            url: tab.url,
+            title: tab.title,
+            status: tab.status,
+          }
+        : null;
     }, snapshotUrl);
     expect(snapshotTab).not.toBeNull();
+    expect(snapshotTab.status).toBe('loading');
 
     const flushResult = await helper.evaluate(() =>
       chrome.runtime.sendMessage({ action: 'flushDesktopQueueForTest' }),

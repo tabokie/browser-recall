@@ -6,6 +6,7 @@ export const BACKGROUND_TEST_ACTIONS = [
   'getActionIconForTest',
   'preparePopupBootstrapForTest',
   'failNextTabMessageForTest',
+  'navigateTabBeforeNextImmediateScriptForTest',
   'triggerCommandForTest',
   'restartConnectorRuntimeForTest',
   'readDesktopValue',
@@ -36,6 +37,7 @@ globalThis.browserRecallActionIconStateForTest = actionIconState;
 
 globalThis.browserRecallCommandListenersForTest = [];
 globalThis.browserRecallTabMessageFailuresForTest = [];
+globalThis.browserRecallImmediateScriptNavigationsForTest = [];
 
 const originalTabsSendMessage = chrome.tabs?.sendMessage?.bind(chrome.tabs);
 if (
@@ -57,6 +59,52 @@ if (
   };
 }
 globalThis.browserRecallTabsSendMessageForTest = chrome.tabs?.sendMessage;
+
+const originalScriptingExecuteScript = chrome.scripting?.executeScript?.bind(
+  chrome.scripting,
+);
+if (
+  originalScriptingExecuteScript &&
+  !globalThis.browserRecallScriptingExecuteScriptForTest
+) {
+  chrome.scripting.executeScript = async (details, ...rest) => {
+    const navigations =
+      globalThis.browserRecallImmediateScriptNavigationsForTest || [];
+    const tabId = details?.target?.tabId;
+    const index = navigations.findIndex(
+      (navigation) => !navigation.tabId || navigation.tabId === tabId,
+    );
+    if (details?.injectImmediately && index >= 0) {
+      const [navigation] = navigations.splice(index, 1);
+      const committed = new Promise((resolve, reject) => {
+        const listener = (event) => {
+          if (
+            event.tabId !== tabId ||
+            event.frameId !== 0 ||
+            event.url !== navigation.url
+          ) {
+            return;
+          }
+          clearTimeout(timer);
+          chrome.webNavigation.onCommitted.removeListener(listener);
+          resolve();
+        };
+        const timer = setTimeout(() => {
+          chrome.webNavigation.onCommitted.removeListener(listener);
+          reject(
+            new Error(`Timed out navigating test tab to ${navigation.url}`),
+          );
+        }, 2_000);
+        chrome.webNavigation.onCommitted.addListener(listener);
+      });
+      await chrome.tabs.update(tabId, { url: navigation.url });
+      await committed;
+    }
+    return originalScriptingExecuteScript(details, ...rest);
+  };
+}
+globalThis.browserRecallScriptingExecuteScriptForTest =
+  chrome.scripting?.executeScript;
 
 const originalOnCommandAddListener =
   chrome.commands?.onCommand?.addListener?.bind(chrome.commands.onCommand);

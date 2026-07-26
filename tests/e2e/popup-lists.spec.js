@@ -195,6 +195,110 @@ test('popup shows identity failure detail when the receiver is stale', async ({
   await page.close();
 });
 
+test('popup uses the tab URL while the page content script is still loading', async ({
+  extContext,
+  extensionId,
+  setupDir,
+  localServer,
+}) => {
+  void setupDir;
+  const title = 'Loading Popup Page Identity';
+  localServer.addPage('/loading-popup-page-identity', {
+    title,
+    body: '<main>Response remains open while popup bootstrap runs.</main>',
+    endDelayMs: 3_000,
+  });
+  const url = localServer.url('/loading-popup-page-identity');
+  await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+
+  const page = await extContext.newPage();
+  await page.goto(url, { waitUntil: 'commit' });
+
+  const helper = await openHelperPage(extContext, extensionId);
+  const prepared = await helper.evaluate(async (pageUrl) => {
+    const [tab] = await chrome.tabs.query({ url: pageUrl });
+    if (!tab?.id) throw new Error('Loading source tab not found');
+    if (tab.status !== 'loading') {
+      throw new Error(`Expected loading tab, received ${tab.status}`);
+    }
+    return chrome.runtime.sendMessage({
+      action: 'preparePopupBootstrapForTest',
+      tabId: tab.id,
+    });
+  }, url);
+  await helper.close();
+  expect(prepared).toMatchObject({ success: true, mode: 'dashboard' });
+
+  const popup = await extContext.newPage();
+  await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
+  await expect(popup.locator('#dashboard')).toBeVisible();
+  await expect(popup.locator('#pageTitle')).toHaveText(title);
+  await expect(popup.locator('#pageDiagnosticDetail')).toBeHidden();
+
+  await popup.close();
+  await page.close();
+});
+
+test('loading popup follows navigation committed during identity resolution', async ({
+  extContext,
+  extensionId,
+  setupDir,
+  localServer,
+}) => {
+  void setupDir;
+  localServer.addPage('/loading-popup-navigation-source', {
+    title: 'Loading Navigation Source',
+    body: '<main>Source page remains loading.</main>',
+    endDelayMs: 3_000,
+  });
+  localServer.addPage('/loading-popup-navigation-destination', {
+    title: 'Loading Navigation Destination',
+    body: '<main>Destination page remains loading.</main>',
+    endDelayMs: 3_000,
+  });
+  const sourceUrl = localServer.url('/loading-popup-navigation-source');
+  const destinationUrl = localServer.url(
+    '/loading-popup-navigation-destination',
+  );
+  await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+
+  const page = await extContext.newPage();
+  await page.goto(sourceUrl, { waitUntil: 'commit' });
+
+  const helper = await openHelperPage(extContext, extensionId);
+  const prepared = await helper.evaluate(
+    async ({ sourceUrl, destinationUrl }) => {
+      const [tab] = await chrome.tabs.query({ url: sourceUrl });
+      if (!tab?.id) throw new Error('Loading source tab not found');
+      const scheduled = await chrome.runtime.sendMessage({
+        action: 'navigateTabBeforeNextImmediateScriptForTest',
+        tabId: tab.id,
+        url: destinationUrl,
+      });
+      if (!scheduled?.success) throw new Error(scheduled?.error);
+      return chrome.runtime.sendMessage({
+        action: 'preparePopupBootstrapForTest',
+        tabId: tab.id,
+      });
+    },
+    { sourceUrl, destinationUrl },
+  );
+  await helper.close();
+  expect(prepared).toMatchObject({ success: true, mode: 'dashboard' });
+  await expect.poll(() => page.url()).toBe(destinationUrl);
+
+  const popup = await extContext.newPage();
+  await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
+  await expect(popup.locator('#dashboard')).toBeVisible();
+  await expect(popup.locator('#pageTitle')).toHaveText(
+    'Loading Navigation Destination',
+  );
+  await expect(popup.locator('#pageUrl')).toHaveText(destinationUrl);
+
+  await popup.close();
+  await page.close();
+});
+
 test.describe('Popup list chip behavior', () => {
   for (const scenario of [
     {

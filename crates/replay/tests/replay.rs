@@ -3647,6 +3647,66 @@ async fn visit_page_caps_parent_ids_at_referrer_limit() {
 }
 
 #[tokio::test]
+async fn visit_page_referrer_limit_preserves_durable_list_parent() {
+    let child_url = "https://example.com/listed-child";
+    let child_slug = generate_slug_from_url(child_url).expect("slug");
+    let child_key = format!("page:{child_slug}");
+    let list_parent = "list:inbox".to_string();
+    let referrer_parents = (0..50)
+        .map(|index| {
+            format!(
+                "page:{}",
+                generate_slug_from_url(&format!("https://example.com/old-parent-{index}"))
+                    .expect("slug")
+            )
+        })
+        .collect::<Vec<_>>();
+    let new_parent_url = "https://example.com/new-parent-50";
+    let new_parent_slug = generate_slug_from_url(new_parent_url).expect("slug");
+    let new_parent_key = format!("page:{new_parent_slug}");
+
+    let mut child = page(&child_slug);
+    child.url = Some(child_url.to_string());
+    child.title = Some("Listed child".to_string());
+    child.timestamps.insert("test-device".to_string(), 50);
+    child.parent_ids = std::iter::once(list_parent.clone())
+        .chain(referrer_parents.clone())
+        .collect();
+
+    let mut parent = page(&new_parent_slug);
+    parent.url = Some(new_parent_url.to_string());
+    parent.title = Some("New Parent".to_string());
+    parent.timestamps.insert("test-device".to_string(), 50);
+
+    let store = BTreeMap::from([
+        (child_key.clone(), Entity::Page(child)),
+        (new_parent_key.clone(), Entity::Page(parent)),
+    ]);
+
+    let result = effect_of(
+        LogEntry::VisitPage {
+            timestamp: 100,
+            url: child_url.to_string(),
+            title: Some("Listed child".to_string()),
+            referrer_url: Some(new_parent_url.to_string()),
+        },
+        load_from(store),
+        context(),
+    )
+    .await
+    .expect("visit replay succeeds");
+
+    let child = result
+        .get(&child_key)
+        .and_then(EntityEffect::as_page)
+        .expect("child updated");
+    assert_eq!(child.parent_ids.len(), 51);
+    assert!(child.parent_ids.contains(&list_parent));
+    assert!(!child.parent_ids.contains(&referrer_parents[0]));
+    assert!(child.parent_ids.contains(&new_parent_key));
+}
+
+#[tokio::test]
 async fn visit_page_caps_referrer_child_ids_at_referrer_limit() {
     let parent_slug = generate_slug_from_url("https://example.com/parent").expect("slug");
     let parent_key = format!("page:{parent_slug}");
