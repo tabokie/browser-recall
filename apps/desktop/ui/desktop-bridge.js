@@ -380,6 +380,60 @@ export async function loadAllPageContext() {
   );
 }
 
+export async function loadHighlightHistory() {
+  const resp = await sendAction({ action: 'getHighlightHistory' });
+  const highlights = requireArrayField(
+    resp,
+    'highlights',
+    'getHighlightHistory',
+  );
+  const seenNoteSlugs = new Set();
+  let previousCreatedAt = Number.POSITIVE_INFINITY;
+  for (const [index, item] of highlights.entries()) {
+    if (
+      !item ||
+      typeof item !== 'object' ||
+      Array.isArray(item) ||
+      !Number.isSafeInteger(item.createdAt) ||
+      item.createdAt <= 0 ||
+      !item.page ||
+      typeof item.page !== 'object' ||
+      Array.isArray(item.page) ||
+      typeof item.page.slug !== 'string' ||
+      !item.page.slug ||
+      typeof item.page.url !== 'string' ||
+      !item.page.url ||
+      !item.note ||
+      typeof item.note !== 'object' ||
+      Array.isArray(item.note) ||
+      typeof item.note.slug !== 'string' ||
+      !item.note.slug ||
+      item.note.url !== item.page.url ||
+      (item.note.note !== null && typeof item.note.note !== 'string') ||
+      !Array.isArray(item.note.excerpt) ||
+      !item.note.excerpt.every(
+        (part) => typeof part === 'string' && part.length > 0,
+      ) ||
+      !Array.isArray(item.note.cssPath) ||
+      item.note.cssPath.length !== item.note.excerpt.length ||
+      !item.note.cssPath.every((path) => typeof path === 'string')
+    ) {
+      throw new Error(`getHighlightHistory response item ${index} is invalid`);
+    }
+    if (
+      seenNoteSlugs.has(item.note.slug) ||
+      item.createdAt > previousCreatedAt
+    ) {
+      throw new Error(
+        `getHighlightHistory response item ${index} has invalid identity or ordering`,
+      );
+    }
+    seenNoteSlugs.add(item.note.slug);
+    previousCreatedAt = item.createdAt;
+  }
+  return highlights;
+}
+
 export async function loadListTreeProjection() {
   const resp = await sendAction({ action: 'getListTree' });
   return {

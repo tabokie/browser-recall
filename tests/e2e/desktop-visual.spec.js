@@ -332,8 +332,10 @@ async function installDesktopBridgeMock(page, options = {}) {
       searchSnapshotsResultsByQuery,
       listHistoryFilesDelayMs,
       loadHistoryBatchDelayMs,
+      highlightHistoryDelayMs,
       readDesktopValueDelayMs,
       resumeServiceDelayMs,
+      updateNoteDelayMs,
       initialRoute,
       systemLocale,
       previewRuleMatchesByPattern,
@@ -351,6 +353,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       const loadHistoryBatchInvocations = [];
       const previewRuleInvocations = [];
       const bridgeActionInvocations = [];
+      let updateNoteCounter = 0;
 
       function clone(value) {
         return value === undefined
@@ -529,6 +532,47 @@ async function installDesktopBridgeMock(page, options = {}) {
             ];
           }),
         );
+      }
+
+      function getHighlightHistory() {
+        const logEntries = [...stores.session.entries()]
+          .filter(([key]) => key.startsWith('log:'))
+          .flatMap(([, entries]) => clone(entries || []))
+          .sort(
+            (left, right) => (left.timestamp || 0) - (right.timestamp || 0),
+          );
+        const createdAtBySlug = new Map();
+        const noteSlugFromPath = (value) =>
+          String(value || '')
+            .replace(/^objects\/notes\//, '')
+            .replace(/\.json$/, '');
+        for (const entry of logEntries) {
+          if (entry.action === 'create_note') {
+            createdAtBySlug.set(noteSlugFromPath(entry.path), entry.timestamp);
+          } else if (entry.action === 'replace_note') {
+            createdAtBySlug.set(
+              noteSlugFromPath(entry.path),
+              createdAtBySlug.get(noteSlugFromPath(entry.oldPath)),
+            );
+          }
+        }
+        const slugs = [...stores.session.keys()]
+          .filter((key) => key.startsWith('page:'))
+          .map((key) => key.slice('page:'.length));
+        const contexts = getPageContext(slugs);
+        return Object.values(contexts)
+          .flatMap((context) =>
+            context.notes.map((note) => ({
+              createdAt: createdAtBySlug.get(note.slug),
+              page: context.page,
+              note,
+            })),
+          )
+          .sort(
+            (left, right) =>
+              right.createdAt - left.createdAt ||
+              left.note.slug.localeCompare(right.note.slug),
+          );
       }
 
       function getListTreeProjection() {
@@ -765,6 +809,59 @@ async function installDesktopBridgeMock(page, options = {}) {
         putOrphanedEntry(noteKey);
       }
 
+      function replaceNoteRecord(noteSlug, noteText) {
+        const noteKey = `note:${noteSlug}`;
+        const note = stores.session.get(noteKey);
+        if (!note) throw new Error(`missing note ${noteSlug}`);
+        updateNoteCounter += 1;
+        const nextSlug = `${noteSlug}-updated-${updateNoteCounter}`;
+        const nextKey = `note:${nextSlug}`;
+        stores.session.set(noteKey, {
+          ...note,
+          deleted: true,
+          deletionReason: 'replaced',
+          replacedBy: nextKey,
+        });
+        stores.session.set(nextKey, {
+          ...note,
+          slug: nextSlug,
+          note: noteText,
+          deleted: false,
+        });
+        for (const [key, value] of stores.session.entries()) {
+          if (key.startsWith('page:') && Array.isArray(value?.childIds)) {
+            stores.session.set(key, {
+              ...value,
+              childIds: value.childIds.map((id) =>
+                id === noteKey ? nextKey : id,
+              ),
+            });
+          } else if (key.startsWith('detailNotes:') && Array.isArray(value)) {
+            stores.session.set(
+              key,
+              value.map((candidate) =>
+                candidate.slug === noteSlug
+                  ? { ...candidate, slug: nextSlug, note: noteText }
+                  : clone(candidate),
+              ),
+            );
+          }
+        }
+        const timestamp = Date.now();
+        const date = new Date(timestamp).toISOString().slice(0, 10);
+        const logKey = `log:${date}`;
+        stores.session.set(logKey, [
+          ...(stores.session.get(logKey) || []),
+          {
+            action: 'replace_note',
+            timestamp,
+            oldPath: `objects/notes/${noteSlug}.json`,
+            path: `objects/notes/${nextSlug}.json`,
+          },
+        ]);
+        return nextSlug;
+      }
+
       function emitMutation(type, detail = {}) {
         emitRuntimeMessage({ action: 'mutation', type, ...detail });
       }
@@ -825,6 +922,11 @@ async function installDesktopBridgeMock(page, options = {}) {
           deleteNoteRecord(noteSlug);
           emitMutation('note', { noteSlug });
           emitMutation('orphaned');
+        },
+        updateNoteExternally(noteSlug, noteText) {
+          const nextSlug = replaceNoteRecord(noteSlug, noteText);
+          emitMutation('note', { noteSlug: nextSlug, oldNoteSlug: noteSlug });
+          return nextSlug;
         },
       };
 
@@ -963,7 +1065,24 @@ async function installDesktopBridgeMock(page, options = {}) {
           case 'deleteNote': {
             const noteSlug = request.noteSlug;
             deleteNoteRecord(noteSlug);
+            emitMutation('note', { noteSlug });
+            emitMutation('orphaned');
             return { success: true, noteSlug };
+          }
+          case 'updateNote': {
+            const oldNoteSlug = request.noteSlug;
+            const existingNote = stores.session.get(`note:${oldNoteSlug}`);
+            if (existingNote && (existingNote.note || '') === request.note) {
+              if (updateNoteDelayMs > 0) {
+                await new Promise((resolve) =>
+                  setTimeout(resolve, updateNoteDelayMs),
+                );
+              }
+              return { success: true, noteSlug: oldNoteSlug };
+            }
+            const noteSlug = replaceNoteRecord(oldNoteSlug, request.note);
+            emitMutation('note', { noteSlug, oldNoteSlug });
+            return { success: true, noteSlug, oldNoteSlug };
           }
           case 'openSnapshot':
             openedSnapshots.push({
@@ -1002,6 +1121,13 @@ async function installDesktopBridgeMock(page, options = {}) {
               .map((key) => key.slice('page:'.length));
             return { success: true, pages: getPageContext(slugs) };
           }
+          case 'getHighlightHistory':
+            if (highlightHistoryDelayMs > 0) {
+              await new Promise((resolve) =>
+                setTimeout(resolve, highlightHistoryDelayMs),
+              );
+            }
+            return { success: true, highlights: getHighlightHistory() };
           case 'getListTree': {
             const projection = getListTreeProjection();
             return { success: true, ...projection };
@@ -1248,8 +1374,10 @@ async function installDesktopBridgeMock(page, options = {}) {
         options.searchSnapshotsResultsByQuery || null,
       listHistoryFilesDelayMs: options.listHistoryFilesDelayMs || 0,
       loadHistoryBatchDelayMs: options.loadHistoryBatchDelayMs || 0,
+      highlightHistoryDelayMs: options.highlightHistoryDelayMs || 0,
       readDesktopValueDelayMs: options.readDesktopValueDelayMs || 0,
       resumeServiceDelayMs: options.resumeServiceDelayMs || 0,
+      updateNoteDelayMs: options.updateNoteDelayMs || 0,
       initialRoute: options.initialRoute || '',
       systemLocale: options.systemLocale || 'en',
       previewRuleMatchesByPattern: options.previewRuleMatchesByPattern || {},
@@ -1278,6 +1406,74 @@ async function commitDesktopSearch(page, query) {
   const input = page.locator('#searchDraftInput');
   await input.fill(query);
   await input.press('Enter');
+}
+
+function denseHighlightHistoryFixtures(now, count = 24) {
+  const url = 'https://example.com/dense-highlight-history';
+  const pageSlug = generateSlugFromUrl(url);
+  const noteSlugs = Array.from(
+    { length: count },
+    (_, index) => `dense-highlight-${index}`,
+  );
+  const extraSession = {
+    [`page:${pageSlug}`]: {
+      slug: pageSlug,
+      url,
+      title: 'Dense highlight history',
+      parentIds: [],
+      childIds: noteSlugs.map((slug) => `note:${slug}`),
+      timestamps: { 'test-device': now },
+      createdAt: now,
+      visitDates: [],
+      scrollDepth: null,
+      timeOnPage: null,
+      user_title: null,
+      likes: null,
+    },
+  };
+  const historyEntries = noteSlugs.map((slug, index) => {
+    const excerpt = [`Stable quote ${String(index).padStart(2, '0')}`];
+    const note = `Stable note ${String(index).padStart(2, '0')}`;
+    extraSession[`note:${slug}`] = {
+      slug,
+      excerpt,
+      cssPath: ['main > p'],
+      note,
+      url,
+      deleted: false,
+    };
+    return {
+      action: 'create_note',
+      timestamp: now - index * 60_000,
+      url,
+      path: `objects/notes/${slug}.json`,
+      title: 'Dense highlight history',
+      excerpt,
+      note,
+      cssPath: ['main > p'],
+    };
+  });
+  return { extraSession, historyEntries, noteSlugs };
+}
+
+async function highlightHistoryViewportState(page, noteSlug) {
+  return page.evaluate((slug) => {
+    const main = document.querySelector('.main');
+    const anchor = document.querySelector(
+      `.highlight-history-entry[data-note-slug="${slug}"]`,
+    );
+    return {
+      scrollTop: main.scrollTop,
+      anchorTop: anchor?.getBoundingClientRect().top ?? null,
+      entries: [...document.querySelectorAll('.highlight-history-entry')].map(
+        (entry) => ({
+          slug: entry.dataset.noteSlug,
+          excerpt: entry.querySelector('.detail-note-excerpt')?.textContent,
+          note: entry.querySelector('.detail-note-content')?.textContent || '',
+        }),
+      ),
+    };
+  }, noteSlug);
 }
 
 async function expectNoHistorySearchDuringVisibilityRefresh(
@@ -1456,15 +1652,24 @@ test.describe('desktop visual regression', () => {
     });
   });
 
-  test('main shell and search panel render before initial history data finishes loading', async ({
+  test('main shell and search panel keep their width before initial history data finishes loading @webkit', async ({
     page,
   }) => {
+    const now = Date.now();
+    const historyEntries = Array.from({ length: 80 }, (_, index) => ({
+      url: `https://example.com/loading-width-${index}`,
+      title: `Loading width ${index}`,
+      timestamp: now - index * 60_000,
+      deviceId: 'device-a',
+    }));
+
     await serveDesktopUi(async (desktopUrl) => {
       await page.setViewportSize({ width: 1280, height: 820 });
       await installDesktopBridgeMock(page, {
         setupComplete: true,
         colorScheme: 'amber',
         loadHistoryBatchDelayMs: 3000,
+        historyEntries,
       });
       await page.goto(desktopUrl);
 
@@ -1485,6 +1690,29 @@ test.describe('desktop visual regression', () => {
           window.__desktopVisualHarness.loadHistoryBatchInvocationCount(),
         ),
       ).toBeGreaterThan(0);
+      await expect(page.locator('.main')).toHaveCSS(
+        'scrollbar-gutter',
+        'stable',
+      );
+
+      const measureMainWidth = () =>
+        page.evaluate(() => {
+          const main = document.querySelector('.main');
+          const search = document.getElementById('searchDraftControl');
+          return {
+            mainClientWidth: main.clientWidth,
+            searchRight: Math.round(search.getBoundingClientRect().right),
+          };
+        });
+      const loadingWidth = await measureMainWidth();
+
+      await page.waitForFunction(() => document.body.dataset.ready === 'true', {
+        timeout: 5000,
+      });
+      await expect(page.locator('#relatedResults .result-row')).not.toHaveCount(
+        0,
+      );
+      expect(await measureMainWidth()).toEqual(loadingWidth);
     });
   });
 
@@ -1929,6 +2157,471 @@ test.describe('desktop visual regression', () => {
     });
   });
 
+  test('highlight history shows every highlight newest first with page-detail styling @webkit', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const secondUrl = 'https://example.com/second-highlight-page';
+    const secondSlug = generateSlugFromUrl(secondUrl);
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        includeDetailListMembership: true,
+        highlightHistoryDelayMs: 150,
+        historyEntries: [
+          {
+            action: 'create_note',
+            timestamp: now - 30_000,
+            url: 'https://example.com/product-research',
+            path: 'objects/notes/highlight-product-research.json',
+            title: 'Product research notes',
+            excerpt: [
+              'Important highlighted passage\nwith original line break',
+            ],
+            note: 'Highlight note',
+            cssPath: [''],
+          },
+          {
+            action: 'create_note',
+            timestamp: now - 20_000,
+            url: 'https://example.com/product-research',
+            path: 'objects/notes/highlight-product-research-array.json',
+            title: 'Product research notes',
+            excerpt: ['Array highlighted passage', 'with grouped line break'],
+            note: '',
+            cssPath: ['', ''],
+          },
+          {
+            action: 'create_note',
+            timestamp: now - 10_000,
+            url: secondUrl,
+            path: 'objects/notes/highlight-second-page.json',
+            title: 'Second highlight page',
+            excerpt: ['Newest highlighted passage'],
+            note: 'Newest note body\nSecond line',
+            cssPath: ['main > p'],
+          },
+        ],
+        extraSession: {
+          [`page:${secondSlug}`]: {
+            slug: secondSlug,
+            url: secondUrl,
+            title: 'Second highlight page',
+            parentIds: [],
+            childIds: ['note:highlight-second-page'],
+            timestamps: { 'test-device': now - 10_000 },
+            createdAt: now - 10_000,
+            visitDates: [],
+            scrollDepth: null,
+            timeOnPage: null,
+            user_title: null,
+            likes: null,
+          },
+          'note:highlight-second-page': {
+            slug: 'highlight-second-page',
+            excerpt: ['Newest highlighted passage'],
+            cssPath: ['main > p'],
+            note: 'Newest note body\nSecond line',
+            url: secondUrl,
+            deleted: false,
+          },
+        },
+      });
+
+      await page.locator('#highlightsHistoryBtn').click();
+
+      expect(await page.locator('#results .spinner').count()).toBe(0);
+      await expect(page.locator('#highlightsHistoryBtn')).toHaveClass(/active/);
+      await expect(page.locator('#mainTitle')).toHaveText('Highlights');
+      const entries = page.locator('#results .highlight-history-entry');
+      await expect(entries).toHaveCount(3);
+      await expect(entries.locator('.detail-note-excerpt')).toHaveText([
+        'Newest highlighted passage',
+        'Array highlighted passage\nwith grouped line break',
+        'Important highlighted passage\nwith original line break',
+      ]);
+      await expect(entries.locator('.highlight-history-page-title')).toHaveText(
+        [
+          'Second highlight page',
+          'Product research notes',
+          'Product research notes',
+        ],
+      );
+      await expect(entries.first().locator('.detail-note-content')).toHaveText(
+        'Newest note body\nSecond line',
+      );
+
+      const noteDragBehavior = await entries
+        .first()
+        .locator('.detail-note-content')
+        .evaluate((content) => {
+          const rect = content.getBoundingClientRect();
+          const startX = rect.left + 4;
+          const startY = rect.top + 4;
+          const mouseDownAllowed = content.dispatchEvent(
+            new MouseEvent('mousedown', {
+              bubbles: true,
+              cancelable: true,
+              clientX: startX,
+              clientY: startY,
+            }),
+          );
+          document.dispatchEvent(
+            new MouseEvent('mousemove', {
+              bubbles: true,
+              clientX: startX + 30,
+              clientY: startY + 10,
+            }),
+          );
+          const band = document.querySelector('#resultsWrapper .select-band');
+          const marqueeVisible =
+            band !== null && getComputedStyle(band).display !== 'none';
+          document.dispatchEvent(
+            new MouseEvent('mouseup', {
+              bubbles: true,
+              clientX: startX + 30,
+              clientY: startY + 10,
+            }),
+          );
+          return { mouseDownAllowed, marqueeVisible };
+        });
+      expect(noteDragBehavior).toEqual({
+        mouseDownAllowed: true,
+        marqueeVisible: false,
+      });
+
+      const editButtonPlacement = await entries.evaluateAll((nodes) =>
+        [nodes[0], nodes[1]].map((entry) => {
+          const body = entry.querySelector('.detail-note-body');
+          const button = body.querySelector('.detail-note-action-btn.edit');
+          const bodyRect = body.getBoundingClientRect();
+          const buttonRect = button.getBoundingClientRect();
+          return {
+            rightInset: bodyRect.right - buttonRect.right,
+            bottomInset: bodyRect.bottom - buttonRect.bottom,
+          };
+        }),
+      );
+      expect(editButtonPlacement[0].rightInset).toBeLessThanOrEqual(7);
+      expect(editButtonPlacement[0].bottomInset).toBeLessThanOrEqual(6);
+      expect(editButtonPlacement[1].rightInset).toBeLessThanOrEqual(7);
+      expect(editButtonPlacement[1].bottomInset).toBeLessThanOrEqual(6);
+
+      const reusedDetailStyles = await entries.first().evaluate((entry) => {
+        const meta = entry.querySelector('.highlight-history-meta');
+        const header = entry.querySelector('.detail-note-header');
+        const excerpt = entry.querySelector('.detail-note-excerpt');
+        const body = entry.querySelector('.detail-note-body');
+        const note = entry.querySelector('.detail-note-content');
+        const entryRect = entry.getBoundingClientRect();
+        const headerRect = header.getBoundingClientRect();
+        return {
+          entryClass: entry.classList.contains('detail-note-entry'),
+          entryBorderLeftWidth: getComputedStyle(entry).borderLeftWidth,
+          metaBorderLeftWidth: getComputedStyle(meta).borderLeftWidth,
+          headerClass: header.classList.contains('detail-note-header'),
+          headerBorderLeftWidth: getComputedStyle(header).borderLeftWidth,
+          headerMarginLeft: getComputedStyle(header).marginLeft,
+          bodyBorderLeftWidth: getComputedStyle(body).borderLeftWidth,
+          excerptClass: excerpt.classList.contains('detail-note-excerpt'),
+          excerptWhiteSpace: getComputedStyle(excerpt).whiteSpace,
+          excerptFontSize: getComputedStyle(excerpt).fontSize,
+          excerptFontStyle: getComputedStyle(excerpt).fontStyle,
+          noteFontSize: getComputedStyle(note).fontSize,
+          quoteReachesCardLeft: headerRect.left === entryRect.left,
+        };
+      });
+      expect(reusedDetailStyles).toEqual({
+        entryClass: true,
+        entryBorderLeftWidth: '0px',
+        metaBorderLeftWidth: '1px',
+        headerClass: true,
+        headerBorderLeftWidth: '3px',
+        headerMarginLeft: '0px',
+        bodyBorderLeftWidth: '1px',
+        excerptClass: true,
+        excerptWhiteSpace: 'pre-wrap',
+        excerptFontSize: '13px',
+        excerptFontStyle: 'normal',
+        noteFontSize: '13px',
+        quoteReachesCardLeft: true,
+      });
+      await expect(
+        page.locator('#results .highlight-history-list'),
+      ).toHaveScreenshot(
+        process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'webkit'
+          ? 'desktop-highlight-history-webkit.png'
+          : 'desktop-highlight-history-amber.png',
+        {
+          animations: 'disabled',
+        },
+      );
+
+      const firstEntry = entries.first();
+      await firstEntry.locator('.detail-note-action-btn.edit').click();
+      const editor = firstEntry.locator(
+        '.detail-note-editor[contenteditable="plaintext-only"]',
+      );
+      await expect(editor).toBeFocused();
+      await expect(firstEntry.locator('textarea, input')).toHaveCount(0);
+      const editorChrome = await editor.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          backgroundColor: style.backgroundColor,
+          borderWidth: style.borderWidth,
+          outlineStyle: style.outlineStyle,
+          padding: style.padding,
+        };
+      });
+      expect(editorChrome).toEqual({
+        backgroundColor: 'rgba(0, 0, 0, 0)',
+        borderWidth: '0px',
+        outlineStyle: 'none',
+        padding: '0px',
+      });
+      const confirmButton = firstEntry.locator(
+        '.detail-note-action-btn.confirm',
+      );
+      await expect(confirmButton.locator('svg')).toHaveAttribute(
+        'data-icon',
+        'checkmark',
+      );
+      await editor.fill('Edited directly in place');
+      await confirmButton.click();
+      await expect(firstEntry.locator('.detail-note-content')).toHaveText(
+        'Edited directly in place',
+      );
+      await expect
+        .poll(async () => {
+          const requests = await page.evaluate(() =>
+            window.__desktopVisualHarness.bridgeActionInvocations(),
+          );
+          return requests.filter((request) => request.action === 'updateNote');
+        })
+        .toContainEqual({
+          action: 'updateNote',
+          noteSlug: 'highlight-second-page',
+          note: 'Edited directly in place',
+        });
+    });
+  });
+
+  test('deleting a scrolled highlight keeps the neighboring content anchored', async ({
+    page,
+  }) => {
+    const fixtures = denseHighlightHistoryFixtures(Date.now());
+    const deletedSlug = fixtures.noteSlugs[10];
+    const anchorSlug = fixtures.noteSlugs[11];
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: fixtures.historyEntries,
+        extraSession: fixtures.extraSession,
+      });
+      await page.setViewportSize({ width: 1280, height: 500 });
+      await page.locator('#highlightsHistoryBtn').click();
+
+      const deletedEntry = page.locator(
+        `.highlight-history-entry[data-note-slug="${deletedSlug}"]`,
+      );
+      await deletedEntry.scrollIntoViewIfNeeded();
+      await page.locator('.main').evaluate((main) => (main.scrollTop += 80));
+      const anchorEntry = page.locator(
+        `.highlight-history-entry[data-note-slug="${anchorSlug}"]`,
+      );
+      await anchorEntry.evaluate(
+        (entry) => (entry.dataset.stabilityProbe = 'retained'),
+      );
+      const before = await highlightHistoryViewportState(page, anchorSlug);
+
+      await deletedEntry.locator('.detail-note-action-btn.delete').click();
+      await expect(deletedEntry).toHaveCount(0);
+      await expect(anchorEntry).toHaveAttribute(
+        'data-stability-probe',
+        'retained',
+      );
+
+      const after = await highlightHistoryViewportState(page, anchorSlug);
+      expect(Math.abs(after.scrollTop - before.scrollTop)).toBeLessThanOrEqual(
+        1,
+      );
+      expect(after.entries).toEqual(
+        before.entries.filter((entry) => entry.slug !== deletedSlug),
+      );
+    });
+  });
+
+  test('editing a scrolled highlight keeps its card and surrounding content anchored', async ({
+    page,
+  }) => {
+    const fixtures = denseHighlightHistoryFixtures(Date.now());
+    const editedSlug = fixtures.noteSlugs[10];
+    const replacementSlug = `${editedSlug}-updated-1`;
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: fixtures.historyEntries,
+        extraSession: fixtures.extraSession,
+      });
+      await page.setViewportSize({ width: 1280, height: 500 });
+      await page.locator('#highlightsHistoryBtn').click();
+
+      const editedEntry = page.locator(
+        `.highlight-history-entry[data-note-slug="${editedSlug}"]`,
+      );
+      await editedEntry.scrollIntoViewIfNeeded();
+      await page.locator('.main').evaluate((main) => (main.scrollTop += 80));
+      await editedEntry.evaluate(
+        (entry) => (entry.dataset.stabilityProbe = 'retained'),
+      );
+      const before = await highlightHistoryViewportState(page, editedSlug);
+
+      await editedEntry.locator('.detail-note-action-btn.edit').click();
+      const editing = await highlightHistoryViewportState(page, editedSlug);
+      expect(
+        Math.abs(editing.scrollTop - before.scrollTop),
+      ).toBeLessThanOrEqual(1);
+      expect(
+        Math.abs(editing.anchorTop - before.anchorTop),
+      ).toBeLessThanOrEqual(1);
+
+      const editor = editedEntry.locator('.detail-note-editor');
+      await editor.fill('Edited without moving the history');
+      await editedEntry.locator('.detail-note-action-btn.confirm').click();
+      const replacementEntry = page.locator(
+        `.highlight-history-entry[data-note-slug="${replacementSlug}"]`,
+      );
+      await expect(replacementEntry).toHaveAttribute(
+        'data-stability-probe',
+        'retained',
+      );
+      await expect(replacementEntry.locator('.detail-note-content')).toHaveText(
+        'Edited without moving the history',
+      );
+
+      const after = await highlightHistoryViewportState(page, replacementSlug);
+      expect(Math.abs(after.scrollTop - before.scrollTop)).toBeLessThanOrEqual(
+        1,
+      );
+      expect(Math.abs(after.anchorTop - before.anchorTop)).toBeLessThanOrEqual(
+        1,
+      );
+      expect(after.entries).toEqual(
+        before.entries.map((entry) =>
+          entry.slug === editedSlug
+            ? {
+                ...entry,
+                slug: replacementSlug,
+                note: 'Edited without moving the history',
+              }
+            : entry,
+        ),
+      );
+    });
+  });
+
+  test('confirming an unchanged highlight note does not hide the next external edit', async ({
+    page,
+  }) => {
+    const fixtures = denseHighlightHistoryFixtures(Date.now(), 3);
+    const noteSlug = fixtures.noteSlugs[0];
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: fixtures.historyEntries,
+        extraSession: fixtures.extraSession,
+        updateNoteDelayMs: 150,
+      });
+      await page.locator('#highlightsHistoryBtn').click();
+
+      const entry = page.locator(
+        `.highlight-history-entry[data-note-slug="${noteSlug}"]`,
+      );
+      await entry.locator('.detail-note-action-btn.edit').click();
+      await entry.locator('.detail-note-editor').fill('Stable note 00');
+      await entry.locator('.detail-note-action-btn.confirm').click();
+      await expect
+        .poll(async () => {
+          const requests = await page.evaluate(() =>
+            window.__desktopVisualHarness.bridgeActionInvocations(),
+          );
+          return requests.some((request) => request.action === 'updateNote');
+        })
+        .toBe(true);
+
+      const replacementSlug = await page.evaluate(
+        ({ oldSlug, noteText }) =>
+          window.__desktopVisualHarness.updateNoteExternally(oldSlug, noteText),
+        {
+          oldSlug: noteSlug,
+          noteText: 'Edited from another surface',
+        },
+      );
+
+      const replacement = page.locator(
+        `.highlight-history-entry[data-note-slug="${replacementSlug}"]`,
+      );
+      await expect(replacement.locator('.detail-note-content')).toHaveText(
+        'Edited from another surface',
+      );
+      await expect(entry).toHaveCount(0);
+    });
+  });
+
+  test('deleting the final highlight renders the empty state', async ({
+    page,
+  }) => {
+    const fixtures = denseHighlightHistoryFixtures(Date.now(), 1);
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: fixtures.historyEntries,
+        extraSession: fixtures.extraSession,
+      });
+      await page.locator('#highlightsHistoryBtn').click();
+
+      await page
+        .locator('.highlight-history-entry .detail-note-action-btn.delete')
+        .click();
+
+      await expect(
+        page.locator('#results .highlight-history-entry'),
+      ).toHaveCount(0);
+      await expect(page.locator('#results .no-results')).toHaveText(
+        'No results',
+      );
+    });
+  });
+
+  test('highlight history renders large collections in bounded batches', async ({
+    page,
+  }) => {
+    const fixtures = denseHighlightHistoryFixtures(Date.now(), 240);
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: fixtures.historyEntries,
+        extraSession: fixtures.extraSession,
+      });
+      await page.setViewportSize({ width: 1280, height: 500 });
+      await page.locator('#highlightsHistoryBtn').click();
+
+      const entries = page.locator('.highlight-history-entry');
+      await expect(entries).toHaveCount(100);
+
+      await page.locator('.main').evaluate((main) => {
+        main.scrollTop = main.scrollHeight;
+      });
+      await expect(entries).toHaveCount(200);
+    });
+  });
+
   test('history search opens details for a visit-only page without a durable checkpoint', async ({
     page,
   }) => {
@@ -2105,6 +2798,9 @@ test.describe('desktop visual regression', () => {
       const row = page.locator(
         '.result-row[data-url="https://example.com/product-research"]',
       );
+      await row.evaluate((element) => {
+        element.dataset.noteMutationRefreshProbe = 'stale';
+      });
       await row.locator('.att-ctrl-btn').click({ force: true });
 
       const noteEntry = page
@@ -2117,6 +2813,10 @@ test.describe('desktop visual regression', () => {
 
       await noteEntry.locator('.detail-note-action-btn.delete').click();
 
+      await expect(row).not.toHaveAttribute(
+        'data-note-mutation-refresh-probe',
+        'stale',
+      );
       await expect(page.locator('#recycleBinBtn')).toBeVisible();
       await expect(page.locator('#recycleBinCount')).toHaveText('1');
       await page.keyboard.press('Escape');

@@ -30,6 +30,8 @@ pub struct Storage {
 struct StorageInner {
     root: PathBuf,
     cache: StdMutex<EntityCache>,
+    highlight_chronology_cache: StdMutex<Option<HighlightChronologyCache>>,
+    highlight_chronology_generation: AtomicU64,
     write_gate: Mutex<()>,
     last_command_timestamp_ms: StdMutex<i64>,
     checkpoint_tx: mpsc::Sender<CheckpointWork>,
@@ -59,6 +61,12 @@ struct LogFile {
 struct LogCatalog {
     devices: Vec<String>,
     files: Vec<LogFile>,
+}
+
+#[derive(Debug, Clone)]
+struct HighlightChronologyCache {
+    generation: u64,
+    entries: Vec<LogEntry>,
 }
 
 #[derive(Debug)]
@@ -124,6 +132,8 @@ impl Storage {
             inner: Arc::new(StorageInner {
                 root: root.into(),
                 cache: StdMutex::new(EntityCache::new(5_000)),
+                highlight_chronology_cache: StdMutex::new(None),
+                highlight_chronology_generation: AtomicU64::new(0),
                 write_gate: Mutex::new(()),
                 last_command_timestamp_ms: StdMutex::new(0),
                 checkpoint_tx,
@@ -337,12 +347,64 @@ impl Storage {
         &self,
     ) -> io::Result<Vec<(String, LogEntry)>> {
         let replay_progress = self.load_replay_progress().await?;
+        self.load_log_entries_where(|device_id, entry| {
+            entry.timestamp() > replay_progress.get(device_id).copied().unwrap_or(i64::MIN)
+        })
+        .await
+    }
+
+    pub async fn load_highlight_chronology_entries(&self) -> io::Result<Vec<LogEntry>> {
+        loop {
+            let generation = self
+                .inner
+                .highlight_chronology_generation
+                .load(Ordering::Acquire);
+            if let Some(cached) = self
+                .inner
+                .highlight_chronology_cache
+                .lock()
+                .as_ref()
+                .filter(|cached| cached.generation == generation)
+                .cloned()
+            {
+                return Ok(cached.entries);
+            }
+
+            let entries = self
+                .load_log_entries_where(|_, entry| {
+                    matches!(
+                        entry,
+                        LogEntry::CreateNote { .. } | LogEntry::ReplaceNote { .. }
+                    )
+                })
+                .await?
+                .into_iter()
+                .map(|(_, entry)| entry)
+                .collect::<Vec<_>>();
+            // A note mutation can invalidate the cache while this asynchronous
+            // scan is running. Publish only if the generation is unchanged;
+            // otherwise rebuild so stale scan results cannot win afterward.
+            if self
+                .inner
+                .highlight_chronology_generation
+                .load(Ordering::Acquire)
+                == generation
+            {
+                *self.inner.highlight_chronology_cache.lock() = Some(HighlightChronologyCache {
+                    generation,
+                    entries: entries.clone(),
+                });
+                return Ok(entries);
+            }
+        }
+    }
+
+    async fn load_log_entries_where(
+        &self,
+        mut include: impl FnMut(&str, &LogEntry) -> bool,
+    ) -> io::Result<Vec<(String, LogEntry)>> {
         let mut result = Vec::new();
         for file in self.scan_log_catalog().await?.files {
-            let progress = replay_progress
-                .get(&file.device_id)
-                .copied()
-                .unwrap_or(i64::MIN);
             let raw = fs::read_to_string(&file.path).await?;
             for (index, line) in raw.lines().enumerate() {
                 if line.trim().is_empty() {
@@ -355,7 +417,7 @@ impl Storage {
                 let entry: LogEntry = serde_json::from_str(line).map_err(|error| {
                     invalid_data(format!("{}:{}: {error}", file.path.display(), index + 1))
                 })?;
-                if entry.timestamp() > progress {
+                if include(&file.device_id, &entry) {
                     result.push((file.device_id.clone(), entry));
                 }
             }
@@ -570,6 +632,12 @@ impl Storage {
         line.push(b'\n');
         file.write_all(&line).await?;
         file.flush().await?;
+        if matches!(
+            entry.get("action").and_then(Value::as_str),
+            Some("create_note" | "replace_note")
+        ) {
+            self.invalidate_highlight_chronology();
+        }
         Ok(path)
     }
 
@@ -1109,11 +1177,7 @@ impl Storage {
     }
 
     async fn write_page_checkpoint(&self, slug: &str, page: &PageEntity) -> io::Result<()> {
-        if let Some(parent) = self.page_path(slug).parent() {
-            fs::create_dir_all(parent).await?;
-        }
-        let payload = serde_json::to_vec_pretty(page).map_err(invalid_data)?;
-        fs::write(self.page_path(slug), payload).await
+        save_json(self.page_path(slug), page).await
     }
 
     async fn persist_page_checkpoint_effect(&self, key: &str, page: &PageEntity) -> io::Result<()> {
@@ -1141,9 +1205,7 @@ impl Storage {
     }
 
     async fn write_note_checkpoint(&self, slug: &str, note: &NoteEntity) -> io::Result<()> {
-        fs::create_dir_all(self.root().join("objects").join("notes")).await?;
-        let payload = serde_json::to_vec_pretty(note).map_err(invalid_data)?;
-        fs::write(self.note_path(slug), payload).await
+        save_json(self.note_path(slug), note).await
     }
 
     fn list_path(&self, slug: &str) -> PathBuf {
@@ -1154,12 +1216,7 @@ impl Storage {
     }
 
     async fn write_list_checkpoint(&self, slug: &str, list: &ListEntity) -> io::Result<()> {
-        let path = self.list_path(slug);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).await?;
-        }
-        let payload = serde_json::to_vec_pretty(list).map_err(invalid_data)?;
-        fs::write(path, payload).await
+        save_json(self.list_path(slug), list).await
     }
 
     fn manifest_path(&self, filename: &str) -> PathBuf {
@@ -1243,6 +1300,15 @@ impl Storage {
     fn clear_cache(&self) {
         let mut cache = self.inner.cache.lock();
         *cache = EntityCache::new(cache.capacity);
+        drop(cache);
+        self.invalidate_highlight_chronology();
+    }
+
+    fn invalidate_highlight_chronology(&self) {
+        self.inner
+            .highlight_chronology_generation
+            .fetch_add(1, Ordering::AcqRel);
+        *self.inner.highlight_chronology_cache.lock() = None;
     }
 
     pub fn reset_cache(&self) {

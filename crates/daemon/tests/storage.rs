@@ -810,3 +810,70 @@ async fn entity_cache_serves_repeat_reads_and_invalidates_on_write_delete() {
         .expect("page present");
     assert_eq!(refreshed.title.as_deref(), Some("Disk Mutation"));
 }
+
+#[tokio::test]
+async fn highlight_chronology_cache_avoids_reparsing_unchanged_history_logs() {
+    let temp_dir = tempdir().expect("tempdir");
+    let storage = Storage::new(temp_dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("layout created");
+
+    let entry = json!({
+        "action": "create_note",
+        "timestamp": 1_710_000_000_000_i64,
+        "url": "https://example.com/highlight",
+        "path": "objects/notes/highlight.json",
+        "title": "Highlight",
+        "excerpt": ["quoted text"],
+        "note": "annotation",
+        "cssPath": ["main > p"]
+    });
+    let log_path = storage
+        .append_log_entry("device-a", 1_710_000_000_000, &entry)
+        .await
+        .expect("highlight log appended");
+
+    let first = storage
+        .load_highlight_chronology_entries()
+        .await
+        .expect("initial chronology");
+    assert_eq!(first.len(), 1);
+
+    let replacement = json!({
+        "action": "replace_note",
+        "timestamp": 1_710_000_000_001_i64,
+        "url": "https://example.com/highlight",
+        "path": "objects/notes/highlight-edited.json",
+        "oldPath": "objects/notes/highlight.json",
+        "excerpt": ["quoted text"],
+        "note": "edited annotation",
+        "cssPath": ["main > p"]
+    });
+    storage
+        .append_log_entry("device-a", 1_710_000_000_001, &replacement)
+        .await
+        .expect("replacement log appended");
+    let refreshed = storage
+        .load_highlight_chronology_entries()
+        .await
+        .expect("note log append invalidates chronology");
+    assert_eq!(refreshed.len(), 2);
+
+    tokio::fs::write(&log_path, "{not valid json}\n")
+        .await
+        .expect("external disk mutation");
+
+    let cached = storage
+        .load_highlight_chronology_entries()
+        .await
+        .expect("unchanged chronology is served without reparsing logs");
+    assert_eq!(cached, refreshed);
+
+    storage.reset_cache();
+    assert!(
+        storage.load_highlight_chronology_entries().await.is_err(),
+        "explicit cache reset must expose the malformed authoritative log"
+    );
+}

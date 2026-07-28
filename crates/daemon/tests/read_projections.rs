@@ -1,9 +1,11 @@
+use browser_recall_daemon::commands::replay_entry;
 use browser_recall_daemon::read_projections::ReadProjections;
 use browser_recall_daemon::storage::Storage;
 use browser_recall_replay::entities::{
     ListEntity, ListOrderManifest, NoteEntity, OrphanedEntry, OrphanedManifest, PageEntity,
     PinEntity, TreeNode,
 };
+use browser_recall_replay::LogEntry;
 use tempfile::tempdir;
 
 #[tokio::test]
@@ -165,6 +167,122 @@ async fn page_context_batches_pages_notes_and_visible_list_memberships() {
     let page_json = serde_json::to_value(&context.page).expect("serialized page");
     assert!(page_json.get("childIds").is_none());
     assert!(page_json.get("parentIds").is_none());
+}
+
+#[tokio::test]
+async fn highlight_history_returns_each_live_highlight_by_original_creation_time() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage.ensure_layout("device-a").await.expect("layout");
+
+    replay_entry(
+        &storage,
+        "device-a",
+        LogEntry::CreateNote {
+            timestamp: 100,
+            url: "https://example.com/a".to_string(),
+            path: "objects/notes/first.json".to_string(),
+            title: Some("Page A".to_string()),
+            excerpt: Some(serde_json::json!(["First excerpt"])),
+            note: Some("Original annotation".to_string()),
+            css_path: Some(serde_json::json!(["main > p"])),
+        },
+    )
+    .await
+    .expect("first highlight");
+    replay_entry(
+        &storage,
+        "device-a",
+        LogEntry::ReplaceNote {
+            timestamp: 200,
+            url: Some("https://example.com/a".to_string()),
+            path: "objects/notes/first-edited.json".to_string(),
+            old_path: "objects/notes/first.json".to_string(),
+            excerpt: Some(serde_json::json!(["First excerpt"])),
+            note: Some("Edited annotation".to_string()),
+            css_path: Some(serde_json::json!(["main > p"])),
+        },
+    )
+    .await
+    .expect("edited highlight");
+    replay_entry(
+        &storage,
+        "device-a",
+        LogEntry::CreateNote {
+            timestamp: 300,
+            url: "https://example.com/a".to_string(),
+            path: "objects/notes/second.json".to_string(),
+            title: Some("Page A".to_string()),
+            excerpt: Some(serde_json::json!(["Second excerpt"])),
+            note: None,
+            css_path: Some(serde_json::json!(["main > p + p"])),
+        },
+    )
+    .await
+    .expect("second highlight");
+
+    let highlights = ReadProjections::new(storage)
+        .highlight_history()
+        .await
+        .expect("highlight history");
+
+    assert_eq!(highlights.len(), 2);
+    assert_eq!(highlights[0].note.slug, "second");
+    assert_eq!(highlights[0].created_at, 300);
+    assert_eq!(highlights[1].note.slug, "first-edited");
+    assert_eq!(highlights[1].created_at, 100);
+    assert_eq!(highlights[1].page.title.as_deref(), Some("Page A"));
+    assert_eq!(
+        highlights[1].note.note.as_deref(),
+        Some("Edited annotation")
+    );
+}
+
+#[tokio::test]
+async fn highlight_history_resolves_replacements_independently_of_timestamp_order() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage.ensure_layout("device-a").await.expect("layout");
+
+    replay_entry(
+        &storage,
+        "device-a",
+        LogEntry::CreateNote {
+            timestamp: 200,
+            url: "https://example.com/clock-skew".to_string(),
+            path: "objects/notes/clock-skew-original.json".to_string(),
+            title: Some("Clock skew".to_string()),
+            excerpt: Some(serde_json::json!(["Clock-skewed highlight"])),
+            note: Some("Original".to_string()),
+            css_path: Some(serde_json::json!(["main > p"])),
+        },
+    )
+    .await
+    .expect("original highlight");
+    replay_entry(
+        &storage,
+        "device-b",
+        LogEntry::ReplaceNote {
+            timestamp: 100,
+            url: Some("https://example.com/clock-skew".to_string()),
+            path: "objects/notes/clock-skew-edited.json".to_string(),
+            old_path: "objects/notes/clock-skew-original.json".to_string(),
+            excerpt: Some(serde_json::json!(["Clock-skewed highlight"])),
+            note: Some("Edited on a device with an earlier clock".to_string()),
+            css_path: Some(serde_json::json!(["main > p"])),
+        },
+    )
+    .await
+    .expect("clock-skewed replacement");
+
+    let highlights = ReadProjections::new(storage)
+        .highlight_history()
+        .await
+        .expect("highlight history");
+
+    assert_eq!(highlights.len(), 1);
+    assert_eq!(highlights[0].note.slug, "clock-skew-edited");
+    assert_eq!(highlights[0].created_at, 200);
 }
 
 #[tokio::test]

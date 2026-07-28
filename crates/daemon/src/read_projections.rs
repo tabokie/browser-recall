@@ -1,8 +1,9 @@
 use crate::storage::Storage;
 use browser_recall_replay::entities::{Entity, NoteEntity, PageEntity, PinEntity, TreeNode};
+use browser_recall_replay::LogEntry;
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone)]
 pub struct ReadProjections {
@@ -58,6 +59,14 @@ pub struct PageContextProjection {
     pub page: PageProjection,
     pub notes: Vec<NoteProjection>,
     pub lists: Vec<ListMembershipProjection>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HighlightHistoryProjection {
+    pub created_at: i64,
+    pub page: PageProjection,
+    pub note: NoteProjection,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -282,6 +291,96 @@ impl ReadProjections {
             .map_err(|error| error.to_string())?;
         self.page_context(&pages.into_keys().collect::<Vec<_>>())
             .await
+    }
+
+    pub async fn highlight_history(&self) -> Result<Vec<HighlightHistoryProjection>, String> {
+        let pages = self
+            .storage
+            .load_all_pages()
+            .await
+            .map_err(|error| error.to_string())?;
+        let notes = self
+            .storage
+            .load_all_notes()
+            .await
+            .map_err(|error| error.to_string())?;
+        let log_entries = self
+            .storage
+            .load_highlight_chronology_entries()
+            .await
+            .map_err(|error| error.to_string())?;
+        let mut created_at_by_slug = BTreeMap::new();
+        let mut predecessor_by_slug = BTreeMap::new();
+
+        for entry in log_entries {
+            match entry {
+                LogEntry::CreateNote {
+                    timestamp, path, ..
+                } => {
+                    let slug = note_slug_from_log_path(&path)?;
+                    match created_at_by_slug.get(&slug) {
+                        Some(existing) if *existing != timestamp => {
+                            return Err(format!(
+                                "highlight {slug} has conflicting creation timestamps {existing} and {timestamp}"
+                            ));
+                        }
+                        _ => {
+                            created_at_by_slug.insert(slug, timestamp);
+                        }
+                    }
+                }
+                LogEntry::ReplaceNote {
+                    timestamp,
+                    path,
+                    old_path,
+                    ..
+                } => {
+                    let old_slug = note_slug_from_log_path(&old_path)?;
+                    let new_slug = note_slug_from_log_path(&path)?;
+                    match predecessor_by_slug.get(&new_slug) {
+                        Some(existing) if existing != &old_slug => {
+                            return Err(format!(
+                                "highlight replacement {new_slug} at {timestamp} has conflicting predecessors {existing} and {old_slug}"
+                            ));
+                        }
+                        _ => {
+                            predecessor_by_slug.insert(new_slug, old_slug);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let mut highlights = Vec::new();
+        for page in pages.into_values() {
+            let projected_page = project_page(page.clone());
+            for child_id in &page.child_ids {
+                let Some(note_slug) = child_id.strip_prefix("note:") else {
+                    continue;
+                };
+                let Some(note) = notes.get(note_slug).filter(|note| !note.deleted) else {
+                    continue;
+                };
+                let created_at = resolve_highlight_created_at(
+                    &note.slug,
+                    &created_at_by_slug,
+                    &predecessor_by_slug,
+                )?;
+                highlights.push(HighlightHistoryProjection {
+                    created_at,
+                    page: projected_page.clone(),
+                    note: project_note(note.clone()),
+                });
+            }
+        }
+        highlights.sort_by(|left, right| {
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| left.note.slug.cmp(&right.note.slug))
+        });
+        Ok(highlights)
     }
 
     pub async fn page_info(&self, slug: &str) -> Result<PageInfoProjection, String> {
@@ -705,6 +804,53 @@ fn excerpt_title(excerpt: Option<&Value>) -> Option<String> {
         .collect::<Vec<_>>()
         .join("\n");
     (!title.is_empty()).then_some(title)
+}
+
+fn note_slug_from_log_path(path: &str) -> Result<String, String> {
+    const PREFIX: &str = "objects/notes/";
+    const SUFFIX: &str = ".json";
+    let slug = path
+        .strip_prefix(PREFIX)
+        .and_then(|value| value.strip_suffix(SUFFIX))
+        .filter(|value| !value.is_empty() && !value.contains('/'))
+        .ok_or_else(|| format!("invalid highlight note path {path}"))?;
+    Ok(slug.to_string())
+}
+
+fn resolve_highlight_created_at(
+    slug: &str,
+    created_at_by_slug: &BTreeMap<String, i64>,
+    predecessor_by_slug: &BTreeMap<String, String>,
+) -> Result<i64, String> {
+    let mut current = slug;
+    let mut visited = BTreeSet::new();
+    let mut resolved = None;
+
+    loop {
+        if !visited.insert(current.to_string()) {
+            return Err(format!(
+                "highlight replacement chain for {slug} contains a cycle at {current}"
+            ));
+        }
+        if let Some(created_at) = created_at_by_slug.get(current).copied() {
+            match resolved {
+                Some(existing) if existing != created_at => {
+                    return Err(format!(
+                        "highlight {slug} has conflicting creation timestamps {existing} and {created_at}"
+                    ));
+                }
+                _ => resolved = Some(created_at),
+            }
+        }
+        let Some(predecessor) = predecessor_by_slug.get(current) else {
+            break;
+        };
+        current = predecessor;
+    }
+
+    resolved.ok_or_else(|| {
+        format!("live highlight {slug} has no creation event in the authoritative logs")
+    })
 }
 
 fn project_page(page: PageEntity) -> PageProjection {

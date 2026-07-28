@@ -296,6 +296,7 @@
         white-space: nowrap;
         overflow: hidden;
       }
+      .highlights-history-btn,
       .recycle-btn {
         display: flex;
         align-items: center;
@@ -316,21 +317,27 @@
           border-color 0.15s var(--ease-smooth);
       }
 
+      .highlights-history-btn:hover,
       .recycle-btn:hover {
         background: var(--bg-warm-hover);
         border-color: var(--border-hover);
         color: var(--text-primary);
       }
 
+      .highlights-history-btn.active,
       .recycle-btn.active {
         background: var(--accent-primary-soft);
         color: var(--accent-primary);
         border-color: var(--accent-primary-glow);
       }
 
+      .highlights-history-btn svg,
       .recycle-btn svg {
         width: 16px;
         height: 16px;
+      }
+
+      .recycle-btn svg {
         fill: currentColor;
       }
       .sidebar-resize-handle {
@@ -500,6 +507,7 @@
         padding-right: 12px;
         overflow-y: auto;
         overflow-anchor: none;
+        scrollbar-gutter: stable;
       }
 
       .main-header {
@@ -1232,8 +1240,10 @@
       }
 
       .detail-note-entry {
+        --detail-note-edge-color: var(--border-glass);
         background: var(--bg-surface);
         border: 1px solid var(--border-glass);
+        border-left: 0;
         border-radius: var(--radius-sm);
         margin: 6px 0;
         overflow: hidden;
@@ -1241,6 +1251,7 @@
       }
 
       .detail-note-entry:hover {
+        --detail-note-edge-color: var(--border-hover);
         border-color: var(--border-hover);
       }
 
@@ -1265,7 +1276,7 @@
         font-size: 12px;
         line-height: 1.5;
         color: var(--text-secondary);
-        font-style: italic;
+        font-style: normal;
         white-space: pre-wrap;
         word-break: break-word;
       }
@@ -1275,6 +1286,7 @@
         align-items: flex-start;
         gap: 6px;
         padding: 5px 6px 5px 10px;
+        border-left: 1px solid var(--detail-note-edge-color);
       }
 
       .detail-note-content {
@@ -1289,6 +1301,12 @@
 
       .detail-note-content em {
         color: var(--text-muted);
+      }
+
+      .detail-note-body > .detail-note-action-btn.edit,
+      .detail-note-body > .detail-note-action-btn.confirm {
+        align-self: flex-end;
+        margin-left: auto;
       }
 
       .detail-note-actions {
@@ -1327,25 +1345,82 @@
         color: var(--accent-red);
       }
 
-      .detail-note-edit-textarea {
-        width: 100%;
+      .detail-note-editor {
+        flex: 1;
+        min-width: 0;
+        min-height: 1.5em;
+        padding: 0;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--text-primary);
+        font: inherit;
         font-size: 12px;
         line-height: 1.5;
-        padding: 5px 10px;
-        border: 1px solid var(--accent-primary);
-        border-radius: 0;
-        font-family: var(--font-body);
-        resize: none;
-        overflow: hidden;
-        box-sizing: border-box;
-        min-height: 1.5em;
-        background: var(--bg-input);
-        color: var(--text-primary);
-        box-shadow: 0 0 0 3px var(--accent-primary-soft);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        caret-color: var(--text-primary);
       }
 
-      .detail-note-edit-textarea:focus {
-        outline: none;
+      .detail-note-editor:empty::before {
+        content: attr(data-placeholder);
+        color: var(--text-muted);
+        font-size: 11px;
+        font-style: italic;
+        pointer-events: none;
+      }
+
+      .highlight-history-list {
+        padding-top: var(--results-gap);
+        padding-bottom: var(--desktop-panel-bottom-space);
+      }
+
+      .highlight-history-entry {
+        margin: 0 0 var(--results-gap);
+        box-shadow:
+          var(--shadow-float), var(--highlight-top), var(--highlight-edge),
+          var(--glass-inset);
+      }
+
+      .highlight-history-entry .detail-note-excerpt,
+      .highlight-history-entry .detail-note-content,
+      .highlight-history-entry .detail-note-editor {
+        font-size: 13px;
+      }
+
+      .highlight-history-meta {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        min-width: 0;
+        padding: 8px 10px 6px;
+        border-left: 1px solid var(--detail-note-edge-color);
+        border-bottom: 1px solid var(--border-section);
+      }
+
+      .highlight-history-page-title {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        color: var(--text-primary);
+        font-size: 12px;
+        font-weight: 600;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .highlight-history-site,
+      .highlight-history-time {
+        flex-shrink: 0;
+        color: var(--text-muted);
+        font-size: 11px;
+      }
+
+      .highlight-history-site {
+        max-width: 200px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .detail-snapshots {
@@ -4269,6 +4344,22 @@
         </svg>
         <span data-i18n="commonExplore">Explore</span>
         <span class="explore-badge" id="exploreBadge"></span>
+      </button>
+
+      <button class="highlights-history-btn" id="highlightsHistoryBtn">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M4 20h7" />
+          <path d="M14.5 4.5l5 5L10 19H5v-5z" />
+          <path d="M12.5 6.5l5 5" />
+        </svg>
+        <span data-i18n="extensionHighlights">Highlights</span>
       </button>
 
       <button class="recycle-btn" id="recycleBinBtn" style="display: none">

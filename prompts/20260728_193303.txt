@@ -1,0 +1,24 @@
+- Now that the section is hidden, the list selection dropdown menu doesn't fit underneath the list section so it extends upward. I don't like that. I want the menu to always extends downward even if that means starting somewhere higher.
+- The starting position should be stable, decided on first render. It especially shouldn't change when the menu is narrowed down to fewer items.
+- I want another history view after the explore history, in this view, we see all highlights (and their notes) ordered by time descending. Each highlight is its individual entry, even if multiple highlights belong to the same page. For the moment, reuse the style of highlights in page detail UI in this new history view.
+- I want highlight to have a time chart as well, is that difficult to implement or can we reuse most code? Also I don't want the spinner when loading history.
+- Actually, let's keep the current minimal style, but remove the spinner.
+- Move the note edit button to the bottom-right corner, especially when the note is empty or when the note spans multiple lines.
+- Remove the marquee selection in note history view, it doesn't serve any purpose.
+- The issue where "distance between page list and time chart is widened when for the first time a page is selected" reappears after you claimed to fix it. Please investigate what causes the regression and why tests didn't catch it early.
+- Another issue, when the history visits list finished loading, the width of the layout shrinks from the right side.
+- The red quote decorating line is sometimes not reaching the left-side of the highlight card, why is it especially why the inconsistency between different cards?
+- Fix it. Then slightly increase the font size inside highlight view. Use normal font not italic style. When entering editing mode, do not explicitly display the input box, just show cursor directly over the note text area, and display a checkmark button in place of the edit button. This style is consistent with extension popup's note section.
+- I want the UI to remain stable (including scroll position and content) when I delete or edit a highlight entry.
+- "The red quote decorating line is sometimes not reaching the left-side of the highlight card" This issue is not fixed, there is still a visible gap
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) 
+- Fix them
+- Please review my uncommitted changes
+- Fix them except for the prompt file.
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.6 Sol
+- No need
+- As code comment somewhere
+- What is checkpoint JSON write?
+- Sure
+- As code comment somewhere
+- Go

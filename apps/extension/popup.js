@@ -1269,12 +1269,13 @@ function borderBlockSize(element) {
 }
 
 function positionListPickerOverlay(wrap, picker, options = {}) {
-  if (!wrap || !picker) return;
+  if (!wrap || !picker) return null;
   const input = picker.querySelector('#listSearchInput');
-  if (!wrap.isConnected || !picker.isConnected || !input) return;
+  if (!wrap.isConnected || !picker.isConnected || !input) return null;
   const gap = 5;
   const listMaxHeight = 160;
   const listMinHeight = 48;
+  const fixedTop = Number.isFinite(options.fixedTop) ? options.fixedTop : null;
   const contentHeight =
     Number.isFinite(options.listContentHeight) && options.listContentHeight > 0
       ? options.listContentHeight
@@ -1299,21 +1300,17 @@ function positionListPickerOverlay(wrap, picker, options = {}) {
   const belowTop = Math.max(gap, wrapRect.bottom + gap);
   const belowSpace =
     viewportHeight - belowTop - inputHeight - gap - pickerFrameHeight;
-  const aboveSpace = wrapRect.top - gap - inputHeight - gap - pickerFrameHeight;
   const hasBelowSpace = belowSpace >= listMinHeight;
-  const hasAboveSpace = aboveSpace >= listMinHeight;
   let pickerTop = belowTop;
   let listHeight = Math.min(preferredListHeight, Math.max(0, belowSpace));
-  picker.classList.remove('list-picker-above');
 
-  if (!hasBelowSpace && hasAboveSpace) {
-    picker.classList.add('list-picker-above');
-    listHeight = Math.min(preferredListHeight, Math.max(0, aboveSpace));
-    pickerTop = Math.max(
-      gap,
-      Math.min(
-        wrapRect.top - gap - inputHeight - listHeight - pickerFrameHeight,
-        viewportHeight - inputHeight - listHeight - pickerFrameHeight - gap,
+  if (fixedTop !== null) {
+    pickerTop = fixedTop;
+    listHeight = Math.min(
+      preferredListHeight,
+      Math.max(
+        0,
+        viewportHeight - pickerTop - inputHeight - gap - pickerFrameHeight,
       ),
     );
   } else if (!hasBelowSpace) {
@@ -1330,6 +1327,7 @@ function positionListPickerOverlay(wrap, picker, options = {}) {
 
   picker.style.top = `${pickerTop}px`;
   picker.style.setProperty('--list-picker-list-max-height', `${listHeight}px`);
+  return pickerTop;
 }
 
 function closeListPicker() {
@@ -1425,6 +1423,7 @@ function openListPicker(lists, options = {}) {
   let pickerLists = lists;
   let activePickerIndex = -1;
   let pickerScrollTop = 0;
+  let fixedPickerTop = null;
 
   function isCurrentPicker() {
     return (
@@ -1438,9 +1437,13 @@ function openListPicker(lists, options = {}) {
   function positionPickerForRenderedRows() {
     if (!isCurrentPicker()) return;
     const renderedHeight = optionsEl.getBoundingClientRect().height;
-    positionListPickerOverlay(wrap, picker, {
+    const pickerTop = positionListPickerOverlay(wrap, picker, {
+      fixedTop: fixedPickerTop,
       listContentHeight: renderedHeight || optionsEl.scrollHeight,
     });
+    if (fixedPickerTop === null && pickerTop !== null) {
+      fixedPickerTop = pickerTop;
+    }
   }
 
   function scrollRangeForPicker() {

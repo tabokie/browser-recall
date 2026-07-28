@@ -2130,6 +2130,8 @@ test.describe('Popup list chip behavior', () => {
     expect(after.pickerBox.right - after.wrapBox.right).toBeCloseTo(0, 1);
     expect(after.inputBox.left - after.pickerBox.left).toBeCloseTo(2, 1);
     expect(after.pickerBox.right - after.inputBox.right).toBeCloseTo(2, 1);
+    expect(after.inputBox.top - after.pickerBox.top).toBeCloseTo(2, 1);
+    expect(after.listBox.top - after.inputBox.bottom).toBeCloseTo(0, 1);
     expect(after.captureBox.top - before.captureBox.top).toBeCloseTo(0, 1);
     expect(after.firstRowBorder.style).not.toBe('none');
     expect(after.firstRowBorder.width).not.toBe('0px');
@@ -2202,6 +2204,9 @@ test.describe('Popup list chip behavior', () => {
       const thumb = document.getElementById('listPickerScrollThumb');
       const scrollbar = document.getElementById('listPickerScrollbar');
       return {
+        pickerTop: document
+          .querySelector('#listPickerHost.list-picker')
+          .getBoundingClientRect().top,
         rowRightBorderStyle: rowStyle.borderRightStyle,
         rowMarginRight: rowStyle.marginRight,
         scrollHeight: document.getElementById('listPickerList').scrollHeight,
@@ -2212,6 +2217,7 @@ test.describe('Popup list chip behavior', () => {
         scrollbarWidth: scrollbar.getBoundingClientRect().width,
       };
     });
+    expect(filtered.pickerTop).toBeCloseTo(after.pickerBox.top, 1);
     expect(filtered.scrollHeight).toBe(filtered.clientHeight);
     expect(filtered.rowRightBorderStyle).toBe('none');
     expect(filtered.rowMarginRight).toBe('0px');
@@ -2240,6 +2246,7 @@ test.describe('Popup list chip behavior', () => {
         listBox.bottom - 2,
       );
       return {
+        pickerTop: pickerBox.top,
         inputToPickerGap:
           pickerBox.top >= inputBox.bottom
             ? pickerBox.top - inputBox.bottom
@@ -2250,6 +2257,7 @@ test.describe('Popup list chip behavior', () => {
         bottomHitOptionId: bottomHit?.closest('.list-picker-option')?.id,
       };
     });
+    expect(createOnly.pickerTop).toBeCloseTo(after.pickerBox.top, 1);
     expect(createOnly.listToCreateBottomGap).toBe(0);
     expect(createOnly.listScrollHeight).toBe(createOnly.listClientHeight);
     expect(createOnly.bottomHitOptionId).toBe('listPickerCreate');

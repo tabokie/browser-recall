@@ -1575,6 +1575,12 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .await?;
             json!({ "success": true, "pages": pages })
         }
+        "getHighlightHistory" => {
+            let highlights = ReadProjections::new(storage()?.clone())
+                .highlight_history()
+                .await?;
+            json!({ "success": true, "highlights": highlights })
+        }
         "getListTree" => {
             let projection = ReadProjections::new(storage()?.clone()).list_tree().await?;
             json!({
@@ -1889,6 +1895,7 @@ fn validate_desktop_bridge_fields(
         | "getDirectoryInfo"
         | "getDirectorySize"
         | "getAllPageContext"
+        | "getHighlightHistory"
         | "getListTree"
         | "getRecycleBin"
         | "getSettings"

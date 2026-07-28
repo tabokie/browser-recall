@@ -24,6 +24,7 @@ Optional references may be omitted only when they are valid non-page URLs; malfo
 
 - Data layout is `logs/`, `objects/`, and `views/`; see [ARCHITECTURE.md](./docs/ARCHITECTURE.md) for exact paths.
 - Logs are authoritative. Checkpoints in `views/` are replay-derived and rebuildable.
+- Async checkpoint JSON writes must use atomic temp-file replacement; in-place rewrites can expose empty or partial files to concurrent projection reads.
 - Replay tests for mutable identifiers must reapply the same entry after its first application; rename handlers must recognize the already-applied destination through immutable identity or replay timestamps.
 - Page checkpoints are selective: persist only pages with durable user state, meaning list parent, note/snapshot child, user title, or rating.
 - Replay-derived checkpoint policy must live in the Rust replay crate; daemon persistence and verification should call the same function instead of duplicating policy in JS or daemon code.

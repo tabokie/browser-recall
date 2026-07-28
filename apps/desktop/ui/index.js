@@ -12,6 +12,7 @@ import {
   loadListDisplay,
   loadListTreeProjection,
   loadAllPageContext,
+  loadHighlightHistory,
   loadDesktopConnectorState,
   loadDesktopShellState,
   loadDirectoryInfo,
@@ -857,7 +858,7 @@ const historyState = {
   batchRawCount: 0, // total raw entries from loaded JSONL files
   _mutationWatermark: 0, // newest history log timestamp merged from live mutations
 };
-let activeView = { type: 'category', value: 'all' }; // or { type: 'search', query: '...' } or { type: 'list', query: '...', id: '...' } or { type: 'explore', query: '...', filter: '...' }
+let activeView = { type: 'category', value: 'all' }; // or { type: 'list', id: '...' }, { type: 'explore' }, { type: 'highlights-history' }, or { type: 'recycle-bin' }
 let pendingShellRoute = window.__BR_STATE__?.route || null;
 let applyingShellRoute = false;
 let shellReady = false;
@@ -2534,6 +2535,8 @@ function refreshCurrentView() {
     showList({ slug: activeView.id, name: activeView.name });
   } else if (activeView.type === 'explore') {
     showExplore();
+  } else if (activeView.type === 'highlights-history') {
+    showHighlightsHistory();
   } else if (activeView.type === 'recycle-bin') {
     showRecycleBin();
   }
@@ -2640,6 +2643,141 @@ async function showCategory(category) {
       renderTimeChart(allFiltered, updatedEstimates);
     }
   };
+}
+
+let highlightHistoryRenderSeq = 0;
+const HIGHLIGHT_HISTORY_BATCH_SIZE = 100;
+let highlightHistoryItems = [];
+let highlightHistoryRenderedCount = 0;
+
+function disableGlobalVirtualScrollerForDirectRender() {
+  const container = document.getElementById('results');
+  if (container._virtualScroller) {
+    container._virtualScroller.destroy();
+  }
+  globalVirtualScroller = null;
+  container.style.paddingTop = '0px';
+  container.style.paddingBottom = '';
+}
+
+function highlightHistoryEntryHtml(item) {
+  const { page, note, createdAt } = item;
+  const url = new URL(page.url);
+  const site =
+    url.protocol === 'file:' ? 'file' : url.hostname.replace(/^www\./, '');
+  const title = page.user_title || page.title || page.url;
+  const excerpt = formatHighlightExcerpt(note.excerpt);
+  const noteBody = note.note
+    ? `<span class="detail-note-content">${escapeHtml(note.note)}</span>`
+    : '';
+  return `<div class="highlight-history-entry detail-note-entry" data-note-slug="${escapeHtml(note.slug)}">
+    <div class="highlight-history-meta">
+      <span class="highlight-history-page-title">${escapeHtml(title)}</span>
+      <span class="highlight-history-site">${escapeHtml(site)}</span>
+      <span class="highlight-history-time">${escapeHtml(formatTime(createdAt))}</span>
+    </div>
+    <div class="detail-note-header">
+      <div class="detail-note-excerpt">${escapeHtml(excerpt)}</div>
+      <button class="detail-note-action-btn delete" title="${escapeHtml(tr('extensionDeleteHighlight', 'Delete highlight'))}">${DETAIL_ICON_DELETE}</button>
+    </div>
+    <div class="detail-note-body">
+      ${noteBody}
+      <button class="detail-note-action-btn edit" title="${escapeHtml(tr('extensionEditNote', 'Edit note'))}">${DETAIL_ICON_EDIT}</button>
+    </div>
+  </div>`;
+}
+
+function renderHighlightHistoryEmptyState(container) {
+  container.innerHTML = `<div class="no-results">${escapeHtml(tr('desktopNoResults', 'No results'))}</div>`;
+}
+
+function renderNextHighlightHistoryBatch(
+  batchSize = HIGHLIGHT_HISTORY_BATCH_SIZE,
+) {
+  if (activeView.type !== 'highlights-history') return;
+  const list = document.querySelector(
+    '#results > .highlight-history-list.detail-notes-section',
+  );
+  if (!list || highlightHistoryRenderedCount >= highlightHistoryItems.length) {
+    return;
+  }
+  const nextCount = Math.min(
+    highlightHistoryRenderedCount + batchSize,
+    highlightHistoryItems.length,
+  );
+  list.insertAdjacentHTML(
+    'beforeend',
+    highlightHistoryItems
+      .slice(highlightHistoryRenderedCount, nextCount)
+      .map(highlightHistoryEntryHtml)
+      .join(''),
+  );
+  highlightHistoryRenderedCount = nextCount;
+  bindNoteDeleteButtons(list);
+}
+
+function removeHighlightHistoryItem(noteSlug) {
+  const index = highlightHistoryItems.findIndex(
+    (item) => item.note.slug === noteSlug,
+  );
+  if (index < 0) return;
+  highlightHistoryItems.splice(index, 1);
+  if (index < highlightHistoryRenderedCount) {
+    highlightHistoryRenderedCount -= 1;
+  }
+}
+
+function updateHighlightHistoryItem(oldNoteSlug, newNoteSlug, noteText) {
+  const item = highlightHistoryItems.find(
+    (candidate) => candidate.note.slug === oldNoteSlug,
+  );
+  if (!item) return;
+  item.note.slug = newNoteSlug;
+  item.note.note = noteText;
+}
+
+async function showHighlightsHistory() {
+  const renderSeq = ++highlightHistoryRenderSeq;
+  activeView = { type: 'highlights-history' };
+  updateSidebarActive();
+  updateMainTitle(tr('extensionHighlights', 'Highlights'));
+  showNormalLayout();
+  resetMainScroll();
+  document.getElementById('queryBuilder').style.display = 'none';
+  document.getElementById('timeChart').classList.remove('visible');
+  disableGlobalVirtualScrollerForDirectRender();
+
+  const container = document.getElementById('results');
+  container.innerHTML = '';
+  highlightHistoryItems = [];
+  highlightHistoryRenderedCount = 0;
+
+  try {
+    const highlights = await loadHighlightHistory();
+    if (
+      renderSeq !== highlightHistoryRenderSeq ||
+      activeView.type !== 'highlights-history'
+    ) {
+      return;
+    }
+    if (highlights.length === 0) {
+      renderHighlightHistoryEmptyState(container);
+      return;
+    }
+    highlightHistoryItems = highlights;
+    container.innerHTML =
+      '<div class="highlight-history-list detail-notes-section"></div>';
+    renderNextHighlightHistoryBatch();
+  } catch (error) {
+    if (
+      renderSeq !== highlightHistoryRenderSeq ||
+      activeView.type !== 'highlights-history'
+    ) {
+      return;
+    }
+    surfaceBackgroundError('Failed to load highlight history', error);
+    container.innerHTML = `<div class="no-results">${escapeHtml(tr('desktopErrorPrefix', `Error: ${error.message}`, [error.message]))}</div>`;
+  }
 }
 
 // --- Query builder: Predicate matchers ---
@@ -4089,9 +4227,11 @@ function renderVisitDatesHtml(visitDates, cardTimestamp) {
 }
 
 const DETAIL_ICON_EDIT =
-  '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 1.5l3 3L5 14H2v-3z"/></svg>';
+  '<svg data-icon="edit" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 1.5l3 3L5 14H2v-3z"/></svg>';
 const DETAIL_ICON_DELETE =
-  '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>';
+  '<svg data-icon="delete" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>';
+const DETAIL_ICON_CONFIRM =
+  '<svg data-icon="checkmark" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter"><path d="M2.5 8.5l3.2 3.2L13.5 4"/></svg>';
 
 function renderExtraDetailHtml(extra, cardTimestamp) {
   let html = '';
@@ -4157,34 +4297,142 @@ function renderExtraDetailHtml(extra, cardTimestamp) {
   return html;
 }
 
+const pendingLocalNoteMutations = new Map();
+
+function registerPendingLocalNoteMutation(noteSlug) {
+  // Only suppress the authoritative mutation refresh when this view fully
+  // reconciles every affected card locally. Shared page-detail editors must
+  // still refresh dependent search, filter, and list state.
+  if (activeView.type !== 'highlights-history') return null;
+  const pending = { expected: null, observed: [] };
+  pending.timeoutId = setTimeout(() => {
+    if (pendingLocalNoteMutations.get(noteSlug) === pending) {
+      pendingLocalNoteMutations.delete(noteSlug);
+      if (pending.observed.length > 0) refreshCurrentView();
+    }
+  }, 5000);
+  pendingLocalNoteMutations.set(noteSlug, pending);
+  return { noteSlug, pending };
+}
+
+function pendingNoteMutationMatches(request, expected) {
+  if (!expected) return false;
+  if (expected.kind === 'delete') {
+    return !request.oldNoteSlug && request.noteSlug === expected.noteSlug;
+  }
+  return (
+    request.oldNoteSlug === expected.oldNoteSlug &&
+    request.noteSlug === expected.noteSlug
+  );
+}
+
+function clearPendingLocalNoteMutation(registration) {
+  if (!registration) return false;
+  if (
+    pendingLocalNoteMutations.get(registration.noteSlug) !==
+    registration.pending
+  ) {
+    return false;
+  }
+  pendingLocalNoteMutations.delete(registration.noteSlug);
+  clearTimeout(registration.pending.timeoutId);
+  return true;
+}
+
+function cancelPendingLocalNoteMutation(registration) {
+  if (!registration) return;
+  const observed = registration.pending.observed;
+  if (clearPendingLocalNoteMutation(registration) && observed.length > 0) {
+    refreshCurrentView();
+  }
+}
+
+function resolvePendingLocalNoteMutation(registration, expected) {
+  if (!registration) return;
+  const pending = registration.pending;
+  if (pendingLocalNoteMutations.get(registration.noteSlug) !== pending) {
+    return;
+  }
+  pending.expected = expected;
+  const matched = pending.observed.some((request) =>
+    pendingNoteMutationMatches(request, expected),
+  );
+  const hasExternal = pending.observed.some(
+    (request) => !pendingNoteMutationMatches(request, expected),
+  );
+  if (!expected || matched) {
+    clearPendingLocalNoteMutation(registration);
+  }
+  if (hasExternal) refreshCurrentView();
+}
+
+function consumePendingLocalNoteMutation(request) {
+  for (const noteSlug of [request.oldNoteSlug, request.noteSlug]) {
+    if (!noteSlug) continue;
+    const pending = pendingLocalNoteMutations.get(noteSlug);
+    if (!pending) continue;
+    if (!pending.expected) {
+      pending.observed.push(request);
+      return true;
+    }
+    if (pendingNoteMutationMatches(request, pending.expected)) {
+      pendingLocalNoteMutations.delete(noteSlug);
+      clearTimeout(pending.timeoutId);
+      return true;
+    }
+    return false;
+  }
+  return false;
+}
+
 function bindNoteDeleteButtons(container) {
   container
     .querySelectorAll('.detail-note-action-btn.delete')
     .forEach((btn) => {
+      if (btn.dataset.noteDeleteBound === 'true') return;
+      btn.dataset.noteDeleteBound = 'true';
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const entry = btn.closest('.detail-note-entry');
         const section = btn.closest('.detail-notes-section');
         const noteSlug = entry?.dataset.noteSlug;
+        const isHighlightHistoryEntry =
+          activeView.type === 'highlights-history' &&
+          Boolean(container.closest('#results'));
 
         if (!noteSlug) return;
 
+        const pendingMutation = registerPendingLocalNoteMutation(noteSlug);
         try {
           await sendAction({
             action: 'deleteNote',
             noteSlug,
           });
+          resolvePendingLocalNoteMutation(pendingMutation, {
+            kind: 'delete',
+            noteSlug,
+          });
         } catch (err) {
+          cancelPendingLocalNoteMutation(pendingMutation);
           logError('Delete note error:', err);
           return;
         }
 
         entry.remove();
+        if (isHighlightHistoryEntry) {
+          removeHighlightHistoryItem(noteSlug);
+          renderNextHighlightHistoryBatch(1);
+        }
         if (
           section &&
           section.querySelectorAll('.detail-note-entry').length === 0
         ) {
           section.remove();
+          if (isHighlightHistoryEntry && highlightHistoryItems.length === 0) {
+            renderHighlightHistoryEmptyState(
+              document.getElementById('results'),
+            );
+          }
         }
         await refreshRecycleBinUi();
       });
@@ -4192,72 +4440,115 @@ function bindNoteDeleteButtons(container) {
 
   container
     .querySelectorAll('.detail-note-entry .detail-note-action-btn.edit')
-    .forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const entry = btn.closest('.detail-note-entry');
-        const noteSlug = entry?.dataset.noteSlug;
-        if (!noteSlug) return;
-        openDetailNoteEditor(entry, noteSlug);
-      });
-    });
+    .forEach(bindDetailNoteEditButton);
+}
+
+function bindDetailNoteEditButton(btn) {
+  if (!btn || btn.dataset.noteEditBound === 'true') return;
+  btn.dataset.noteEditBound = 'true';
+  btn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const entry = btn.closest('.detail-note-entry');
+    const noteSlug = entry?.dataset.noteSlug;
+    if (!noteSlug) return;
+    openDetailNoteEditor(entry, noteSlug);
+  });
+}
+
+function renderDetailNoteBody(body, noteText) {
+  const noteBody = noteText
+    ? `<span class="detail-note-content">${escapeHtml(noteText)}</span>`
+    : '';
+  body.innerHTML = `${noteBody}
+    <button class="detail-note-action-btn edit" title="${escapeHtml(tr('extensionEditNote', 'Edit note'))}">${DETAIL_ICON_EDIT}</button>`;
+  bindDetailNoteEditButton(body.querySelector('.detail-note-action-btn.edit'));
 }
 
 function openDetailNoteEditor(entry, noteSlug) {
   const body = entry.querySelector('.detail-note-body');
+  if (!body || body.querySelector('.detail-note-editor')) return;
   const contentEl = body.querySelector('.detail-note-content');
   const currentText = contentEl?.textContent || '';
-  body.innerHTML = `<textarea class="detail-note-edit-textarea" placeholder="${escapeHtml(tr('extensionAddNote', 'Add a note...'))}">${escapeHtml(currentText)}</textarea>`;
-  const ta = body.querySelector('textarea');
-  autoResizeTextarea(ta);
-  ta.focus();
+  body.innerHTML = `<span class="detail-note-editor" contenteditable="plaintext-only" role="textbox" aria-multiline="true" data-placeholder="${escapeHtml(tr('extensionAddNote', 'Add a note...'))}">${escapeHtml(currentText)}</span>
+    <button class="detail-note-action-btn confirm" title="${escapeHtml(tr('commonConfirm', 'Confirm'))}">${DETAIL_ICON_CONFIRM}</button>`;
+  const editor = body.querySelector('.detail-note-editor');
+  const confirmButton = body.querySelector('.detail-note-action-btn.confirm');
+  const deleteButton = entry.querySelector('.detail-note-action-btn.delete');
+  let saving = false;
+  let finished = false;
 
-  let saveTimeout = null;
-  ta.addEventListener('input', () => {
-    autoResizeTextarea(ta);
-    clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(() => {
-      void sendAction({
-        action: 'updateNote',
-        noteSlug,
-        note: ta.value,
-      })
-        .then((resp) => {
-          if (resp?.noteSlug && resp.noteSlug !== noteSlug) {
-            entry.dataset.noteSlug = resp.noteSlug;
-            noteSlug = resp.noteSlug;
-          }
-        })
-        .catch((error) => surfaceBackgroundError('Could not save note', error));
-    }, 500);
-  });
+  const finish = (noteText) => {
+    if (finished) return;
+    finished = true;
+    renderDetailNoteBody(body, noteText);
+  };
 
-  ta.addEventListener('blur', async () => {
-    clearTimeout(saveTimeout);
-    let resp;
+  const saveCurrent = async () => {
+    if (saving || finished) return;
+    saving = true;
+    confirmButton.disabled = true;
+    if (deleteButton) deleteButton.disabled = true;
+    const nextNote = editor.innerText.replace(/\r\n/g, '\n');
+    const requestedNoteSlug = noteSlug;
+    const pendingMutation = registerPendingLocalNoteMutation(noteSlug);
     try {
-      resp = await sendAction({
+      const resp = await sendAction({
         action: 'updateNote',
         noteSlug,
-        note: ta.value,
+        note: nextNote,
       });
+      resolvePendingLocalNoteMutation(
+        pendingMutation,
+        resp?.oldNoteSlug
+          ? {
+              kind: 'update',
+              oldNoteSlug: requestedNoteSlug,
+              noteSlug: resp.noteSlug,
+            }
+          : null,
+      );
+      if (activeView.type === 'highlights-history') {
+        updateHighlightHistoryItem(
+          requestedNoteSlug,
+          resp?.noteSlug || requestedNoteSlug,
+          nextNote,
+        );
+      }
+      if (resp?.noteSlug && resp.noteSlug !== noteSlug) {
+        entry.dataset.noteSlug = resp.noteSlug;
+        noteSlug = resp.noteSlug;
+      }
+      finish(nextNote);
     } catch (error) {
+      cancelPendingLocalNoteMutation(pendingMutation);
       surfaceBackgroundError('Could not save note', error);
-      return;
+      saving = false;
+      confirmButton.disabled = false;
+      if (deleteButton) deleteButton.disabled = false;
+      editor.focus();
     }
-    if (resp?.noteSlug && resp.noteSlug !== noteSlug) {
-      entry.dataset.noteSlug = resp.noteSlug;
-    }
-    const noteText = ta.value;
-    const noteBody = noteText
-      ? `<span class="detail-note-content">${escapeHtml(noteText)}</span>`
-      : '';
-    body.innerHTML = `${noteBody}
-      <button class="detail-note-action-btn edit" title="${escapeHtml(tr('extensionEditNote', 'Edit note'))}">${DETAIL_ICON_EDIT}</button>`;
-    bindNoteDeleteButtons(
-      entry.closest('.detail-notes-section') || entry.parentElement,
-    );
+  };
+
+  confirmButton.addEventListener('click', (event) => {
+    event.stopPropagation();
+    void saveCurrent();
   });
+  editor.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !saving) {
+      event.preventDefault();
+      finish(currentText);
+    } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      void saveCurrent();
+    }
+  });
+  editor.focus();
+  const selection = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(editor);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
 }
 
 function bindSnapshotClickHandlers(container) {
@@ -4852,6 +5143,7 @@ function updateSidebarActive() {
     .querySelectorAll('.sidebar-item')
     .forEach((item) => item.classList.remove('active'));
   document.getElementById('exploreBtn').classList.remove('active');
+  document.getElementById('highlightsHistoryBtn').classList.remove('active');
   document.getElementById('recycleBinBtn').classList.remove('active');
 
   if (activeView.type === 'category') {
@@ -4866,6 +5158,8 @@ function updateSidebarActive() {
     if (el) el.classList.add('active');
   } else if (activeView.type === 'explore') {
     document.getElementById('exploreBtn').classList.add('active');
+  } else if (activeView.type === 'highlights-history') {
+    document.getElementById('highlightsHistoryBtn').classList.add('active');
   } else if (activeView.type === 'recycle-bin') {
     document.getElementById('recycleBinBtn').classList.add('active');
   }
@@ -5306,6 +5600,20 @@ document.getElementById('exploreBtn').addEventListener('click', () => {
   showExplore();
 });
 
+document
+  .getElementById('highlightsHistoryBtn')
+  .addEventListener('click', () => {
+    showHighlightsHistory();
+  });
+
+document.querySelector('.main').addEventListener('scroll', (event) => {
+  if (activeView.type !== 'highlights-history') return;
+  const main = event.currentTarget;
+  if (main.scrollHeight - main.scrollTop - main.clientHeight <= 320) {
+    renderNextHighlightHistoryBatch();
+  }
+});
+
 bindSidebarDragAutoScroll();
 
 // --- Event listeners: Create List button ---
@@ -5367,6 +5675,8 @@ function initMarqueeForElements(wrapper, container) {
   }
 
   wrapper.addEventListener('mousedown', (e) => {
+    if (activeView.type === 'highlights-history') return;
+
     // Only start marquee from the background, not from interactive content
     if (e.target.closest('.result-item, .column-header-row')) return;
 
@@ -7203,9 +7513,10 @@ chrome.runtime.onMessage.addListener((request) => {
   } else if (type === 'settings') {
     invalidateSettingsCache();
   } else if (type === 'note') {
-    // Note created/deleted — invalidate cached notes and refresh view
-
-    refreshCurrentView();
+    // Local note commands already reconcile their card in place. Their daemon
+    // mutation is an acknowledgement, not a reason to rebuild and scroll the
+    // active view. Mutations from other surfaces still refresh authoritatively.
+    if (!consumePendingLocalNoteMutation(request)) refreshCurrentView();
   } else if (type === 'rules') {
     // Rules changed — refresh rules panel if viewing the affected list
     if (activeView.type === 'list' && request.listId === activeView.id) {
@@ -8242,7 +8553,11 @@ function initSidebarToggle() {
   });
   // Close sidebar on narrow screens when navigating
   sidebar.addEventListener('click', (e) => {
-    if (e.target.closest('.sidebar-item') || e.target.closest('.explore-btn')) {
+    if (
+      e.target.closest(
+        '.sidebar-item, .explore-btn, .highlights-history-btn, .recycle-btn',
+      )
+    ) {
       sidebar.classList.remove('sidebar-open');
     }
   });
