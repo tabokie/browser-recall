@@ -269,6 +269,12 @@ test('desktop locale choices persist across real daemon checkpoints and reloads'
           .join('\n'),
       );
       expect(fatalOverlayText).toBe('');
+      await expect(page.locator('#exploreBtn .sidebar-hero-label')).toHaveText(
+        localeMessage('zh-CN', 'desktopTimeline'),
+      );
+      await expect(
+        page.locator('#highlightsHistoryBtn .sidebar-hero-label'),
+      ).toHaveText(localeMessage('zh-CN', 'desktopBook'));
 
       await page.locator('#createListBtn').click();
       await expect(page.locator('.inline-list-create')).toHaveAttribute(
@@ -317,6 +323,12 @@ test('desktop locale choices persist across real daemon checkpoints and reloads'
 
       await page.locator('#settingsBtn').click();
       await expect(page.locator('#settingsTitle')).toHaveText('Settings');
+      await expect(page.locator('#exploreBtn .sidebar-hero-label')).toHaveText(
+        localeMessage('en', 'desktopTimeline'),
+      );
+      await expect(
+        page.locator('#highlightsHistoryBtn .sidebar-hero-label'),
+      ).toHaveText(localeMessage('en', 'desktopBook'));
       await expect(page.locator('#localeSelect')).toHaveValue('en');
 
       for (const { code } of SUPPORTED_LOCALES.filter(
@@ -339,6 +351,12 @@ test('desktop locale choices persist across real daemon checkpoints and reloads'
         await expect(page.locator('#settingsTitle')).toHaveText(
           localeMessage(code, 'commonSettings'),
         );
+        await expect(
+          page.locator('#exploreBtn .sidebar-hero-label'),
+        ).toHaveText(localeMessage(code, 'desktopTimeline'));
+        await expect(
+          page.locator('#highlightsHistoryBtn .sidebar-hero-label'),
+        ).toHaveText(localeMessage(code, 'desktopBook'));
         await expect(page.locator('#localeSelect')).toHaveValue(code);
         await expect(page.locator('html')).toHaveAttribute('lang', code);
         await expect(page.locator('html')).toHaveAttribute(

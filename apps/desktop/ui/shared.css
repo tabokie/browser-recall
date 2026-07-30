@@ -23,3 +23,19 @@
   font-display: swap;
   src: url(fonts/nunito.woff2) format('woff2');
 }
+
+@font-face {
+  font-family: 'Gentium Book Plus';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(fonts/GentiumBookPlus-Regular.woff2) format('woff2');
+}
+
+@font-face {
+  font-family: 'Gentium Book Plus';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(fonts/GentiumBookPlus-Italic.woff2) format('woff2');
+}

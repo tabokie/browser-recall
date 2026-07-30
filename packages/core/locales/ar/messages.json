@@ -1576,5 +1576,13 @@
   "desktopListNamePlaceholder": {
     "message": "اسم القائمة...",
     "description": "عنصر نائب لاسم القائمة."
+  },
+  "desktopTimeline": {
+    "message": "الخط الزمني",
+    "description": "Primary desktop timeline navigation label."
+  },
+  "desktopBook": {
+    "message": "الكتاب",
+    "description": "Primary desktop highlight-book navigation label."
   }
 }

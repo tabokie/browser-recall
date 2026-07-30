@@ -1576,5 +1576,13 @@
   "desktopListNamePlaceholder": {
     "message": "목록 이름...",
     "description": "목록 이름 입력 자리표시자."
+  },
+  "desktopTimeline": {
+    "message": "타임라인",
+    "description": "Primary desktop timeline navigation label."
+  },
+  "desktopBook": {
+    "message": "책",
+    "description": "Primary desktop highlight-book navigation label."
   }
 }

@@ -1576,5 +1576,13 @@
   "desktopListNamePlaceholder": {
     "message": "Nome da lista...",
     "description": "Espaço reservado para o nome da lista."
+  },
+  "desktopTimeline": {
+    "message": "Linha do tempo",
+    "description": "Primary desktop timeline navigation label."
+  },
+  "desktopBook": {
+    "message": "Livro",
+    "description": "Primary desktop highlight-book navigation label."
   }
 }

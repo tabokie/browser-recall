@@ -22,6 +22,8 @@ const extensionSourceDir = path.join(repoRoot, 'apps/extension');
 const desktopUiSourceDir = path.join(repoRoot, 'apps/desktop/ui');
 const sharedCoreDir = path.join(repoRoot, 'packages/core');
 const sharedLocaleDir = path.join(sharedCoreDir, 'locales');
+const justifDistDir = path.join(repoRoot, 'node_modules', 'justif', 'dist');
+const justifPackageDir = path.dirname(justifDistDir);
 const extensionDistDir = path.join(repoRoot, 'dist/extension');
 const chromeExtensionOutDir = path.join(extensionDistDir, 'chrome');
 const firefoxExtensionOutDir = path.join(extensionDistDir, 'firefox');
@@ -129,6 +131,18 @@ function writeExtensionSnapshotCaptureBudgetGlobal(outDir) {
   fs.writeFileSync(
     path.join(outDir, snapshotCaptureBudgetContentScript),
     createSnapshotCaptureBudgetGlobalScript(),
+  );
+}
+
+function writeDesktopVendorAssets(outDir) {
+  const justifOutDir = path.join(outDir, 'vendor', 'justif');
+  fs.cpSync(justifDistDir, justifOutDir, {
+    recursive: true,
+    dereference: true,
+  });
+  fs.copyFileSync(
+    path.join(justifPackageDir, 'LICENSE'),
+    path.join(justifOutDir, 'LICENSE'),
   );
 }
 
@@ -712,7 +726,9 @@ export function stageFirefoxExtensionAssets(outDir = firefoxExtensionOutDir) {
 export function stageDesktopUiAssets(
   outDir = targets['desktop-ui'].defaultOutDir,
 ) {
-  return stageTarget('desktop-ui', outDir);
+  const staged = stageTarget('desktop-ui', outDir);
+  writeDesktopVendorAssets(staged);
+  return staged;
 }
 
 export function createStagedExtensionDir(prefix = 'browser-recall-extension-') {

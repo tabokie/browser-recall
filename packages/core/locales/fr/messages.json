@@ -1576,5 +1576,13 @@
   "desktopListNamePlaceholder": {
     "message": "Nom de la liste...",
     "description": "Espace réservé du nom de liste."
+  },
+  "desktopTimeline": {
+    "message": "Chronologie",
+    "description": "Primary desktop timeline navigation label."
+  },
+  "desktopBook": {
+    "message": "Livre",
+    "description": "Primary desktop highlight-book navigation label."
   }
 }

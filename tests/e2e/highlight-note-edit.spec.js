@@ -11,6 +11,101 @@ import {
 } from './helpers.js';
 
 test.describe('Highlight note edit', () => {
+  test('live-page note editor stays private and does not reach page input handlers', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/note-editor-keyboard-isolation', {
+      title: 'Note Editor Keyboard Isolation',
+      body: '<p>The browser page owns this video player shortcut.</p>',
+    });
+    const pageUrl = localServer.url('/note-editor-keyboard-isolation');
+    const slug = getSlugForUrl(pageUrl);
+    const noteSlug = 'note-editor-keyboard-isolation';
+    const now = Date.now();
+
+    await resetAndSeed(extContext, extensionId, [
+      settingsCheckpoint(),
+      {
+        path: pageCheckpointPath(slug),
+        data: pageEntityFixture({
+          slug,
+          url: pageUrl,
+          title: 'Note Editor Keyboard Isolation',
+          timestamps: { 'test-device': now },
+          parentIds: [],
+          childIds: [`note:${noteSlug}`],
+        }),
+      },
+      {
+        path: `objects/notes/${noteSlug}.json`,
+        data: noteEntityFixture({
+          slug: noteSlug,
+          excerpt: ['browser page owns this video player shortcut'],
+          note: '',
+          cssPath: [''],
+          url: pageUrl,
+        }),
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.addInitScript(() => {
+      globalThis.__pageHotkeys = [];
+      globalThis.__pageClicks = [];
+      for (const eventName of ['keydown', 'keypress', 'keyup']) {
+        window.addEventListener(eventName, (event) => {
+          globalThis.__pageHotkeys.push(`${event.type}:${event.key}`);
+        });
+      }
+      window.addEventListener('click', (event) => {
+        globalThis.__pageClicks.push(event.target?.id || event.target?.tagName);
+      });
+    });
+    await page.goto(pageUrl);
+    await page.waitForSelector('mark.browser-recall-highlight', {
+      timeout: 5000,
+    });
+    await page
+      .locator('mark.browser-recall-highlight')
+      .evaluate((mark) => mark.click());
+
+    const pageCanReadEditor = await page.evaluate(() => {
+      const host = document.getElementById('browser-recall-highlight-overlay');
+      globalThis.__pageClicks = [];
+      return Boolean(host?.shadowRoot?.querySelector('.highlight-note-editor'));
+    });
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement?.id))
+      .toBe('browser-recall-highlight-overlay');
+    await page.keyboard.type('play pause');
+    expect(await page.evaluate(() => globalThis.__pageHotkeys)).toEqual([]);
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('#browser-recall-highlight-overlay', {
+      state: 'detached',
+      timeout: 3000,
+    });
+
+    expect.soft(pageCanReadEditor).toBe(false);
+    expect.soft(await page.evaluate(() => globalThis.__pageClicks)).toEqual([]);
+    const helper = await openHelperPage(extContext, extensionId);
+    const notesResp = await helper.evaluate(
+      (pageSlug) =>
+        chrome.runtime.sendMessage({
+          action: 'loadPageNotes',
+          slug: pageSlug,
+        }),
+      slug,
+    );
+    expect(notesResp.notes?.[0]?.note).toBe('play pause');
+
+    await helper.close();
+    await page.close();
+  });
+
   test('note text persists after edit without page reload', async ({
     extContext,
     extensionId,
@@ -81,11 +176,15 @@ test.describe('Highlight note edit', () => {
     );
     expect(overlayBorderRun).toBeGreaterThanOrEqual(2);
 
-    // Textarea is auto-focused — type a note
+    expect(
+      await page.evaluate(
+        () =>
+          document.getElementById('browser-recall-highlight-overlay')
+            ?.shadowRoot,
+      ),
+    ).toBeNull();
     await page.keyboard.type('my important note');
-
-    // Press Escape to save and close
-    await page.keyboard.press('Escape');
+    await page.keyboard.press('Control+Enter');
     await page.waitForSelector('#browser-recall-highlight-overlay', {
       state: 'detached',
       timeout: 3000,
@@ -212,7 +311,7 @@ test.describe('Highlight note edit', () => {
     await page.close();
   });
 
-  test('seeded highlight note shows text in overlay on mark click', async ({
+  test('seeded highlight note loads into the private editor on mark click', async ({
     extContext,
     extensionId,
     setupDir,
@@ -267,15 +366,21 @@ test.describe('Highlight note edit', () => {
       timeout: 3000,
     });
 
-    // The overlay uses closed shadow DOM — we can't directly read the textarea.
-    // But we can verify via background that the note data is accessible
+    await page.keyboard.press('End');
+    await page.keyboard.type(' appended');
+    await page.keyboard.press('Control+Enter');
+    await page.waitForSelector('#browser-recall-highlight-overlay', {
+      state: 'detached',
+      timeout: 3000,
+    });
+
     const helper = await openHelperPage(extContext, extensionId);
     const notesResp = await helper.evaluate(
       (s) => chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: s }),
       slug,
     );
     expect(notesResp.notes).toHaveLength(1);
-    expect(notesResp.notes[0].note).toBe('my saved note');
+    expect(notesResp.notes[0].note).toBe('my saved note appended');
 
     // Verify noteSlug on mark matches the note slug
     const markSlug = await page.evaluate(
@@ -283,7 +388,7 @@ test.describe('Highlight note edit', () => {
         document.querySelector('mark.browser-recall-highlight')?.dataset
           .noteSlug,
     );
-    expect(markSlug).toBe(noteSlug);
+    expect(markSlug).toBe(notesResp.notes[0].slug);
 
     await helper.close();
     await page.close();
@@ -1342,16 +1447,12 @@ test.describe('Highlight note edit', () => {
       timeout: 3000,
     });
 
-    // Type a note
     await page.keyboard.type('important insight');
-    // Close with Escape — saveAndClose now awaits updateNote before removing overlay
-    await page.keyboard.press('Escape');
+    await page.keyboard.press('Control+Enter');
     await page.waitForSelector('#browser-recall-highlight-overlay', {
       state: 'detached',
       timeout: 5000,
     });
-
-    // No artificial delay needed — overlay removal means save completed
 
     // Verify the note was saved via background
     const notesResp = await helper.evaluate(
@@ -1377,11 +1478,7 @@ test.describe('Highlight note edit', () => {
       timeout: 3000,
     });
 
-    // Verify the overlay has note text — use shadow DOM pierce
-    // The overlay uses closed shadow DOM, so we check via the mark's noteSlug
-    // If noteSlug matches a note with text, content script will populate the textarea
-    // Wait for loadPageNotes to resolve then check textarea
-    await page.waitForTimeout(300);
+    await page.keyboard.press('Escape');
 
     // Verify from background that note data is intact after re-click
     const notesAfterClick = await helper.evaluate(

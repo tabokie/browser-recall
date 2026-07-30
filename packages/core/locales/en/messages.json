@@ -1576,5 +1576,13 @@
   "desktopListNamePlaceholder": {
     "message": "List name...",
     "description": "New list name input placeholder."
+  },
+  "desktopTimeline": {
+    "message": "Timeline",
+    "description": "Primary desktop timeline navigation label."
+  },
+  "desktopBook": {
+    "message": "Book",
+    "description": "Primary desktop highlight-book navigation label."
   }
 }

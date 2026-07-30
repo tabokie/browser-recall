@@ -280,6 +280,7 @@
 
     action.addEventListener('click', saveCurrent);
     editor.addEventListener('keydown', (event) => {
+      event.stopPropagation();
       if (event.key === 'Escape' && !saving) {
         event.preventDefault();
         finish(note.note || '');
@@ -288,6 +289,11 @@
         void saveCurrent();
       }
     });
+    for (const eventName of ['keypress', 'keyup']) {
+      editor.addEventListener(eventName, (event) => {
+        event.stopPropagation();
+      });
+    }
     editor.focus();
     const selection = view.getSelection();
     const range = view.document.createRange();

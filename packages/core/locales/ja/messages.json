@@ -1576,5 +1576,13 @@
   "desktopListNamePlaceholder": {
     "message": "リスト名...",
     "description": "リスト名入力のプレースホルダー。"
+  },
+  "desktopTimeline": {
+    "message": "タイムライン",
+    "description": "Primary desktop timeline navigation label."
+  },
+  "desktopBook": {
+    "message": "ブック",
+    "description": "Primary desktop highlight-book navigation label."
   }
 }

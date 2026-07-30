@@ -504,6 +504,67 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
+  test('popup reconnects to a tab that loaded while recording was paused', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    localServer.addPage('/resume-paused-tab', {
+      title: 'Resume Paused Tab',
+      body: '<main>Loaded while Browser Recall recording was paused.</main>',
+    });
+    const url = localServer.url('/resume-paused-tab');
+
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+    const helper = await openHelperPage(extContext, extensionId);
+    await helper.evaluate(async () => {
+      const response = await chrome.runtime.sendMessage({
+        action: 'setRecordingPaused',
+        paused: true,
+      });
+      if (response?.success !== true) {
+        throw new Error(response?.error || 'Could not pause recording');
+      }
+    });
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await helper.evaluate(async (pageUrl) => {
+      const [tab] = await chrome.tabs.query({ url: pageUrl });
+      if (!tab?.id) throw new Error('Paused page tab not found');
+      try {
+        await chrome.tabs.sendMessage(tab.id, { action: 'isPdfPage' });
+        throw new Error('Paused page unexpectedly installed its receiver');
+      } catch (error) {
+        if (
+          error.message === 'Paused page unexpectedly installed its receiver'
+        ) {
+          throw error;
+        }
+      }
+
+      const response = await chrome.runtime.sendMessage({
+        action: 'setRecordingPaused',
+        paused: false,
+      });
+      if (response?.success !== true) {
+        throw new Error(response?.error || 'Could not resume recording');
+      }
+    }, url);
+    await helper.close();
+
+    const popup = await openPopupForUrl(extContext, extensionId, {
+      url,
+      title: 'Resume Paused Tab',
+    });
+    await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
+
+    await popup.close();
+    await page.close();
+  });
+
   test('popup hides applied highlight markup without deleting the saved note', async ({
     extContext,
     extensionId,

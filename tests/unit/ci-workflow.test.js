@@ -61,7 +61,10 @@ describe('GitHub CI prerequisites', () => {
       'playwright install --no-shell chromium webkit',
     );
     expect(packageJson.scripts['test:visual']).toBe(
-      'npm run build:desktop-ui && npm run test:visual:chromium && npm run test:visual:webkit',
+      'npm run build:desktop-ui && npm run test:visual:wkwebview && npm run test:visual:chromium && npm run test:visual:webkit',
+    );
+    expect(packageJson.scripts['test:visual:wkwebview']).toBe(
+      'node tests/smoke/macos-wkwebview-chart-layout.mjs',
     );
     expect(packageJson.scripts['test:visual:chromium']).toBe(
       'playwright test tests/e2e/desktop-visual.spec.js',

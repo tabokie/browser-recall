@@ -51,6 +51,8 @@ import {
 } from './entity-types.js';
 import { logDebug, logError } from './logger.js';
 import { applyTheme } from './theme.js';
+import { justify } from './vendor/justif/index.js';
+import { hyphenateEnUS } from './vendor/justif/hyphenate/en-us.js';
 import {
   canonicalRegisteredLocale,
   getActiveLocale,
@@ -680,7 +682,65 @@ function bindWindowDragRegions() {
     return sendAction({ action: 'startWindowDrag' });
   };
   const toggleFullscreen = () => {
-    return sendAction({ action: 'toggleWindowFullscreen' });
+    const scrollPositions = [
+      document.querySelector('.main'),
+      document.querySelector('.sidebar-content'),
+    ]
+      .filter((element) => element?.scrollTop > 0)
+      .map((element) => ({ element, scrollTop: element.scrollTop }));
+    if (scrollPositions.length === 0) {
+      return sendAction({ action: 'toggleWindowFullscreen' });
+    }
+
+    const RESIZE_SETTLE_MS = 300;
+    const TRANSITION_TIMEOUT_MS = 1800;
+    let restoreFrame = null;
+    let settleTimer = null;
+    let transitionTimer = null;
+    let active = true;
+
+    const restoreScrollPositions = () => {
+      restoreFrame = null;
+      if (!active) return;
+      for (const { element, scrollTop } of scrollPositions) {
+        if (!element.isConnected) continue;
+        const maxScrollTop = Math.max(
+          0,
+          element.scrollHeight - element.clientHeight,
+        );
+        if (maxScrollTop > 0) {
+          element.scrollTop = Math.min(scrollTop, maxScrollTop);
+        }
+      }
+    };
+    const scheduleRestore = () => {
+      restoreScrollPositions();
+      if (restoreFrame === null) {
+        restoreFrame = requestAnimationFrame(restoreScrollPositions);
+      }
+    };
+    const cleanup = () => {
+      if (!active) return;
+      scheduleRestore();
+      active = false;
+      window.removeEventListener('resize', handleResize);
+      if (restoreFrame !== null) cancelAnimationFrame(restoreFrame);
+      if (settleTimer !== null) clearTimeout(settleTimer);
+      if (transitionTimer !== null) clearTimeout(transitionTimer);
+    };
+    const handleResize = () => {
+      scheduleRestore();
+      if (settleTimer !== null) clearTimeout(settleTimer);
+      settleTimer = setTimeout(cleanup, RESIZE_SETTLE_MS);
+    };
+
+    window.addEventListener('resize', handleResize);
+    transitionTimer = setTimeout(cleanup, TRANSITION_TIMEOUT_MS);
+    scheduleRestore();
+    return sendAction({ action: 'toggleWindowFullscreen' }).catch((error) => {
+      cleanup();
+      throw error;
+    });
   };
   let suppressNextDblClick = false;
   let lastDragClick = null;
@@ -1914,6 +1974,7 @@ async function toggleResultPin(listId, url, title) {
 
 // --- Layout switching (list vs normal vs recycle bin) ---
 function showListLayout() {
+  destroyHighlightHistoryJustification();
   document.getElementById('timeChart').classList.remove('visible');
   document.getElementById('resultsWrapper').style.display = 'none';
   document.getElementById('listLayout').classList.add('visible');
@@ -1926,6 +1987,7 @@ function showListLayout() {
 }
 
 function showNormalLayout() {
+  destroyHighlightHistoryJustification();
   document.getElementById('resultsWrapper').style.display = '';
   document.getElementById('listLayout').classList.remove('visible');
   document.getElementById('recycleBinLayout').classList.remove('visible');
@@ -1935,6 +1997,7 @@ function showNormalLayout() {
 }
 
 function showRecycleBinLayout() {
+  destroyHighlightHistoryJustification();
   document.getElementById('timeChart').classList.remove('visible');
   document.getElementById('resultsWrapper').style.display = 'none';
   document.getElementById('listLayout').classList.remove('visible');
@@ -2535,7 +2598,7 @@ function refreshCurrentView() {
     showList({ slug: activeView.id, name: activeView.name });
   } else if (activeView.type === 'explore') {
     showExplore();
-  } else if (activeView.type === 'highlights-history') {
+  } else if (isHighlightHistoryView()) {
     showHighlightsHistory();
   } else if (activeView.type === 'recycle-bin') {
     showRecycleBin();
@@ -2645,10 +2708,79 @@ async function showCategory(category) {
   };
 }
 
-let highlightHistoryRenderSeq = 0;
+const HIGHLIGHT_HISTORY_VIEW_TYPE = 'highlights-history';
 const HIGHLIGHT_HISTORY_BATCH_SIZE = 100;
-let highlightHistoryItems = [];
-let highlightHistoryRenderedCount = 0;
+const HIGHLIGHT_HISTORY_LOAD_AHEAD_PX = 320;
+const HIGHLIGHT_HISTORY_LIST_SELECTOR =
+  '#results > .highlight-history-list.detail-notes-section';
+const HIGHLIGHT_HISTORY_TEXT_SELECTOR =
+  '.highlight-history-entry .detail-note-excerpt, .highlight-history-entry .detail-note-content';
+const highlightHistoryState = {
+  renderSequence: 0,
+  items: [],
+  renderedCount: 0,
+  justificationControllers: new Map(),
+};
+
+function isHighlightHistoryView() {
+  return activeView.type === HIGHLIGHT_HISTORY_VIEW_TYPE;
+}
+
+function isCurrentHighlightHistoryRender(renderSequence) {
+  return (
+    isHighlightHistoryView() &&
+    renderSequence === highlightHistoryState.renderSequence
+  );
+}
+
+function highlightHistoryTextElements(container) {
+  if (container.matches?.(HIGHLIGHT_HISTORY_TEXT_SELECTOR)) return [container];
+  return container.querySelectorAll(HIGHLIGHT_HISTORY_TEXT_SELECTOR);
+}
+
+function destroyHighlightHistoryJustification(
+  elements = highlightHistoryState.justificationControllers.keys(),
+) {
+  const targets = [...elements];
+  for (const element of targets) {
+    const controller =
+      highlightHistoryState.justificationControllers.get(element);
+    if (!controller) continue;
+    controller.destroy();
+    highlightHistoryState.justificationControllers.delete(element);
+  }
+}
+
+function applyHighlightHistoryJustification(container) {
+  for (const paragraph of highlightHistoryTextElements(container)) {
+    destroyHighlightHistoryJustification([paragraph]);
+    const options = {
+      hyphenate: hyphenateEnUS,
+      hangingPunctuation: 'all-lines',
+      lastLineMinWidth: 0.5,
+      onSkip: (_skippedParagraph, reason) => {
+        logDebug('Highlight history text kept native layout:', reason);
+      },
+    };
+    if (paragraph.matches('.detail-note-content')) {
+      options.pretolerance = -1;
+    }
+    const controller = justify(paragraph, options);
+    highlightHistoryState.justificationControllers.set(paragraph, controller);
+    controller.ready.catch((error) => {
+      logError('Failed to finish highlight history text layout', error);
+    });
+  }
+}
+
+function highlightHistoryTextHtml(text) {
+  return escapeHtml(text).replace(/\r\n?|\n/g, '<br>\n');
+}
+
+function detailNoteContentHtml(noteText, formatText = escapeHtml) {
+  if (!noteText) return '';
+  return `<span class="detail-note-content">${formatText(noteText)}</span>`;
+}
 
 function disableGlobalVirtualScrollerForDirectRender() {
   const container = document.getElementById('results');
@@ -2660,31 +2792,106 @@ function disableGlobalVirtualScrollerForDirectRender() {
   container.style.paddingBottom = '';
 }
 
-function highlightHistoryEntryHtml(item) {
-  const { page, note, createdAt } = item;
+function highlightHistoryPageMetaHtml(item) {
+  const { page, createdAt } = item;
   const url = new URL(page.url);
   const site =
     url.protocol === 'file:' ? 'file' : url.hostname.replace(/^www\./, '');
   const title = page.user_title || page.title || page.url;
-  const excerpt = formatHighlightExcerpt(note.excerpt);
-  const noteBody = note.note
-    ? `<span class="detail-note-content">${escapeHtml(note.note)}</span>`
-    : '';
-  return `<div class="highlight-history-entry detail-note-entry" data-note-slug="${escapeHtml(note.slug)}">
-    <div class="highlight-history-meta">
-      <span class="highlight-history-page-title">${escapeHtml(title)}</span>
-      <span class="highlight-history-site">${escapeHtml(site)}</span>
-      <span class="highlight-history-time">${escapeHtml(formatTime(createdAt))}</span>
-    </div>
-    <div class="detail-note-header">
-      <div class="detail-note-excerpt">${escapeHtml(excerpt)}</div>
-      <button class="detail-note-action-btn delete" title="${escapeHtml(tr('extensionDeleteHighlight', 'Delete highlight'))}">${DETAIL_ICON_DELETE}</button>
-    </div>
-    <div class="detail-note-body">
-      ${noteBody}
-      <button class="detail-note-action-btn edit" title="${escapeHtml(tr('extensionEditNote', 'Edit note'))}">${DETAIL_ICON_EDIT}</button>
-    </div>
+  return `<div class="highlight-history-meta">
+    <span class="highlight-history-page-title" data-url="${escapeHtml(page.url)}" role="link" tabindex="0"><span class="highlight-history-page-title-label">${escapeHtml(title)}</span></span>
+    <span class="highlight-history-site">${escapeHtml(site)}</span>
+    <span class="highlight-history-time">${escapeHtml(formatTime(createdAt))}</span>
   </div>`;
+}
+
+function highlightHistoryEntryHtml(item) {
+  const { note } = item;
+  const excerpt = formatHighlightExcerpt(note.excerpt);
+  const noteBody = detailNoteContentHtml(note.note, highlightHistoryTextHtml);
+  const contentClass = note.note
+    ? 'highlight-history-content has-note'
+    : 'highlight-history-content';
+  return `<article class="highlight-history-entry detail-note-entry" data-note-slug="${escapeHtml(note.slug)}">
+    <div class="${contentClass}">
+      <div class="highlight-history-quote">
+        <div class="detail-note-header">
+          <div class="detail-note-excerpt">${highlightHistoryTextHtml(excerpt)}</div>
+          <button class="detail-note-action-btn delete" title="${escapeHtml(tr('extensionDeleteHighlight', 'Delete highlight'))}">${DETAIL_ICON_DELETE}</button>
+        </div>
+      </div>
+      <div class="detail-note-body">
+        ${noteBody}
+        <button class="detail-note-action-btn edit" title="${escapeHtml(tr('extensionEditNote', 'Edit note'))}">${DETAIL_ICON_EDIT}</button>
+      </div>
+    </div>
+  </article>`;
+}
+
+function formatHighlightHistoryDate(timestamp) {
+  const date = new Date(timestamp);
+  return [
+    String(date.getFullYear()).slice(-2),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('');
+}
+
+function appendHighlightHistoryDay(list, dateLabel) {
+  list.insertAdjacentHTML(
+    'beforeend',
+    `<section class="highlight-history-day-section" data-highlight-history-date="${dateLabel}">
+      <h2 class="highlight-history-date"><span class="highlight-history-date-label">${dateLabel}</span></h2>
+      <div class="highlight-history-day-entries"></div>
+    </section>`,
+  );
+  return list.lastElementChild;
+}
+
+function getHighlightHistoryDay(list, dateLabel) {
+  const currentDay = list.lastElementChild;
+  return currentDay?.dataset.highlightHistoryDate === dateLabel
+    ? currentDay
+    : appendHighlightHistoryDay(list, dateLabel);
+}
+
+function appendHighlightHistoryPageGroup(dayEntries, item) {
+  dayEntries.insertAdjacentHTML(
+    'beforeend',
+    `<section class="highlight-history-page-group" data-highlight-history-page-url="${escapeHtml(item.page.url)}">
+      ${highlightHistoryPageMetaHtml(item)}
+      <div class="highlight-history-page-entries"></div>
+    </section>`,
+  );
+  return dayEntries.lastElementChild;
+}
+
+function getHighlightHistoryPageGroup(daySection, item) {
+  const dayEntries = daySection.querySelector('.highlight-history-day-entries');
+  const existingGroup = [...dayEntries.children].find(
+    (group) => group.dataset.highlightHistoryPageUrl === item.page.url,
+  );
+  return existingGroup || appendHighlightHistoryPageGroup(dayEntries, item);
+}
+
+function appendHighlightHistoryItems(list, items) {
+  const entries = [];
+  const pageGroups = new Set();
+  for (const item of items) {
+    const dateLabel = formatHighlightHistoryDate(item.createdAt);
+    const daySection = getHighlightHistoryDay(list, dateLabel);
+    const pageGroup = getHighlightHistoryPageGroup(daySection, item);
+    const pageEntries = pageGroup.querySelector(
+      '.highlight-history-page-entries',
+    );
+    pageEntries.insertAdjacentHTML(
+      'beforeend',
+      highlightHistoryEntryHtml(item),
+    );
+    entries.push(pageEntries.lastElementChild);
+    pageGroups.add(pageGroup);
+  }
+  return { entries, pageGroups };
 }
 
 function renderHighlightHistoryEmptyState(container) {
@@ -2694,41 +2901,50 @@ function renderHighlightHistoryEmptyState(container) {
 function renderNextHighlightHistoryBatch(
   batchSize = HIGHLIGHT_HISTORY_BATCH_SIZE,
 ) {
-  if (activeView.type !== 'highlights-history') return;
-  const list = document.querySelector(
-    '#results > .highlight-history-list.detail-notes-section',
-  );
-  if (!list || highlightHistoryRenderedCount >= highlightHistoryItems.length) {
+  if (!isHighlightHistoryView()) return;
+  const list = document.querySelector(HIGHLIGHT_HISTORY_LIST_SELECTOR);
+  if (
+    !list ||
+    highlightHistoryState.renderedCount >= highlightHistoryState.items.length
+  ) {
     return;
   }
   const nextCount = Math.min(
-    highlightHistoryRenderedCount + batchSize,
-    highlightHistoryItems.length,
+    highlightHistoryState.renderedCount + batchSize,
+    highlightHistoryState.items.length,
   );
-  list.insertAdjacentHTML(
-    'beforeend',
-    highlightHistoryItems
-      .slice(highlightHistoryRenderedCount, nextCount)
-      .map(highlightHistoryEntryHtml)
-      .join(''),
+  const appended = appendHighlightHistoryItems(
+    list,
+    highlightHistoryState.items.slice(
+      highlightHistoryState.renderedCount,
+      nextCount,
+    ),
   );
-  highlightHistoryRenderedCount = nextCount;
-  bindNoteDeleteButtons(list);
+  highlightHistoryState.renderedCount = nextCount;
+  // Keep incremental rendering incremental: rebuilding earlier Justif DOM
+  // makes batching quadratic and can invalidate an active text selection.
+  for (const entry of appended.entries) {
+    bindNoteDeleteButtons(entry);
+    applyHighlightHistoryJustification(entry);
+  }
+  for (const pageGroup of appended.pageGroups) {
+    bindHighlightHistoryPageTitles(pageGroup);
+  }
 }
 
 function removeHighlightHistoryItem(noteSlug) {
-  const index = highlightHistoryItems.findIndex(
+  const index = highlightHistoryState.items.findIndex(
     (item) => item.note.slug === noteSlug,
   );
   if (index < 0) return;
-  highlightHistoryItems.splice(index, 1);
-  if (index < highlightHistoryRenderedCount) {
-    highlightHistoryRenderedCount -= 1;
+  highlightHistoryState.items.splice(index, 1);
+  if (index < highlightHistoryState.renderedCount) {
+    highlightHistoryState.renderedCount -= 1;
   }
 }
 
 function updateHighlightHistoryItem(oldNoteSlug, newNoteSlug, noteText) {
-  const item = highlightHistoryItems.find(
+  const item = highlightHistoryState.items.find(
     (candidate) => candidate.note.slug === oldNoteSlug,
   );
   if (!item) return;
@@ -2737,8 +2953,8 @@ function updateHighlightHistoryItem(oldNoteSlug, newNoteSlug, noteText) {
 }
 
 async function showHighlightsHistory() {
-  const renderSeq = ++highlightHistoryRenderSeq;
-  activeView = { type: 'highlights-history' };
+  const renderSequence = ++highlightHistoryState.renderSequence;
+  activeView = { type: HIGHLIGHT_HISTORY_VIEW_TYPE };
   updateSidebarActive();
   updateMainTitle(tr('extensionHighlights', 'Highlights'));
   showNormalLayout();
@@ -2748,33 +2964,24 @@ async function showHighlightsHistory() {
   disableGlobalVirtualScrollerForDirectRender();
 
   const container = document.getElementById('results');
+  destroyHighlightHistoryJustification();
   container.innerHTML = '';
-  highlightHistoryItems = [];
-  highlightHistoryRenderedCount = 0;
+  highlightHistoryState.items = [];
+  highlightHistoryState.renderedCount = 0;
 
   try {
     const highlights = await loadHighlightHistory();
-    if (
-      renderSeq !== highlightHistoryRenderSeq ||
-      activeView.type !== 'highlights-history'
-    ) {
-      return;
-    }
+    if (!isCurrentHighlightHistoryRender(renderSequence)) return;
     if (highlights.length === 0) {
       renderHighlightHistoryEmptyState(container);
       return;
     }
-    highlightHistoryItems = highlights;
+    highlightHistoryState.items = highlights;
     container.innerHTML =
       '<div class="highlight-history-list detail-notes-section"></div>';
     renderNextHighlightHistoryBatch();
   } catch (error) {
-    if (
-      renderSeq !== highlightHistoryRenderSeq ||
-      activeView.type !== 'highlights-history'
-    ) {
-      return;
-    }
+    if (!isCurrentHighlightHistoryRender(renderSequence)) return;
     surfaceBackgroundError('Failed to load highlight history', error);
     container.innerHTML = `<div class="no-results">${escapeHtml(tr('desktopErrorPrefix', `Error: ${error.message}`, [error.message]))}</div>`;
   }
@@ -4303,16 +4510,17 @@ function registerPendingLocalNoteMutation(noteSlug) {
   // Only suppress the authoritative mutation refresh when this view fully
   // reconciles every affected card locally. Shared page-detail editors must
   // still refresh dependent search, filter, and list state.
-  if (activeView.type !== 'highlights-history') return null;
+  if (!isHighlightHistoryView()) return null;
   const pending = { expected: null, observed: [] };
+  const registration = { noteSlug, pending };
   pending.timeoutId = setTimeout(() => {
-    if (pendingLocalNoteMutations.get(noteSlug) === pending) {
-      pendingLocalNoteMutations.delete(noteSlug);
-      if (pending.observed.length > 0) refreshCurrentView();
+    const shouldRefresh = pending.observed.length > 0;
+    if (clearPendingLocalNoteMutation(registration) && shouldRefresh) {
+      refreshCurrentView();
     }
   }, 5000);
   pendingLocalNoteMutations.set(noteSlug, pending);
-  return { noteSlug, pending };
+  return registration;
 }
 
 function pendingNoteMutationMatches(request, expected) {
@@ -4326,33 +4534,32 @@ function pendingNoteMutationMatches(request, expected) {
   );
 }
 
+function currentPendingLocalNoteMutation(registration) {
+  if (!registration) return null;
+  const { noteSlug, pending } = registration;
+  return pendingLocalNoteMutations.get(noteSlug) === pending ? pending : null;
+}
+
 function clearPendingLocalNoteMutation(registration) {
-  if (!registration) return false;
-  if (
-    pendingLocalNoteMutations.get(registration.noteSlug) !==
-    registration.pending
-  ) {
-    return false;
-  }
+  const pending = currentPendingLocalNoteMutation(registration);
+  if (!pending) return false;
   pendingLocalNoteMutations.delete(registration.noteSlug);
-  clearTimeout(registration.pending.timeoutId);
+  clearTimeout(pending.timeoutId);
   return true;
 }
 
 function cancelPendingLocalNoteMutation(registration) {
-  if (!registration) return;
-  const observed = registration.pending.observed;
-  if (clearPendingLocalNoteMutation(registration) && observed.length > 0) {
+  const pending = currentPendingLocalNoteMutation(registration);
+  if (!pending) return;
+  const shouldRefresh = pending.observed.length > 0;
+  if (clearPendingLocalNoteMutation(registration) && shouldRefresh) {
     refreshCurrentView();
   }
 }
 
 function resolvePendingLocalNoteMutation(registration, expected) {
-  if (!registration) return;
-  const pending = registration.pending;
-  if (pendingLocalNoteMutations.get(registration.noteSlug) !== pending) {
-    return;
-  }
+  const pending = currentPendingLocalNoteMutation(registration);
+  if (!pending) return;
   pending.expected = expected;
   const matched = pending.observed.some((request) =>
     pendingNoteMutationMatches(request, expected),
@@ -4376,8 +4583,7 @@ function consumePendingLocalNoteMutation(request) {
       return true;
     }
     if (pendingNoteMutationMatches(request, pending.expected)) {
-      pendingLocalNoteMutations.delete(noteSlug);
-      clearTimeout(pending.timeoutId);
+      clearPendingLocalNoteMutation({ noteSlug, pending });
       return true;
     }
     return false;
@@ -4385,56 +4591,77 @@ function consumePendingLocalNoteMutation(request) {
   return false;
 }
 
+function removeElementWithoutDescendants(element, selector) {
+  if (element && !element.querySelector(selector)) element.remove();
+}
+
+function reconcileDeletedHighlightHistoryEntry({
+  noteSlug,
+  pageGroup,
+  daySection,
+}) {
+  removeHighlightHistoryItem(noteSlug);
+  removeElementWithoutDescendants(pageGroup, '.highlight-history-entry');
+  removeElementWithoutDescendants(daySection, '.highlight-history-entry');
+  renderNextHighlightHistoryBatch(1);
+}
+
+function removeEmptyDetailNoteSection(section, { isHighlightHistoryEntry }) {
+  if (!section || section.querySelector('.detail-note-entry')) return;
+  section.remove();
+  if (isHighlightHistoryEntry && highlightHistoryState.items.length === 0) {
+    renderHighlightHistoryEmptyState(document.getElementById('results'));
+  }
+}
+
+async function deleteDetailNote(button, container) {
+  const entry = button.closest('.detail-note-entry');
+  const noteSlug = entry?.dataset.noteSlug;
+  if (!noteSlug) return;
+
+  const section = button.closest('.detail-notes-section');
+  const daySection = button.closest('.highlight-history-day-section');
+  const pageGroup = button.closest('.highlight-history-page-group');
+  const isHighlightHistoryEntry =
+    isHighlightHistoryView() && Boolean(container.closest('#results'));
+  const pendingMutation = registerPendingLocalNoteMutation(noteSlug);
+
+  try {
+    await sendAction({ action: 'deleteNote', noteSlug });
+    resolvePendingLocalNoteMutation(pendingMutation, {
+      kind: 'delete',
+      noteSlug,
+    });
+  } catch (error) {
+    cancelPendingLocalNoteMutation(pendingMutation);
+    logError('Delete note error:', error);
+    return;
+  }
+
+  destroyHighlightHistoryJustification(
+    entry.querySelectorAll('.detail-note-excerpt, .detail-note-content'),
+  );
+  entry.remove();
+  if (isHighlightHistoryEntry) {
+    reconcileDeletedHighlightHistoryEntry({
+      noteSlug,
+      pageGroup,
+      daySection,
+    });
+  }
+  removeEmptyDetailNoteSection(section, { isHighlightHistoryEntry });
+  await refreshRecycleBinUi();
+}
+
 function bindNoteDeleteButtons(container) {
   container
     .querySelectorAll('.detail-note-action-btn.delete')
-    .forEach((btn) => {
-      if (btn.dataset.noteDeleteBound === 'true') return;
-      btn.dataset.noteDeleteBound = 'true';
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const entry = btn.closest('.detail-note-entry');
-        const section = btn.closest('.detail-notes-section');
-        const noteSlug = entry?.dataset.noteSlug;
-        const isHighlightHistoryEntry =
-          activeView.type === 'highlights-history' &&
-          Boolean(container.closest('#results'));
-
-        if (!noteSlug) return;
-
-        const pendingMutation = registerPendingLocalNoteMutation(noteSlug);
-        try {
-          await sendAction({
-            action: 'deleteNote',
-            noteSlug,
-          });
-          resolvePendingLocalNoteMutation(pendingMutation, {
-            kind: 'delete',
-            noteSlug,
-          });
-        } catch (err) {
-          cancelPendingLocalNoteMutation(pendingMutation);
-          logError('Delete note error:', err);
-          return;
-        }
-
-        entry.remove();
-        if (isHighlightHistoryEntry) {
-          removeHighlightHistoryItem(noteSlug);
-          renderNextHighlightHistoryBatch(1);
-        }
-        if (
-          section &&
-          section.querySelectorAll('.detail-note-entry').length === 0
-        ) {
-          section.remove();
-          if (isHighlightHistoryEntry && highlightHistoryItems.length === 0) {
-            renderHighlightHistoryEmptyState(
-              document.getElementById('results'),
-            );
-          }
-        }
-        await refreshRecycleBinUi();
+    .forEach((button) => {
+      if (button.dataset.noteDeleteBound === 'true') return;
+      button.dataset.noteDeleteBound = 'true';
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        void deleteDetailNote(button, container);
       });
     });
 
@@ -4443,31 +4670,135 @@ function bindNoteDeleteButtons(container) {
     .forEach(bindDetailNoteEditButton);
 }
 
-function bindDetailNoteEditButton(btn) {
-  if (!btn || btn.dataset.noteEditBound === 'true') return;
-  btn.dataset.noteEditBound = 'true';
-  btn.addEventListener('click', (event) => {
+function bindDetailNoteEditButton(button) {
+  if (!button || button.dataset.noteEditBound === 'true') return;
+  button.dataset.noteEditBound = 'true';
+  button.addEventListener('click', (event) => {
     event.stopPropagation();
-    const entry = btn.closest('.detail-note-entry');
+    const entry = button.closest('.detail-note-entry');
     const noteSlug = entry?.dataset.noteSlug;
     if (!noteSlug) return;
     openDetailNoteEditor(entry, noteSlug);
   });
 }
 
+function selectionIntersectsElement(element) {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+    return false;
+  }
+  for (let index = 0; index < selection.rangeCount; index += 1) {
+    if (selection.getRangeAt(index).intersectsNode(element)) return true;
+  }
+  return false;
+}
+
+async function openHighlightHistoryPage(title) {
+  const url = title.dataset.url;
+  if (!url) return;
+  try {
+    await chrome.tabs.create({ url });
+  } catch (error) {
+    surfaceBackgroundError('Could not open URL', error);
+  }
+}
+
+function bindHighlightHistoryPageTitles(container) {
+  container
+    .querySelectorAll('.highlight-history-page-title[data-url]')
+    .forEach((title) => {
+      if (title.dataset.openUrlBound === 'true') return;
+      title.dataset.openUrlBound = 'true';
+      title.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        if (event.detail > 0 && selectionIntersectsElement(title)) return;
+        await openHighlightHistoryPage(title);
+      });
+      title.addEventListener('keydown', async (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        event.stopPropagation();
+        await openHighlightHistoryPage(title);
+      });
+    });
+}
+
 function renderDetailNoteBody(body, noteText) {
-  const noteBody = noteText
-    ? `<span class="detail-note-content">${escapeHtml(noteText)}</span>`
-    : '';
+  destroyHighlightHistoryJustification(
+    body.querySelectorAll('.detail-note-content'),
+  );
+  const isHighlightHistoryEntry = body.closest('.highlight-history-entry');
+  if (isHighlightHistoryEntry) {
+    body
+      .closest('.highlight-history-content')
+      ?.classList.toggle('has-note', Boolean(noteText));
+  }
+  const noteBody = detailNoteContentHtml(
+    noteText,
+    isHighlightHistoryEntry ? highlightHistoryTextHtml : escapeHtml,
+  );
   body.innerHTML = `${noteBody}
     <button class="detail-note-action-btn edit" title="${escapeHtml(tr('extensionEditNote', 'Edit note'))}">${DETAIL_ICON_EDIT}</button>`;
   bindDetailNoteEditButton(body.querySelector('.detail-note-action-btn.edit'));
+  if (isHighlightHistoryEntry) {
+    applyHighlightHistoryJustification(body);
+  }
+}
+
+function expectedLocalNoteUpdate(response, requestedNoteSlug) {
+  if (!response?.oldNoteSlug) return null;
+  return {
+    kind: 'update',
+    oldNoteSlug: requestedNoteSlug,
+    noteSlug: response.noteSlug,
+  };
+}
+
+function reconcileSavedDetailNote({
+  entry,
+  requestedNoteSlug,
+  currentNoteSlug,
+  response,
+  noteText,
+}) {
+  const updatedNoteSlug = response?.noteSlug || requestedNoteSlug;
+  if (isHighlightHistoryView()) {
+    updateHighlightHistoryItem(requestedNoteSlug, updatedNoteSlug, noteText);
+  }
+  if (!response?.noteSlug || response.noteSlug === currentNoteSlug) {
+    return currentNoteSlug;
+  }
+  entry.dataset.noteSlug = response.noteSlug;
+  return response.noteSlug;
+}
+
+function setDetailNoteEditorControlsDisabled(
+  confirmButton,
+  deleteButton,
+  disabled,
+) {
+  confirmButton.disabled = disabled;
+  if (deleteButton) deleteButton.disabled = disabled;
+}
+
+function focusEditableAtEnd(editor) {
+  editor.focus();
+  const selection = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(editor);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
 }
 
 function openDetailNoteEditor(entry, noteSlug) {
   const body = entry.querySelector('.detail-note-body');
   if (!body || body.querySelector('.detail-note-editor')) return;
+  entry.querySelector('.highlight-history-content')?.classList.add('has-note');
   const contentEl = body.querySelector('.detail-note-content');
+  destroyHighlightHistoryJustification(
+    body.querySelectorAll('.detail-note-content'),
+  );
   const currentText = contentEl?.textContent || '';
   body.innerHTML = `<span class="detail-note-editor" contenteditable="plaintext-only" role="textbox" aria-multiline="true" data-placeholder="${escapeHtml(tr('extensionAddNote', 'Add a note...'))}">${escapeHtml(currentText)}</span>
     <button class="detail-note-action-btn confirm" title="${escapeHtml(tr('commonConfirm', 'Confirm'))}">${DETAIL_ICON_CONFIRM}</button>`;
@@ -4477,78 +4808,60 @@ function openDetailNoteEditor(entry, noteSlug) {
   let saving = false;
   let finished = false;
 
-  const finish = (noteText) => {
+  const finishEditing = (noteText) => {
     if (finished) return;
     finished = true;
     renderDetailNoteBody(body, noteText);
   };
 
-  const saveCurrent = async () => {
+  const saveEditor = async () => {
     if (saving || finished) return;
     saving = true;
-    confirmButton.disabled = true;
-    if (deleteButton) deleteButton.disabled = true;
+    setDetailNoteEditorControlsDisabled(confirmButton, deleteButton, true);
     const nextNote = editor.innerText.replace(/\r\n/g, '\n');
     const requestedNoteSlug = noteSlug;
     const pendingMutation = registerPendingLocalNoteMutation(noteSlug);
     try {
-      const resp = await sendAction({
+      const response = await sendAction({
         action: 'updateNote',
         noteSlug,
         note: nextNote,
       });
       resolvePendingLocalNoteMutation(
         pendingMutation,
-        resp?.oldNoteSlug
-          ? {
-              kind: 'update',
-              oldNoteSlug: requestedNoteSlug,
-              noteSlug: resp.noteSlug,
-            }
-          : null,
+        expectedLocalNoteUpdate(response, requestedNoteSlug),
       );
-      if (activeView.type === 'highlights-history') {
-        updateHighlightHistoryItem(
-          requestedNoteSlug,
-          resp?.noteSlug || requestedNoteSlug,
-          nextNote,
-        );
-      }
-      if (resp?.noteSlug && resp.noteSlug !== noteSlug) {
-        entry.dataset.noteSlug = resp.noteSlug;
-        noteSlug = resp.noteSlug;
-      }
-      finish(nextNote);
+      noteSlug = reconcileSavedDetailNote({
+        entry,
+        requestedNoteSlug,
+        currentNoteSlug: noteSlug,
+        response,
+        noteText: nextNote,
+      });
+      finishEditing(nextNote);
     } catch (error) {
       cancelPendingLocalNoteMutation(pendingMutation);
       surfaceBackgroundError('Could not save note', error);
       saving = false;
-      confirmButton.disabled = false;
-      if (deleteButton) deleteButton.disabled = false;
+      setDetailNoteEditorControlsDisabled(confirmButton, deleteButton, false);
       editor.focus();
     }
   };
 
   confirmButton.addEventListener('click', (event) => {
     event.stopPropagation();
-    void saveCurrent();
+    void saveEditor();
   });
   editor.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && !saving) {
       event.preventDefault();
-      finish(currentText);
+      finishEditing(currentText);
     } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
-      void saveCurrent();
+      void saveEditor();
     }
   });
-  editor.focus();
-  const selection = window.getSelection();
-  const range = document.createRange();
-  range.selectNodeContents(editor);
-  range.collapse(false);
-  selection.removeAllRanges();
-  selection.addRange(range);
+  focusEditableAtEnd(editor);
 }
 
 function bindSnapshotClickHandlers(container) {
@@ -5158,7 +5471,7 @@ function updateSidebarActive() {
     if (el) el.classList.add('active');
   } else if (activeView.type === 'explore') {
     document.getElementById('exploreBtn').classList.add('active');
-  } else if (activeView.type === 'highlights-history') {
+  } else if (isHighlightHistoryView()) {
     document.getElementById('highlightsHistoryBtn').classList.add('active');
   } else if (activeView.type === 'recycle-bin') {
     document.getElementById('recycleBinBtn').classList.add('active');
@@ -5607,11 +5920,16 @@ document
   });
 
 document.querySelector('.main').addEventListener('scroll', (event) => {
-  if (activeView.type !== 'highlights-history') return;
   const main = event.currentTarget;
-  if (main.scrollHeight - main.scrollTop - main.clientHeight <= 320) {
-    renderNextHighlightHistoryBatch();
+  const distanceFromBottom =
+    main.scrollHeight - main.scrollTop - main.clientHeight;
+  if (
+    !isHighlightHistoryView() ||
+    distanceFromBottom > HIGHLIGHT_HISTORY_LOAD_AHEAD_PX
+  ) {
+    return;
   }
+  renderNextHighlightHistoryBatch();
 });
 
 bindSidebarDragAutoScroll();
@@ -5675,7 +5993,7 @@ function initMarqueeForElements(wrapper, container) {
   }
 
   wrapper.addEventListener('mousedown', (e) => {
-    if (activeView.type === 'highlights-history') return;
+    if (isHighlightHistoryView()) return;
 
     // Only start marquee from the background, not from interactive content
     if (e.target.closest('.result-item, .column-header-row')) return;

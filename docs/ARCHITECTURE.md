@@ -107,21 +107,80 @@ Checkpoint JSON is also one strict current schema, not a family of historical sh
 
 Shell, device-identity, directory, and connector reads are strict DTOs. Required booleans, nullable identities, counters, paired-browser fields, and connector states are validated before rendering; configured identity must agree across `setupComplete`, device ID, data folder, token, and port fields. The UI does not translate malformed or failed platform reads into “offline,” “unknown,” “default,” or checked preference state.
 
-The desktop shell scrolls the main results pane and sidebar independently. The main pane reserves a stable scrollbar gutter before history hydration so its right edge does not move when loaded rows make the pane scrollable. List and Explore result wrappers grow to fill sparse panes but never flex-shrink below their content, so the outer main pane remains the sole vertical scroll authority and selection paint cannot redistribute chart-to-result spacing. Results containers keep a bottom gutter aligned to the sidebar bottom edge, and the virtual scroller preserves that gutter as part of its base padding.
+The desktop shell scrolls the main results pane and sidebar independently. Results containers keep a bottom gutter aligned to the sidebar bottom edge, and the virtual scroller preserves that gutter as part of its base padding. Fullscreen toggles capture both scroll containers before the native window transition and restore them through its resize sequence, preventing the webview's transient zero-height/clamped state from replacing either position.
+
+The sidebar's primary Timeline and Book destinations form one paired hero mode
+deck above Lists. Amber presents the pair as one compact translucent instrument
+rail: its flush cells keep the centered horizontal line-art motifs, and the
+selected legend receives the accent light without a molded keycap or moving
+lower rim. Mono deliberately uses the stronger calculator reference as two
+separate outlined keycaps with uppercase legends and a solid selected face.
+Their frames remain fixed through pointer-down and release; only the mono
+legend moves by one pixel, preventing the bottom edge from flickering. The deck
+uses localized labels, respects reduced-motion preferences, and responds to the
+resizable sidebar as one horizontal pair at normal widths or two compact rows
+below 210 px.
 
 The sidebar exposes a highlight-history view directly after Explore. It renders
-each live highlight note as its own time-descending entry, including multiple
-highlights from one page, and reuses the page-detail highlight presentation and
-edit/delete controls. Highlight quote rules cover the card's left border, and
-note editing uses a borderless contenteditable surface with an explicit
-checkmark confirmation, matching the connector highlight editor. Successful
-local edit/delete commands reconcile only their affected card; the matching
-daemon note mutation is consumed as an acknowledgement so it cannot rebuild the
-history view, replace unaffected cards, or reset the main-pane scroll position.
+each live highlight note in time-descending order, including multiple highlights
+from one page. Entries are grouped into local-calendar-day sections headed by a
+larger bold-italic `yymmdd` date and presented together on one centered paper
+surface. Within a day, every highlight for the same page is collected into one
+page group even when another page's timestamp originally falls between them;
+the shared page title/site/time line renders once, while every entry retains its
+own slim quote rule. Sibling quotations use an 8 px gap, and the shared page
+line has the same 8 px whitespace before and after it. Within-day groups use
+compact whitespace instead of divider lines, and metadata shares the same right
+text edge as the highlight/note columns. The paper, ink, rules, and action
+states use an ivory paper surface with neutral grayscale content and controls.
+Paper text uses the text-selection cursor; the page title is selectable,
+keyboard-focusable link-role text that opens the page through the desktop
+system-browser bridge on a single click or Enter, while a selection drag does
+not navigate.
+The compact sheet uses one regular Gentium size and line height for metadata,
+excerpts, notes, and editing, with the date as the deliberate hierarchy
+exception. Entries with note text use a 60/40 highlight/note split; highlights
+without notes keep the full text measure and omit the empty note row entirely.
+Hover and keyboard focus reveal controls in the surrounding
+paper gutters: delete sits to the left of the quote rule and note/edit sits to
+the right of the text measure. Both are centered within their responsive side
+rim, remain visible while that rim is hovered at the block's height, and align
+to the highlight block's first line. Starting a note from that control
+immediately establishes the two-column layout and focuses the right-side editor.
+Rendered note text and its contenteditable replacement share one fixed text
+measure so edit mode cannot narrow the note column or text box.
+The desktop bundle ships regular and italic Gentium Book Plus 6.200 webfonts
+under the SIL Open Font License for deterministic offline typography.
+Rendered excerpts and notes use the self-hosted Justif 0.6.5 browser runtime
+for whole-paragraph line breaking, English hyphenation, hanging punctuation,
+and width-aware reflow, with compact native CSS justification as its explicit
+fallback. Multi-segment source newlines remain native `<br>` hard breaks inside
+the managed paragraph, so Justif composes all segments and its clipboard
+cleanup restores exact source newlines without layout-only characters. The
+narrower note column skips Justif's non-hyphenating first pass so discretionary
+hyphenation participates in its initial layout. Structural elements inside the
+paper are selection-transparent:
+date and page-title label glyphs shift to muted ink without a background, so a
+selection that crosses their block boundary cannot produce WebKit's oversized
+line highlight. Excerpt and note selections, including Justif's generated
+inline segments, use the same glyph-only muted ink treatment; selection never
+paints a background across spaces or line-box negative space. Each excerpt's
+1 px quote rule uses the same black ink as the text. Entering the
+contenteditable note editor tears down the managed
+paragraph first and reapplies it only after rendered note content returns.
+Page-detail edit/delete controls remain hidden until their highlight-and-note
+block is hovered or receives keyboard focus. Note editing uses a borderless
+contenteditable surface with an explicit checkmark confirmation, matching the
+connector highlight editor. Successful local edit/delete commands reconcile
+only their affected entry; the matching daemon note mutation is consumed as an
+acknowledgement so it cannot rebuild the history view, replace unaffected
+entries, or reset the main-pane scroll position.
 That acknowledgement suppression is scoped to highlight history; page-detail
 note actions still refresh their underlying Explore, search, or list view.
-Highlight cards render in bounded scroll-triggered batches rather than creating
-the complete history DOM at once.
+Highlight entries and their date sections render in bounded scroll-triggered
+batches rather than creating the complete history DOM at once. Each batch binds
+controls and starts Justif only for its newly appended entries, preserving the
+managed DOM and active selection of every earlier batch.
 The UI reads one `getHighlightHistory` workflow
 projection; it does not infer highlight chronology from page visits or scan
 entity files directly.
@@ -189,12 +248,12 @@ The extension is intentionally thin and no longer owns the main product UI.
 ### Responsibilities
 
 - `apps/extension/browser-api.js` selects Chromium or Firefox from the actual user agent and requires that engine's Manifest V3 runtime, action, and context-menu APIs. It does not probe MV2 aliases such as `browserAction` or `menus`, and it never selects an unrelated truthy `browser` global on Chromium.
-- `apps/extension/content.js` captures visit and attention signals. Because declarative content scripts are classic scripts, staged extension builds load a generated `browser-recall-page-identity.js` bridge before `content.js` so page slug generation still comes from the shared core implementation.
+- `apps/extension/content.js` captures visit and attention signals. Because declarative content scripts are classic scripts, staged extension builds load a generated `browser-recall-page-identity.js` bridge before `content.js` so page slug generation still comes from the shared core implementation. Its live-page note editor keeps annotation content and mutation controls in a closed shadow root, retains internal references for focus, and stops bubbling pointer events at the overlay boundary so ordinary page handlers cannot observe its controls.
 - `packages/core/highlight-lifecycle.js` owns the narrow shared highlight lifecycle used by live pages and snapshot documents. Its bounded hydration observer retains saved-note ownership long enough to repair marks removed by client rendering, while each retry skips notes whose owned marks are still intact.
 - Browser Recall-owned page markup uses the `browser-recall-` prefix. Saved snapshot identity is embedded only as `x-browser-recall-slug` and `x-browser-recall-url` metadata; readers do not accept obsolete marker names.
 - `apps/extension/savepage-bridge.js` orchestrates snapshot capture as one identified session per tab. The session owns settings, lifecycle timers, and typed resource diagnostics; overlapping captures are rejected, stale messages cannot settle newer captures, and intentional policy skips remain distinguishable from network, security, unsupported, and budget omissions. Save Page first fetches from the page context, then uses the extension's host-permission-backed HTTP(S) fetch path for resources that require a CORS bypass; the extension CSP explicitly permits that recovery path. Both paths use `packages/core/bounded-response.js` to enforce the 50 MB per-resource limit against streamed bytes rather than trusting `Content-Length`. Before capture starts, `packages/core/snapshot-capture-budget.js` derives the JSON-encoded HTML allowance from the daemon-advertised complete WebSocket message limit. After retained frames reply, the page performs a resource-free serializer pass so nested documents, shadow roots, and attribute escaping are part of the structural reservation; it then keeps mutation overhead, schedules at most six resource loads, provisionally divides the remaining encoded allowance among in-flight reads, and accounts for base64/percent expansion and repeated references before accepting content. Staging generates and orders both required classic-script bridges, and capture fails explicitly if either is missing. Before persistence, the pure `packages/core/snapshot-html.js` preparation boundary removes Browser Recall highlight markup and the inactive vendored shadow-loader script, injects snapshot identity metadata, deactivates stylesheet links Save Page could not embed, and enables declarative shadow roots without rewriting serialized markup inside `srcdoc` attributes. The all-frame helper serializes live shadow trees before retained cross-origin frame HTML crosses the message boundary; the trusted viewer recursively prepares nested `srcdoc` documents, including frames inside serialized shadow trees, while archived scripts remain blocked. Snapshot reads reapply the same idempotent preparation boundary, repairing legacy stored HTML without extension-side persistent migration. Replay therefore never blocks first paint on a resource that capture already declared unavailable; successfully embedded `<style>` content remains intact.
 - `apps/extension/background.js` buffers semantic connector commands, serves popup requests, manages pairing, and forwards RPC to the daemon. It is the sole tab page-identity resolver: reported same-document URLs, content-script identity, embedded saved pages, and snapshot-viewer slugs are validated there against desktop data. While an HTTP(S) tab is still loading before its `document_idle` content script is available, popup preparation inspects already-parsed embedded identity metadata and otherwise derives identity from the browser-reported tab URL instead of treating the absent receiver as an identity failure; completed tabs still require the validated content-script response. Popup preparation and snapshot-viewer badge-marker reads share that resolver, so both use the original page URL, title, notes/snapshots, and list memberships. Direct popup loads request that resolved identity from background instead of reproducing the rules. Toolbar clicks do not use a manifest `default_popup`: background resolves the current page identity, obtains the complete popup-ready daemon projection in one request, stores that data as a one-shot in-memory bootstrap token, then opens `popup.html?bootstrap=...` with `chrome.action.openPopup()`. Connector state is read locally after that request only to classify failures; it is not a separate RPC preflight. The token exists because extension action popups accept a URL but not an object payload; it is an in-memory handoff, not product persistence. Each token records the daemon-mutation revision observed before preparation; if a committed mutation arrives before consumption, background rebuilds the bootstrap from the daemon instead of handing stale metadata to the popup. Preparation is timeout-bounded so a slow daemon opens an explicit popup error instead of leaving the click dead. Engines without programmatic action popups fall back to opening the same prepared extension page in a tab. Test-only reset/seed/queue RPC handlers live in `apps/extension/background-test-control.js` and are staged only by the test fixture.
-- `apps/extension/popup.js` is the current-page dashboard backed by daemon RPC; its list picker is a short-lived popup control, not extension persistence. The picker keeps one input node mounted from initial popup markup through capture and picker modes so startup typing and native IME composition are not interrupted by DOM reparenting or focus replacement. Tokenized toolbar-opened popups consume the prepared bootstrap before rendering; direct popup loads request the same complete popup-summary projection. Private mode is resolved before entering the dashboard shell, and the dashboard surface means authoritative page data finished rendering. The picker opens from the already prepared per-open list projection instead of rereading lists. Existing membership toggles use one semantic mutation request; creating a list and adding the current page uses the combined `createListAndPin` semantic command, so both replay effects commit in one daemon transaction and one connector round trip. Both paths apply the committed response locally and let the committed mutation stream perform any later authoritative reconciliation. An open popup refreshes current-page list metadata when committed daemon pin/list mutations arrive, while other sections remain a per-open snapshot plus the popup's own user actions. Popup-originated mutations and live list refreshes run through one serialized UI lane: explicit command clicks are ignored while the lane is busy, and explicit highlight-note confirmation marks the lane busy before later actions can start. Busy state disables conflicting controls but never globally dims the popup. `extension-surface.js` supplies one highlight-entry renderer, editor state machine, icon set, and base CSS to both the popup and the scrollbar-free PDF panel. Empty annotations remain unlabeled, and a failed edit or delete keeps the entry intact and retryable. The standalone Hide markup action is transient: when the source tab has a content-script receiver, it stops that page's current highlight hydration watcher and unwraps Browser Recall marks without changing the desktop-owned notes; receiver-less surfaces still render notes but omit that unavailable action. The content script owns the transient state, so reopening the popup still shows the inverse-color Show markup action until the user shows markup or a later page load or route transition resets and reapplies it.
+- `apps/extension/popup.js` is the current-page dashboard backed by daemon RPC; its list picker is a short-lived popup control, not extension persistence. The picker keeps one input node mounted from initial popup markup through capture and picker modes so startup typing and native IME composition are not interrupted by DOM reparenting or focus replacement. Tokenized toolbar-opened popups consume the prepared bootstrap before rendering; direct popup loads request the same complete popup-summary projection. Private mode is resolved before entering the dashboard shell, and the dashboard surface means authoritative page data finished rendering. The picker opens from the already prepared per-open list projection instead of rereading lists. Existing membership toggles use one semantic mutation request; creating a list and adding the current page uses the combined `createListAndPin` semantic command, so both replay effects commit in one daemon transaction and one connector round trip. Both paths apply the committed response locally and let the committed mutation stream perform any later authoritative reconciliation. An open popup refreshes current-page list metadata when committed daemon pin/list mutations arrive, while other sections remain a per-open snapshot plus the popup's own user actions. Popup-originated mutations and live list refreshes run through one serialized UI lane: explicit command clicks are ignored while the lane is busy, and explicit highlight-note confirmation marks the lane busy before later actions can start. Busy state disables conflicting controls but never globally dims the popup. `extension-surface.js` supplies one highlight-entry renderer, editor state machine, icon set, and base CSS to the popup, scrollbar-free PDF panel, and browser-page mark editor. Each surface therefore uses the same red quote rule, borderless contenteditable note field, X delete action, and checkmark confirmation; empty annotations remain unlabeled, and a failed edit or delete keeps the entry intact and retryable. The standalone Hide markup action is transient: when the source tab has a content-script receiver, it stops that page's current highlight hydration watcher and unwraps Browser Recall marks without changing the desktop-owned notes; receiver-less surfaces still render notes but omit that unavailable action. The content script owns the transient state, so reopening the popup still shows the inverse-color Show markup action until the user shows markup or a later page load or route transition resets and reapplies it.
 - `apps/extension/icon-paths.js` and `apps/extension/badge-controller.js` switch packaged toolbar icons at runtime: the default icon is used for normal capture, the closed-eye icon for session-only recording pause, and state-colored backgrounds indicate special page-marker states. The badge controller awaits background's tab identity resolution before reading markers, including for extension-hosted snapshot viewers. When a viewer finishes loading, background probes the live connector state before refreshing its icon instead of allowing an earlier cached `starting` state to suppress the authoritative marker read.
 - Icon PNGs are generated from root SVG sources by `scripts/generate-icons.mjs`: the full desktop app and extension toolbar icons keep an opaque background, while the desktop tray icon is transparent for macOS template rendering. macOS app bundles are always signed as complete bundles: local builds default to Tauri's ad-hoc `-` identity and finalize it with an explicit bundle-identifier designated requirement so rebuilds do not become different CDHash-only identities; `APPLE_SIGNING_IDENTITY` overrides the ad-hoc path with an installed Apple identity for development or distribution builds. The build fails unless strict code-signature verification succeeds, the signed identifier equals `CFBundleIdentifier`, `Info.plist` is bound, resources are sealed, and the designated requirement is not pinned to one build's CDHash. Ad-hoc signing remains local-only and provides no publisher authentication; distribution still requires an Apple identity and notarization.
 - `apps/extension/extension-surface.css`, `apps/extension/extension-surface.js`, and `apps/extension/extension-ui-tokens.js` keep connector pages, content overlays, and transient popouts on the shared light paper visual system. Floating connector surfaces use the same strong outer frame as the popup list picker.
@@ -301,6 +360,11 @@ Current automated coverage is split across three layers:
 - `tests/unit/` for shared JS helpers and connector-side utility logic
 - `tests/integration/` for daemon/connector RPC and event-flow coverage
 - `tests/e2e/` for current shipped extension popup and connector behavior
+
+The canonical desktop visual run also compiles a small native macOS WKWebView
+probe against the staged production UI. It guards webview-only layout behavior
+that Playwright WebKit does not reproduce, including stable chart-to-list
+spacing when the first page selection highlights a chart bar.
 
 Desktop locale registration and persistence are covered by a daemon-backed
 Playwright workflow that drives every registered locale through the production

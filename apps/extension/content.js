@@ -40,15 +40,53 @@ if (!markdownExtractorModule?.extractMarkdown) {
   );
 }
 
-// Recording paused: skip all content script functionality.
-chrome.storage.session.get(['workspace'], (result) => {
-  const recordingState = result.workspace;
-  if (recordingState && recordingState.mode === 'private') {
-    console.log('[content] Recording paused — all tracking disabled');
-    return;
+let contentScriptInitialized = false;
+
+function readRecordingMode(workspace) {
+  if (workspace === undefined) return 'default';
+  if (
+    !workspace ||
+    typeof workspace !== 'object' ||
+    Array.isArray(workspace) ||
+    (workspace.mode !== 'default' && workspace.mode !== 'private')
+  ) {
+    throw new Error('Stored recording state must have mode default or private');
   }
+  return workspace.mode;
+}
+
+function ensureContentScriptInitialized() {
+  if (contentScriptInitialized) return;
+  contentScriptInitialized = true;
   initContentScript();
+}
+
+// A page can load while recording is paused and remain open after recording
+// resumes. Keep that content-script instance dormant, but initialize its
+// receiver on the explicit session transition instead of requiring a reload.
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'session' || !changes.workspace) return;
+  try {
+    if (readRecordingMode(changes.workspace.newValue) === 'default') {
+      ensureContentScriptInitialized();
+    }
+  } catch (error) {
+    console.error('[content] Invalid recording state:', error);
+  }
 });
+
+chrome.storage.session
+  .get(['workspace'])
+  .then((result) => {
+    if (readRecordingMode(result.workspace) === 'private') {
+      console.log('[content] Recording paused — all tracking disabled');
+      return;
+    }
+    ensureContentScriptInitialized();
+  })
+  .catch((error) => {
+    console.error('[content] Could not load recording state:', error);
+  });
 
 function initContentScript() {
   let currentHistoryId = null;
@@ -162,14 +200,16 @@ function initContentScript() {
   }
 
   // ─── Note overlay factory ────────────────────────────────────────────
-  function createNoteOverlay({
+  function createHighlightEditOverlay({
     positionStyle,
-    extraCss,
-    beforeTextareaHtml,
-    bodyHtml,
+    note,
     placeholder,
-    existingNote,
-    onClose,
+    confirmTitle,
+    editTitle,
+    deleteTitle,
+    onSave,
+    onSaved,
+    onDelete,
   }) {
     const prev = document.getElementById('browser-recall-highlight-overlay');
     if (prev) prev.remove();
@@ -178,10 +218,14 @@ function initContentScript() {
     host.id = 'browser-recall-highlight-overlay';
     host.style.cssText = positionStyle + ' z-index: 2147483647;';
 
+    // This tree contains private note text and mutation controls. Keep it
+    // closed, and stop its input events below so the host page cannot inspect
+    // the editor or react to ordinary save/delete interactions.
     const shadow = host.attachShadow({ mode: 'closed' });
     shadow.innerHTML = `
     <style>
       ${extensionSurface.shadowCss}
+      ${extensionSurface.highlightEntryCss}
       .overlay {
         width: 300px;
         background: var(--br-bg-base);
@@ -191,132 +235,88 @@ function initContentScript() {
         font-family: var(--br-font-body);
         font-size: 12px;
         line-height: 1.45;
-        padding: 8px;
+        padding: 0 8px;
       }
-      .br-note-label {
-        margin-bottom: 7px;
-        color: var(--br-text-muted);
-        font-size: 10px;
-        font-weight: 900;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
+      .highlight-item {
+        --br-highlight-side-padding: 0px;
+        border-top: 0;
       }
-      .br-note-excerpt {
-        margin-bottom: 8px;
-        padding: 7px 0 8px;
-        border-top: 1px dotted var(--br-border-section);
-        border-bottom: 1px dotted var(--br-border-section);
-        color: var(--br-text-muted);
-        font-style: italic;
-        line-height: 1.45;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-      }
-      .br-note-editor {
-        display: flex;
-        align-items: flex-start;
-        gap: 8px;
-      }
-      .br-note-body {
-        flex: 1;
-        min-width: 0;
-      }
-      textarea {
-        width: 100%;
-        min-height: 30px;
-        height: 30px;
-        border: 1px solid var(--br-border-section);
-        border-radius: 2px;
-        padding: 5px 8px;
-        font-family: inherit;
-        font-size: 12px;
-        resize: none;
-        box-sizing: border-box;
-        line-height: 18px;
-        overflow: hidden;
-        background: transparent;
-        color: var(--br-text-primary);
-      }
-      textarea::placeholder { color: var(--br-text-muted); }
-      textarea:focus {
-        outline: none;
-        border-color: var(--br-accent-primary);
-        box-shadow: 0 0 0 3px var(--br-accent-soft);
-      }
-      ${extraCss || ''}
     </style>
     <div class="overlay">
-      ${
-        bodyHtml ||
-        `
-        <div class="br-note-editor">
-          ${beforeTextareaHtml || ''}
-          <div class="br-note-body">
-            <textarea placeholder="${placeholder}"></textarea>
-          </div>
-        </div>
-      `
-      }
+      ${extensionSurface.highlightEntryHtml(note, {
+        deleteTitle,
+        editTitle,
+      })}
     </div>
   `;
 
     document.body.appendChild(host);
 
-    const textarea = shadow.querySelector('textarea');
-    textarea.value = existingNote || '';
-
-    function autoResize() {
-      textarea.style.height = '0';
-      textarea.style.height = Math.max(30, textarea.scrollHeight) + 'px';
+    for (const eventName of [
+      'pointerdown',
+      'pointerup',
+      'mousedown',
+      'mouseup',
+      'click',
+      'dblclick',
+      'touchstart',
+      'touchend',
+    ]) {
+      shadow.addEventListener(eventName, (event) => {
+        event.stopPropagation();
+      });
     }
-    if (existingNote) autoResize();
 
-    textarea.focus();
-    textarea.addEventListener('input', autoResize);
-
-    let closed = false;
-    async function finish({ save }) {
-      if (closed) return;
-      closed = true;
-      document.removeEventListener('keydown', handleKeyDown, true);
-      document.removeEventListener('mousedown', handleOutsideClick);
-      const note = save ? textarea.value : null;
-      if (!save) {
-        host.remove();
-        return;
+    let handleOutsideClick;
+    const removeHost = () => {
+      if (handleOutsideClick) {
+        document.removeEventListener('mousedown', handleOutsideClick);
       }
-      try {
-        await onClose(note);
-      } catch (error) {
-        showExtensionReloadNotification(error);
-      } finally {
-        host.remove();
-      }
-    }
-
-    function close() {
-      finish({ save: true });
-    }
-
-    function dismiss() {
-      finish({ save: false });
-    }
-
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape') close();
+      host.remove();
     };
-    textarea.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') close();
+    const item = shadow.querySelector('.highlight-item');
+    extensionSurface.openHighlightNoteEditor({
+      item,
+      note,
+      placeholder,
+      confirmTitle,
+      editTitle,
+      save: onSave,
+      async onSaved(...args) {
+        await onSaved(...args);
+        removeHost();
+      },
+      onError(error) {
+        if (!showExtensionReloadNotification(error)) {
+          showErrorNotification(
+            error?.message || tr('extensionUpdateFailed', 'Update failed'),
+          );
+        }
+      },
     });
-    const handleOutsideClick = (e) => {
-      if (!host.contains(e.target)) close();
+
+    shadow
+      .querySelector('.note-action-btn.delete')
+      .addEventListener('click', () => {
+        onDelete();
+        removeHost();
+      });
+
+    handleOutsideClick = (event) => {
+      if (!host.contains(event.target)) {
+        removeHost();
+      }
     };
-    document.addEventListener('keydown', handleKeyDown, true);
     setTimeout(() => {
-      document.addEventListener('mousedown', handleOutsideClick);
+      if (host.isConnected) {
+        document.addEventListener('mousedown', handleOutsideClick);
+      }
     }, 100);
 
-    return { host, shadow, textarea, close, dismiss };
+    return {
+      host,
+      editor: shadow.querySelector('.highlight-note-editor'),
+    };
   }
 
   // Highlight lifecycle behavior is supplied by the generated classic-script
@@ -409,62 +409,57 @@ function initContentScript() {
 
   function showHighlightEditOverlay(mark, text, noteSlug, existingNote) {
     const rect = mark.getBoundingClientRect();
-    const { host, shadow, textarea, dismiss } = createNoteOverlay({
+    const note = {
+      slug: noteSlug || '',
+      excerpt: String(text || mark.textContent)
+        .split('\n')
+        .filter(Boolean),
+      note: existingNote,
+    };
+    const { host, editor } = createHighlightEditOverlay({
       positionStyle: 'position: absolute; visibility: hidden;',
-      extraCss: `
-      .delete-btn { flex-shrink:0; width:30px; height:30px; display:flex; align-items:center; justify-content:center; background:none; border:1px solid var(--br-border-section); border-radius:2px; cursor:pointer; color:var(--br-text-muted); padding:0; }
-      .delete-btn:hover { background:var(--br-bg-surface-active); border-color:var(--br-text-primary); color:var(--br-text-primary); }
-      .delete-btn svg { width:16px; height:16px; fill:currentColor; }`,
-      beforeTextareaHtml: extensionSurface.trashButtonHtml(
-        tr('commonDelete', 'Delete'),
-      ),
-      bodyHtml: extensionSurface.noteOverlayHtml({
-        excerpt: text || '',
-        placeholder: tr('extensionAddNoteEsc', 'Add a note... Esc to save.'),
-        includeDelete: true,
-        deleteTitle: tr('commonDelete', 'Delete'),
-      }),
-      placeholder: tr('extensionAddNoteEsc', 'Add a note... Esc to save.'),
-      existingNote,
-      async onClose(note) {
-        if (note === existingNote || !noteSlug) return;
-        try {
-          const response = await chrome.runtime.sendMessage({
-            action: 'updateNote',
-            noteSlug,
-            note,
-          });
-          if (
-            showUserActionFailureFromResponse(
-              response,
-              tr('extensionUpdateFailed', 'Update failed'),
-              ['noteSlug'],
-            )
-          ) {
-            return;
-          }
-          if (response?.noteSlug) {
-            highlightLifecycle.replaceNote(noteSlug, response.noteSlug);
-          }
-        } catch (error) {
-          showExtensionReloadNotification(error);
+      note,
+      placeholder: tr('extensionAddNote', 'Add a note...'),
+      confirmTitle: tr('commonConfirm', 'Confirm'),
+      editTitle: tr('extensionEditNote', 'Edit note'),
+      deleteTitle: tr('extensionDeleteHighlight', 'Delete highlight'),
+      async onSave(nextNote) {
+        if (nextNote === existingNote || !noteSlug) {
+          return { noteSlug };
+        }
+        const response = await chrome.runtime.sendMessage({
+          action: 'updateNote',
+          noteSlug,
+          note: nextNote,
+        });
+        if (
+          response?.success !== true ||
+          typeof response.noteSlug !== 'string' ||
+          !response.noteSlug
+        ) {
+          throw new Error(
+            response?.error || tr('extensionUpdateFailed', 'Update failed'),
+          );
+        }
+        return response;
+      },
+      onSaved(response) {
+        if (response?.noteSlug && response.noteSlug !== noteSlug) {
+          highlightLifecycle.replaceNote(noteSlug, response.noteSlug);
+        }
+      },
+      onDelete() {
+        if (noteSlug) removeHighlightMarksByNoteSlug(noteSlug);
+        else unwrapHighlightMark(mark);
+        if (noteSlug) {
+          chrome.runtime
+            .sendMessage({ action: 'deleteNote', noteSlug })
+            .catch((error) => showExtensionReloadNotification(error));
         }
       },
     });
     extensionSurface.positionNearRect(host, rect);
-    textarea.focus();
-
-    shadow.querySelector('.delete-btn').addEventListener('click', (event) => {
-      event.stopPropagation();
-      if (noteSlug) removeHighlightMarksByNoteSlug(noteSlug);
-      else unwrapHighlightMark(mark);
-      if (noteSlug) {
-        chrome.runtime
-          .sendMessage({ action: 'deleteNote', noteSlug })
-          .catch((error) => showExtensionReloadNotification(error));
-      }
-      dismiss();
-    });
+    editor?.focus();
   }
 
   // ─── Page Reporting ───────────────────────────────────────────────────

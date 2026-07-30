@@ -1576,5 +1576,13 @@
   "desktopListNamePlaceholder": {
     "message": "Nama daftar...",
     "description": "Placeholder nama daftar."
+  },
+  "desktopTimeline": {
+    "message": "Linimasa",
+    "description": "Primary desktop timeline navigation label."
+  },
+  "desktopBook": {
+    "message": "Buku",
+    "description": "Primary desktop highlight-book navigation label."
   }
 }

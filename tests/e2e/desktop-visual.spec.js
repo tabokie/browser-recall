@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import fs from 'fs';
 import http from 'http';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { stageDesktopUiAssets } from '../../scripts/stage-app-assets.mjs';
@@ -11,7 +12,6 @@ import { pickSeeded, seededRandom } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '../..');
-const desktopUiDir = path.join(repoRoot, 'dist/desktop/ui');
 const VIRTUALIZED_ENTRY_COUNT = VIRTUAL_SCROLLER_BUFFER * 3 + 150;
 const DESKTOP_COMBO_SEED = 'desktop-combo-20260505-a';
 const DESKTOP_RULE_PREVIEW_SEED = 'desktop-rule-preview-20260505-a';
@@ -281,6 +281,9 @@ function completeDesktopVisualPageFixtures(seed, now) {
 }
 
 async function serveDesktopUi(use) {
+  const desktopUiDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'browser-recall-desktop-visual-'),
+  );
   stageDesktopUiAssets(desktopUiDir);
   const server = http.createServer((req, res) => {
     const urlPath = decodeURIComponent(
@@ -313,6 +316,7 @@ async function serveDesktopUi(use) {
     );
     server.closeAllConnections();
     await closed;
+    fs.rmSync(desktopUiDir, { recursive: true, force: true });
   }
 }
 
@@ -336,6 +340,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       readDesktopValueDelayMs,
       resumeServiceDelayMs,
       updateNoteDelayMs,
+      fullscreenScrollResetDelayMs,
       initialRoute,
       systemLocale,
       previewRuleMatchesByPattern,
@@ -1265,6 +1270,15 @@ async function installDesktopBridgeMock(page, options = {}) {
               openedExternalUrls.push(request.url);
             }
             return { success: true };
+          case 'toggleWindowFullscreen':
+            if (fullscreenScrollResetDelayMs !== null) {
+              setTimeout(() => {
+                const main = document.querySelector('.main');
+                if (main) main.scrollTop = 0;
+                window.dispatchEvent(new Event('resize'));
+              }, fullscreenScrollResetDelayMs);
+            }
+            return { success: true, fullscreen: true };
           default:
             return { success: true };
         }
@@ -1378,6 +1392,8 @@ async function installDesktopBridgeMock(page, options = {}) {
       readDesktopValueDelayMs: options.readDesktopValueDelayMs || 0,
       resumeServiceDelayMs: options.resumeServiceDelayMs || 0,
       updateNoteDelayMs: options.updateNoteDelayMs || 0,
+      fullscreenScrollResetDelayMs:
+        options.fullscreenScrollResetDelayMs ?? null,
       initialRoute: options.initialRoute || '',
       systemLocale: options.systemLocale || 'en',
       previewRuleMatchesByPattern: options.previewRuleMatchesByPattern || {},
@@ -1525,11 +1541,222 @@ test.describe('desktop visual regression', () => {
         colorScheme: 'amber',
       });
       await expect(page.locator('[data-scheme="rose"]')).toHaveCount(0);
+      const heroButtons = page.locator(
+        '.sidebar-hero-nav .sidebar-hero-button',
+      );
+      await expect(heroButtons).toHaveCount(2);
+      await expect(page.locator('#exploreBtn .sidebar-hero-label')).toHaveText(
+        'Timeline',
+      );
+      await expect(
+        page.locator('#highlightsHistoryBtn .sidebar-hero-label'),
+      ).toHaveText('Book');
       await expect(page).toHaveScreenshot('desktop-main-amber.png', {
         fullPage: true,
         animations: 'disabled',
         maxDiffPixelRatio: 0.01,
       });
+    });
+  });
+
+  test('sidebar hero destinations use an amber glass rail and mono keycaps', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+      });
+
+      const heroDeck = page.locator('.sidebar-hero-nav');
+      const timeline = page.locator('#exploreBtn');
+      const book = page.locator('#highlightsHistoryBtn');
+      const geometry = await heroDeck.evaluate((deck) => {
+        const buttons = [...deck.querySelectorAll('.sidebar-hero-button')];
+        const columns = getComputedStyle(deck)
+          .gridTemplateColumns.split(' ')
+          .filter(Boolean);
+        return {
+          columns: columns.length,
+          buttonHeights: buttons.map((button) =>
+            Math.round(button.getBoundingClientRect().height),
+          ),
+          buttonRadii: buttons.map((button) =>
+            Number.parseFloat(getComputedStyle(button).borderRadius),
+          ),
+          buttonBorderWidths: buttons.map((button) =>
+            Number.parseFloat(getComputedStyle(button).borderWidth),
+          ),
+          transformTransitions: buttons.map((button) =>
+            getComputedStyle(button).transitionProperty.includes('transform'),
+          ),
+          colorTransitions: buttons.map((button) =>
+            getComputedStyle(button)
+              .transitionProperty.split(',')
+              .map((property) => property.trim())
+              .includes('color'),
+          ),
+          deckGlassFilter:
+            getComputedStyle(deck).backdropFilter ||
+            getComputedStyle(deck).webkitBackdropFilter,
+          centeredContents: buttons.every((button) => {
+            const style = getComputedStyle(button);
+            return (
+              style.display === 'flex' &&
+              style.alignItems === 'center' &&
+              style.justifyContent === 'center'
+            );
+          }),
+          sheenRemoved: buttons.every(
+            (button) =>
+              getComputedStyle(button, '::before').backgroundImage === 'none',
+          ),
+        };
+      });
+      expect(geometry).toEqual({
+        columns: 2,
+        buttonHeights: [42, 42],
+        buttonRadii: [9, 9],
+        buttonBorderWidths: [0, 0],
+        transformTransitions: [true, true],
+        colorTransitions: [false, false],
+        deckGlassFilter: 'blur(16px) saturate(1.12)',
+        centeredContents: true,
+        sheenRemoved: true,
+      });
+      await expect(timeline).toHaveClass(/active/);
+      await expect(book).not.toHaveClass(/active/);
+      await expect(timeline.locator('.hero-timeline-node')).toHaveCount(3);
+      await expect(book.locator('.hero-book-page')).toHaveCount(2);
+
+      await book.hover();
+      await expect
+        .poll(() =>
+          book.evaluate((button) => {
+            const matrix = new DOMMatrixReadOnly(
+              getComputedStyle(button).transform,
+            );
+            return Math.round(matrix.f * 10) / 10;
+          }),
+        )
+        .toBe(0);
+      await expect
+        .poll(() => book.evaluate((button) => getComputedStyle(button).color))
+        .toBe('rgb(53, 40, 32)');
+
+      const bookBox = await book.boundingBox();
+      expect(bookBox).not.toBeNull();
+      await page.mouse.move(
+        bookBox.x + bookBox.width / 2,
+        bookBox.y + bookBox.height / 2,
+      );
+      await page.mouse.down();
+      await expect
+        .poll(() =>
+          book.evaluate((button) => {
+            const matrix = new DOMMatrixReadOnly(
+              getComputedStyle(button).transform,
+            );
+            return Math.round(matrix.a * 1000) / 1000;
+          }),
+        )
+        .toBe(0.965);
+      await page.mouse.up();
+
+      await expect(book).toHaveClass(/active/);
+      await expect(timeline).not.toHaveClass(/active/);
+      await expect(page.locator('#mainTitle')).toHaveText('Highlights');
+      await expect
+        .poll(() =>
+          book.evaluate((button) => {
+            const matrix = new DOMMatrixReadOnly(
+              getComputedStyle(button).transform,
+            );
+            return Math.round(matrix.f * 10) / 10;
+          }),
+        )
+        .toBe(0);
+      await expect(heroDeck).toHaveScreenshot(
+        'desktop-sidebar-hero-book-active-amber.png',
+        {
+          animations: 'disabled',
+        },
+      );
+
+      await page.evaluate(() =>
+        document.documentElement.setAttribute('data-color-scheme', 'mono'),
+      );
+      await expect
+        .poll(() =>
+          heroDeck.evaluate((deck) => {
+            const button = deck.querySelector('.sidebar-hero-button');
+            const deckStyle = getComputedStyle(deck);
+            const buttonStyle = getComputedStyle(button);
+            return {
+              deckBackground: deckStyle.backgroundImage,
+              deckBorder: deckStyle.borderTopWidth,
+              buttonHeight: Math.round(button.getBoundingClientRect().height),
+              buttonBorder: buttonStyle.borderTopWidth,
+              buttonShadow: buttonStyle.boxShadow,
+              labelTransform: getComputedStyle(
+                button.querySelector('.sidebar-hero-label'),
+              ).textTransform,
+            };
+          }),
+        )
+        .toEqual({
+          deckBackground: 'none',
+          deckBorder: '0px',
+          buttonHeight: 42,
+          buttonBorder: '2px',
+          buttonShadow: 'none',
+          labelTransform: 'uppercase',
+        });
+
+      const monoBookBox = await book.boundingBox();
+      expect(monoBookBox).not.toBeNull();
+      const monoBottomBeforePress = monoBookBox.y + monoBookBox.height;
+      await page.mouse.move(
+        monoBookBox.x + monoBookBox.width / 2,
+        monoBookBox.y + monoBookBox.height / 2,
+      );
+      await page.mouse.down();
+      await expect
+        .poll(async () => {
+          const pressedBox = await book.boundingBox();
+          return Math.round((pressedBox.y + pressedBox.height) * 10) / 10;
+        })
+        .toBe(Math.round(monoBottomBeforePress * 10) / 10);
+      await page.mouse.up();
+      await expect
+        .poll(async () => {
+          const releasedBox = await book.boundingBox();
+          return Math.round((releasedBox.y + releasedBox.height) * 10) / 10;
+        })
+        .toBe(Math.round(monoBottomBeforePress * 10) / 10);
+
+      await expect(heroDeck).toHaveScreenshot(
+        'desktop-sidebar-hero-book-active-mono.png',
+        {
+          animations: 'disabled',
+        },
+      );
+
+      await page
+        .locator('.sidebar')
+        .evaluate((sidebar) => (sidebar.style.width = '200px'));
+      await expect
+        .poll(() =>
+          heroDeck.evaluate((deck) => ({
+            columns: getComputedStyle(deck)
+              .gridTemplateColumns.split(' ')
+              .filter(Boolean).length,
+            heights: [...deck.querySelectorAll('.sidebar-hero-button')].map(
+              (button) => Math.round(button.getBoundingClientRect().height),
+            ),
+          })),
+        )
+        .toEqual({ columns: 1, heights: [40, 40] });
     });
   });
 
@@ -1815,6 +2042,97 @@ test.describe('desktop visual regression', () => {
     });
   });
 
+  test('entering fullscreen preserves the main scroll position', async ({
+    page,
+  }) => {
+    const fixtures = denseHighlightHistoryFixtures(Date.now(), 60);
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        ...fixtures,
+        fullscreenScrollResetDelayMs: 50,
+      });
+      await page.locator('#highlightsHistoryBtn').click();
+      await expect(
+        page.locator('#results .highlight-history-entry'),
+      ).toHaveCount(60);
+
+      const before = await page.locator('.main').evaluate((main) => {
+        main.scrollTop = 640;
+        return main.scrollTop;
+      });
+      expect(before).toBeGreaterThan(0);
+
+      const mainBox = await page.locator('.main').boundingBox();
+      await page.mouse.dblclick(mainBox.x + mainBox.width / 2, 10);
+
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() =>
+              window.__desktopVisualHarness
+                .bridgeActionInvocations()
+                .some((request) => request.action === 'toggleWindowFullscreen'),
+            ),
+          { timeout: 1000 },
+        )
+        .toBe(true);
+      await page.waitForTimeout(450);
+      expect(
+        await page.locator('.main').evaluate((main) => main.scrollTop),
+      ).toBe(before);
+    });
+  });
+
+  test('loading another highlight-history batch preserves existing Justif DOM', async ({
+    page,
+  }) => {
+    const fixtures = denseHighlightHistoryFixtures(Date.now(), 101);
+    for (const [index, noteSlug] of fixtures.noteSlugs.entries()) {
+      const excerpt = [
+        `Stable quote ${index} keeps enough words in this paragraph to exercise the managed line-breaking layout across multiple compact lines of the paper.`,
+      ];
+      fixtures.historyEntries[index].excerpt = excerpt;
+      fixtures.extraSession[`note:${noteSlug}`].excerpt = excerpt;
+    }
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        ...fixtures,
+      });
+      await page.locator('#highlightsHistoryBtn').click();
+
+      const entries = page.locator('#results .highlight-history-entry');
+      await expect(entries).toHaveCount(100);
+      await expect(
+        entries.first().locator('.detail-note-excerpt .justif-seg').first(),
+      ).toBeVisible();
+      await page.evaluate(() => {
+        globalThis.__firstHighlightHistoryJustifSegment =
+          document.querySelector(
+            '.highlight-history-entry .detail-note-excerpt .justif-seg',
+          );
+        const main = document.querySelector('.main');
+        main.scrollTop = main.scrollHeight;
+      });
+
+      await expect(entries).toHaveCount(101);
+      expect(
+        await page.evaluate(() => {
+          const previous = globalThis.__firstHighlightHistoryJustifSegment;
+          return (
+            previous?.isConnected === true &&
+            previous ===
+              document.querySelector(
+                '.highlight-history-entry .detail-note-excerpt .justif-seg',
+              )
+          );
+        }),
+      ).toBe(true);
+    });
+  });
+
   test('explore updates when a history mutation appends to an existing day file', async ({
     page,
   }) => {
@@ -1951,9 +2269,7 @@ test.describe('desktop visual regression', () => {
 
       await page.locator('#searchDraftInput').click();
       await expect(page.locator('#relatedResults .result-row')).toHaveCount(0);
-      await page
-        .locator('#relatedResultsWrapper')
-        .click({ position: { x: 20, y: 20 } });
+      await page.locator('.main').click({ position: { x: 20, y: 200 } });
       await expect(page.locator('#searchDraftInput')).toHaveValue('');
       await expect
         .poll(() =>
@@ -1970,9 +2286,7 @@ test.describe('desktop visual regression', () => {
 
       await page.locator('#searchDraftInput').fill(historyEntries[1].title);
       await expect(page.locator('#relatedResults .result-row')).toHaveCount(0);
-      await page
-        .locator('#relatedResultsWrapper')
-        .click({ position: { x: 20, y: 20 } });
+      await page.locator('.main').click({ position: { x: 20, y: 200 } });
       await expect(page.locator('#searchDraftInput')).toHaveValue(
         historyEntries[1].title,
       );
@@ -2157,12 +2471,17 @@ test.describe('desktop visual regression', () => {
     });
   });
 
-  test('highlight history shows every highlight newest first with page-detail styling @webkit', async ({
+  test('highlight history lays out date-grouped highlights on a paper sheet @webkit', async ({
     page,
   }) => {
-    const now = Date.now();
+    const newerDay = Date.now() - 60_000;
+    const olderDay = newerDay - 24 * 60 * 60 * 1000;
     const secondUrl = 'https://example.com/second-highlight-page';
     const secondSlug = generateSlugFromUrl(secondUrl);
+    const compactExcerpt =
+      'Publication-grade layout chooses line breaks across the complete highlighted passage, keeping the printed sheet compact while preserving a quiet and readable rhythm.';
+    const compactNote =
+      'A carefully composed note keeps its spacing even and its lines close enough to feel like a marginal annotation, with the final thought tucked neatly into the available measure instead of drifting across the paper.';
     await serveDesktopUi(async (desktopUrl) => {
       await openDesktopUi(page, desktopUrl, {
         setupComplete: true,
@@ -2172,7 +2491,7 @@ test.describe('desktop visual regression', () => {
         historyEntries: [
           {
             action: 'create_note',
-            timestamp: now - 30_000,
+            timestamp: olderDay,
             url: 'https://example.com/product-research',
             path: 'objects/notes/highlight-product-research.json',
             title: 'Product research notes',
@@ -2184,22 +2503,32 @@ test.describe('desktop visual regression', () => {
           },
           {
             action: 'create_note',
-            timestamp: now - 20_000,
+            timestamp: newerDay + 60_000,
             url: 'https://example.com/product-research',
             path: 'objects/notes/highlight-product-research-array.json',
             title: 'Product research notes',
             excerpt: ['Array highlighted passage', 'with grouped line break'],
-            note: '',
+            note: 'Product annotation',
             cssPath: ['', ''],
           },
           {
             action: 'create_note',
-            timestamp: now - 10_000,
+            timestamp: newerDay + 50_000,
+            url: secondUrl,
+            path: 'objects/notes/highlight-second-page-followup.json',
+            title: 'Second highlight page',
+            excerpt: ['Follow-up highlighted passage', 'from the same page'],
+            note: '',
+            cssPath: ['main > p', 'main > p'],
+          },
+          {
+            action: 'create_note',
+            timestamp: newerDay + 120_000,
             url: secondUrl,
             path: 'objects/notes/highlight-second-page.json',
             title: 'Second highlight page',
-            excerpt: ['Newest highlighted passage'],
-            note: 'Newest note body\nSecond line',
+            excerpt: [compactExcerpt],
+            note: compactNote,
             cssPath: ['main > p'],
           },
         ],
@@ -2209,9 +2538,12 @@ test.describe('desktop visual regression', () => {
             url: secondUrl,
             title: 'Second highlight page',
             parentIds: [],
-            childIds: ['note:highlight-second-page'],
-            timestamps: { 'test-device': now - 10_000 },
-            createdAt: now - 10_000,
+            childIds: [
+              'note:highlight-second-page',
+              'note:highlight-second-page-followup',
+            ],
+            timestamps: { 'test-device': newerDay + 120_000 },
+            createdAt: newerDay + 120_000,
             visitDates: [],
             scrollDepth: null,
             timeOnPage: null,
@@ -2220,9 +2552,17 @@ test.describe('desktop visual regression', () => {
           },
           'note:highlight-second-page': {
             slug: 'highlight-second-page',
-            excerpt: ['Newest highlighted passage'],
+            excerpt: [compactExcerpt],
             cssPath: ['main > p'],
-            note: 'Newest note body\nSecond line',
+            note: compactNote,
+            url: secondUrl,
+            deleted: false,
+          },
+          'note:highlight-second-page-followup': {
+            slug: 'highlight-second-page-followup',
+            excerpt: ['Follow-up highlighted passage', 'from the same page'],
+            cssPath: ['main > p', 'main > p'],
+            note: '',
             url: secondUrl,
             deleted: false,
           },
@@ -2235,22 +2575,261 @@ test.describe('desktop visual regression', () => {
       await expect(page.locator('#highlightsHistoryBtn')).toHaveClass(/active/);
       await expect(page.locator('#mainTitle')).toHaveText('Highlights');
       const entries = page.locator('#results .highlight-history-entry');
-      await expect(entries).toHaveCount(3);
-      await expect(entries.locator('.detail-note-excerpt')).toHaveText([
-        'Newest highlighted passage',
-        'Array highlighted passage\nwith grouped line break',
-        'Important highlighted passage\nwith original line break',
+      await expect(entries).toHaveCount(4);
+      await expect
+        .poll(() =>
+          entries
+            .locator('.detail-note-excerpt')
+            .evaluateAll((excerpts) =>
+              excerpts.map((excerpt) => excerpt.innerText),
+            ),
+        )
+        .toEqual([
+          compactExcerpt,
+          'Follow-up highlighted passage\nfrom the same page',
+          'Array highlighted passage\nwith grouped line break',
+          'Important highlighted passage\nwith original line break',
+        ]);
+      await expect(
+        entries.nth(1).locator('.detail-note-excerpt br'),
+      ).toHaveCount(1);
+      await expect(
+        entries.nth(2).locator('.detail-note-excerpt br'),
+      ).toHaveCount(1);
+      await expect(entries.locator('.detail-note-excerpt br')).toHaveCount(3);
+      const pageGroups = page.locator('#results .highlight-history-page-group');
+      await expect(pageGroups).toHaveCount(3);
+      await expect(
+        page.locator('#results .highlight-history-page-title'),
+      ).toHaveText([
+        'Second highlight page',
+        'Product research notes',
+        'Product research notes',
       ]);
-      await expect(entries.locator('.highlight-history-page-title')).toHaveText(
-        [
-          'Second highlight page',
-          'Product research notes',
-          'Product research notes',
-        ],
-      );
+      await expect(
+        pageGroups.first().locator('.highlight-history-entry'),
+      ).toHaveCount(2);
       await expect(entries.first().locator('.detail-note-content')).toHaveText(
-        'Newest note body\nSecond line',
+        compactNote,
       );
+      await expect(
+        entries.first().locator('.detail-note-excerpt'),
+      ).toHaveAttribute('data-justif', '');
+      await expect(
+        entries.first().locator('.detail-note-content'),
+      ).toHaveAttribute('data-justif', '');
+      await expect(
+        entries.first().locator('.detail-note-excerpt .justif-seg').first(),
+      ).toBeVisible();
+      await expect(
+        entries.nth(1).locator('.detail-note-excerpt'),
+      ).toHaveAttribute('data-justif', '');
+      await expect(
+        entries.nth(2).locator('.detail-note-excerpt'),
+      ).toHaveAttribute('data-justif', '');
+      await expect(
+        entries.first().locator('.detail-note-content .justif-hyphen').first(),
+      ).toBeVisible();
+
+      const copiedText = await entries.evaluateAll((renderedEntries) => {
+        const copy = (element) => {
+          const selection = window.getSelection();
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          const clipboardData = new DataTransfer();
+          element.dispatchEvent(
+            new ClipboardEvent('copy', {
+              bubbles: true,
+              cancelable: true,
+              clipboardData,
+            }),
+          );
+          const result = clipboardData.getData('text/plain');
+          selection.removeAllRanges();
+          return result;
+        };
+        return {
+          excerpt: copy(
+            renderedEntries[2].querySelector('.detail-note-excerpt'),
+          ),
+          note: copy(renderedEntries[0].querySelector('.detail-note-content')),
+        };
+      });
+      expect(copiedText).toEqual({
+        excerpt: 'Array highlighted passage\nwith grouped line break',
+        note: compactNote,
+      });
+
+      const managedSelectionState = await entries.first().evaluate((entry) => {
+        const excerpt = entry.querySelector('.detail-note-excerpt');
+        const note = entry.querySelector('.detail-note-content');
+        const excerptSegment = excerpt.querySelector('.justif-seg');
+        const noteSegment = note.querySelector('.justif-seg');
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(excerpt);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        const channels = (value) =>
+          value.match(/\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+        const selectionColors = [excerptSegment, noteSegment].map((segment) => {
+          const style = getComputedStyle(segment, '::selection');
+          return {
+            background: channels(style.backgroundColor),
+            ink: channels(style.color),
+            baseInk: channels(getComputedStyle(segment).color),
+          };
+        });
+        return {
+          selectedText: selection.toString(),
+          managedTextDoesNotPaintSelectionNegativeSpace: selectionColors.every(
+            ({ background }) => background.length >= 4 && background[3] === 0,
+          ),
+          managedTextUsesVisibleGrayscaleSelectionInk: selectionColors.every(
+            ({ ink, baseInk }) =>
+              ink.length >= 3 &&
+              ink[0] === ink[1] &&
+              ink[1] === ink[2] &&
+              ink
+                .slice(0, 3)
+                .some((channel, index) => channel !== baseInk[index]),
+          ),
+        };
+      });
+      expect(managedSelectionState).toEqual({
+        selectedText: compactExcerpt,
+        managedTextDoesNotPaintSelectionNegativeSpace: true,
+        managedTextUsesVisibleGrayscaleSelectionInk: true,
+      });
+      await expect(
+        page.locator('#results .highlight-history-list'),
+      ).toHaveScreenshot(
+        process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'webkit'
+          ? 'desktop-highlight-history-selection-webkit.png'
+          : 'desktop-highlight-history-selection-amber.png',
+        {
+          animations: 'disabled',
+        },
+      );
+      await page.evaluate(() => window.getSelection()?.removeAllRanges());
+
+      const daySections = page.locator(
+        '#results .highlight-history-day-section',
+      );
+      await expect(daySections).toHaveCount(2);
+      await expect(daySections.locator('.highlight-history-date')).toHaveText([
+        '260730',
+        '260729',
+      ]);
+      await expect(
+        daySections.locator('.highlight-history-date-label'),
+      ).toHaveCount(2);
+      await expect(
+        pageGroups.locator('.highlight-history-page-title-label'),
+      ).toHaveCount(3);
+      await expect(
+        daySections.nth(0).locator('.highlight-history-entry'),
+      ).toHaveCount(3);
+      await expect(
+        daySections.nth(1).locator('.highlight-history-entry'),
+      ).toHaveCount(1);
+      await expect(
+        daySections.nth(0).locator('.highlight-history-page-group'),
+      ).toHaveCount(2);
+
+      const titleSelectionState = await daySections.first().evaluate((day) => {
+        const date = day.querySelector('.highlight-history-date');
+        const dateLabel = date.querySelector('.highlight-history-date-label');
+        const title = day.querySelector('.highlight-history-page-title');
+        const titleLabel = title.querySelector(
+          '.highlight-history-page-title-label',
+        );
+        const start = dateLabel?.firstChild;
+        const end = titleLabel?.firstChild;
+        if (!start || !end) return { selectionCreated: false };
+        const range = document.createRange();
+        range.setStart(start, 0);
+        range.setEnd(end, end.textContent.length);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        const selectionMode = (element) => {
+          const style = getComputedStyle(element);
+          return (
+            style.userSelect ||
+            style.webkitUserSelect ||
+            style.getPropertyValue('-webkit-user-select')
+          );
+        };
+        const channels = (value) =>
+          value.match(/\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+        const titleSelectionBackground = channels(
+          getComputedStyle(titleLabel, '::selection').backgroundColor,
+        );
+        const titleSelectionInk = channels(
+          getComputedStyle(titleLabel, '::selection').color,
+        );
+        return {
+          selectionCreated: selection.toString().length > 0,
+          dateContainerExcludesBoundary: selectionMode(date) === 'none',
+          dateLabelIsSelectable: selectionMode(dateLabel) === 'text',
+          titleContainerIsSelectable: selectionMode(title) === 'text',
+          titleLabelIsSelectable: selectionMode(titleLabel) === 'text',
+          titleSelectionBackgroundIsTransparent:
+            titleSelectionBackground.length >= 4 &&
+            titleSelectionBackground[3] === 0,
+          titleSelectionInkIsGrayscale:
+            titleSelectionInk.length >= 3 &&
+            titleSelectionInk[0] === titleSelectionInk[1] &&
+            titleSelectionInk[1] === titleSelectionInk[2],
+        };
+      });
+      expect(titleSelectionState).toEqual({
+        selectionCreated: true,
+        dateContainerExcludesBoundary: true,
+        dateLabelIsSelectable: true,
+        titleContainerIsSelectable: true,
+        titleLabelIsSelectable: true,
+        titleSelectionBackgroundIsTransparent: true,
+        titleSelectionInkIsGrayscale: true,
+      });
+      await page.evaluate(() => window.getSelection()?.removeAllRanges());
+      const firstPageTitleLabel = pageGroups
+        .first()
+        .locator('.highlight-history-page-title-label');
+      const firstPageTitleBox = await firstPageTitleLabel.boundingBox();
+      expect(firstPageTitleBox).not.toBeNull();
+      await page.mouse.move(
+        firstPageTitleBox.x + firstPageTitleBox.width - 2,
+        firstPageTitleBox.y + firstPageTitleBox.height / 2,
+      );
+      await page.mouse.down();
+      await page.mouse.move(
+        firstPageTitleBox.x + 2,
+        firstPageTitleBox.y + firstPageTitleBox.height / 2,
+        { steps: 10 },
+      );
+      await page.mouse.up();
+      const pointerTitleSelection = await page.evaluate(() => ({
+        text: window.getSelection()?.toString().trim() ?? '',
+        openedUrls: window.__desktopVisualHarness?.openedExternalUrls?.() ?? [],
+      }));
+      expect(pointerTitleSelection.text.length).toBeGreaterThan(5);
+      expect('Second highlight page').toContain(pointerTitleSelection.text);
+      expect(pointerTitleSelection.openedUrls).not.toContain(secondUrl);
+      await expect(
+        page.locator('#results .highlight-history-list'),
+      ).toHaveScreenshot(
+        process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'webkit'
+          ? 'desktop-highlight-history-title-selection-webkit.png'
+          : 'desktop-highlight-history-title-selection-amber.png',
+        {
+          animations: 'disabled',
+        },
+      );
+      await page.evaluate(() => window.getSelection()?.removeAllRanges());
 
       const noteDragBehavior = await entries
         .first()
@@ -2295,58 +2874,328 @@ test.describe('desktop visual regression', () => {
         [nodes[0], nodes[1]].map((entry) => {
           const body = entry.querySelector('.detail-note-body');
           const button = body.querySelector('.detail-note-action-btn.edit');
+          const sheet = entry.closest('.highlight-history-list');
           const bodyRect = body.getBoundingClientRect();
           const buttonRect = button.getBoundingClientRect();
+          const sheetRect = sheet.getBoundingClientRect();
           return {
-            rightInset: bodyRect.right - buttonRect.right,
-            bottomInset: bodyRect.bottom - buttonRect.bottom,
+            rightRimCenterOffset:
+              buttonRect.left +
+              buttonRect.width / 2 -
+              (bodyRect.right + sheetRect.right) / 2,
+            topOffset: buttonRect.top - bodyRect.top,
           };
         }),
       );
-      expect(editButtonPlacement[0].rightInset).toBeLessThanOrEqual(7);
-      expect(editButtonPlacement[0].bottomInset).toBeLessThanOrEqual(6);
-      expect(editButtonPlacement[1].rightInset).toBeLessThanOrEqual(7);
-      expect(editButtonPlacement[1].bottomInset).toBeLessThanOrEqual(6);
+      expect(
+        Math.abs(editButtonPlacement[0].rightRimCenterOffset),
+      ).toBeLessThanOrEqual(1);
+      expect(editButtonPlacement[0].topOffset).toBeCloseTo(0, 1);
+      expect(
+        Math.abs(editButtonPlacement[1].rightRimCenterOffset),
+      ).toBeLessThanOrEqual(1);
+      expect(editButtonPlacement[1].topOffset).toBeCloseTo(0, 1);
 
-      const reusedDetailStyles = await entries.first().evaluate((entry) => {
-        const meta = entry.querySelector('.highlight-history-meta');
-        const header = entry.querySelector('.detail-note-header');
-        const excerpt = entry.querySelector('.detail-note-excerpt');
-        const body = entry.querySelector('.detail-note-body');
-        const note = entry.querySelector('.detail-note-content');
-        const entryRect = entry.getBoundingClientRect();
-        const headerRect = header.getBoundingClientRect();
-        return {
-          entryClass: entry.classList.contains('detail-note-entry'),
-          entryBorderLeftWidth: getComputedStyle(entry).borderLeftWidth,
-          metaBorderLeftWidth: getComputedStyle(meta).borderLeftWidth,
-          headerClass: header.classList.contains('detail-note-header'),
-          headerBorderLeftWidth: getComputedStyle(header).borderLeftWidth,
-          headerMarginLeft: getComputedStyle(header).marginLeft,
-          bodyBorderLeftWidth: getComputedStyle(body).borderLeftWidth,
-          excerptClass: excerpt.classList.contains('detail-note-excerpt'),
-          excerptWhiteSpace: getComputedStyle(excerpt).whiteSpace,
-          excerptFontSize: getComputedStyle(excerpt).fontSize,
-          excerptFontStyle: getComputedStyle(excerpt).fontStyle,
-          noteFontSize: getComputedStyle(note).fontSize,
-          quoteReachesCardLeft: headerRect.left === entryRect.left,
-        };
+      const paperLayout = await page
+        .locator('#results .highlight-history-list')
+        .evaluate((sheet) => {
+          const results = sheet.parentElement;
+          const sheetRect = sheet.getBoundingClientRect();
+          const resultsRect = results.getBoundingClientRect();
+          const days = [
+            ...sheet.querySelectorAll('.highlight-history-day-section'),
+          ];
+          const firstDayEntries = days[0].querySelectorAll(
+            '.highlight-history-entry',
+          );
+          const firstDayGroups = days[0].querySelectorAll(
+            '.highlight-history-page-group',
+          );
+          const firstEntry = firstDayEntries[0];
+          const secondEntry = firstDayEntries[1];
+          const firstPageGroup = firstDayGroups[0];
+          const secondPageGroup = firstDayGroups[1];
+          const meta = firstPageGroup.querySelector('.highlight-history-meta');
+          const site = firstPageGroup.querySelector('.highlight-history-site');
+          const time = firstPageGroup.querySelector('.highlight-history-time');
+          const highlightContent = firstEntry.querySelector(
+            '.highlight-history-content',
+          );
+          const noteBody = firstEntry.querySelector('.detail-note-body');
+          const quote = firstEntry.querySelector('.highlight-history-quote');
+          const excerpt = firstEntry.querySelector('.detail-note-excerpt');
+          const note = firstEntry.querySelector('.detail-note-content');
+          const actionButtons = [
+            ...firstEntry.querySelectorAll('.detail-note-action-btn'),
+          ];
+          const dividerStyle = getComputedStyle(secondEntry, '::before');
+          const excerptStyle = getComputedStyle(excerpt);
+          const sheetStyle = getComputedStyle(sheet);
+          const entryStyle = getComputedStyle(firstEntry);
+          const highlightContentStyle = getComputedStyle(highlightContent);
+          const quoteStyle = getComputedStyle(quote);
+          const noteBodyStyle = getComputedStyle(noteBody);
+          const noteStyle = getComputedStyle(note);
+          const dateStyle = getComputedStyle(
+            days[0].querySelector('.highlight-history-date'),
+          );
+          const dateLabelStyle = getComputedStyle(
+            days[0].querySelector('.highlight-history-date-label'),
+          );
+          const textStyles = [
+            getComputedStyle(
+              firstPageGroup.querySelector('.highlight-history-page-title'),
+            ),
+            getComputedStyle(
+              firstPageGroup.querySelector('.highlight-history-site'),
+            ),
+            getComputedStyle(
+              firstPageGroup.querySelector('.highlight-history-time'),
+            ),
+            excerptStyle,
+            noteStyle,
+          ];
+          const colorIsGrayscale = (value) => {
+            const channels = value.match(/\d+(?:\.\d+)?/g)?.map(Number);
+            return (
+              channels?.length >= 3 &&
+              channels[0] === channels[1] &&
+              channels[1] === channels[2]
+            );
+          };
+          const quoteRect = quote.getBoundingClientRect();
+          const noteRect = note.getBoundingClientRect();
+          const metaRect = meta.getBoundingClientRect();
+          const timeRect = time.getBoundingClientRect();
+          const unnotedContent = secondEntry.querySelector(
+            '.highlight-history-content',
+          );
+          const unnotedQuote = secondEntry.querySelector(
+            '.highlight-history-quote',
+          );
+          const unnotedBody = secondEntry.querySelector('.detail-note-body');
+          const unnotedPageGroup = secondEntry.closest(
+            '.highlight-history-page-group',
+          );
+          const unnotedMeta = unnotedPageGroup.querySelector(
+            '.highlight-history-meta',
+          );
+          const unnotedTime = unnotedPageGroup.querySelector(
+            '.highlight-history-time',
+          );
+          const unnotedExcerpt = secondEntry.querySelector(
+            '.detail-note-excerpt',
+          );
+          const unnotedDelete = secondEntry.querySelector(
+            '.detail-note-action-btn.delete',
+          );
+          const unnotedEdit = unnotedBody.querySelector(
+            '.detail-note-action-btn.edit',
+          );
+          const unnotedContentRect = unnotedContent.getBoundingClientRect();
+          const unnotedQuoteRect = unnotedQuote.getBoundingClientRect();
+          const unnotedMetaRect = unnotedMeta.getBoundingClientRect();
+          const unnotedTimeRect = unnotedTime.getBoundingClientRect();
+          const unnotedExcerptRect = unnotedExcerpt.getBoundingClientRect();
+          const unnotedDeleteRect = unnotedDelete.getBoundingClientRect();
+          const unnotedEditRect = unnotedEdit.getBoundingClientRect();
+          const gentiumBookPlusFaces = [...document.fonts].filter(
+            (face) => face.family.replaceAll('"', '') === 'Gentium Book Plus',
+          );
+          return {
+            dateLabels: days.map(
+              (day) =>
+                day.querySelector('.highlight-history-date')?.textContent,
+            ),
+            entryCounts: days.map(
+              (day) => day.querySelectorAll('.highlight-history-entry').length,
+            ),
+            sheetBackground: sheetStyle.backgroundColor,
+            sheetBorderWidth: sheetStyle.borderWidth,
+            sheetWidth: sheetRect.width,
+            sheetHorizontalPadding: Number.parseFloat(sheetStyle.paddingLeft),
+            sheetCentered:
+              Math.abs(
+                sheetRect.left +
+                  sheetRect.width / 2 -
+                  (resultsRect.left + resultsRect.width / 2),
+              ) <= 1,
+            sheetNarrowerThanResults: sheetRect.width < resultsRect.width,
+            entryBackground: entryStyle.backgroundColor,
+            entryBorderWidth: entryStyle.borderWidth,
+            entryBoxShadow: entryStyle.boxShadow,
+            titleLineRightAligned:
+              Math.abs(timeRect.right - noteRect.right) <= 1,
+            titleToTextGap:
+              highlightContent.getBoundingClientRect().top - metaRect.bottom,
+            pageTitleVerticalPaddingBalanced:
+              Math.abs(
+                secondPageGroup
+                  .querySelector('.highlight-history-meta')
+                  .getBoundingClientRect().top -
+                  firstPageGroup.getBoundingClientRect().bottom -
+                  (secondPageGroup
+                    .querySelector('.highlight-history-entry')
+                    .getBoundingClientRect().top -
+                    secondPageGroup
+                      .querySelector('.highlight-history-meta')
+                      .getBoundingClientRect().bottom),
+              ) <= 1,
+            quoteBorderLeftWidth: quoteStyle.borderLeftWidth,
+            quoteBorderLeftStyle: quoteStyle.borderLeftStyle,
+            quoteUsesTextInk: quoteStyle.borderLeftColor === excerptStyle.color,
+            quoteDoesNotScopeNote:
+              !quote.contains(note) &&
+              noteBodyStyle.borderLeftWidth === '0px' &&
+              quoteRect.right <= noteRect.left,
+            quotePaddingLeft: Number.parseFloat(quoteStyle.paddingLeft),
+            notePaddingTop: Number.parseFloat(noteBodyStyle.paddingTop),
+            noteUsesTwoColumns:
+              highlightContent.classList.contains('has-note') &&
+              highlightContentStyle.display === 'grid' &&
+              highlightContentStyle.gridTemplateColumns
+                .split(' ')
+                .filter(Boolean).length === 2,
+            noteColumnsSeparated: quoteRect.right <= noteRect.left,
+            highlightToNoteWidthRatio:
+              quoteRect.width / noteBody.getBoundingClientRect().width,
+            unnotedHighlightUsesOneColumn:
+              getComputedStyle(unnotedContent).display !== 'grid',
+            unnotedBodyLeavesNoBlankRow:
+              getComputedStyle(unnotedBody).position === 'absolute' &&
+              Math.abs(unnotedContentRect.height - unnotedQuoteRect.height) <=
+                1,
+            singleColumnTextRightAligned:
+              Math.abs(unnotedTimeRect.right - unnotedExcerptRect.right) <= 1 &&
+              Math.abs(unnotedMetaRect.right - unnotedExcerptRect.right) <= 1,
+            singleColumnControlsOutsideText:
+              unnotedDeleteRect.right <= unnotedQuoteRect.left + 1 &&
+              unnotedEditRect.left >= unnotedExcerptRect.right,
+            singleColumnControlsFirstLineAligned:
+              Math.abs(unnotedDeleteRect.top - unnotedExcerptRect.top) <= 1 &&
+              Math.abs(unnotedEditRect.top - unnotedExcerptRect.top) <= 1,
+            singleColumnControlsCenteredInPaperRim:
+              Math.abs(
+                unnotedDeleteRect.left +
+                  unnotedDeleteRect.width / 2 -
+                  (sheetRect.left + unnotedQuoteRect.left) / 2,
+              ) <= 1 &&
+              Math.abs(
+                unnotedEditRect.left +
+                  unnotedEditRect.width / 2 -
+                  (unnotedExcerptRect.right + sheetRect.right) / 2,
+              ) <= 1,
+            withinDayEntryGap:
+              secondEntry.getBoundingClientRect().top -
+              firstEntry.getBoundingClientRect().bottom,
+            dividerContent: dividerStyle.content,
+            excerptFontFamily: excerptStyle.fontFamily,
+            excerptFontWeight: Number(excerptStyle.fontWeight),
+            excerptLineHeight: Number.parseFloat(excerptStyle.lineHeight),
+            excerptFontSize: Number.parseFloat(excerptStyle.fontSize),
+            noteFontFamily: noteStyle.fontFamily,
+            dateFontSize: Number.parseFloat(dateStyle.fontSize),
+            dateFontStyle: dateStyle.fontStyle,
+            dateFontWeight: Number(dateStyle.fontWeight),
+            paperTextUsesTextCursor: [
+              dateLabelStyle,
+              getComputedStyle(site),
+              getComputedStyle(time),
+              excerptStyle,
+              noteStyle,
+            ].every((style) => style.cursor === 'text'),
+            titleUsesPointerCursor:
+              getComputedStyle(
+                firstPageGroup.querySelector('.highlight-history-page-title'),
+              ).cursor === 'pointer',
+            unifiedTextTypography:
+              new Set(
+                textStyles.map(
+                  (style) =>
+                    `${style.fontFamily}|${style.fontSize}|${style.fontStyle}|${style.fontWeight}|${style.lineHeight}|${style.letterSpacing}|${style.color}`,
+                ),
+              ).size === 1,
+            dateLetterSpacing: dateStyle.letterSpacing,
+            gentiumBookPlusLoaded: gentiumBookPlusFaces.some(
+              (face) => face.style === 'normal' && face.status === 'loaded',
+            ),
+            allInkAndRulesAreGrayscale: [
+              sheetStyle.borderColor,
+              excerptStyle.color,
+              noteStyle.color,
+              dateStyle.color,
+              quoteStyle.borderLeftColor,
+              dividerStyle.backgroundColor,
+              ...actionButtons.map((button) => getComputedStyle(button).color),
+            ].every(colorIsGrayscale),
+            actionButtonOpacity: actionButtons.map(
+              (button) => getComputedStyle(button).opacity,
+            ),
+            actionButtonPointerEvents: actionButtons.map(
+              (button) => getComputedStyle(button).pointerEvents,
+            ),
+            hasDedicatedHighlightContentBlock: Boolean(highlightContent),
+          };
+        });
+      expect(paperLayout).toMatchObject({
+        dateLabels: ['260730', '260729'],
+        entryCounts: [3, 1],
+        sheetBorderWidth: '1px',
+        sheetWidth: 680,
+        sheetCentered: true,
+        sheetNarrowerThanResults: true,
+        entryBackground: 'rgba(0, 0, 0, 0)',
+        entryBorderWidth: '0px',
+        entryBoxShadow: 'none',
+        titleLineRightAligned: true,
+        quoteBorderLeftWidth: '1px',
+        quoteBorderLeftStyle: 'solid',
+        quoteUsesTextInk: true,
+        quoteDoesNotScopeNote: true,
+        noteUsesTwoColumns: true,
+        noteColumnsSeparated: true,
+        unnotedHighlightUsesOneColumn: true,
+        unnotedBodyLeavesNoBlankRow: true,
+        singleColumnTextRightAligned: true,
+        singleColumnControlsOutsideText: true,
+        singleColumnControlsFirstLineAligned: true,
+        singleColumnControlsCenteredInPaperRim: true,
+        pageTitleVerticalPaddingBalanced: true,
+        unifiedTextTypography: true,
+        dividerContent: 'none',
+        paperTextUsesTextCursor: true,
+        titleUsesPointerCursor: true,
+        sheetBackground: 'rgb(255, 253, 244)',
+        gentiumBookPlusLoaded: true,
+        allInkAndRulesAreGrayscale: true,
+        actionButtonOpacity: ['0', '0'],
+        actionButtonPointerEvents: ['none', 'none'],
+        hasDedicatedHighlightContentBlock: true,
       });
-      expect(reusedDetailStyles).toEqual({
-        entryClass: true,
-        entryBorderLeftWidth: '0px',
-        metaBorderLeftWidth: '1px',
-        headerClass: true,
-        headerBorderLeftWidth: '3px',
-        headerMarginLeft: '0px',
-        bodyBorderLeftWidth: '1px',
-        excerptClass: true,
-        excerptWhiteSpace: 'pre-wrap',
-        excerptFontSize: '13px',
-        excerptFontStyle: 'normal',
-        noteFontSize: '13px',
-        quoteReachesCardLeft: true,
-      });
+      expect(paperLayout.sheetBackground).not.toBe('rgba(0, 0, 0, 0)');
+      expect(paperLayout.sheetHorizontalPadding).toBeLessThanOrEqual(44);
+      expect(paperLayout.quotePaddingLeft).toBeLessThanOrEqual(12);
+      expect(paperLayout.notePaddingTop).toBe(0);
+      expect(paperLayout.highlightToNoteWidthRatio).toBeGreaterThanOrEqual(1.4);
+      expect(paperLayout.highlightToNoteWidthRatio).toBeLessThanOrEqual(1.6);
+      expect(paperLayout.titleToTextGap).toBeGreaterThanOrEqual(7);
+      expect(paperLayout.titleToTextGap).toBeLessThanOrEqual(10);
+      expect(paperLayout.withinDayEntryGap).toBeLessThanOrEqual(10);
+      expect(paperLayout.excerptFontFamily).toContain('Gentium Book Plus');
+      expect(paperLayout.excerptFontWeight).toBeLessThanOrEqual(400);
+      expect(paperLayout.excerptLineHeight).toBeGreaterThan(
+        paperLayout.excerptFontSize,
+      );
+      expect(paperLayout.excerptLineHeight).toBeLessThanOrEqual(
+        paperLayout.excerptFontSize * 1.5,
+      );
+      expect(paperLayout.noteFontFamily).toContain('Gentium Book Plus');
+      expect(paperLayout.dateFontSize).toBeGreaterThan(
+        paperLayout.excerptFontSize,
+      );
+      expect(paperLayout.dateFontStyle).toBe('italic');
+      expect(paperLayout.dateFontWeight).toBeGreaterThanOrEqual(700);
+      expect(paperLayout.dateLetterSpacing).toBe('normal');
       await expect(
         page.locator('#results .highlight-history-list'),
       ).toHaveScreenshot(
@@ -2358,12 +3207,140 @@ test.describe('desktop visual regression', () => {
         },
       );
 
+      const unnotedEntry = entries.nth(1);
+      const unnotedEdit = unnotedEntry.locator('.detail-note-action-btn.edit');
+      const rimHoverPoint = await unnotedEntry.evaluate((entry) => {
+        const sheet = entry.closest('.highlight-history-list');
+        const content = entry.querySelector('.highlight-history-content');
+        const sheetRect = sheet.getBoundingClientRect();
+        const contentRect = content.getBoundingClientRect();
+        return {
+          x: sheetRect.left + 10,
+          y: contentRect.top + Math.min(8, contentRect.height / 2),
+        };
+      });
+      await page.mouse.move(rimHoverPoint.x, rimHoverPoint.y);
+      await expect(unnotedEdit).toHaveCSS('opacity', '1');
+      await unnotedEntry.locator('.highlight-history-content').hover();
+      await expect(unnotedEdit).toHaveCSS('opacity', '1');
+      await expect(
+        page.locator('#results .highlight-history-list'),
+      ).toHaveScreenshot(
+        process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'webkit'
+          ? 'desktop-highlight-history-unnoted-hover-webkit.png'
+          : 'desktop-highlight-history-unnoted-hover-amber.png',
+        {
+          animations: 'disabled',
+        },
+      );
+      await unnotedEdit.click();
+      const newNoteEditor = unnotedEntry.locator('.detail-note-editor');
+      await expect(newNoteEditor).toBeFocused();
+      const newNoteLayout = await unnotedEntry.evaluate((entry) => {
+        const content = entry.querySelector('.highlight-history-content');
+        const quote = entry.querySelector('.highlight-history-quote');
+        const editor = entry.querySelector('.detail-note-editor');
+        const quoteRect = quote.getBoundingClientRect();
+        const editorRect = editor.getBoundingClientRect();
+        return {
+          hasNoteLayout: content.classList.contains('has-note'),
+          columnCount: getComputedStyle(content)
+            .gridTemplateColumns.split(' ')
+            .filter(Boolean).length,
+          editorIsRightOfHighlight: editorRect.left >= quoteRect.right,
+          selectionInsideEditor: editor.contains(
+            window.getSelection()?.anchorNode,
+          ),
+        };
+      });
+      expect(newNoteLayout).toEqual({
+        hasNoteLayout: true,
+        columnCount: 2,
+        editorIsRightOfHighlight: true,
+        selectionInsideEditor: true,
+      });
+      await expect(
+        page.locator('#results .highlight-history-list'),
+      ).toHaveScreenshot(
+        process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'webkit'
+          ? 'desktop-highlight-history-unnoted-editor-webkit.png'
+          : 'desktop-highlight-history-unnoted-editor-amber.png',
+        {
+          animations: 'disabled',
+        },
+      );
+      await newNoteEditor.press('Escape');
+
+      const firstPageTitle = pageGroups
+        .first()
+        .locator('.highlight-history-page-title');
+      await expect(firstPageTitle).toHaveAttribute('role', 'link');
+      await firstPageTitle.click();
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness.openedExternalUrls(),
+          ),
+        )
+        .toEqual([secondUrl]);
+      await firstPageTitle.focus();
+      await firstPageTitle.press('Enter');
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness.openedExternalUrls(),
+          ),
+        )
+        .toEqual([secondUrl, secondUrl]);
+      await firstPageTitle.evaluate((title) => title.blur());
+
       const firstEntry = entries.first();
+      const firstEntryActions = firstEntry.locator('.detail-note-action-btn');
+      await pageGroups.first().locator('.highlight-history-meta').hover();
+      await expect(firstEntryActions.first()).toHaveCSS('opacity', '0');
+      await expect(firstEntryActions.last()).toHaveCSS('opacity', '0');
+      await firstEntry.locator('.highlight-history-content').hover();
+      await expect(firstEntryActions.first()).toHaveCSS('opacity', '1');
+      await expect(firstEntryActions.last()).toHaveCSS('opacity', '1');
+      const renderedNoteGeometry = await firstEntry.evaluate((entry) => {
+        const body = entry.querySelector('.detail-note-body');
+        const note = entry.querySelector('.detail-note-content');
+        return {
+          columnWidth: body.getBoundingClientRect().width,
+          textWidth: note.getBoundingClientRect().width,
+        };
+      });
       await firstEntry.locator('.detail-note-action-btn.edit').click();
       const editor = firstEntry.locator(
         '.detail-note-editor[contenteditable="plaintext-only"]',
       );
       await expect(editor).toBeFocused();
+      const editorGeometry = await firstEntry.evaluate((entry) => {
+        const body = entry.querySelector('.detail-note-body');
+        const editor = entry.querySelector('.detail-note-editor');
+        return {
+          columnWidth: body.getBoundingClientRect().width,
+          textWidth: editor.getBoundingClientRect().width,
+        };
+      });
+      expect(editorGeometry.columnWidth).toBeCloseTo(
+        renderedNoteGeometry.columnWidth,
+        1,
+      );
+      expect(editorGeometry.textWidth).toBeCloseTo(
+        renderedNoteGeometry.textWidth,
+        1,
+      );
+      await expect(
+        page.locator('#results .highlight-history-list'),
+      ).toHaveScreenshot(
+        process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'webkit'
+          ? 'desktop-highlight-history-noted-editor-webkit.png'
+          : 'desktop-highlight-history-noted-editor-amber.png',
+        {
+          animations: 'disabled',
+        },
+      );
       await expect(firstEntry.locator('textarea, input')).toHaveCount(0);
       const editorChrome = await editor.evaluate((element) => {
         const style = getComputedStyle(element);
@@ -2404,6 +3381,20 @@ test.describe('desktop visual regression', () => {
           noteSlug: 'highlight-second-page',
           note: 'Edited directly in place',
         });
+      const followupEntry = page.locator(
+        '.highlight-history-entry[data-note-slug="highlight-second-page-followup"]',
+      );
+      await followupEntry.locator('.highlight-history-content').hover();
+      await followupEntry.locator('.detail-note-action-btn.delete').click();
+      await expect(followupEntry).toHaveCount(0);
+      await expect(
+        pageGroups.first().locator('.highlight-history-entry'),
+      ).toHaveCount(1);
+      await expect(
+        pageGroups.first().locator('.highlight-history-page-title'),
+      ).toHaveText('Second highlight page');
+      await page.locator('#exploreBtn').click();
+      await expect(page.locator('#results [data-justif]')).toHaveCount(0);
     });
   });
 
@@ -2436,6 +3427,7 @@ test.describe('desktop visual regression', () => {
       );
       const before = await highlightHistoryViewportState(page, anchorSlug);
 
+      await deletedEntry.locator('.highlight-history-content').hover();
       await deletedEntry.locator('.detail-note-action-btn.delete').click();
       await expect(deletedEntry).toHaveCount(0);
       await expect(anchorEntry).toHaveAttribute(
@@ -2453,7 +3445,7 @@ test.describe('desktop visual regression', () => {
     });
   });
 
-  test('editing a scrolled highlight keeps its card and surrounding content anchored', async ({
+  test('editing a scrolled highlight keeps its entry and surrounding content anchored', async ({
     page,
   }) => {
     const fixtures = denseHighlightHistoryFixtures(Date.now());
@@ -2479,6 +3471,7 @@ test.describe('desktop visual regression', () => {
       );
       const before = await highlightHistoryViewportState(page, editedSlug);
 
+      await editedEntry.locator('.highlight-history-content').hover();
       await editedEntry.locator('.detail-note-action-btn.edit').click();
       const editing = await highlightHistoryViewportState(page, editedSlug);
       expect(
@@ -2541,6 +3534,7 @@ test.describe('desktop visual regression', () => {
       const entry = page.locator(
         `.highlight-history-entry[data-note-slug="${noteSlug}"]`,
       );
+      await entry.locator('.highlight-history-content').hover();
       await entry.locator('.detail-note-action-btn.edit').click();
       await entry.locator('.detail-note-editor').fill('Stable note 00');
       await entry.locator('.detail-note-action-btn.confirm').click();
@@ -2585,6 +3579,7 @@ test.describe('desktop visual regression', () => {
       });
       await page.locator('#highlightsHistoryBtn').click();
 
+      await page.locator('.highlight-history-content').hover();
       await page
         .locator('.highlight-history-entry .detail-note-action-btn.delete')
         .click();
@@ -5792,126 +6787,6 @@ test.describe('desktop visual regression', () => {
       });
 
       expect(chartMetrics.barTop).toBeGreaterThan(chartMetrics.rowTop);
-    });
-  });
-
-  test('chart to result gap remains stable after selecting rows and resizing @webkit', async ({
-    page,
-  }) => {
-    const now = Date.now();
-    const historyEntries = Array.from({ length: 80 }, (_, i) => ({
-      url: `https://example.com/stable-layout-${i}`,
-      title: `Stable layout ${i}`,
-      timestamp: now - i * 7 * 24 * 60 * 60 * 1000,
-      deviceId: 'device-a',
-    }));
-
-    await serveDesktopUi(async (desktopUrl) => {
-      await page.setViewportSize({ width: 900, height: 560 });
-      await openDesktopUi(page, desktopUrl, {
-        setupComplete: true,
-        colorScheme: 'amber',
-        historyEntries,
-      });
-      await expect(page.locator('#relatedChart.visible')).toBeVisible();
-      await page.waitForFunction(
-        () => document.querySelectorAll('#relatedResults .result-row').length,
-      );
-
-      const measureLayout = async () =>
-        page.evaluate(() => {
-          const chart = document.getElementById('relatedChart');
-          const chartBars = document.getElementById('relatedChartBars');
-          const chartContent = chartBars.querySelector('.chart-content');
-          const resultsWrapper = document.getElementById(
-            'relatedResultsWrapper',
-          );
-          const firstItem = document.querySelector(
-            '#relatedResults .result-item',
-          );
-          const chartRect = chart.getBoundingClientRect();
-          const chartBarsRect = chartBars.getBoundingClientRect();
-          const chartContentRect = chartContent.getBoundingClientRect();
-          const itemRect = firstItem.getBoundingClientRect();
-          return {
-            outerGap: Math.round(itemRect.top - chartRect.bottom),
-            visibleGap: Math.round(itemRect.top - chartContentRect.bottom),
-            chartBarsHeight: Math.round(chartBarsRect.height),
-            resultsWrapperHeight: Math.round(
-              resultsWrapper.getBoundingClientRect().height,
-            ),
-            resultsWrapperScrollHeight: resultsWrapper.scrollHeight,
-          };
-        });
-
-      const initialLayout = await measureLayout();
-      expect(initialLayout.outerGap).toBeGreaterThanOrEqual(0);
-      expect(initialLayout.outerGap).toBeLessThanOrEqual(12);
-      expect(initialLayout.resultsWrapperHeight).toBe(
-        initialLayout.resultsWrapperScrollHeight,
-      );
-
-      await page.locator('#relatedResults .result-row').first().click();
-      await expect(
-        page.locator('#relatedResults .result-row.selected'),
-      ).toHaveCount(1);
-      const firstSelectionLayouts = [];
-      for (let sample = 0; sample < 10; sample += 1) {
-        await page.waitForTimeout(50);
-        firstSelectionLayouts.push(await measureLayout());
-      }
-      expect(firstSelectionLayouts).toEqual(
-        Array.from({ length: 10 }, () => initialLayout),
-      );
-
-      await page.setViewportSize({ width: 1280, height: 820 });
-      await expect.poll(measureLayout).toEqual(initialLayout);
-    });
-  });
-
-  test('explore page list fills the remaining main pane height', async ({
-    page,
-  }) => {
-    const now = Date.now();
-    const historyEntries = [
-      {
-        url: 'https://example.com/sparse-layout',
-        title: 'Sparse layout',
-        timestamp: now,
-        deviceId: 'device-a',
-      },
-    ];
-
-    await serveDesktopUi(async (desktopUrl) => {
-      await openDesktopUi(page, desktopUrl, {
-        setupComplete: true,
-        colorScheme: 'amber',
-        historyEntries,
-      });
-      await expect(page.locator('#relatedChart.visible')).toBeVisible();
-      await expect(page.locator('#relatedResults .result-row')).toHaveCount(1);
-
-      const metrics = await page.evaluate(() => {
-        const main = document.querySelector('.main').getBoundingClientRect();
-        const list = document
-          .getElementById('listLayout')
-          .getBoundingClientRect();
-        const wrapper = document
-          .getElementById('relatedResultsWrapper')
-          .getBoundingClientRect();
-        return {
-          mainBottom: Math.round(main.bottom),
-          listBottom: Math.round(list.bottom),
-          wrapperBottom: Math.round(wrapper.bottom),
-        };
-      });
-
-      expect(
-        Math.abs(metrics.listBottom - metrics.mainBottom),
-      ).toBeLessThanOrEqual(1);
-      expect(
-        Math.abs(metrics.wrapperBottom - metrics.mainBottom),
-      ).toBeLessThanOrEqual(1);
     });
   });
 

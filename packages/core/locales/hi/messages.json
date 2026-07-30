@@ -1576,5 +1576,13 @@
   "desktopListNamePlaceholder": {
     "message": "सूची का नाम...",
     "description": "सूची नाम इनपुट का प्लेसहोल्डर।"
+  },
+  "desktopTimeline": {
+    "message": "समयरेखा",
+    "description": "Primary desktop timeline navigation label."
+  },
+  "desktopBook": {
+    "message": "पुस्तक",
+    "description": "Primary desktop highlight-book navigation label."
   }
 }

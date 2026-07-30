@@ -1576,5 +1576,13 @@
   "desktopListNamePlaceholder": {
     "message": "清單名稱...",
     "description": "清單名稱輸入預留位置。"
+  },
+  "desktopTimeline": {
+    "message": "時間軸",
+    "description": "Primary desktop timeline navigation label."
+  },
+  "desktopBook": {
+    "message": "書冊",
+    "description": "Primary desktop highlight-book navigation label."
   }
 }

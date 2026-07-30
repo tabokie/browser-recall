@@ -1,0 +1,48 @@
+- When I pause extension tracking for a long time and then re-enable it, the popup sometimes says "Could not establish connection. Receiving end does not exist.".
+- The style of the highlight edit UI on a browser page should be consistent with what's in popup UI.
+- Let's rework the style of desktop highlight history view. I want to make it so the entire list of highlights are laid out on a sheet of paper, and the typography is delicate enough to mirror the feel of a printed paper. The structure is, highlights of each day is grouped into a section starting with format yymmdd, use thin and short and centered divider line to separate multiple highlights within the same day, use a quoted decorator line to scope the individual block of highlights.
+- All elements should be in black-and-white, no colored lines. The quote decorator line should not extend to note text. The buttons should only appear when hovered over the entry (the block area of highlight and note).
+- Use "Gentium Book Plus" as font, use a slight yellow-ish color as the paper color.
+- When I enter notes for a highlight on a browser page, some keys pass through to the web. E.g. space is captured by the web video player instead of going into the editor.
+- The issue of "distance between page list and time chart is widened when for the first time a page is selected" is still not fixed. This is the third time I'm asking you to fix. Please review the testing and the two versions of fixes before and figure out what went wrong. Don't just assume you got the full picture and do the fix right away.
+- Use [lyallcooper/justif](https://github.com/lyallcooper/justif) to format the text so that they appear more compact.
+- What do you mean by "Justif bundled locally". Isn't it a npm dependency?
+- Still not fixed. Majority of the lists I owned still exhibit the same problem. I asked you not to fix on broken assumption of the situation. Please revert all three fixes in the past, and examine the situation thoroughly.
+- Reduce the paper size and reduce the text padding, so that the paper is more compact visually. All text should be in the same font size and font style, the line distance are the same as well. For highlight with note, render them in a two-column format.
+- Why is the site and timestamp still not in the same font style?
+- For highlight that do no have a note, remove the blank line placeholder, and move the edit note button to within the highlight block (still bottom-right corner).
+- (1) On the right hand side of the paper, the page title line protrude more than the highlight/note part of the text. Let's make them aligned. (2) Make mouse a cursor when hovered over text on paper. (3) Remove the divider line, and reduce the distance between title line and highlight text, so that text within a day appears more consistent and more compact. (4) Single click the title to enter the page in system browser. (5) When clicking edit note on a highlight that has no note before, we automatically enter the two-column layout and show text input cursor on the right side. (6) When enter edit note mode, keep the text box size stable. Right now when I edit, the note section's width slightly reduces.
+- For single-column layout, the highlight text is still not aligned to the title text because of button taking the space. I want you to move button outside the text area, the delete button is on the left, the note-taking button is on the right. Both buttons align to the first line of the block.
+- The distance between text and button is too small. Make the button centered on the rim of the paper.
+- Slightly reduce the width of the note column (and enlarge the highlight). Show the buttons even when mouse is over the paper rim. The selected text should be styled in consistent with the whole paper aesthetics. The selection between segments needs to be improved, right now there is an invisible line at the boundary that are wider than the paper.
+- Change the date title to bigger bold with italic style. Reduce the width of note column slightly more. Collapse sibling entries in the same day that are referencing the same page. By collapsing, I mean display the page title/url only once, but display multiple entries each with their own quotation decoration line. Reduce the line padding distance *after* the highlight before the next entry, make it so that the padding before and after the page title is the same.
+- Text selection around the title (including date title and page title) is still off, a longer-than necessary line is selected that overflows the paper.
+- What is the .js-snapshots folder used for?
+- When I enter full-screen UI, the scroll position always resets to zero briefly after making the switch.
+- Is there an option with justif to do work breaking? I see some breaking opportunities but none taken.
+- Go ahead
+- What do you mean by "Highlights containing source line breaks currently skip Justif entirely"
+- That doesn't sound right. I see highlights with multiple paragraphs being formatted alright.
+- No, I mean the formatting is very good, as in there's no way that native formatting can achieve the same result. Please don't put words in my mouth. You can check the live UI right now, e.g. the first highlight at 260721 is formatted perfectly even though it has a line break inside.
+- So does line break affect formatting or not? What about the earlier theory? What bit of it is wrong? We need to build correct mental model before proceeding.
+- Tell me the context of using highlight-history-segment-break instead of native line breaks.
+- (1) Stop using highlight-history-segment-break, make sure justif works on multi-paragraphs excerpts. Ignore text-selection issue for now. (2) Let's try enable hyphenation for note column first because it is narrower and more in need. (3) Slightly increase the line weight of the quotation decorator line, so that the line and text share the same weight visually. (4) Take a look at the text copy, it seems broken on the highlight view UI.
+- (1) The quotation line is too thick, and it's not fully black. (2) I cannot select text at all, only the negative space is selected but text remains unselected.
+- Use 方正书宋 FZSS as Chinese font face (only within the history note view)
+- Forget it, I thought the font is open-sourced. Revert changes around font selection.
+- Avoid applying selection over the negative space of text. Also, I can't select the page title currently.
+- Rework the two buttons on sidebar to "Timeline" and "Book". I want them to be the hero elements of the entire show, they should have a coolness within their visual appearance, make them satisfying to watch and click.
+- That's an interesting direction! Let's remove the sheen, it's a bit distracting. Based on the shape you designed, I suggest we go for a keyboard aesthetics, style them similar to an old-school keyboard's keycap, make them smaller with more rigid frame shape, and put more emphasis on the button height and depth, also make text/icon centered within the button.
+- Not good enough. Take a look at ./button.gif, can we reproduce this look?
+- That's a faithful reproduction, but the cartoonish style is a bit inconsistent with the rest of the UI. Could we tweak it further, make it more aligned with the liquid glass theme without losing the "calculator key" concept?
+- Nope, that is too ugly and unpolished, feels like outdated skeuomorphic from a decade ago.
+- The first version is good as buttons in mono theme, let's think of some other options for the amber theme.
+- Not bad. Some feedbacks: (1) Reduce the overall height and make the arrangement more compact, (2) Improve the "shadow" effect of the mono version, right now the bottom rim of the button flickers a lot when releasing. I want the bottom side of the button to be positioned stably, remove the shadow if needed.
+- In amber theme, there's a delay between button flip and the button text becoming amber colored. They should change at the same time.
+- [$flatten](/Users/xyt/dev/skills/flatten/SKILL.md) the entire history note view part of desktop app.
+- Please review my uncommitted changes
+- Fix them
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.6 Sol
+- Go
+- As code comment somewhere
+- As code comment somewhere
