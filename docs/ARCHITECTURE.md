@@ -109,17 +109,26 @@ Shell, device-identity, directory, and connector reads are strict DTOs. Required
 
 The desktop shell scrolls the main results pane and sidebar independently. Results containers keep a bottom gutter aligned to the sidebar bottom edge, and the virtual scroller preserves that gutter as part of its base padding. Fullscreen toggles capture both scroll containers before the native window transition and restore them through its resize sequence, preventing the webview's transient zero-height/clamped state from replacing either position.
 
-The sidebar's primary Timeline and Book destinations form one paired hero mode
-deck above Lists. Amber presents the pair as one compact translucent instrument
-rail: its flush cells keep the centered horizontal line-art motifs, and the
-selected legend receives the accent light without a molded keycap or moving
-lower rim. Mono deliberately uses the stronger calculator reference as two
-separate outlined keycaps with uppercase legends and a solid selected face.
-Their frames remain fixed through pointer-down and release; only the mono
-legend moves by one pixel, preventing the bottom edge from flickering. The deck
-uses localized labels, respects reduced-motion preferences, and responds to the
-resizable sidebar as one horizontal pair at normal widths or two compact rows
-below 210 px.
+The sidebar's primary Timeline and Book destinations form a calm one-column
+navigation stack above Lists. Each destination is a 36 px, left-aligned pill
+row with a compact line icon and sentence-case localized label; the selected
+row receives the current scheme's accent surface without keycap chrome,
+translation, or a font-weight jump. Clicking a destination activates its pill
+and matching main title synchronously. The title retains the selected
+destination's localization key, so a persisted-locale catalog that finishes
+loading later re-translates the active title instead of resetting it to
+Timeline. Content rendering starts only after the
+finite pill and icon activation transitions have settled and a final painted
+frame has been presented, so loading the main view cannot create a second
+activation phase. The gate recognizes only the selected pill's background,
+shadow, and color transitions plus its icon color transition; unrelated badge,
+looping, and paused animations are not part of it. The pill and icon share one
+transition-duration token, including the 1 ms
+reduced-motion override, and the vertical layout remains stable while the
+sidebar is resized. Root lists with children expose accessible, CSS-drawn
+`−`/`+` folder toggles; leaf lists use a small hollow circle whose outline color
+matches those toggles. The Settings icon is held to the sidebar's smaller 16 px
+utility size.
 
 The sidebar exposes a highlight-history view directly after Explore. It renders
 each live highlight note in time-descending order, including multiple highlights
@@ -158,14 +167,14 @@ fallback. Multi-segment source newlines remain native `<br>` hard breaks inside
 the managed paragraph, so Justif composes all segments and its clipboard
 cleanup restores exact source newlines without layout-only characters. The
 narrower note column skips Justif's non-hyphenating first pass so discretionary
-hyphenation participates in its initial layout. Structural elements inside the
-paper are selection-transparent:
-date and page-title label glyphs shift to muted ink without a background, so a
-selection that crosses their block boundary cannot produce WebKit's oversized
-line highlight. Excerpt and note selections, including Justif's generated
-inline segments, use the same glyph-only muted ink treatment; selection never
-paints a background across spaces or line-box negative space. Each excerpt's
-1 px quote rule uses the same black ink as the text. Entering the
+hyphenation participates in its initial layout. Selectable content inside the
+paper uses a visible neutral-grey selection fill while preserving its normal
+ink color, including date and page-title labels, metadata, excerpts, notes,
+editors, and Justif's generated inline segments. Light and dark themes provide
+separate grayscale fill tokens with the same opacity. Justif's synthetic break
+marker remains selection-transparent so it cannot produce an oversized WebKit
+boundary highlight. Each excerpt's 1 px quote rule uses the same black ink as
+the text. Entering the
 contenteditable note editor tears down the managed
 paragraph first and reapplies it only after rendered note content returns.
 Page-detail edit/delete controls remain hidden until their highlight-and-note

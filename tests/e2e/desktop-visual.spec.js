@@ -338,6 +338,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       loadHistoryBatchDelayMs,
       highlightHistoryDelayMs,
       readDesktopValueDelayMs,
+      getSettingsDelayMs,
       resumeServiceDelayMs,
       updateNoteDelayMs,
       fullscreenScrollResetDelayMs,
@@ -1140,6 +1141,11 @@ async function installDesktopBridgeMock(page, options = {}) {
           case 'getRecycleBin':
             return { success: true, entries: getRecycleBin() };
           case 'getSettings':
+            if (getSettingsDelayMs > 0) {
+              await new Promise((resolve) =>
+                setTimeout(resolve, getSettingsDelayMs),
+              );
+            }
             return {
               success: true,
               settings: readDesktopValue('manifest:settings'),
@@ -1390,6 +1396,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       loadHistoryBatchDelayMs: options.loadHistoryBatchDelayMs || 0,
       highlightHistoryDelayMs: options.highlightHistoryDelayMs || 0,
       readDesktopValueDelayMs: options.readDesktopValueDelayMs || 0,
+      getSettingsDelayMs: options.getSettingsDelayMs || 0,
       resumeServiceDelayMs: options.resumeServiceDelayMs || 0,
       updateNoteDelayMs: options.updateNoteDelayMs || 0,
       fullscreenScrollResetDelayMs:
@@ -1405,15 +1412,17 @@ async function openDesktopUi(page, desktopUrl, options = {}) {
   await page.setViewportSize({ width: 1280, height: 820 });
   await installDesktopBridgeMock(page, options);
   await page.goto(desktopUrl);
-  await page.addStyleTag({
-    content: `
-      *, *::before, *::after {
-        animation-duration: 0s !important;
-        transition-duration: 0s !important;
-        caret-color: transparent !important;
-      }
-    `,
-  });
+  if (!options.preserveMotion) {
+    await page.addStyleTag({
+      content: `
+        *, *::before, *::after {
+          animation-duration: 0s !important;
+          transition-duration: 0s !important;
+          caret-color: transparent !important;
+        }
+      `,
+    });
+  }
   await page.waitForFunction(() => document.body.dataset.ready === 'true');
   await page.evaluate(() => document.fonts?.ready);
 }
@@ -1559,13 +1568,14 @@ test.describe('desktop visual regression', () => {
     });
   });
 
-  test('sidebar hero destinations use an amber glass rail and mono keycaps', async ({
+  test('sidebar destinations and list tree use calm navigation affordances', async ({
     page,
   }) => {
     await serveDesktopUi(async (desktopUrl) => {
       await openDesktopUi(page, desktopUrl, {
         setupComplete: true,
         colorScheme: 'amber',
+        preserveMotion: true,
       });
 
       const heroDeck = page.locator('.sidebar-hero-nav');
@@ -1596,15 +1606,17 @@ test.describe('desktop visual regression', () => {
               .map((property) => property.trim())
               .includes('color'),
           ),
-          deckGlassFilter:
+          deckBackground: getComputedStyle(deck).backgroundImage,
+          deckBorderWidth: getComputedStyle(deck).borderTopWidth,
+          deckFilter:
             getComputedStyle(deck).backdropFilter ||
             getComputedStyle(deck).webkitBackdropFilter,
-          centeredContents: buttons.every((button) => {
+          leftAlignedContents: buttons.every((button) => {
             const style = getComputedStyle(button);
             return (
               style.display === 'flex' &&
               style.alignItems === 'center' &&
-              style.justifyContent === 'center'
+              style.justifyContent === 'flex-start'
             );
           }),
           sheenRemoved: buttons.every(
@@ -1614,20 +1626,96 @@ test.describe('desktop visual regression', () => {
         };
       });
       expect(geometry).toEqual({
-        columns: 2,
-        buttonHeights: [42, 42],
-        buttonRadii: [9, 9],
+        columns: 1,
+        buttonHeights: [36, 36],
+        buttonRadii: [9999, 9999],
         buttonBorderWidths: [0, 0],
-        transformTransitions: [true, true],
-        colorTransitions: [false, false],
-        deckGlassFilter: 'blur(16px) saturate(1.12)',
-        centeredContents: true,
+        transformTransitions: [false, false],
+        colorTransitions: [true, true],
+        deckBackground: 'none',
+        deckBorderWidth: '0px',
+        deckFilter: 'none',
+        leftAlignedContents: true,
         sheenRemoved: true,
       });
       await expect(timeline).toHaveClass(/active/);
       await expect(book).not.toHaveClass(/active/);
       await expect(timeline.locator('.hero-timeline-node')).toHaveCount(3);
       await expect(book.locator('.hero-book-page')).toHaveCount(2);
+
+      const research = page.locator('.sidebar-item[data-list-id="research"]');
+      const design = page.locator('.sidebar-item[data-list-id="design"]');
+      const reading = page.locator('.sidebar-item[data-list-id="reading"]');
+      const researchToggle = research.locator('.fold-toggle');
+      await expect(researchToggle).toHaveAttribute('aria-label', 'Collapse');
+      await expect(researchToggle).toHaveAttribute('aria-expanded', 'true');
+      expect(
+        await researchToggle.evaluate((button) => ({
+          text: button.textContent.trim(),
+          horizontalStroke: getComputedStyle(button, '::before').content,
+          verticalStrokeOpacity: getComputedStyle(button, '::after').opacity,
+        })),
+      ).toEqual({
+        text: '',
+        horizontalStroke: '""',
+        verticalStrokeOpacity: '0',
+      });
+      await expect(research.locator('.list-leaf-dot')).toHaveCount(0);
+      await expect(design.locator('.list-leaf-dot')).toHaveCount(1);
+      await expect(design.locator('.fold-toggle')).toHaveCount(0);
+      await expect(reading.locator('.list-leaf-dot')).toHaveCount(1);
+      await expect(page.locator('#settingsBtn svg')).toHaveCSS('width', '16px');
+      await expect(page.locator('#settingsBtn svg')).toHaveCSS(
+        'height',
+        '16px',
+      );
+      expect(
+        await design.locator('.list-leaf-dot').evaluate((marker) => {
+          const dot = getComputedStyle(marker, '::before');
+          const foldToggle = document.querySelector('.fold-toggle');
+          return {
+            backgroundColor: dot.backgroundColor,
+            borderStyle: dot.borderTopStyle,
+            borderWidth: dot.borderTopWidth,
+            width: dot.width,
+            height: dot.height,
+            markerMatchesToggle:
+              dot.borderTopColor === getComputedStyle(foldToggle).color,
+          };
+        }),
+      ).toEqual({
+        backgroundColor: 'rgba(0, 0, 0, 0)',
+        borderStyle: 'solid',
+        borderWidth: '1px',
+        width: '4px',
+        height: '4px',
+        markerMatchesToggle: true,
+      });
+
+      await researchToggle.click();
+      await expect(researchToggle).toHaveAttribute('aria-label', 'Expand');
+      await expect(researchToggle).toHaveAttribute('aria-expanded', 'false');
+      await expect
+        .poll(() =>
+          researchToggle.evaluate(
+            (button) => getComputedStyle(button, '::after').opacity,
+          ),
+        )
+        .toBe('1');
+      await expect(
+        page.locator('.sidebar-children[data-parent-slug="research"]'),
+      ).toBeHidden();
+      await researchToggle.click();
+      await expect
+        .poll(() =>
+          researchToggle.evaluate(
+            (button) => getComputedStyle(button, '::after').opacity,
+          ),
+        )
+        .toBe('0');
+      await expect(
+        page.locator('.sidebar-children[data-parent-slug="research"]'),
+      ).toBeVisible();
 
       await book.hover();
       await expect
@@ -1660,12 +1748,12 @@ test.describe('desktop visual regression', () => {
             return Math.round(matrix.a * 1000) / 1000;
           }),
         )
-        .toBe(0.965);
+        .toBe(1);
       await page.mouse.up();
 
       await expect(book).toHaveClass(/active/);
       await expect(timeline).not.toHaveClass(/active/);
-      await expect(page.locator('#mainTitle')).toHaveText('Highlights');
+      await expect(page.locator('#mainTitle')).toHaveText('Book');
       await expect
         .poll(() =>
           book.evaluate((button) => {
@@ -1707,33 +1795,11 @@ test.describe('desktop visual regression', () => {
         .toEqual({
           deckBackground: 'none',
           deckBorder: '0px',
-          buttonHeight: 42,
-          buttonBorder: '2px',
+          buttonHeight: 36,
+          buttonBorder: '0px',
           buttonShadow: 'none',
-          labelTransform: 'uppercase',
+          labelTransform: 'none',
         });
-
-      const monoBookBox = await book.boundingBox();
-      expect(monoBookBox).not.toBeNull();
-      const monoBottomBeforePress = monoBookBox.y + monoBookBox.height;
-      await page.mouse.move(
-        monoBookBox.x + monoBookBox.width / 2,
-        monoBookBox.y + monoBookBox.height / 2,
-      );
-      await page.mouse.down();
-      await expect
-        .poll(async () => {
-          const pressedBox = await book.boundingBox();
-          return Math.round((pressedBox.y + pressedBox.height) * 10) / 10;
-        })
-        .toBe(Math.round(monoBottomBeforePress * 10) / 10);
-      await page.mouse.up();
-      await expect
-        .poll(async () => {
-          const releasedBox = await book.boundingBox();
-          return Math.round((releasedBox.y + releasedBox.height) * 10) / 10;
-        })
-        .toBe(Math.round(monoBottomBeforePress * 10) / 10);
 
       await expect(heroDeck).toHaveScreenshot(
         'desktop-sidebar-hero-book-active-mono.png',
@@ -1756,7 +1822,166 @@ test.describe('desktop visual regression', () => {
             ),
           })),
         )
-        .toEqual({ columns: 1, heights: [40, 40] });
+        .toEqual({ columns: 1, heights: [36, 36] });
+
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      expect(
+        await timeline.evaluate((button) => ({
+          buttonDurations: getComputedStyle(button)
+            .transitionDuration.split(',')
+            .map((duration) => duration.trim()),
+          iconDurations: getComputedStyle(
+            button.querySelector('.sidebar-hero-icon'),
+          )
+            .transitionDuration.split(',')
+            .map((duration) => duration.trim()),
+        })),
+      ).toEqual({
+        buttonDurations: ['0.001s', '0.001s', '0.001s'],
+        iconDurations: ['0.001s'],
+      });
+    });
+  });
+
+  test('timeline selection paints before timeline content rendering starts @webkit', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        preserveMotion: true,
+      });
+
+      await page.locator('#highlightsHistoryBtn').click();
+      await expect(page.locator('#listLayout')).not.toHaveClass(/visible/);
+
+      await page.evaluate(() => {
+        const timeline = document.getElementById('exploreBtn');
+        const listLayout = document.getElementById('listLayout');
+        const badge = timeline.querySelector('.explore-badge');
+        badge.animate([{ opacity: 0.99 }, { opacity: 1 }], {
+          duration: 1000,
+          easing: 'linear',
+        });
+        badge.animate([{ transform: 'none' }, { transform: 'scale(1)' }], {
+          duration: 1000,
+          iterations: Infinity,
+        });
+        window.__timelineLayoutStartState = new Promise((resolve) => {
+          const observer = new MutationObserver(() => {
+            if (!listLayout.classList.contains('visible')) return;
+            observer.disconnect();
+            const animations = timeline.getAnimations({ subtree: true });
+            const icon = timeline.querySelector('.sidebar-hero-icon');
+            const isActivationTransition = (animation) => {
+              if (!(animation instanceof CSSTransition)) return false;
+              const target = animation.effect?.target;
+              return (
+                (target === timeline &&
+                  ['background-color', 'box-shadow', 'color'].includes(
+                    animation.transitionProperty,
+                  )) ||
+                (target === icon && animation.transitionProperty === 'color')
+              );
+            };
+            resolve({
+              unfinishedActivationTransitionCount: animations.filter(
+                (animation) =>
+                  isActivationTransition(animation) &&
+                  animation.playState !== 'finished',
+              ).length,
+              unfinishedUnrelatedFiniteAnimationCount: animations.filter(
+                (animation) =>
+                  !isActivationTransition(animation) &&
+                  Number.isFinite(
+                    animation.effect?.getComputedTiming().endTime,
+                  ) &&
+                  animation.playState !== 'finished',
+              ).length,
+              unfinishedInfiniteAnimationCount: animations.filter(
+                (animation) =>
+                  animation.effect?.getComputedTiming().endTime === Infinity &&
+                  animation.playState !== 'finished',
+              ).length,
+            });
+          });
+          observer.observe(listLayout, {
+            attributes: true,
+            attributeFilter: ['class'],
+          });
+        });
+        window.__timelineFirstPaintState = new Promise((resolve) => {
+          timeline.addEventListener(
+            'click',
+            () => {
+              requestAnimationFrame(() => {
+                setTimeout(() => {
+                  resolve({
+                    timelineActive: timeline.classList.contains('active'),
+                    bookActive: document
+                      .getElementById('highlightsHistoryBtn')
+                      .classList.contains('active'),
+                    resultsVisible:
+                      getComputedStyle(
+                        document.getElementById('resultsWrapper'),
+                      ).display !== 'none',
+                    timelineLayoutStarted: document
+                      .getElementById('listLayout')
+                      .classList.contains('visible'),
+                    buttonAnimatesColor: getComputedStyle(timeline)
+                      .transitionProperty.split(',')
+                      .map((property) => property.trim())
+                      .includes('color'),
+                    iconAnimatesColor: getComputedStyle(
+                      timeline.querySelector('.sidebar-hero-icon'),
+                    )
+                      .transitionProperty.split(',')
+                      .map((property) => property.trim())
+                      .includes('color'),
+                    buttonTransitionDurations: getComputedStyle(timeline)
+                      .transitionDuration.split(',')
+                      .map((duration) => duration.trim()),
+                    iconTransitionDurations: getComputedStyle(
+                      timeline.querySelector('.sidebar-hero-icon'),
+                    )
+                      .transitionDuration.split(',')
+                      .map((duration) => duration.trim()),
+                    labelFontWeight: getComputedStyle(
+                      timeline.querySelector('.sidebar-hero-label'),
+                    ).fontWeight,
+                  });
+                }, 0);
+              });
+            },
+            { once: true },
+          );
+        });
+      });
+      await page.locator('#exploreBtn').click();
+      const firstPaintState = await page.evaluate(
+        () => window.__timelineFirstPaintState,
+      );
+
+      expect(firstPaintState).toEqual({
+        timelineActive: true,
+        bookActive: false,
+        resultsVisible: true,
+        timelineLayoutStarted: false,
+        buttonAnimatesColor: true,
+        iconAnimatesColor: true,
+        buttonTransitionDurations: ['0.14s', '0.14s', '0.14s'],
+        iconTransitionDurations: ['0.14s'],
+        labelFontWeight: '500',
+      });
+      await expect(page.locator('#listLayout')).toHaveClass(/visible/);
+      expect(
+        await page.evaluate(() => window.__timelineLayoutStartState),
+      ).toEqual({
+        unfinishedActivationTransitionCount: 0,
+        unfinishedUnrelatedFiniteAnimationCount: 1,
+        unfinishedInfiniteAnimationCount: 1,
+      });
     });
   });
 
@@ -1951,7 +2176,8 @@ test.describe('desktop visual regression', () => {
       await installDesktopBridgeMock(page, {
         setupComplete: true,
         colorScheme: 'amber',
-        readDesktopValueDelayMs: 3000,
+        getSettingsDelayMs: 3000,
+        localeOverride: 'es',
       });
       await page.goto(desktopUrl);
 
@@ -1967,6 +2193,18 @@ test.describe('desktop visual regression', () => {
       await expect(page.locator('#searchDraftInput')).toBeVisible({
         timeout: 1000,
       });
+      await page.locator('#highlightsHistoryBtn').click();
+      await expect(page.locator('#highlightsHistoryBtn')).toHaveClass(/active/);
+      await expect(page.locator('#mainTitle')).toHaveText('Book');
+
+      await page.waitForFunction(() => document.body.dataset.ready === 'true', {
+        timeout: 7000,
+      });
+      await expect(page.locator('#highlightsHistoryBtn')).toHaveClass(/active/);
+      await expect(
+        page.locator('#highlightsHistoryBtn .sidebar-hero-label'),
+      ).toHaveText('Libro');
+      await expect(page.locator('#mainTitle')).toHaveText('Libro');
     });
   });
 
@@ -2222,7 +2460,7 @@ test.describe('desktop visual regression', () => {
         extraSession,
       });
 
-      await expect(page.locator('#mainTitle')).toHaveText('Explore');
+      await expect(page.locator('#mainTitle')).toHaveText('Timeline');
       await commitDesktopSearch(page, 'combo');
       await expect
         .poll(() =>
@@ -2331,7 +2569,7 @@ test.describe('desktop visual regression', () => {
         deviceId: 'device-a',
       };
       await page.locator('#exploreBtn').click();
-      await expect(page.locator('#mainTitle')).toHaveText('Explore');
+      await expect(page.locator('#mainTitle')).toHaveText('Timeline');
       await commitDesktopSearch(page, 'live-combo');
       await expect(
         page.locator(`.result-row[data-url="${liveEntry.url}"]`),
@@ -2474,7 +2712,7 @@ test.describe('desktop visual regression', () => {
   test('highlight history lays out date-grouped highlights on a paper sheet @webkit', async ({
     page,
   }) => {
-    const newerDay = Date.now() - 60_000;
+    const newerDay = Date.UTC(2026, 6, 30, 12);
     const olderDay = newerDay - 24 * 60 * 60 * 1000;
     const secondUrl = 'https://example.com/second-highlight-page';
     const secondSlug = generateSlugFromUrl(secondUrl);
@@ -2482,6 +2720,7 @@ test.describe('desktop visual regression', () => {
       'Publication-grade layout chooses line breaks across the complete highlighted passage, keeping the printed sheet compact while preserving a quiet and readable rhythm.';
     const compactNote =
       'A carefully composed note keeps its spacing even and its lines close enough to feel like a marginal annotation, with the final thought tucked neatly into the available measure instead of drifting across the paper.';
+    await page.clock.setFixedTime(newerDay);
     await serveDesktopUi(async (desktopUrl) => {
       await openDesktopUi(page, desktopUrl, {
         setupComplete: true,
@@ -2573,7 +2812,7 @@ test.describe('desktop visual regression', () => {
 
       expect(await page.locator('#results .spinner').count()).toBe(0);
       await expect(page.locator('#highlightsHistoryBtn')).toHaveClass(/active/);
-      await expect(page.locator('#mainTitle')).toHaveText('Highlights');
+      await expect(page.locator('#mainTitle')).toHaveText('Book');
       const entries = page.locator('#results .highlight-history-entry');
       await expect(entries).toHaveCount(4);
       await expect
@@ -2684,24 +2923,27 @@ test.describe('desktop visual regression', () => {
         });
         return {
           selectedText: selection.toString(),
-          managedTextDoesNotPaintSelectionNegativeSpace: selectionColors.every(
-            ({ background }) => background.length >= 4 && background[3] === 0,
+          managedTextUsesVisibleGrayscaleSelectionFill: selectionColors.every(
+            ({ background }) =>
+              background.length >= 4 &&
+              background[0] === background[1] &&
+              background[1] === background[2] &&
+              background[3] >= 0.25,
           ),
-          managedTextUsesVisibleGrayscaleSelectionInk: selectionColors.every(
+          managedTextPreservesBaseInk: selectionColors.every(
             ({ ink, baseInk }) =>
               ink.length >= 3 &&
-              ink[0] === ink[1] &&
-              ink[1] === ink[2] &&
+              baseInk.length >= 3 &&
               ink
                 .slice(0, 3)
-                .some((channel, index) => channel !== baseInk[index]),
+                .every((channel, index) => channel === baseInk[index]),
           ),
         };
       });
       expect(managedSelectionState).toEqual({
         selectedText: compactExcerpt,
-        managedTextDoesNotPaintSelectionNegativeSpace: true,
-        managedTextUsesVisibleGrayscaleSelectionInk: true,
+        managedTextUsesVisibleGrayscaleSelectionFill: true,
+        managedTextPreservesBaseInk: true,
       });
       await expect(
         page.locator('#results .highlight-history-list'),
@@ -2714,6 +2956,27 @@ test.describe('desktop visual regression', () => {
         },
       );
       await page.evaluate(() => window.getSelection()?.removeAllRanges());
+
+      const darkSelectionState = await entries.first().evaluate((entry) => {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        const segment = entry.querySelector('.detail-note-excerpt .justif-seg');
+        const channels = (value) =>
+          value.match(/\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+        const state = {
+          background: channels(
+            getComputedStyle(segment, '::selection').backgroundColor,
+          ),
+          ink: channels(getComputedStyle(segment, '::selection').color),
+          baseInk: channels(getComputedStyle(segment).color),
+        };
+        document.documentElement.setAttribute('data-theme', 'light');
+        return state;
+      });
+      expect(darkSelectionState).toEqual({
+        background: [153, 153, 153, 0.3],
+        ink: [237, 237, 237],
+        baseInk: [237, 237, 237],
+      });
 
       const daySections = page.locator(
         '#results .highlight-history-day-section',
@@ -2771,19 +3034,24 @@ test.describe('desktop visual regression', () => {
         const titleSelectionInk = channels(
           getComputedStyle(titleLabel, '::selection').color,
         );
+        const titleBaseInk = channels(getComputedStyle(titleLabel).color);
         return {
           selectionCreated: selection.toString().length > 0,
           dateContainerExcludesBoundary: selectionMode(date) === 'none',
           dateLabelIsSelectable: selectionMode(dateLabel) === 'text',
           titleContainerIsSelectable: selectionMode(title) === 'text',
           titleLabelIsSelectable: selectionMode(titleLabel) === 'text',
-          titleSelectionBackgroundIsTransparent:
+          titleSelectionBackgroundIsVisibleGrayscale:
             titleSelectionBackground.length >= 4 &&
-            titleSelectionBackground[3] === 0,
-          titleSelectionInkIsGrayscale:
+            titleSelectionBackground[0] === titleSelectionBackground[1] &&
+            titleSelectionBackground[1] === titleSelectionBackground[2] &&
+            titleSelectionBackground[3] >= 0.25,
+          titleSelectionPreservesBaseInk:
             titleSelectionInk.length >= 3 &&
-            titleSelectionInk[0] === titleSelectionInk[1] &&
-            titleSelectionInk[1] === titleSelectionInk[2],
+            titleBaseInk.length >= 3 &&
+            titleSelectionInk
+              .slice(0, 3)
+              .every((channel, index) => channel === titleBaseInk[index]),
         };
       });
       expect(titleSelectionState).toEqual({
@@ -2792,8 +3060,8 @@ test.describe('desktop visual regression', () => {
         dateLabelIsSelectable: true,
         titleContainerIsSelectable: true,
         titleLabelIsSelectable: true,
-        titleSelectionBackgroundIsTransparent: true,
-        titleSelectionInkIsGrayscale: true,
+        titleSelectionBackgroundIsVisibleGrayscale: true,
+        titleSelectionPreservesBaseInk: true,
       });
       await page.evaluate(() => window.getSelection()?.removeAllRanges());
       const firstPageTitleLabel = pageGroups

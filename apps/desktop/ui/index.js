@@ -2952,11 +2952,15 @@ function updateHighlightHistoryItem(oldNoteSlug, newNoteSlug, noteText) {
   item.note.note = noteText;
 }
 
-async function showHighlightsHistory() {
-  const renderSequence = ++highlightHistoryState.renderSequence;
+function activateHighlightsHistoryShell() {
   activeView = { type: HIGHLIGHT_HISTORY_VIEW_TYPE };
   updateSidebarActive();
-  updateMainTitle(tr('extensionHighlights', 'Highlights'));
+  updateMainTitle(tr('desktopBook', 'Book'), 'desktopBook');
+}
+
+async function showHighlightsHistory({ activate = true } = {}) {
+  const renderSequence = ++highlightHistoryState.renderSequence;
+  if (activate) activateHighlightsHistoryShell();
   showNormalLayout();
   resetMainScroll();
   document.getElementById('queryBuilder').style.display = 'none';
@@ -3109,16 +3113,24 @@ function enrichPinResult(r, pins, pageSnap) {
 
 // Summarize a query tree into a short display name for lists
 
-async function showExplore({ hydrate = true, markReady = true } = {}) {
+function activateExploreShell() {
+  activeView = { type: 'explore', name: null };
+  updateSidebarActive();
+  updateMainTitle(tr('desktopTimeline', 'Timeline'), 'desktopTimeline');
+}
+
+async function showExplore({
+  hydrate = true,
+  markReady = true,
+  activate = true,
+} = {}) {
   const _t0 = performance.now();
   const _timer = (label) =>
     logDebug(
       `[explore-timer] ${label}: ${(performance.now() - _t0).toFixed(0)}ms`,
     );
 
-  activeView = { type: 'explore', name: null };
-  updateSidebarActive();
-  updateMainTitle(tr('commonExplore', 'Explore'));
+  if (activate) activateExploreShell();
 
   showListLayout();
   resetMainScroll();
@@ -5371,11 +5383,13 @@ function listDisplayName(list) {
   return list.name;
 }
 
-function updateMainTitle(text) {
+function updateMainTitle(text, i18nKey = null) {
   const titleEl = document.getElementById('mainTitle');
   const inputEl = document.getElementById('mainTitleInput');
   const confirmBtn = document.getElementById('confirmTitleBtn');
   // Exit any edit mode and show normal title
+  if (i18nKey) titleEl.setAttribute('data-i18n', i18nKey);
+  else titleEl.removeAttribute('data-i18n');
   titleEl.textContent = text;
   titleEl.style.display = '';
   titleEl.ondblclick = null;
@@ -5588,15 +5602,13 @@ function createSidebarItemDOM(node, depth) {
   const hasChildren = node.children.length > 0;
   const expanded = listFoldState[node.slug] !== false;
 
-  const chevronSvg =
-    '<svg viewBox="0 0 8 8"><path d="M2 1l4 3-4 3z" fill="currentColor"/></svg>';
   const collapseTitle = tr('desktopCollapse', 'Collapse');
   const expandTitle = tr('desktopExpand', 'Expand');
   item.innerHTML = `
     ${
       hasChildren
-        ? `<button class="fold-toggle${expanded ? ' expanded' : ''}" title="${escapeHtml(expanded ? collapseTitle : expandTitle)}">${chevronSvg}</button>`
-        : '<span class="fold-spacer"></span>'
+        ? `<button type="button" class="fold-toggle${expanded ? ' expanded' : ''}" title="${escapeHtml(expanded ? collapseTitle : expandTitle)}" aria-label="${escapeHtml(expanded ? collapseTitle : expandTitle)}" aria-expanded="${expanded}"></button>`
+        : '<span class="list-leaf-dot" aria-hidden="true"></span>'
     }
     <span class="label">${escapeHtml(listDisplayName(node))}</span>
     <span class="pin-count"></span>
@@ -5616,6 +5628,8 @@ function createSidebarItemDOM(node, depth) {
       const btn = item.querySelector('.fold-toggle');
       btn.classList.toggle('expanded', newExpanded);
       btn.title = newExpanded ? collapseTitle : expandTitle;
+      btn.setAttribute('aria-label', newExpanded ? collapseTitle : expandTitle);
+      btn.setAttribute('aria-expanded', String(newExpanded));
     });
   }
 
@@ -5908,15 +5922,81 @@ document.querySelectorAll('.sidebar-item[data-category]').forEach((item) => {
   });
 });
 
-// --- Event listeners: Explore button ---
+let primaryNavigationRenderSequence = 0;
+const primaryNavigationButtonTransitionProperties = new Set([
+  'background-color',
+  'box-shadow',
+  'color',
+]);
+
+function isPrimaryNavigationActivationTransition(animation, button, icon) {
+  if (!(animation instanceof CSSTransition)) return false;
+  const target = animation.effect?.target;
+  return (
+    (target === button &&
+      primaryNavigationButtonTransitionProperties.has(
+        animation.transitionProperty,
+      )) ||
+    (target === icon && animation.transitionProperty === 'color')
+  );
+}
+
+async function renderPrimaryNavigationAfterActivation(
+  button,
+  isCurrentView,
+  render,
+) {
+  const renderSequence = ++primaryNavigationRenderSequence;
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  if (renderSequence !== primaryNavigationRenderSequence || !isCurrentView()) {
+    return;
+  }
+
+  const icon = button.querySelector('.sidebar-hero-icon');
+  const activationTransitions = button
+    .getAnimations({ subtree: true })
+    .filter((animation) => {
+      const endTime = animation.effect?.getComputedTiming().endTime;
+      return (
+        isPrimaryNavigationActivationTransition(animation, button, icon) &&
+        Number.isFinite(endTime) &&
+        animation.playState !== 'idle' &&
+        animation.playState !== 'paused'
+      );
+    });
+  await Promise.allSettled(
+    activationTransitions.map((animation) => animation.finished),
+  );
+  if (renderSequence !== primaryNavigationRenderSequence || !isCurrentView()) {
+    return;
+  }
+
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  if (renderSequence !== primaryNavigationRenderSequence || !isCurrentView()) {
+    return;
+  }
+  void render();
+}
+
+// --- Event listeners: primary sidebar destinations ---
 document.getElementById('exploreBtn').addEventListener('click', () => {
-  showExplore();
+  const button = document.getElementById('exploreBtn');
+  activateExploreShell();
+  void renderPrimaryNavigationAfterActivation(button, isActiveExploreView, () =>
+    showExplore({ activate: false }),
+  );
 });
 
 document
   .getElementById('highlightsHistoryBtn')
   .addEventListener('click', () => {
-    showHighlightsHistory();
+    const button = document.getElementById('highlightsHistoryBtn');
+    activateHighlightsHistoryShell();
+    void renderPrimaryNavigationAfterActivation(
+      button,
+      isHighlightHistoryView,
+      () => showHighlightsHistory({ activate: false }),
+    );
   });
 
 document.querySelector('.main').addEventListener('scroll', (event) => {

@@ -32,6 +32,7 @@
         --highlight-history-paper-border: #dedede;
         --highlight-history-ink: #242424;
         --highlight-history-muted-ink: #767676;
+        --highlight-history-selection-fill: rgba(118, 118, 118, 0.3);
         --highlight-history-action-hover: rgba(0, 0, 0, 0.06);
         --highlight-history-font: 'Gentium Book Plus', Georgia, serif;
       }
@@ -48,6 +49,7 @@
         --highlight-history-paper-border: #3c3c3c;
         --highlight-history-ink: #ededed;
         --highlight-history-muted-ink: #999999;
+        --highlight-history-selection-fill: rgba(153, 153, 153, 0.3);
         --highlight-history-action-hover: rgba(255, 255, 255, 0.08);
       }
 
@@ -172,32 +174,25 @@
       }
 
       .settings-btn svg {
-        width: 18px;
-        height: 18px;
+        width: 16px;
+        height: 16px;
         fill: currentColor;
       }
 
       .sidebar-hero-nav {
+        --primary-navigation-transition-duration: 140ms;
+
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: minmax(0, 1fr);
         gap: 2px;
         margin: 0 var(--sidebar-padding-x) 10px;
-        padding: 2px;
-        background:
-          linear-gradient(
-            135deg,
-            rgba(255, 255, 255, 0.34),
-            rgba(208, 112, 48, 0.035)
-          ),
-          var(--bg-warm-tint);
-        border: 1px solid rgba(156, 105, 65, 0.12);
-        border-radius: 12px;
-        backdrop-filter: blur(16px) saturate(1.12);
-        -webkit-backdrop-filter: blur(16px) saturate(1.12);
-        box-shadow:
-          inset 0 1px 0 rgba(255, 255, 255, 0.58),
-          inset 0 0 0 0.5px rgba(255, 255, 255, 0.18),
-          0 8px 24px rgba(var(--shadow-color), 0.045);
+        padding: 0;
+        background: none;
+        border: 0;
+        border-radius: 0;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        box-shadow: none;
       }
 
       .sidebar-hero-button {
@@ -205,33 +200,30 @@
         display: flex;
         flex-direction: row;
         align-items: center;
-        justify-content: center;
-        gap: 5px;
+        justify-content: flex-start;
+        gap: 8px;
         width: 100%;
-        height: 42px;
+        height: 36px;
         min-width: 0;
         overflow: hidden;
-        padding: 5px;
+        padding: 6px 10px;
         appearance: none;
         background: transparent;
-        color: var(--text-secondary);
+        color: var(--text-primary);
         border: 0;
-        border-radius: 9px;
+        border-radius: var(--radius-pill);
         cursor: pointer;
         box-shadow: none;
         transition:
-          transform 110ms cubic-bezier(0.2, 0.8, 0.25, 1),
-          background 140ms ease,
-          border-color 140ms ease,
-          box-shadow 140ms ease;
+          background-color var(--primary-navigation-transition-duration) ease,
+          box-shadow var(--primary-navigation-transition-duration) ease,
+          color var(--primary-navigation-transition-duration) ease;
       }
 
       .sidebar-hero-button:hover {
-        background: rgba(255, 255, 255, 0.3);
+        background: var(--bg-surface-hover);
         color: var(--text-primary);
-        box-shadow:
-          inset 0 0 0 0.5px rgba(255, 255, 255, 0.54),
-          0 3px 12px rgba(var(--shadow-color), 0.035);
+        box-shadow: none;
       }
 
       .sidebar-hero-button:focus-visible {
@@ -241,26 +233,15 @@
 
       .sidebar-hero-button.active,
       .sidebar-hero-button.drag-over {
-        background:
-          radial-gradient(
-            circle at 50% 115%,
-            rgba(208, 112, 48, 0.14),
-            transparent 58%
-          ),
-          rgba(255, 255, 255, 0.52);
+        background: var(--accent-primary-soft);
         color: var(--accent-primary);
         box-shadow:
-          inset 0 0 0 0.5px rgba(255, 255, 255, 0.72),
-          inset 0 -1px 0 rgba(208, 112, 48, 0.08),
-          0 4px 16px rgba(208, 112, 48, 0.06);
+          inset 0 0 0 1px var(--accent-primary-soft),
+          0 1px 3px var(--accent-primary-soft);
       }
 
       .sidebar-hero-button:active {
-        transform: scale(0.965);
-        transition-duration: 50ms;
-        box-shadow:
-          inset 0 0 0 0.5px rgba(255, 255, 255, 0.58),
-          0 2px 8px rgba(var(--shadow-color), 0.035);
+        transform: none;
       }
 
       .sidebar-hero-icon {
@@ -269,11 +250,15 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 16px;
-        height: 16px;
+        width: 18px;
+        height: 18px;
         flex-shrink: 0;
-        opacity: 1;
-        transition: transform 60ms cubic-bezier(0.2, 0.8, 0.25, 1);
+        color: var(--text-secondary);
+        transition: color var(--primary-navigation-transition-duration) ease;
+      }
+
+      .sidebar-hero-button.active .sidebar-hero-icon {
+        color: var(--accent-primary);
       }
 
       .sidebar-hero-icon svg {
@@ -293,42 +278,32 @@
         max-width: 100%;
         overflow: hidden;
         font-family: var(--font-body);
-        font-size: 12px;
+        font-size: 13px;
         font-style: normal;
-        font-weight: 700;
+        font-weight: 500;
         line-height: 1;
-        letter-spacing: 0.01em;
-        text-align: center;
+        letter-spacing: 0;
+        text-align: left;
         text-overflow: ellipsis;
         white-space: nowrap;
-        transition: transform 60ms cubic-bezier(0.2, 0.8, 0.25, 1);
       }
 
       html[data-color-scheme='mono'] .sidebar-hero-nav {
-        gap: 8px;
-        padding: 0;
-        background: transparent;
-        border: 0;
-        border-radius: 0;
-        backdrop-filter: none;
-        -webkit-backdrop-filter: none;
-        box-shadow: none;
+        gap: 2px;
       }
 
       html[data-color-scheme='mono'] .sidebar-hero-button {
-        height: 42px;
-        background: var(--bg-surface-solid);
+        height: 36px;
+        background: transparent;
         color: var(--text-primary);
-        border: 2px solid var(--text-primary);
-        border-radius: 9px;
+        border: 0;
+        border-radius: var(--radius-pill);
         box-shadow: none;
       }
 
       html[data-color-scheme='mono'] .sidebar-hero-button:hover {
         background: var(--bg-surface-hover);
         color: var(--text-primary);
-        border-color: var(--text-primary);
-        transform: none;
         box-shadow: none;
       }
 
@@ -336,28 +311,19 @@
       html[data-color-scheme='mono'] .sidebar-hero-button.drag-over {
         background: var(--text-primary);
         color: var(--bg-base);
-        border-color: var(--text-primary);
-        box-shadow: none;
-      }
-
-      html[data-color-scheme='mono'] .sidebar-hero-button:active {
-        transform: none;
         box-shadow: none;
       }
 
       html[data-color-scheme='mono']
-        .sidebar-hero-button:active
-        .sidebar-hero-icon,
-      html[data-color-scheme='mono']
-        .sidebar-hero-button:active
-        .sidebar-hero-label {
-        transform: translateY(1px);
+        .sidebar-hero-button.active
+        .sidebar-hero-icon {
+        color: var(--bg-base);
       }
 
       html[data-color-scheme='mono'] .sidebar-hero-label {
-        font-size: 11px;
-        letter-spacing: 0.075em;
-        text-transform: uppercase;
+        font-size: 13px;
+        letter-spacing: 0;
+        text-transform: none;
       }
 
       .explore-badge {
@@ -383,23 +349,18 @@
       }
 
       @container sidebar (max-width: 210px) {
-        .sidebar-hero-nav {
-          grid-template-columns: minmax(0, 1fr);
-        }
-
         .sidebar-hero-button {
-          height: 40px;
-          gap: 5px;
+          height: 36px;
         }
 
         html[data-color-scheme='mono'] .sidebar-hero-button {
-          height: 40px;
+          height: 36px;
         }
       }
 
       @media (prefers-reduced-motion: reduce) {
-        .sidebar-hero-button {
-          transition-duration: 1ms;
+        .sidebar-hero-nav {
+          --primary-navigation-transition-duration: 1ms;
         }
       }
 
@@ -425,6 +386,7 @@
         /* container for child list items */
       }
       .fold-toggle {
+        position: relative;
         width: 20px;
         height: 20px;
         border: none;
@@ -436,18 +398,54 @@
         align-items: center;
         justify-content: center;
         padding: 0;
+        border-radius: 50%;
       }
-      .fold-toggle svg {
-        width: 10px;
-        height: 10px;
-        transition: transform 0.15s ease;
+
+      .fold-toggle::before,
+      .fold-toggle::after {
+        position: absolute;
+        width: 8px;
+        height: 1.5px;
+        background: currentColor;
+        border-radius: var(--radius-pill);
+        content: '';
       }
-      .fold-toggle.expanded svg {
+
+      .fold-toggle::after {
+        opacity: 1;
         transform: rotate(90deg);
       }
-      .fold-spacer {
+
+      .fold-toggle.expanded::after {
+        opacity: 0;
+      }
+
+      .fold-toggle:hover {
+        background: var(--bg-surface-hover);
+        color: var(--text-primary);
+      }
+
+      .list-leaf-dot {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         width: 20px;
+        height: 20px;
         flex-shrink: 0;
+        color: var(--text-secondary);
+      }
+
+      .list-leaf-dot::before {
+        width: 4px;
+        height: 4px;
+        background: transparent;
+        border: 1.5px solid currentColor;
+        border-radius: 50%;
+        content: '';
+      }
+
+      .sidebar-item.active .list-leaf-dot {
+        color: var(--accent-primary);
       }
       .sidebar-item.nest-target {
         background: var(--accent-primary-soft);
@@ -1557,8 +1555,7 @@
 
       .highlight-history-list::selection,
       .highlight-history-list *::selection {
-        background: transparent;
-        color: var(--highlight-history-ink);
+        background: var(--highlight-history-selection-fill);
       }
 
       .highlight-history-site::selection,
@@ -1571,13 +1568,11 @@
       .highlight-history-entry .detail-note-editor *::selection,
       .highlight-history-date-label::selection,
       .highlight-history-page-title-label::selection {
-        background: transparent;
-        color: var(--highlight-history-muted-ink);
+        background: var(--highlight-history-selection-fill);
       }
 
       .highlight-history-list .justif-break::selection {
         background: transparent;
-        color: var(--highlight-history-ink);
       }
 
       .highlight-history-day-section + .highlight-history-day-section {
@@ -4807,8 +4802,8 @@
             <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
           </svg>
         </button>
-        <span class="main-title" id="mainTitle" data-i18n="commonExplore"
-          >Explore</span
+        <span class="main-title" id="mainTitle" data-i18n="desktopTimeline"
+          >Timeline</span
         >
         <input
           class="main-title-input"

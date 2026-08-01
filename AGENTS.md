@@ -78,6 +78,7 @@ Optional references may be omitted only when they are valid non-page URLs; malfo
 - Inspect generated raster assets at actual target sizes before judging SVG icon changes; 16px toolbar icons and macOS `.icns` slots can diverge from source previews.
 - For popup, menu, and overlay CSS bugs, capture a focused Playwright screenshot of the rendered state and inspect the pixels before adding more CSS. Geometry and computed-style assertions can pass while browser scrollports, native scrollbar gutters, clipping, or paint order still leave visible artifacts; screenshots validate the actual raster.
 - Use CSS pseudo-element shapes instead of text characters for small icons; text glyphs render inconsistently across fonts/colors.
+- For animation-gated navigation, activate shell state synchronously and wait only for named UI transitions; regression tests must preserve real motion and include unrelated finite and infinite animations.
 - Match container size to visual element size for seamless edges.
 - Avoid unnecessary `flex: 1` chains when content should be content-sized.
 - Put static skeleton HTML in markup rather than relying on JS. Module scripts are deferred.
