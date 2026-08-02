@@ -1,0 +1,17 @@
+- The extension sometimes reports desktop doesn't communicate snapshot limit, but recovers after a retry.
+- Walk me over the entire connection flow, I wonder if the thing has become too complicated.
+- Explain the state variants one by one
+- What is dataFolder used for?
+- Check thoroughly if there're any more unused variables or data concepts around the desktop-extension bridge.
+- In addition to removing dead weight, I agree the state transition around connection needs a large refactor. Let's go over your new design for the state machine, explain each state and whether it is absolutely necessary (has meaningful side effect).
+- Do you think this is an optimal design considering the whole picture of desktop-extension communication? Are there any more small-scoped local state transitions that need to be improved or merged as well?
+- Will this refactor introduce behavior regression?
+- Go ahead, do the cleanup and refactor
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them
+- Let's me confirm (1) is the architectural followup implemented as well? (2) is there any added compatibility code? if so remove them because we don't need to protect against legacy clients.
+- Please review my uncommitted changes
+- Fix them
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.6 Sol
+- As code comment somewhere
+- Go

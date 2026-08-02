@@ -209,7 +209,6 @@ export async function waitForDesktopConnector(
           'connectorDaemonPort',
           'connectorDeviceId',
           'connectorLastError',
-          'connectorLastErrorCode',
           'connectorLastDiagnostic',
         ]);
         return {
@@ -218,7 +217,6 @@ export async function waitForDesktopConnector(
           port: stored.connectorDaemonPort ?? null,
           deviceId: stored.connectorDeviceId ?? null,
           lastError: stored.connectorLastError ?? null,
-          lastErrorCode: stored.connectorLastErrorCode ?? null,
           lastDiagnostic: stored.connectorLastDiagnostic ?? null,
           probeTimedOut: true,
         };

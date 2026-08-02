@@ -73,7 +73,6 @@ async function handleSeedTestData(request) {
   if (deviceId) {
     const setDeviceResp = await requestDesktopSetDeviceId(deviceId);
     if (!setDeviceResp?.success) return setDeviceResp;
-    testControl().setLocalDeviceIdForTest(deviceId);
   }
   const files = (request.files || [])
     .map(serializeTestSeedFile)
@@ -82,15 +81,6 @@ async function handleSeedTestData(request) {
     return { success: true };
   }
   return requestDesktopTestSeed(files);
-}
-
-async function handleGetDesktopQueueForTest() {
-  const connector = await testControl().getConnectorBridgeState();
-  return {
-    success: true,
-    length: connector.pendingCommands || 0,
-    watermark: connector.lastDrainedAt || 0,
-  };
 }
 
 async function handleReadDesktopValueForTest(request) {
@@ -210,7 +200,6 @@ const testMessageHandlers = new Map([
   ['resetForTest', handleResetForTest],
   ['flushDesktopQueueForTest', handleFlushDesktopQueueForTest],
   ['seedTestData', handleSeedTestData],
-  ['getDesktopQueueForTest', handleGetDesktopQueueForTest],
   ['getActionIconForTest', handleGetActionIconForTest],
   ['preparePopupBootstrapForTest', handlePreparePopupBootstrapForTest],
   ['failNextTabMessageForTest', handleFailNextTabMessageForTest],

@@ -2,7 +2,8 @@ mod support;
 
 use browser_recall_daemon::pairing::{static_approver, PairingDecision};
 use browser_recall_daemon::protocol::{
-    ConnectorMessage, DaemonMessage, TestControlMessage, CONNECTOR_PROTOCOL_VERSION,
+    AuthorityStatus, ConnectorMessage, DaemonMessage, TestControlMessage,
+    CONNECTOR_PROTOCOL_VERSION,
 };
 use browser_recall_daemon::ws_server::start_server;
 use browser_recall_daemon::{ApprovedConnector, ConfigStore, ServerStartOptions, Token};
@@ -197,7 +198,7 @@ async fn get_entity(socket: &mut TestSocket, key: &str) -> Option<Value> {
 async fn expect_ack(socket: &mut TestSocket) {
     let message = next_daemon(socket).await;
     assert!(
-        matches!(message, DaemonMessage::Ack { .. }),
+        matches!(message, DaemonMessage::Ack),
         "expected ack, got {message:?}"
     );
 }
@@ -220,8 +221,6 @@ async fn send_event(socket: &mut TestSocket, entry: Value) {
         test_control(TestControlMessage::Event {
             entry,
             source: "extension".to_string(),
-            buffer_depth: 0,
-            buffer_bytes: 0,
         }),
     )
     .await;
@@ -260,8 +259,6 @@ async fn send_note_and_ack(
             title: Some("Notes Page".to_string()),
             ts,
             source: "extension".to_string(),
-            buffer_depth: 0,
-            buffer_bytes: 0,
         }),
     )
     .await;
@@ -278,9 +275,6 @@ async fn send_snapshot_and_ack(socket: &mut TestSocket, slug: &str, url: &str, t
             title: Some("Snapshot".to_string()),
             markdown: Some("banana snapshot".to_string()),
             html: "<html><body>snapshot</body></html>".to_string(),
-            source: "extension".to_string(),
-            buffer_depth: 0,
-            buffer_bytes: 0,
         },
     )
     .await;
@@ -395,18 +389,14 @@ async fn event_ingest_persists_page_and_reports_status() {
     let status = next_daemon(&mut socket).await;
     match status {
         DaemonMessage::Status {
-            connected_browsers,
-            buffer_depth,
-            last_drained_at,
-            data_folder,
             device_id: returned_device_id,
+            max_message_bytes,
+            authority,
             ..
         } => {
-            assert_eq!(connected_browsers, vec!["Chrome".to_string()]);
-            assert_eq!(buffer_depth, 0);
-            assert!(last_drained_at.is_some());
-            assert_eq!(data_folder, data_dir.to_string_lossy());
             assert_eq!(returned_device_id, device_id);
+            assert!(max_message_bytes > 0);
+            assert_eq!(authority, AuthorityStatus::Running);
         }
         other => panic!("expected status response, got {other:?}"),
     }
@@ -448,8 +438,8 @@ async fn active_connectors_are_tracked_by_connector_identity() {
     let mut socket = authenticated_socket(handle.port(), "new-token").await;
 
     let snapshot = handle.snapshot().await;
-    assert_eq!(snapshot.connected_browsers, vec!["Chrome"]);
     assert_eq!(snapshot.connected_connectors.len(), 1);
+    assert_eq!(snapshot.connected_connectors[0].browser_name, "Chrome");
     assert_eq!(
         snapshot.connected_connectors[0].browser_id,
         "new-browser-install"
@@ -464,7 +454,6 @@ async fn active_connectors_are_tracked_by_connector_identity() {
     let config = config_store.load_or_create().expect("reload config");
     assert!(config.connectors.is_empty());
     let snapshot = handle.snapshot().await;
-    assert!(snapshot.connected_browsers.is_empty());
     assert!(snapshot.connected_connectors.is_empty());
 
     let revoked = next_text_message(&mut socket).await;
@@ -611,8 +600,6 @@ async fn connector_source_errors_are_protocol_errors_not_socket_disconnects() {
                 "referrerUrl": null,
             }),
             source: "content-script".to_string(),
-            buffer_depth: 3,
-            buffer_bytes: 99,
         }),
     )
     .await;
@@ -641,8 +628,6 @@ async fn connector_source_errors_are_protocol_errors_not_socket_disconnects() {
             title: Some("Bad Source".to_string()),
             ts: 1_710_000_000_100i64,
             source: "popup-cache".to_string(),
-            buffer_depth: 0,
-            buffer_bytes: 0,
         }),
     )
     .await;
@@ -659,57 +644,15 @@ async fn connector_source_errors_are_protocol_errors_not_socket_disconnects() {
         other => panic!("expected invalid note source error, got {other:?}"),
     }
 
-    send_connector(
-        &mut socket,
-        ConnectorMessage::Snapshot {
-            slug: "bad-source-page".to_string(),
-            ts: 1_710_000_000_200i64,
-            url: "https://example.com/bad-source".to_string(),
-            title: Some("Bad Source".to_string()),
-            markdown: Some("should not persist".to_string()),
-            html: "<html><body>should not persist</body></html>".to_string(),
-            source: "snapshot-cache".to_string(),
-            buffer_depth: 0,
-            buffer_bytes: 0,
-        },
-    )
-    .await;
-    match next_daemon(&mut socket).await {
-        DaemonMessage::Error {
-            error,
-            code,
-            message,
-        } => {
-            assert_eq!(error, "invalid_message");
-            assert_eq!(code, "invalid_message");
-            assert!(message.contains("invalid connector source"));
-        }
-        other => panic!("expected invalid snapshot source error, got {other:?}"),
-    }
-
     send_connector(&mut socket, ConnectorMessage::GetStatus).await;
-    match next_daemon(&mut socket).await {
-        DaemonMessage::Status {
-            buffer_depth,
-            buffer_bytes,
-            daemon_buffer_depth,
-            ..
-        } => {
-            assert_eq!(buffer_depth, 0);
-            assert_eq!(buffer_bytes, 0);
-            assert_eq!(daemon_buffer_depth, 0);
-        }
-        other => panic!("expected status after invalid source errors, got {other:?}"),
-    }
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::Status { .. }
+    ));
 
     let slug = generate_slug_from_url("https://example.com/bad-source").expect("slug");
     assert!(!page_path(&data_dir, &slug).exists());
     assert!(!note_path(&data_dir, "bad-source-note").exists());
-    assert!(
-        !snapshot_base_path(&data_dir, "bad-source-page", 1_710_000_000_200)
-            .with_extension("html")
-            .exists()
-    );
 
     handle.shutdown().await;
 }
@@ -975,7 +918,7 @@ async fn websocket_pairing_denial_is_explicit_and_closes_request() {
     .await;
     assert!(matches!(
         next_daemon(&mut socket).await,
-        DaemonMessage::PairPending { .. }
+        DaemonMessage::PairPending
     ));
     assert!(matches!(
         next_daemon(&mut socket).await,
@@ -1007,22 +950,20 @@ async fn websocket_unauthenticated_matrix_rejects_privileged_messages_without_cl
 
     for message in [
         json!({ "type": "get_status" }),
-        json!({ "type": "get_directory_info" }),
-        json!({ "type": "get_directory_size" }),
         test_control_json(json!({ "type": "clear_all_data" })),
         test_control_json(
             json!({ "type": "replay_remote_entries", "deviceId": "peer", "entries": [] }),
         ),
         test_control_json(json!({ "type": "set_device_id", "deviceId": "peer" })),
-        json!({ "type": "list_history_files", "includeSizes": true }),
-        json!({ "type": "load_history_batch", "files": [] }),
+        test_control_json(json!({ "type": "list_history_files", "includeSizes": true })),
+        test_control_json(json!({ "type": "load_history_batch", "files": [] })),
         test_control_json(json!({ "type": "get_all_pages" })),
         json!({ "type": "get_page_info", "slug": "missing" }),
         json!({ "type": "get_page_summary", "url": "https://example.com/summary", "title": null }),
         json!({ "type": "get_snapshot_html", "slug": "missing", "ts": 1 }),
         test_control_json(json!({ "type": "get_entity", "key": "page:missing" })),
         test_control_json(json!({ "type": "permanent_delete", "keys": ["note:missing"] })),
-        json!({ "type": "run_command", "action": "createList", "request": { "name": "Unauthenticated" }, "bufferDepth": 0, "bufferBytes": 0 }),
+        json!({ "type": "run_command", "action": "createList", "request": { "name": "Unauthenticated" } }),
         test_control_json(json!({ "type": "search_notes", "query": "x", "limit": null })),
         test_control_json(json!({ "type": "search_snapshots", "query": "x", "limit": null })),
         test_control_json(json!({
@@ -1035,8 +976,6 @@ async fn websocket_unauthenticated_matrix_rejects_privileged_messages_without_cl
                 "referrerUrl": null
             },
             "source": "extension",
-            "bufferDepth": 0,
-            "bufferBytes": 0
         })),
         test_control_json(json!({ "type": "run_rule_batch", "listIds": [], "entries": [] })),
         test_control_json(json!({
@@ -1052,9 +991,6 @@ async fn websocket_unauthenticated_matrix_rejects_privileged_messages_without_cl
             "title": null,
             "markdown": null,
             "html": "<html></html>",
-            "source": "extension",
-            "bufferDepth": 0,
-            "bufferBytes": 0
         }),
         test_control_json(json!({
             "type": "note",
@@ -1067,8 +1003,6 @@ async fn websocket_unauthenticated_matrix_rejects_privileged_messages_without_cl
             "title": null,
             "ts": 1_710_050_000_200i64,
             "source": "extension",
-            "bufferDepth": 0,
-            "bufferBytes": 0
         })),
     ] {
         send_raw(&mut socket, message).await;
@@ -1080,12 +1014,6 @@ async fn websocket_unauthenticated_matrix_rejects_privileged_messages_without_cl
             other => panic!("expected unauthorized error, got {other:?}"),
         }
     }
-
-    send_connector(&mut socket, ConnectorMessage::Ping).await;
-    assert!(matches!(
-        next_daemon(&mut socket).await,
-        DaemonMessage::Pong
-    ));
 
     handle.shutdown().await;
 }
@@ -1150,8 +1078,6 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
             &mut socket,
             json!({
                 "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
                 "action": action,
                 "request": request
             }),
@@ -1187,8 +1113,6 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
             &mut socket,
             json!({
                 "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
                 "action": "saveSettingsKey",
                 "request": { "key": key, "value": value }
             }),
@@ -1227,8 +1151,6 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "reportVisit",
             "request": {
                 "url": "https://example.com/missing-timestamp"
@@ -1252,8 +1174,6 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "reportVisit",
             "request": {
                 "observedAt": 1_710_030_000_000i64,
@@ -1275,8 +1195,6 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "reportVisit",
             "request": {
                 "timestamp": i64::MAX,
@@ -1302,8 +1220,6 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "reportVisit",
             "request": {
                 "timestamp": 1_710_040_000_000i64,
@@ -1335,8 +1251,6 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
         &mut socket,
         json!({
             "type": "run_command",
-            "bufferDepth": 0,
-            "bufferBytes": 0,
             "action": "reportLeave",
             "request": {
                 "timestamp": 1_710_040_000_050i64,
@@ -1362,8 +1276,6 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
         &mut socket,
         json!({
             "type": "run_command",
-            "bufferDepth": 0,
-            "bufferBytes": 0,
             "action": "reportVisit",
             "request": {
                 "timestamp": 1_710_040_000_075i64,
@@ -1396,8 +1308,6 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
         &mut socket,
         json!({
             "type": "run_command",
-            "bufferDepth": 0,
-            "bufferBytes": 0,
             "action": "reportVisit",
             "request": {
                 "timestamp": 1_710_040_000_080i64,
@@ -1423,8 +1333,6 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "reportVisit",
             "request": {
                 "timestamp": 1_710_040_000_100i64,
@@ -1551,8 +1459,6 @@ async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
                 "referrerUrl": null
             },
             "source": "extension",
-            "bufferDepth": 0,
-            "bufferBytes": 0
         })),
     )
     .await;
@@ -1576,8 +1482,6 @@ async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
                 "referrerUrl": null
             },
             "source": "extension",
-            "bufferDepth": 0,
-            "bufferBytes": 0
         })),
     )
     .await;
@@ -1596,7 +1500,7 @@ async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
         ),
         test_control_json(json!({ "type": "set_device_id", "deviceId": "paused-device" })),
         test_control_json(json!({ "type": "permanent_delete", "keys": ["note:paused"] })),
-        json!({ "type": "run_command", "action": "createList", "request": { "name": "Paused" }, "bufferDepth": 0, "bufferBytes": 0 }),
+        json!({ "type": "run_command", "action": "createList", "request": { "name": "Paused" } }),
         test_control_json(json!({
             "type": "event",
             "entry": {
@@ -1607,8 +1511,6 @@ async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
                 "referrerUrl": null
             },
             "source": "extension",
-            "bufferDepth": 0,
-            "bufferBytes": 0
         })),
         test_control_json(json!({ "type": "run_rule_batch", "listIds": [], "entries": [] })),
         json!({
@@ -1619,9 +1521,6 @@ async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
             "title": null,
             "markdown": null,
             "html": "<html></html>",
-            "source": "extension",
-            "bufferDepth": 0,
-            "bufferBytes": 0
         }),
         test_control_json(json!({
             "type": "note",
@@ -1634,8 +1533,6 @@ async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
             "title": null,
             "ts": 1_710_060_000_400i64,
             "source": "extension",
-            "bufferDepth": 0,
-            "bufferBytes": 0
         })),
     ] {
         send_raw(&mut socket, message).await;
@@ -1659,9 +1556,6 @@ async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
             title: Some("Bad Snapshot".to_string()),
             markdown: None,
             html: "<html><body>bad</body></html>".to_string(),
-            source: "extension".to_string(),
-            buffer_depth: 0,
-            buffer_bytes: 0,
         },
     )
     .await;
@@ -1687,8 +1581,6 @@ async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
             title: Some("Bad Note".to_string()),
             ts: 1_710_060_000_600i64,
             source: "extension".to_string(),
-            buffer_depth: 0,
-            buffer_bytes: 0,
         }),
     )
     .await;
@@ -1700,11 +1592,26 @@ async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
         other => panic!("expected note fs pause, got {other:?}"),
     }
 
+    send_connector(&mut socket, ConnectorMessage::GetStatus).await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::Status {
+            authority: AuthorityStatus::Paused { code, message },
+            ..
+        } => {
+            assert_eq!(code, "fs_error");
+            assert!(!message.is_empty());
+        }
+        other => panic!("expected paused authority status, got {other:?}"),
+    }
+
     handle.control_handle().resume().await;
     send_connector(&mut socket, ConnectorMessage::GetStatus).await;
     assert!(matches!(
         next_daemon(&mut socket).await,
-        DaemonMessage::Status { .. }
+        DaemonMessage::Status {
+            authority: AuthorityStatus::Running,
+            ..
+        }
     ));
 
     handle.shutdown().await;
@@ -1724,8 +1631,6 @@ async fn websocket_read_error_and_secondary_command_matrix_is_structured() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "renamePage",
             "request": {
                 "url": "https://example.com/secondary",
@@ -1743,8 +1648,6 @@ async fn websocket_read_error_and_secondary_command_matrix_is_structured() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "createNote",
             "request": {
                 "url": "https://example.com/secondary",
@@ -1777,8 +1680,6 @@ async fn websocket_read_error_and_secondary_command_matrix_is_structured() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "updateNote",
             "request": {
                 "noteSlug": note_slug,
@@ -1804,8 +1705,6 @@ async fn websocket_read_error_and_secondary_command_matrix_is_structured() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "clearAllData",
             "request": {}
         }),
@@ -1934,8 +1833,6 @@ async fn websocket_get_entity_covers_manifest_and_child_entities() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "saveSettingsKey",
             "request": {
                 "key": "localeOverride",
@@ -1992,8 +1889,6 @@ async fn websocket_get_entity_covers_manifest_and_child_entities() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "createNote",
             "request": {
                 "url": "https://example.com/entity-note",
@@ -2034,8 +1929,6 @@ async fn websocket_get_entity_covers_manifest_and_child_entities() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "deleteNote",
             "request": { "noteSlug": note_slug }
         }),
@@ -2288,9 +2181,6 @@ async fn search_messages_return_note_and_snapshot_hits() {
             title: Some("Banana Example".to_string()),
             markdown: Some("banana snapshot body".to_string()),
             html: "<html><body>banana snapshot body</body></html>".to_string(),
-            source: "extension".to_string(),
-            buffer_depth: 0,
-            buffer_bytes: 0,
         },
     )
     .await;
@@ -2374,8 +2264,6 @@ async fn page_info_accepts_navigation_children_created_by_reported_visits() {
             &mut socket,
             json!({
                 "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
                 "action": "reportVisit",
                 "request": {
                     "timestamp": timestamp,
@@ -2468,8 +2356,6 @@ async fn popup_summary_returns_page_info_and_compact_lists() {
             title: Some("Popup Page".to_string()),
             ts: 1_710_000_010_200i64,
             source: "extension".to_string(),
-            buffer_depth: 0,
-            buffer_bytes: 0,
         }),
     )
     .await;
@@ -2484,9 +2370,6 @@ async fn popup_summary_returns_page_info_and_compact_lists() {
             title: Some("Popup Page".to_string()),
             markdown: Some("popup snapshot".to_string()),
             html: "<html><body>popup snapshot</body></html>".to_string(),
-            source: "extension".to_string(),
-            buffer_depth: 0,
-            buffer_bytes: 0,
         },
     )
     .await;
@@ -2750,8 +2633,6 @@ async fn run_command_executes_desktop_mutation() {
         &mut actor,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "toggleListPin",
             "request": {
                 "listId": "reading",
@@ -2809,8 +2690,6 @@ async fn desktop_and_websocket_adapters_share_command_validation() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "renamePage",
             "request": { "userTitle": "Missing URL" }
         }),
@@ -2839,36 +2718,7 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
     options.test_control_enabled = false;
     let handle = start_server(options).await.expect("server starts");
 
-    let (mut socket, data_dir, device_id) = paired_socket(handle.port(), &config_store).await;
-
-    send_connector(&mut socket, ConnectorMessage::Ping).await;
-    assert!(matches!(
-        next_daemon(&mut socket).await,
-        DaemonMessage::Pong
-    ));
-
-    send_connector(&mut socket, ConnectorMessage::GetDirectoryInfo).await;
-    match next_daemon(&mut socket).await {
-        DaemonMessage::DirectoryInfoResult {
-            success,
-            info: Some(info),
-            error,
-        } => {
-            assert!(success);
-            assert!(error.is_none());
-            assert!(info.has_permission);
-        }
-        other => panic!("expected directory info, got {other:?}"),
-    }
-
-    send_connector(&mut socket, ConnectorMessage::GetDirectorySize).await;
-    match next_daemon(&mut socket).await {
-        DaemonMessage::DirectorySizeResult { success, error, .. } => {
-            assert!(success);
-            assert!(error.is_none());
-        }
-        other => panic!("expected directory size, got {other:?}"),
-    }
+    let (mut socket, data_dir, _device_id) = paired_socket(handle.port(), &config_store).await;
 
     send_connector(&mut socket, test_control(TestControlMessage::ResetData)).await;
     match next_daemon(&mut socket).await {
@@ -2888,8 +2738,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
                 "value": "raw-event"
             }),
             source: "extension".to_string(),
-            buffer_depth: 0,
-            buffer_bytes: 0,
         }),
         test_control(TestControlMessage::ClearAllData),
         test_control(TestControlMessage::ReplayRemoteEntries {
@@ -2916,8 +2764,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         ConnectorMessage::RunCommand {
             action: "unsupportedCommand".to_string(),
             request: json!({}),
-            buffer_depth: 0,
-            buffer_bytes: 0,
         },
     )
     .await;
@@ -2938,12 +2784,8 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "saveSettingsKey",
-            "request": { "key": "theme", "value": "dark" },
-            "bufferDepth": 7,
-            "bufferBytes": 2048
+            "request": { "key": "theme", "value": "dark" }
         }),
     )
     .await;
@@ -2953,17 +2795,10 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
     ));
 
     send_connector(&mut socket, ConnectorMessage::GetStatus).await;
-    match next_daemon(&mut socket).await {
-        DaemonMessage::Status {
-            buffer_depth,
-            buffer_bytes,
-            ..
-        } => {
-            assert_eq!(buffer_depth, 7);
-            assert_eq!(buffer_bytes, 2048);
-        }
-        other => panic!("expected status, got {other:?}"),
-    }
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::Status { .. }
+    ));
 
     send_raw(
         &mut socket,
@@ -2992,8 +2827,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "reportVisit",
             "request": {
                 "timestamp": 1_710_030_000_000i64,
@@ -3015,8 +2848,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "reportLeave",
             "request": {
                 "timestamp": 1_710_030_005_000i64,
@@ -3037,8 +2868,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "ratePage",
             "request": {
                 "url": "https://example.com/matrix",
@@ -3057,8 +2886,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "saveListMeta",
             "request": { "name": "Matrix List" }
         }),
@@ -3085,8 +2912,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "addRule",
             "request": {
                 "listId": list_id,
@@ -3114,8 +2939,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "updateRule",
             "request": {
                 "listId": list_id,
@@ -3134,8 +2957,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "removeRule",
             "request": {
                 "listId": list_id,
@@ -3153,8 +2974,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "addListPins",
             "request": {
                 "listId": list_id,
@@ -3176,8 +2995,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "updateListTree",
             "request": {
                 "tree": [{ "slug": list_id, "children": [] }]
@@ -3194,8 +3011,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "createNote",
             "request": {
                 "url": "https://example.com/matrix",
@@ -3228,8 +3043,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "updateNote",
             "request": {
                 "noteSlug": note_slug,
@@ -3259,8 +3072,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "deleteNote",
             "request": { "noteSlug": updated_note_slug }
         }),
@@ -3274,8 +3085,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "restoreNote",
             "request": { "noteSlug": updated_note_slug }
         }),
@@ -3299,8 +3108,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "deleteSnapshot",
             "request": {
                 "slug": page_slug,
@@ -3317,8 +3124,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "restoreSnapshot",
             "request": { "snapSlug": format!("{page_slug}-1710030010000") }
         }),
@@ -3333,8 +3138,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "deleteList",
             "request": { "listId": list_id }
         }),
@@ -3348,8 +3151,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "restoreList",
             "request": { "listId": list_id }
         }),
@@ -3364,8 +3165,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "importHistory",
             "request": {
                 "entries": [{
@@ -3387,8 +3186,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "importBookmarks",
             "request": {
                 "tree": [{
@@ -3408,54 +3205,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         next_daemon(&mut socket).await,
         DaemonMessage::CommandResult { success: true, .. }
     ));
-
-    send_connector(
-        &mut socket,
-        ConnectorMessage::ListHistoryFiles {
-            include_sizes: true,
-        },
-    )
-    .await;
-    let files = match next_daemon(&mut socket).await {
-        DaemonMessage::HistoryFilesResult {
-            success,
-            files,
-            devices,
-            sizes: Some(sizes),
-            error,
-        } => {
-            assert!(success);
-            assert!(error.is_none());
-            assert!(devices.contains(&device_id));
-            assert!(!sizes.is_empty());
-            files
-        }
-        other => panic!("expected history files, got {other:?}"),
-    };
-    assert!(!files.is_empty());
-
-    send_connector(
-        &mut socket,
-        ConnectorMessage::LoadHistoryBatch {
-            files: files.clone(),
-        },
-    )
-    .await;
-    match next_daemon(&mut socket).await {
-        DaemonMessage::HistoryBatchResult {
-            success,
-            entries,
-            error,
-        } => {
-            assert!(success);
-            assert!(error.is_none());
-            assert!(entries
-                .iter()
-                .any(|entry| entry.get("url").and_then(Value::as_str)
-                    == Some("https://example.com/matrix")));
-        }
-        other => panic!("expected history batch, got {other:?}"),
-    }
 
     send_connector(
         &mut socket,
@@ -3521,8 +3270,6 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "permanentDeleteAll",
             "request": {}
         }),
@@ -3534,17 +3281,10 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
     ));
 
     send_connector(&mut socket, ConnectorMessage::GetStatus).await;
-    match next_daemon(&mut socket).await {
-        DaemonMessage::Status {
-            buffer_depth,
-            buffer_bytes,
-            ..
-        } => {
-            assert_eq!(buffer_depth, 0);
-            assert_eq!(buffer_bytes, 0);
-        }
-        other => panic!("expected status, got {other:?}"),
-    }
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::Status { .. }
+    ));
 
     assert!(data_dir.exists());
     handle.shutdown().await;
@@ -3611,8 +3351,6 @@ async fn page_summary_and_visit_reject_non_web_platform_urls() {
         &mut socket,
         json!({
             "type": "run_command",
-                "bufferDepth": 0,
-                "bufferBytes": 0,
             "action": "reportVisit",
             "request": {
                 "timestamp": 1_710_000_040_000i64,
@@ -4375,8 +4113,6 @@ async fn replay_failure_pauses_daemon_and_rejects_followup_events() {
                     "referrerUrl": null
                 }),
                 source: "extension".to_string(),
-                buffer_depth: 0,
-                buffer_bytes: 0,
             }))
             .expect("event json"),
         ))
@@ -4399,11 +4135,11 @@ async fn replay_failure_pauses_daemon_and_rejects_followup_events() {
     }
 
     let snapshot = handle.snapshot().await;
-    assert_eq!(
-        snapshot.service_status,
-        browser_recall_daemon::ServiceStatus::Paused
-    );
-    assert_eq!(snapshot.last_error_code.as_deref(), Some("replay_error"));
+    assert!(matches!(
+        snapshot.service_state,
+        browser_recall_daemon::ServiceState::Paused { ref code, .. }
+            if code == "replay_error"
+    ));
 
     socket
         .send(Message::Text(
@@ -4416,8 +4152,6 @@ async fn replay_failure_pauses_daemon_and_rejects_followup_events() {
                     "referrerUrl": null
                 }),
                 source: "extension".to_string(),
-                buffer_depth: 0,
-                buffer_bytes: 0,
             }))
             .expect("event json"),
         ))
@@ -4443,12 +4177,14 @@ async fn replay_failure_pauses_daemon_and_rejects_followup_events() {
 
     let resumed_snapshot = handle.snapshot().await;
     assert_eq!(
-        resumed_snapshot.service_status,
-        browser_recall_daemon::ServiceStatus::Running
+        resumed_snapshot.service_state,
+        browser_recall_daemon::ServiceState::Running
     );
-    assert_eq!(resumed_snapshot.connected_browsers, vec!["Chrome"]);
-    assert_eq!(resumed_snapshot.last_error, None);
-    assert_eq!(resumed_snapshot.last_error_code, None);
+    assert_eq!(resumed_snapshot.connected_connectors.len(), 1);
+    assert_eq!(
+        resumed_snapshot.connected_connectors[0].browser_name,
+        "Chrome"
+    );
 
     socket
         .send(Message::Text(
@@ -4461,8 +4197,6 @@ async fn replay_failure_pauses_daemon_and_rejects_followup_events() {
                     "referrerUrl": null,
                 }),
                 source: "extension".to_string(),
-                buffer_depth: 0,
-                buffer_bytes: 0,
             }))
             .expect("event json"),
         ))

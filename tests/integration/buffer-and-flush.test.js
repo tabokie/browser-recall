@@ -177,6 +177,8 @@ class BrowserLikeWebSocket {
   static omitProtocolVersion = false;
   static sendMismatchedProtocol = false;
   static statusMaxMessageBytes = null;
+  static statusAuthority = null;
+  static sentMessages = [];
   static instances = [];
 
   constructor(url) {
@@ -213,6 +215,13 @@ class BrowserLikeWebSocket {
             data = JSON.stringify(payload);
           }
         }
+        if (BrowserLikeWebSocket.statusAuthority != null) {
+          const payload = JSON.parse(data);
+          if (payload.type === 'status') {
+            payload.authority = BrowserLikeWebSocket.statusAuthority;
+            data = JSON.stringify(payload);
+          }
+        }
         if (
           BrowserLikeWebSocket.delayMessageMs > 0 &&
           BrowserLikeWebSocket.delayMessagePredicate?.(data)
@@ -240,6 +249,7 @@ class BrowserLikeWebSocket {
   send(payload) {
     try {
       const message = JSON.parse(payload);
+      BrowserLikeWebSocket.sentMessages.push(message);
       if (
         BrowserLikeWebSocket.sendMismatchedProtocol &&
         (message.type === 'auth' || message.type === 'pair_request')
@@ -342,6 +352,8 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     BrowserLikeWebSocket.omitProtocolVersion = false;
     BrowserLikeWebSocket.sendMismatchedProtocol = false;
     BrowserLikeWebSocket.statusMaxMessageBytes = null;
+    BrowserLikeWebSocket.statusAuthority = null;
+    BrowserLikeWebSocket.sentMessages = [];
     BrowserLikeWebSocket.instances = [];
     RefusingWebSocket.urls = [];
 
@@ -384,11 +396,10 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     await wsClient.initConnectorBridge();
     await waitFor(() => store.connectorState === 'incompatible');
 
-    expect(store.connectorLastErrorCode).toBe('incompatible_protocol');
     expect(store.connectorAuthToken).toBeUndefined();
     expect(store.connectorLastDiagnostic).toMatchObject({
       code: 'incompatible_protocol',
-      expected: 2,
+      expected: 3,
       actual: null,
     });
 
@@ -408,7 +419,9 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       }),
     ]);
     expect(manualState.state).toBe('incompatible');
-    expect(manualState.lastErrorCode).toBe('incompatible_protocol');
+    expect(manualState.connection.failure).toMatchObject({
+      code: 'incompatible_protocol',
+    });
   }, 30_000);
 
   it('reports an explicit daemon protocol rejection as incompatible', async () => {
@@ -445,11 +458,10 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     await wsClient.initConnectorBridge();
     await waitFor(() => store.connectorState === 'incompatible');
 
-    expect(store.connectorLastErrorCode).toBe('incompatible_protocol');
     expect(store.connectorAuthToken).toBeUndefined();
     expect(store.connectorLastDiagnostic).toMatchObject({
       code: 'incompatible_protocol',
-      expected: 2,
+      expected: 3,
     });
   }, 30_000);
 
@@ -742,6 +754,222 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(readFileSync(snapshotPath, 'utf8')).toContain('large snapshot body');
   }, 30_000);
 
+  it('waits for authenticated desktop status before calculating the snapshot capture budget', async () => {
+    const dir = mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-snapshot-budget-auth-status-'),
+    );
+    tempDirs.push(dir);
+
+    originalWebSocket = globalThis.WebSocket;
+    originalChrome = globalThis.chrome;
+    originalNavigator = globalThis.navigator;
+    originalSetTimeout = globalThis.setTimeout;
+
+    const { chrome, store } = createChromeMock();
+    globalThis.chrome = chrome;
+    globalThis.WebSocket = BrowserLikeWebSocket;
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { userAgent: 'Chrome/123.0.0.0 Safari/537.36' },
+      configurable: true,
+    });
+    globalThis.setTimeout = (fn, delay, ...args) => {
+      const timer = originalSetTimeout(fn, delay, ...args);
+      timer?.unref?.();
+      return timer;
+    };
+
+    const wsClient =
+      await import('../../apps/extension/connector/ws-client.js');
+
+    const child = launchDaemon(dir, 'allow');
+    childProcesses.push(child);
+    store.connectorDaemonPort = await waitForListening(child);
+
+    await wsClient.initConnectorBridge();
+    await waitFor(async () => {
+      const state = await wsClient.getConnectorBridgeState();
+      return state.state === 'connected' && state.hasToken;
+    });
+
+    BrowserLikeWebSocket.delayMessageMs = 250;
+    BrowserLikeWebSocket.delayMessagePredicate = (data) =>
+      JSON.parse(data).type === 'status';
+    await wsClient.restartConnectorRuntimeForTest();
+    await waitFor(async () => {
+      const state = await wsClient.getConnectorBridgeState();
+      return state.connection.phase === 'synchronizing';
+    });
+    let budgetSettled = false;
+    const budgetPromise = wsClient
+      .requestDesktopSnapshotCaptureBudget({
+        slug: 'status-race-snapshot-page',
+        ts: 1710000002725,
+        url: 'https://example.com/status-race-snapshot',
+        title: null,
+        markdown: null,
+      })
+      .finally(() => {
+        budgetSettled = true;
+      });
+    await new Promise((resolve) => originalSetTimeout(resolve, 50));
+    expect(budgetSettled).toBe(false);
+    const budget = await budgetPromise;
+
+    expect(budget.maxEncodedHtmlBytes).toBeGreaterThan(0);
+    expect(budget.maxConcurrentResourceLoads).toBe(6);
+    expect((await wsClient.getConnectorBridgeState()).connection).toMatchObject(
+      { phase: 'ready', authority: { state: 'running' } },
+    );
+  }, 30_000);
+
+  it('does not let a replaced authentication callback publish state or credentials', async () => {
+    const dir = mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-replaced-auth-callback-'),
+    );
+    tempDirs.push(dir);
+
+    originalWebSocket = globalThis.WebSocket;
+    originalChrome = globalThis.chrome;
+    originalNavigator = globalThis.navigator;
+    originalSetTimeout = globalThis.setTimeout;
+
+    const { chrome, store } = createChromeMock();
+    globalThis.chrome = chrome;
+    globalThis.WebSocket = BrowserLikeWebSocket;
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { userAgent: 'Chrome/123.0.0.0 Safari/537.36' },
+      configurable: true,
+    });
+    globalThis.setTimeout = (fn, delay, ...args) => {
+      const timer = originalSetTimeout(fn, delay, ...args);
+      timer?.unref?.();
+      return timer;
+    };
+
+    let releaseFirstDiagnosticClear;
+    const firstDiagnosticClearReleased = new Promise((resolve) => {
+      releaseFirstDiagnosticClear = resolve;
+    });
+    let signalFirstDiagnosticClear;
+    const firstDiagnosticClearStarted = new Promise((resolve) => {
+      signalFirstDiagnosticClear = resolve;
+    });
+    const removeStorage = chrome.storage.local.remove.bind(
+      chrome.storage.local,
+    );
+    let blockFirstDiagnosticClear = true;
+    chrome.storage.local.remove = async (keys) => {
+      const keyList = Array.isArray(keys) ? keys : [keys];
+      if (
+        blockFirstDiagnosticClear &&
+        keyList.includes('connectorLastDiagnostic')
+      ) {
+        blockFirstDiagnosticClear = false;
+        signalFirstDiagnosticClear();
+        await firstDiagnosticClearReleased;
+      }
+      return removeStorage(keys);
+    };
+
+    const wsClient =
+      await import('../../apps/extension/connector/ws-client.js');
+    const child = launchDaemon(dir, 'allow');
+    childProcesses.push(child);
+    store.connectorDaemonPort = await waitForListening(child);
+
+    await wsClient.initConnectorBridge();
+    await firstDiagnosticClearStarted;
+    const restartPromise = wsClient.restartConnectorRuntimeForTest();
+    releaseFirstDiagnosticClear();
+    await restartPromise;
+    await waitFor(async () => {
+      const state = await wsClient.getConnectorBridgeState();
+      return state.connection.phase === 'ready' && state.hasToken;
+    });
+    const replacementToken = store.connectorAuthToken;
+
+    await new Promise((resolve) => originalSetTimeout(resolve, 100));
+
+    const state = await wsClient.getConnectorBridgeState();
+    expect(state.connection).toMatchObject({
+      phase: 'ready',
+      authority: { state: 'running' },
+    });
+    expect(store.connectorAuthToken).toBe(replacementToken);
+  }, 30_000);
+
+  it('keeps an old drain failure out of a replacement session', async () => {
+    const dir = mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-replaced-drain-task-'),
+    );
+    tempDirs.push(dir);
+
+    originalWebSocket = globalThis.WebSocket;
+    originalChrome = globalThis.chrome;
+    originalNavigator = globalThis.navigator;
+    originalSetTimeout = globalThis.setTimeout;
+
+    const { chrome, store } = createChromeMock();
+    globalThis.chrome = chrome;
+    globalThis.WebSocket = BrowserLikeWebSocket;
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { userAgent: 'Chrome/123.0.0.0 Safari/537.36' },
+      configurable: true,
+    });
+    globalThis.setTimeout = (fn, delay, ...args) => {
+      const timer = originalSetTimeout(fn, delay, ...args);
+      timer?.unref?.();
+      return timer;
+    };
+
+    const wsClient =
+      await import('../../apps/extension/connector/ws-client.js');
+    const child = launchDaemon(dir, 'allow');
+    childProcesses.push(child);
+    store.connectorDaemonPort = await waitForListening(child);
+
+    await wsClient.initConnectorBridge();
+    await waitFor(async () => {
+      const state = await wsClient.getConnectorBridgeState();
+      return state.connection.phase === 'ready' && state.hasToken;
+    });
+
+    const setStorage = chrome.storage.local.set.bind(chrome.storage.local);
+    chrome.storage.local.set = async (values) => {
+      if (values.connectorLastDiagnostic?.code === 'buffer_flush_failed') {
+        await new Promise((resolve) => originalSetTimeout(resolve, 300));
+      }
+      return setStorage(values);
+    };
+    BrowserLikeWebSocket.delayMessageMs = 500;
+    BrowserLikeWebSocket.delayMessagePredicate = (data) =>
+      JSON.parse(data).type === 'command_result';
+
+    await wsClient.enqueueDesktopCommand('saveSettingsKey', {
+      key: 'theme',
+      value: 'dark',
+    });
+    await waitFor(() =>
+      BrowserLikeWebSocket.sentMessages.some(
+        (message) => message.type === 'run_command',
+      ),
+    );
+    const firstSocketCount = BrowserLikeWebSocket.instances.length;
+    BrowserLikeWebSocket.instances.at(-1).close();
+
+    await waitFor(
+      () => BrowserLikeWebSocket.instances.length > firstSocketCount,
+    );
+    await waitFor(async () => {
+      const state = await wsClient.getConnectorBridgeState();
+      return state.connection.phase === 'ready' && state.pendingCommands === 0;
+    });
+
+    expect((await wsClient.requestDesktopSettings()).settings.theme).toBe(
+      'dark',
+    );
+  }, 30_000);
+
   it('rejects a snapshot whose encoded message exceeds the daemon-advertised limit', async () => {
     const dir = mkdtempSync(
       path.join(tmpdir(), 'browser-recall-oversized-snapshot-preflight-'),
@@ -864,7 +1092,66 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(store.desktopCommandBuffer).toHaveLength(2);
     expect(store.desktopCommandBuffer[0].kind).toBe('unknown');
     expect(store.connectorState).toBe('paused');
-    expect(store.connectorLastErrorCode).toBe('invalid_buffer_item');
+    expect(store.connectorLastDiagnostic).toMatchObject({
+      code: 'invalid_buffer_item',
+    });
+  }, 30_000);
+
+  it('does not let a running status erase a post-ready blocked outbox', async () => {
+    const dir = mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-ready-buffer-invalid-'),
+    );
+    tempDirs.push(dir);
+
+    originalWebSocket = globalThis.WebSocket;
+    originalChrome = globalThis.chrome;
+    originalNavigator = globalThis.navigator;
+    originalSetTimeout = globalThis.setTimeout;
+
+    const { chrome, store } = createChromeMock();
+    globalThis.chrome = chrome;
+    globalThis.WebSocket = BrowserLikeWebSocket;
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { userAgent: 'Chrome/123.0.0.0 Safari/537.36' },
+      configurable: true,
+    });
+    globalThis.setTimeout = (fn, delay, ...args) => {
+      const timer = originalSetTimeout(fn, delay, ...args);
+      timer?.unref?.();
+      return timer;
+    };
+
+    const wsClient =
+      await import('../../apps/extension/connector/ws-client.js');
+    const { enqueueBufferedMessage } =
+      await import('../../apps/extension/connector/command-buffer.js');
+    const child = launchDaemon(dir, 'allow');
+    childProcesses.push(child);
+    store.connectorDaemonPort = await waitForListening(child);
+
+    await wsClient.initConnectorBridge();
+    await waitFor(async () => {
+      const state = await wsClient.getConnectorBridgeState();
+      return state.state === 'connected' && state.hasToken;
+    });
+    await enqueueBufferedMessage({ kind: 'unknown', request: {} });
+
+    const state = await wsClient.flushDesktopBuffer();
+
+    expect(state.state).toBe('paused');
+    expect(state.pendingCommands).toBe(1);
+    expect(state.connection.failure).toMatchObject({
+      code: 'invalid_buffer_item',
+    });
+    expect(state.lastDiagnostic).toMatchObject({
+      code: 'invalid_buffer_item',
+    });
+
+    const refreshed = await wsClient.refreshConnectorBridgeState();
+    expect(refreshed.state).toBe('paused');
+    expect(refreshed.connection.failure).toMatchObject({
+      code: 'invalid_buffer_item',
+    });
   }, 30_000);
 
   it('keeps a daemon socket alive after a malformed connector frame', async () => {
@@ -881,7 +1168,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     socket.send(
       JSON.stringify({
         type: 'pair_request',
-        protocolVersion: 2,
+        protocolVersion: 3,
         browserId: 'raw-browser',
         browserName: 'Chrome',
         extensionId: 'abcdefghijklmnop',
@@ -898,7 +1185,6 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
         ts: 1710000002820,
         url: 'https://example.com/bad-snapshot',
         html: null,
-        source: 'extension',
       }),
     );
     expect(await nextRawJson(socket)).toMatchObject({
@@ -1128,11 +1414,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       if (closeDuringConnectedWrite && values.connectorState === 'connected') {
         closeDuringConnectedWrite = false;
         BrowserLikeWebSocket.instances.at(-1).socket.close();
-        await waitFor(
-          () =>
-            BrowserLikeWebSocket.instances.length > 1 &&
-            BrowserLikeWebSocket.instances.at(-1)._authenticated,
-        );
+        await new Promise((resolve) => originalSetTimeout(resolve, 50));
       }
       await setStorage(values);
     };
@@ -1143,7 +1425,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(BrowserLikeWebSocket.instances).toHaveLength(2);
   }, 30_000);
 
-  it('preserves a paused connector state after a successful status refresh', async () => {
+  it('replaces stale local pause state with desktop authority on refresh', async () => {
     const dir = mkdtempSync(
       path.join(tmpdir(), 'browser-recall-status-preserves-pause-'),
     );
@@ -1182,15 +1464,14 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
 
     store.connectorState = 'paused';
     store.connectorLastError = 'Replay storage failed';
-    store.connectorLastErrorCode = 'replay_error';
     await wsClient.getConnectorBridgeState();
 
     const state = await wsClient.refreshConnectorBridgeState();
 
     expect(state).toMatchObject({
-      state: 'paused',
-      lastError: 'Replay storage failed',
-      lastErrorCode: 'replay_error',
+      state: 'connected',
+      lastError: null,
+      connection: { phase: 'ready', authority: { state: 'running' } },
     });
   }, 30_000);
 
@@ -1251,7 +1532,6 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     });
 
     expect(store.connectorState).toBe('connected');
-    expect(store.connectorDataFolder).toContain('browser-data');
   }, 30_000);
 
   it('persists diagnostics when no desktop port is reachable', async () => {
@@ -1328,7 +1608,9 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(state.lastError).toBe(
       'Stored connector port must be an integer from 1 to 65535',
     );
-    expect(state.lastErrorCode).toBe('invalid_connector_port');
+    expect(state.connection.failure).toMatchObject({
+      code: 'invalid_connector_port',
+    });
     expect(state.lastDiagnostic).toMatchObject({
       code: 'invalid_connector_configuration',
       errorCode: 'invalid_connector_port',
@@ -1530,6 +1812,120 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(store.connectorAuthToken).toBeTruthy();
   }, 30_000);
 
+  it('rejects when the final state refresh after a connection wait fails', async () => {
+    const dir = mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-state-wait-refresh-failure-'),
+    );
+    tempDirs.push(dir);
+
+    originalWebSocket = globalThis.WebSocket;
+    originalChrome = globalThis.chrome;
+    originalNavigator = globalThis.navigator;
+    originalSetTimeout = globalThis.setTimeout;
+
+    const { chrome, store } = createChromeMock();
+    globalThis.chrome = chrome;
+    globalThis.WebSocket = BrowserLikeWebSocket;
+    BrowserLikeWebSocket.delayMessageMs = 3000;
+    BrowserLikeWebSocket.delayMessagePredicate = (data) =>
+      JSON.parse(data).type === 'pair_approved';
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { userAgent: 'Chrome/123.0.0.0 Safari/537.36' },
+      configurable: true,
+    });
+    globalThis.setTimeout = (fn, delay, ...args) => {
+      const timer = originalSetTimeout(fn, delay, ...args);
+      timer?.unref?.();
+      return timer;
+    };
+
+    const readStorage = chrome.storage.local.get.bind(chrome.storage.local);
+    let connectorStateReadCount = 0;
+    chrome.storage.local.get = async (keys) => {
+      if (Array.isArray(keys) && keys.includes('connectorState')) {
+        connectorStateReadCount += 1;
+        if (connectorStateReadCount === 2) {
+          throw new Error('connector state storage unavailable');
+        }
+      }
+      return readStorage(keys);
+    };
+
+    const wsClient =
+      await import('../../apps/extension/connector/ws-client.js');
+    const child = launchDaemon(dir, 'allow');
+    childProcesses.push(child);
+    store.connectorDaemonPort = await waitForListening(child);
+
+    await expect(wsClient.connectDesktopBridge()).rejects.toThrow(
+      'connector state storage unavailable',
+    );
+  }, 30_000);
+
+  it('does not drain queued commands while desktop authority is paused', async () => {
+    const dir = mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-paused-authority-no-drain-'),
+    );
+    tempDirs.push(dir);
+
+    originalWebSocket = globalThis.WebSocket;
+    originalChrome = globalThis.chrome;
+    originalNavigator = globalThis.navigator;
+    originalSetTimeout = globalThis.setTimeout;
+
+    const { chrome, store } = createChromeMock();
+    store.desktopCommandBuffer = [
+      {
+        kind: 'command',
+        action: 'saveSettingsKey',
+        request: { key: 'theme', value: 'dark' },
+      },
+    ];
+    store.desktopPendingCommands = 1;
+    globalThis.chrome = chrome;
+    globalThis.WebSocket = BrowserLikeWebSocket;
+    BrowserLikeWebSocket.statusAuthority = {
+      state: 'paused',
+      code: 'fs_error',
+      message: 'Desktop storage is unavailable',
+    };
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { userAgent: 'Chrome/123.0.0.0 Safari/537.36' },
+      configurable: true,
+    });
+    globalThis.setTimeout = (fn, delay, ...args) => {
+      const timer = originalSetTimeout(fn, delay, ...args);
+      timer?.unref?.();
+      return timer;
+    };
+
+    const wsClient =
+      await import('../../apps/extension/connector/ws-client.js');
+    const child = launchDaemon(dir, 'allow');
+    childProcesses.push(child);
+    store.connectorDaemonPort = await waitForListening(child);
+
+    await wsClient.initConnectorBridge();
+    await waitFor(async () => {
+      const state = await wsClient.getConnectorBridgeState();
+      return state.connection.authority?.state === 'paused';
+    });
+    const runCommandsBeforeRefresh = BrowserLikeWebSocket.sentMessages.filter(
+      (message) => message.type === 'run_command',
+    ).length;
+
+    const state = await wsClient.refreshConnectorBridgeState();
+    await new Promise((resolve) => originalSetTimeout(resolve, 100));
+
+    expect(state.connection.authority).toMatchObject({ state: 'paused' });
+    expect(state.pendingCommands).toBe(1);
+    expect(
+      BrowserLikeWebSocket.sentMessages.filter(
+        (message) => message.type === 'run_command',
+      ),
+    ).toHaveLength(runCommandsBeforeRefresh);
+  }, 30_000);
+
   it('replaces a stale authenticated socket when manual status refresh fails', async () => {
     const dir = mkdtempSync(
       path.join(tmpdir(), 'browser-recall-stale-auth-socket-'),
@@ -1577,6 +1973,52 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       initialSocketCount,
     );
     expect(store.connectorState).toBe('connected');
+  }, 30_000);
+
+  it('replaces a stale authenticated socket when a passive status probe fails', async () => {
+    const dir = mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-passive-stale-auth-socket-'),
+    );
+    tempDirs.push(dir);
+
+    originalWebSocket = globalThis.WebSocket;
+    originalChrome = globalThis.chrome;
+    originalNavigator = globalThis.navigator;
+    originalSetTimeout = globalThis.setTimeout;
+
+    const { chrome, store } = createChromeMock();
+    globalThis.chrome = chrome;
+    globalThis.WebSocket = BrowserLikeWebSocket;
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { userAgent: 'Chrome/123.0.0.0 Safari/537.36' },
+      configurable: true,
+    });
+    globalThis.setTimeout = (fn, delay, ...args) => {
+      const timer = originalSetTimeout(fn, delay, ...args);
+      timer?.unref?.();
+      return timer;
+    };
+
+    const wsClient =
+      await import('../../apps/extension/connector/ws-client.js');
+    const child = launchDaemon(dir, 'allow');
+    childProcesses.push(child);
+    store.connectorDaemonPort = await waitForListening(child);
+
+    await wsClient.initConnectorBridge();
+    await waitFor(async () => {
+      const state = await wsClient.getConnectorBridgeState();
+      return state.state === 'connected' && state.hasToken;
+    });
+    const initialSocketCount = BrowserLikeWebSocket.instances.length;
+
+    BrowserLikeWebSocket.hangOnNextStatus = true;
+    const state = await wsClient.refreshConnectorBridgeState(5_000);
+
+    expect(state.state).toBe('connected');
+    expect(BrowserLikeWebSocket.instances.length).toBeGreaterThan(
+      initialSocketCount,
+    );
   }, 30_000);
 
   it('times out a stale open socket and reconnects on manual refresh', async () => {
@@ -1671,7 +2113,6 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(state.state).toBe('connected');
     expect(BrowserLikeWebSocket.instances).toHaveLength(socketCount);
     expect(store.connectorState).toBe('connected');
-    expect(store.connectorDataFolder).toContain('browser-data');
   }, 30_000);
 
   it('rebroadcasts daemon change messages as extension mutations', async () => {
@@ -1723,38 +2164,14 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
         mutations: [
           {
             type: 'history',
-            listId: null,
-            pageSlug: null,
-            noteSlug: null,
-            oldNoteSlug: null,
-            slug: null,
             url: 'https://example.com/change',
             urls: null,
-            key: null,
-            historyEntry: {
-              action: 'visit_page',
-              timestamp: 1_710_000_000_123,
-              url: 'https://example.com/change',
-              title: 'Changed page',
-              userTitle: null,
-              scrollDepth: null,
-              timeOnPage: null,
-              likes: null,
-              deviceId: 'device-a',
-            },
             futureTraceId: 'compatible-additive-field',
           },
           {
             type: 'note',
-            listId: null,
-            pageSlug: 'change',
-            noteSlug: 'change-note',
-            oldNoteSlug: null,
-            slug: null,
             url: null,
             urls: null,
-            key: null,
-            historyEntry: null,
           },
         ],
       }),
@@ -1764,38 +2181,14 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
       action: 'mutation',
       type: 'history',
-      listId: null,
-      pageSlug: null,
-      noteSlug: null,
-      oldNoteSlug: null,
-      slug: null,
       url: 'https://example.com/change',
       urls: null,
-      key: null,
-      historyEntry: {
-        action: 'visit_page',
-        timestamp: 1_710_000_000_123,
-        url: 'https://example.com/change',
-        title: 'Changed page',
-        userTitle: null,
-        scrollDepth: null,
-        timeOnPage: null,
-        likes: null,
-        deviceId: 'device-a',
-      },
     });
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
       action: 'mutation',
       type: 'note',
-      listId: null,
-      pageSlug: 'change',
-      noteSlug: 'change-note',
-      oldNoteSlug: null,
-      slug: null,
       url: null,
       urls: null,
-      key: null,
-      historyEntry: null,
     });
   }, 30_000);
 });

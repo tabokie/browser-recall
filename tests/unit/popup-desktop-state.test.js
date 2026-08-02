@@ -124,12 +124,7 @@ function installChromeMock({ tab, responses }) {
       connectorAuthToken: initialConnector.hasToken ? 'test-token' : null,
       desktopPendingCommands: initialConnector.pendingCommands ?? 0,
       desktopPendingBytes: initialConnector.pendingBytes ?? 0,
-      desktopRefuseMode: initialConnector.refuseMode ?? false,
       connectorLastError: initialConnector.lastError ?? null,
-      connectorLastErrorCode: initialConnector.lastErrorCode ?? null,
-      connectorLastDrainedAt: initialConnector.lastDrainedAt ?? null,
-      connectorDataFolder: initialConnector.dataFolder ?? null,
-      connectorDaemonBufferDepth: initialConnector.daemonBufferDepth ?? null,
       connectorLastDiagnostic: initialConnector.lastDiagnostic ?? null,
     });
   }

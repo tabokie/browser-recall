@@ -22,9 +22,7 @@ use browser_recall_daemon::commands::{
 use browser_recall_daemon::pairing::{
     ApprovalFuture, PairingApprover, PairingDecision, PairingRequest,
 };
-use browser_recall_daemon::protocol::{
-    DaemonMessage, MutationPayload, RuleBatchEntry, RulePayload,
-};
+use browser_recall_daemon::protocol::{MutationPayload, RuleBatchEntry, RulePayload};
 use browser_recall_daemon::read_projections::ReadProjections;
 use browser_recall_daemon::search::{
     search_history_parallel_in_data_dir, search_notes_in_storage, search_snapshots_in_data_dir,
@@ -37,7 +35,7 @@ use browser_recall_daemon::sync::{
 };
 use browser_recall_daemon::ws_server::{
     start_server, ServerControlHandle, ServerHandle, ServerSnapshot, ServerStartOptions,
-    ServiceStatus,
+    ServiceState,
 };
 use browser_recall_daemon::{ConfigStore, DaemonConfig};
 use parking_lot::Mutex;
@@ -490,7 +488,6 @@ struct UiModel {
     is_paused: bool,
     error: Option<String>,
     endpoint: String,
-    browsers: Vec<String>,
     data_dir: String,
     log_dir: String,
     device_id: String,
@@ -503,19 +500,17 @@ struct UiModel {
 impl UiModel {
     fn from_state(state: &ShellState) -> Self {
         let endpoint = format!("ws://127.0.0.1:{}", state.snapshot.port);
-        let paused_error = state
-            .snapshot
-            .last_error
-            .clone()
-            .or_else(|| state.error.clone());
-        let is_paused =
-            state.snapshot.service_status == ServiceStatus::Paused || paused_error.is_some();
+        let daemon_error = match &state.snapshot.service_state {
+            ServiceState::Running => None,
+            ServiceState::Paused { message, .. } => Some(message.clone()),
+        };
+        let paused_error = daemon_error.or_else(|| state.error.clone());
+        let is_paused = paused_error.is_some();
 
         Self {
             is_paused,
             error: paused_error,
             endpoint,
-            browsers: state.snapshot.connected_browsers.clone(),
             data_dir: state.data_dir.clone(),
             log_dir: state.log_dir.clone(),
             device_id: state.snapshot.device_id.clone(),
@@ -541,12 +536,11 @@ mod tests {
     use browser_recall_daemon::pairing::static_approver;
     use std::sync::atomic::AtomicUsize;
 
-    fn ui_model(is_paused: bool, browsers: Vec<String>) -> UiModel {
+    fn ui_model(is_paused: bool) -> UiModel {
         UiModel {
             is_paused,
             error: None,
             endpoint: "ws://127.0.0.1:0".to_string(),
-            browsers,
             data_dir: String::new(),
             log_dir: String::new(),
             device_id: "test-device".to_string(),
@@ -559,13 +553,13 @@ mod tests {
 
     #[test]
     fn window_title_is_plain_when_connected() {
-        let model = ui_model(false, vec!["Firefox".to_string()]);
+        let model = ui_model(false);
         assert_eq!(window_title(&model), "Browser Recall");
     }
 
     #[test]
     fn window_title_keeps_error_state() {
-        let model = ui_model(true, vec!["Firefox".to_string()]);
+        let model = ui_model(true);
         assert_eq!(window_title(&model), "Browser Recall - Error");
     }
 
@@ -951,18 +945,15 @@ fn inactive_server_snapshot(config: &DaemonConfig) -> ServerSnapshot {
     ServerSnapshot {
         port: 0,
         device_id: config.device_id.clone(),
-        service_status: ServiceStatus::Running,
-        connected_browsers: Vec::new(),
+        service_state: ServiceState::Running,
         connected_connectors: Vec::new(),
-        last_error: None,
-        last_error_code: None,
     }
 }
 
 fn spawn_server_watchers(
     app: AppHandle,
     mut snapshot_rx: tokio::sync::watch::Receiver<ServerSnapshot>,
-    mut change_rx: tokio::sync::broadcast::Receiver<DaemonMessage>,
+    mut change_rx: tokio::sync::broadcast::Receiver<Vec<MutationPayload>>,
 ) {
     tauri::async_runtime::spawn({
         let app = app.clone();
@@ -979,10 +970,7 @@ fn spawn_server_watchers(
     tauri::async_runtime::spawn(async move {
         loop {
             match change_rx.recv().await {
-                Ok(DaemonMessage::Change { mutations }) => {
-                    emit_protocol_mutations(&app, &mutations);
-                }
-                Ok(_) => {}
+                Ok(mutations) => emit_protocol_mutations(&app, &mutations),
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
@@ -1220,21 +1208,17 @@ fn desktop_connector_state_response(
             "port": null,
             "deviceId": null,
             "hasToken": false,
-            "pendingCommands": 0,
-            "pendingBytes": 0,
-            "refuseMode": false,
             "lastError": null,
             "lastErrorCode": null,
-            "lastDrainedAt": null,
             "dataFolder": null,
-            "daemonBufferDepth": 0,
         });
     }
 
-    let state = if snapshot.service_status == ServiceStatus::Paused {
-        "paused"
-    } else {
-        "connected"
+    let (state, last_error, last_error_code) = match &snapshot.service_state {
+        ServiceState::Running => ("connected", None, None),
+        ServiceState::Paused { code, message } => {
+            ("paused", Some(message.as_str()), Some(code.as_str()))
+        }
     };
     json!({
         "success": true,
@@ -1242,14 +1226,9 @@ fn desktop_connector_state_response(
         "port": snapshot.port,
         "deviceId": snapshot.device_id,
         "hasToken": true,
-        "pendingCommands": 0,
-        "pendingBytes": 0,
-        "refuseMode": false,
-        "lastError": snapshot.last_error,
-        "lastErrorCode": snapshot.last_error_code,
-        "lastDrainedAt": null,
+        "lastError": last_error,
+        "lastErrorCode": last_error_code,
         "dataFolder": data_dir,
-        "daemonBufferDepth": 0,
     })
 }
 
@@ -2130,10 +2109,10 @@ fn main() -> tauri::Result<()> {
                         Err(error) => {
                             warn!(%error, "failed to start Browser Recall daemon");
                             let mut snapshot = inactive_server_snapshot(&bootstrap.config);
-                            snapshot.service_status = ServiceStatus::Paused;
-                            snapshot.last_error =
-                                Some(format!("Failed to start Browser Recall daemon: {error}"));
-                            snapshot.last_error_code = Some("daemon_start_failed".into());
+                            snapshot.service_state = ServiceState::Paused {
+                                code: "daemon_start_failed".into(),
+                                message: format!("Failed to start Browser Recall daemon: {error}"),
+                            };
                             (None, snapshot, None)
                         }
                     }

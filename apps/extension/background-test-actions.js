@@ -2,7 +2,6 @@ export const BACKGROUND_TEST_ACTIONS = [
   'resetForTest',
   'flushDesktopQueueForTest',
   'seedTestData',
-  'getDesktopQueueForTest',
   'getActionIconForTest',
   'preparePopupBootstrapForTest',
   'failNextTabMessageForTest',

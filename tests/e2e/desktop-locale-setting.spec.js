@@ -112,13 +112,8 @@ async function installDesktopShellBridge(page, helper, setupDir) {
             deviceId: 'locale-device',
             hasToken: true,
             dataFolder: setupDir,
-            pendingCommands: 0,
-            pendingBytes: 0,
-            refuseMode: false,
             lastError: null,
             lastErrorCode: null,
-            lastDrainedAt: null,
-            daemonBufferDepth: 0,
           };
         case 'getDesktopShellState':
           return {

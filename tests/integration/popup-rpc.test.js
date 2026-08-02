@@ -37,7 +37,7 @@ async function pairSocket(port) {
   socket.send(
     JSON.stringify({
       type: 'pair_request',
-      protocolVersion: 2,
+      protocolVersion: 3,
       browserId: 'browser-install-1',
       browserName: 'Chrome',
       extensionId: 'abcdefghijklmnop',
@@ -47,7 +47,10 @@ async function pairSocket(port) {
   const [, approved] = await pairingMessages;
   expect(approved.type).toBe('pair_approved');
   installTestControlWireAdapter(socket);
-  return { socket, deviceId: approved.deviceId };
+  socket.send(JSON.stringify({ type: 'get_status' }));
+  const status = await nextMessage(socket);
+  expect(status.type).toBe('status');
+  return { socket, deviceId: status.deviceId };
 }
 
 describe.sequential('popup rpc integration', () => {
@@ -83,8 +86,6 @@ describe.sequential('popup rpc integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
-        bufferDepth: 0,
-        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp,
@@ -100,8 +101,6 @@ describe.sequential('popup rpc integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
-        bufferDepth: 0,
-        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: timestamp + 1,
@@ -118,8 +117,6 @@ describe.sequential('popup rpc integration', () => {
     socket.send(
       JSON.stringify({
         type: 'event',
-        bufferDepth: 0,
-        bufferBytes: 0,
         source: 'extension',
         entry: {
           timestamp: timestamp + 2,
@@ -137,8 +134,6 @@ describe.sequential('popup rpc integration', () => {
     socket.send(
       JSON.stringify({
         type: 'note',
-        bufferDepth: 0,
-        bufferBytes: 0,
         source: 'extension',
         slug: noteSlug,
         excerpt: ['Summary highlight'],
@@ -155,9 +150,6 @@ describe.sequential('popup rpc integration', () => {
     socket.send(
       JSON.stringify({
         type: 'snapshot',
-        bufferDepth: 0,
-        bufferBytes: 0,
-        source: 'extension',
         slug,
         ts: timestamp + 4,
         url,

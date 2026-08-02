@@ -48,11 +48,10 @@ async fn fresh_pairing_persists_token() {
 
     let pending: DaemonMessage = serde_json::from_str(&pending).expect("pending json");
     let approved: DaemonMessage = serde_json::from_str(&approved).expect("approved json");
-    assert!(matches!(pending, DaemonMessage::PairPending { .. }));
+    assert!(matches!(pending, DaemonMessage::PairPending));
     let token = match approved {
         DaemonMessage::PairApproved {
             token,
-            device_id: _,
             protocol_version,
         } => {
             assert_eq!(protocol_version, CONNECTOR_PROTOCOL_VERSION);
@@ -158,7 +157,7 @@ async fn firefox_extension_origin_can_pair() {
 
     let pending: DaemonMessage = serde_json::from_str(&pending).expect("pending json");
     let approved: DaemonMessage = serde_json::from_str(&approved).expect("approved json");
-    assert!(matches!(pending, DaemonMessage::PairPending { .. }));
+    assert!(matches!(pending, DaemonMessage::PairPending));
     assert!(matches!(approved, DaemonMessage::PairApproved { .. }));
 
     let saved = config_store.load_or_create().expect("config reload");
@@ -230,7 +229,7 @@ async fn connect_pair_socket(port: u16, browser_name: &str) -> support::TestSock
     let approved = next_text_message(&mut socket).await;
     let pending: DaemonMessage = serde_json::from_str(&pending).expect("pending json");
     let approved: DaemonMessage = serde_json::from_str(&approved).expect("approved json");
-    assert!(matches!(pending, DaemonMessage::PairPending { .. }));
+    assert!(matches!(pending, DaemonMessage::PairPending));
     assert!(matches!(approved, DaemonMessage::PairApproved { .. }));
     socket
 }

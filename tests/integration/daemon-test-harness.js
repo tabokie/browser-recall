@@ -19,6 +19,8 @@ const TEST_CONTROL_MESSAGE_TYPES = new Set([
   'test_reset_data',
   'test_seed_data',
   'note',
+  'list_history_files',
+  'load_history_batch',
 ]);
 
 export function installTestControlWireAdapter(socket) {

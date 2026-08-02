@@ -3,7 +3,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-pub const CONNECTOR_PROTOCOL_VERSION: u32 = 2;
+pub const CONNECTOR_PROTOCOL_VERSION: u32 = 3;
 
 fn deserialize_required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where
@@ -11,13 +11,6 @@ where
     T: Deserialize<'de>,
 {
     Option::deserialize(deserializer)
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DirectoryInfoPayload {
-    pub name: String,
-    #[serde(rename = "hasPermission")]
-    pub has_permission: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -184,6 +177,24 @@ pub struct MutationPayload {
     pub history_entry: Option<HistoryMutationEntry>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct ConnectorMutationPayload {
+    #[serde(rename = "type")]
+    pub mutation_type: String,
+    pub url: Option<String>,
+    pub urls: Option<Vec<String>>,
+}
+
+impl From<MutationPayload> for ConnectorMutationPayload {
+    fn from(value: MutationPayload) -> Self {
+        Self {
+            mutation_type: value.mutation_type,
+            url: value.url,
+            urls: value.urls,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ConnectorMessage {
@@ -213,17 +224,7 @@ pub enum ConnectorMessage {
         protocol_version: Option<u32>,
         token: String,
     },
-    Ping,
     GetStatus,
-    GetDirectoryInfo,
-    GetDirectorySize,
-    ListHistoryFiles {
-        #[serde(rename = "includeSizes")]
-        include_sizes: bool,
-    },
-    LoadHistoryBatch {
-        files: Vec<String>,
-    },
     GetPageInfo {
         slug: String,
     },
@@ -240,10 +241,6 @@ pub enum ConnectorMessage {
     RunCommand {
         action: String,
         request: Value,
-        #[serde(rename = "bufferDepth")]
-        buffer_depth: usize,
-        #[serde(rename = "bufferBytes")]
-        buffer_bytes: usize,
     },
     TestControl {
         request: TestControlMessage,
@@ -257,17 +254,19 @@ pub enum ConnectorMessage {
         #[serde(deserialize_with = "deserialize_required_option")]
         markdown: Option<String>,
         html: String,
-        source: String,
-        #[serde(rename = "bufferDepth")]
-        buffer_depth: usize,
-        #[serde(rename = "bufferBytes")]
-        buffer_bytes: usize,
     },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TestControlMessage {
+    ListHistoryFiles {
+        #[serde(rename = "includeSizes")]
+        include_sizes: bool,
+    },
+    LoadHistoryBatch {
+        files: Vec<String>,
+    },
     ClearAllData,
     ReplayRemoteEntries {
         #[serde(rename = "deviceId")]
@@ -288,10 +287,6 @@ pub enum TestControlMessage {
     Event {
         entry: Value,
         source: String,
-        #[serde(rename = "bufferDepth")]
-        buffer_depth: usize,
-        #[serde(rename = "bufferBytes")]
-        buffer_bytes: usize,
     },
     RunRuleBatch {
         #[serde(rename = "listIds")]
@@ -328,24 +323,22 @@ pub enum TestControlMessage {
         title: Option<String>,
         ts: i64,
         source: String,
-        #[serde(rename = "bufferDepth")]
-        buffer_depth: usize,
-        #[serde(rename = "bufferBytes")]
-        buffer_bytes: usize,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum AuthorityStatus {
+    Running,
+    Paused { code: String, message: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DaemonMessage {
-    PairPending {
-        #[serde(rename = "requestId")]
-        request_id: String,
-    },
+    PairPending,
     PairApproved {
         token: String,
-        #[serde(rename = "deviceId")]
-        device_id: String,
         #[serde(rename = "protocolVersion")]
         protocol_version: u32,
     },
@@ -357,45 +350,16 @@ pub enum DaemonMessage {
     AuthFail {
         reason: String,
     },
-    Pong,
-    Ack {
-        #[serde(rename = "ackedAt")]
-        acked_at: i64,
-        #[serde(rename = "bufferDepth")]
-        buffer_depth: usize,
-        #[serde(rename = "lastDrainedAt")]
-        last_drained_at: i64,
-    },
+    Ack,
     Status {
-        #[serde(rename = "connectedBrowsers")]
-        connected_browsers: Vec<String>,
-        #[serde(rename = "bufferDepth")]
-        buffer_depth: usize,
-        #[serde(rename = "bufferBytes")]
-        buffer_bytes: usize,
-        #[serde(rename = "daemonBufferDepth")]
-        daemon_buffer_depth: usize,
-        #[serde(rename = "lastDrainedAt")]
-        last_drained_at: Option<i64>,
-        #[serde(rename = "dataFolder")]
-        data_folder: String,
         #[serde(rename = "deviceId")]
         device_id: String,
         #[serde(rename = "maxMessageBytes")]
         max_message_bytes: usize,
+        authority: AuthorityStatus,
     },
     Change {
-        mutations: Vec<MutationPayload>,
-    },
-    DirectoryInfoResult {
-        success: bool,
-        info: Option<DirectoryInfoPayload>,
-        error: Option<String>,
-    },
-    DirectorySizeResult {
-        success: bool,
-        size: u64,
-        error: Option<String>,
+        mutations: Vec<ConnectorMutationPayload>,
     },
     ClearAllDataResult {
         success: bool,
@@ -527,9 +491,7 @@ mod tests {
         let raw_event = json!({
             "type": "event",
             "entry": {},
-            "source": "extension",
-            "bufferDepth": 0,
-            "bufferBytes": 0
+            "source": "extension"
         });
         assert!(serde_json::from_value::<ConnectorMessage>(raw_event).is_err());
 
@@ -538,44 +500,38 @@ mod tests {
             "request": {
                 "type": "event",
                 "entry": {},
-                "source": "extension",
-                "bufferDepth": 0,
-                "bufferBytes": 0
+                "source": "extension"
             }
         });
         assert!(serde_json::from_value::<ConnectorMessage>(wrapped).is_ok());
     }
 
     #[test]
-    fn connector_v2_accepts_additive_message_fields() {
-        assert_eq!(CONNECTOR_PROTOCOL_VERSION, 2);
+    fn connector_v3_accepts_additive_message_fields() {
+        assert_eq!(CONNECTOR_PROTOCOL_VERSION, 3);
 
         let message = json!({
             "type": "run_command",
             "action": "createList",
             "request": { "name": "Reading" },
-            "bufferDepth": 0,
-            "bufferBytes": 0,
-            "futureTracingContext": { "spanId": "additive-v2-field" }
+            "futureTracingContext": { "spanId": "additive-v3-field" }
         });
 
         assert!(serde_json::from_value::<ConnectorMessage>(message).is_ok());
     }
 
     #[test]
-    fn connector_v2_still_requires_current_fields() {
+    fn connector_v3_still_requires_current_fields() {
         let missing_request = json!({
             "type": "run_command",
-            "action": "createList",
-            "bufferDepth": 0,
-            "bufferBytes": 0
+            "action": "createList"
         });
 
         assert!(serde_json::from_value::<ConnectorMessage>(missing_request).is_err());
     }
 
     #[test]
-    fn connector_v2_rejects_missing_nullable_snapshot_fields_even_with_additions() {
+    fn connector_v3_rejects_missing_nullable_snapshot_fields_even_with_additions() {
         let misspelled_markdown = json!({
             "type": "snapshot",
             "slug": "snapshot-page",
@@ -584,10 +540,7 @@ mod tests {
             "title": null,
             "markdonw": null,
             "html": "<html></html>",
-            "source": "extension",
-            "bufferDepth": 0,
-            "bufferBytes": 0,
-            "futureTracingContext": { "spanId": "additive-v2-field" }
+            "futureTracingContext": { "spanId": "additive-v3-field" }
         });
 
         assert!(serde_json::from_value::<ConnectorMessage>(misspelled_markdown).is_err());

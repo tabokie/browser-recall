@@ -8,7 +8,7 @@ use crate::connectors::{
 use crate::mutations::{build_mutations, dedupe_mutations};
 use crate::pairing::{with_timeout, PairingApprover, PairingDecision, PairingRequest};
 use crate::protocol::{
-    ConnectorMessage, DaemonMessage, DirectoryInfoPayload, MutationPayload, NoteSearchResult,
+    AuthorityStatus, ConnectorMessage, DaemonMessage, MutationPayload, NoteSearchResult,
     PopupAccessResult, PopupAttentionResult, PopupListResult, PopupNoteResult, PopupPageInfoEntry,
     PopupSnapshotResult, PreviewRuleHit, RuleBatchEntry, RuleBatchHit, RuleMatchResult,
     RulePayload, SnapshotSearchResult, TestControlMessage, TestSeedFilePayload,
@@ -116,36 +116,25 @@ impl From<serde_json::Error> for WsServerError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ServiceStatus {
-    Running,
-    Paused,
-}
-
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ErrorCode {
     FsError,
-    SyncError,
     ReplayError,
-    ManualPause,
 }
 
 impl ErrorCode {
     fn as_str(self) -> &'static str {
         match self {
             Self::FsError => "fs_error",
-            Self::SyncError => "sync_error",
             Self::ReplayError => "replay_error",
-            Self::ManualPause => "manual_pause",
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum ServiceState {
+pub enum ServiceState {
     Running,
-    Paused { code: ErrorCode, message: String },
+    Paused { code: String, message: String },
 }
 
 #[derive(Debug, Clone)]
@@ -165,42 +154,24 @@ impl ConnectedConnector {
 pub struct ServerSnapshot {
     pub port: u16,
     pub device_id: String,
-    pub service_status: ServiceStatus,
-    pub connected_browsers: Vec<String>,
+    pub service_state: ServiceState,
     pub connected_connectors: Vec<ConnectedConnector>,
-    pub last_error: Option<String>,
-    pub last_error_code: Option<String>,
 }
 
 #[derive(Clone)]
 struct SharedState {
     snapshot: Arc<RwLock<ServerSnapshot>>,
     snapshot_tx: watch::Sender<ServerSnapshot>,
-    change_message_tx: broadcast::Sender<DaemonMessage>,
+    change_message_tx: broadcast::Sender<Vec<MutationPayload>>,
     revoke_tx: broadcast::Sender<ConnectorKey>,
     config_store: ConfigStore,
     config: Arc<Mutex<crate::config::DaemonConfig>>,
     storage: Storage,
-    ingest_status: Arc<Mutex<IngestStatus>>,
-    connector_buffer_status: Arc<Mutex<ConnectorBufferStatus>>,
-    service_state: Arc<RwLock<ServiceState>>,
     approver: PairingApprover,
     pair_timeout: Duration,
     test_control_enabled: bool,
     active_connections: Arc<Mutex<HashMap<u64, ConnectedConnector>>>,
     next_connection_id: Arc<AtomicU64>,
-}
-
-#[derive(Debug, Default)]
-struct IngestStatus {
-    buffer_depth: usize,
-    last_drained_at: Option<i64>,
-}
-
-#[derive(Debug, Default)]
-struct ConnectorBufferStatus {
-    buffer_depth: usize,
-    buffer_bytes: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -233,7 +204,7 @@ impl ServerHandle {
         self.shared.snapshot_tx.subscribe()
     }
 
-    pub fn subscribe_changes(&self) -> broadcast::Receiver<DaemonMessage> {
+    pub fn subscribe_changes(&self) -> broadcast::Receiver<Vec<MutationPayload>> {
         self.shared.change_message_tx.subscribe()
     }
 
@@ -333,11 +304,8 @@ pub async fn start_server(options: ServerStartOptions) -> Result<ServerHandle, W
     let snapshot = ServerSnapshot {
         port,
         device_id: config.device_id.clone(),
-        service_status: ServiceStatus::Running,
-        connected_browsers: Vec::new(),
+        service_state: ServiceState::Running,
         connected_connectors: Vec::new(),
-        last_error: None,
-        last_error_code: None,
     };
     let (snapshot_tx, _) = watch::channel(snapshot.clone());
     let (change_message_tx, _) = broadcast::channel(128);
@@ -350,9 +318,6 @@ pub async fn start_server(options: ServerStartOptions) -> Result<ServerHandle, W
         config_store: options.config_store.clone(),
         config: Arc::new(Mutex::new(config)),
         storage,
-        ingest_status: Arc::new(Mutex::new(IngestStatus::default())),
-        connector_buffer_status: Arc::new(Mutex::new(ConnectorBufferStatus::default())),
-        service_state: Arc::new(RwLock::new(ServiceState::Running)),
         approver: options.approver,
         pair_timeout: options.pair_timeout,
         test_control_enabled: options.test_control_enabled,
@@ -484,7 +449,10 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
             }
             changed = change_rx.recv(), if authenticated => {
                 match changed {
-                    Ok(message) => {
+                    Ok(mutations) => {
+                        let message = DaemonMessage::Change {
+                            mutations: mutations.into_iter().map(Into::into).collect(),
+                        };
                         send_json(&mut write, &message).await?;
                         continue;
                     }
@@ -544,17 +512,8 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
             continue;
         }
         match incoming {
-            ConnectorMessage::Ping => {
-                send_json(&mut write, &DaemonMessage::Pong).await?;
-            }
             ConnectorMessage::GetStatus => {
                 send_json(&mut write, &build_status_message(&shared).await).await?;
-            }
-            ConnectorMessage::GetDirectoryInfo => {
-                send_json(&mut write, &handle_get_directory_info(&shared).await).await?;
-            }
-            ConnectorMessage::GetDirectorySize => {
-                send_json(&mut write, &handle_get_directory_size(&shared).await).await?;
             }
             ConnectorMessage::TestControl {
                 request: TestControlMessage::ClearAllData,
@@ -585,14 +544,18 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
             } => {
                 send_json(&mut write, &handle_set_device_id(&shared, device_id).await).await?;
             }
-            ConnectorMessage::ListHistoryFiles { include_sizes } => {
+            ConnectorMessage::TestControl {
+                request: TestControlMessage::ListHistoryFiles { include_sizes },
+            } => {
                 send_json(
                     &mut write,
                     &handle_list_history_files(&shared, include_sizes).await,
                 )
                 .await?;
             }
-            ConnectorMessage::LoadHistoryBatch { files } => {
+            ConnectorMessage::TestControl {
+                request: TestControlMessage::LoadHistoryBatch { files },
+            } => {
                 send_json(&mut write, &handle_load_history_batch(&shared, files).await).await?;
             }
             ConnectorMessage::TestControl {
@@ -654,70 +617,69 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                     }
                 }
             },
-            ConnectorMessage::RunCommand {
-                action,
-                request,
-                buffer_depth,
-                buffer_bytes,
-            } => match run_connector_command(&shared, &action, request).await {
-                Ok(response) => {
-                    record_connector_buffer(&shared, buffer_depth, buffer_bytes).await;
-                    let Some(mut payload) = response.as_object().cloned() else {
-                        send_json(
-                            &mut write,
-                            &DaemonMessage::CommandResult {
-                                success: false,
-                                response: None,
-                                error: Some(format!("{action} returned a non-object response")),
-                            },
-                        )
-                        .await?;
-                        continue;
-                    };
-                    let Some(success) = payload.remove("success").and_then(|value| value.as_bool())
-                    else {
-                        send_json(
-                            &mut write,
-                            &DaemonMessage::CommandResult {
-                                success: false,
-                                response: None,
-                                error: Some(format!(
+            ConnectorMessage::RunCommand { action, request } => {
+                match run_connector_command(&shared, &action, request).await {
+                    Ok(response) => {
+                        let Some(mut payload) = response.as_object().cloned() else {
+                            send_json(
+                                &mut write,
+                                &DaemonMessage::CommandResult {
+                                    success: false,
+                                    response: None,
+                                    error: Some(format!("{action} returned a non-object response")),
+                                },
+                            )
+                            .await?;
+                            continue;
+                        };
+                        let Some(success) =
+                            payload.remove("success").and_then(|value| value.as_bool())
+                        else {
+                            send_json(
+                                &mut write,
+                                &DaemonMessage::CommandResult {
+                                    success: false,
+                                    response: None,
+                                    error: Some(format!(
                                     "{action} returned an invalid response without boolean success"
                                 )),
+                                },
+                            )
+                            .await?;
+                            continue;
+                        };
+                        let error = (!success).then(|| {
+                            payload
+                                .get("error")
+                                .and_then(Value::as_str)
+                                .map(str::to_string)
+                                .unwrap_or_else(|| {
+                                    format!("{action} failed without an error message")
+                                })
+                        });
+                        send_json(
+                            &mut write,
+                            &DaemonMessage::CommandResult {
+                                success,
+                                response: success.then_some(Value::Object(payload)),
+                                error,
                             },
                         )
                         .await?;
-                        continue;
-                    };
-                    let error = (!success).then(|| {
-                        payload
-                            .get("error")
-                            .and_then(Value::as_str)
-                            .map(str::to_string)
-                            .unwrap_or_else(|| format!("{action} failed without an error message"))
-                    });
-                    send_json(
-                        &mut write,
-                        &DaemonMessage::CommandResult {
-                            success,
-                            response: success.then_some(Value::Object(payload)),
-                            error,
-                        },
-                    )
-                    .await?;
+                    }
+                    Err(error) => {
+                        send_json(
+                            &mut write,
+                            &DaemonMessage::CommandResult {
+                                success: false,
+                                response: None,
+                                error: Some(error.to_string()),
+                            },
+                        )
+                        .await?;
+                    }
                 }
-                Err(error) => {
-                    send_json(
-                        &mut write,
-                        &DaemonMessage::CommandResult {
-                            success: false,
-                            response: None,
-                            error: Some(error.to_string()),
-                        },
-                    )
-                    .await?;
-                }
-            },
+            }
             ConnectorMessage::TestControl {
                 request: TestControlMessage::SearchNotes { query, limit },
             } => {
@@ -869,13 +831,7 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                     browser_profile,
                     origin: origin.clone(),
                 };
-                send_json(
-                    &mut write,
-                    &DaemonMessage::PairPending {
-                        request_id: request.request_id.clone(),
-                    },
-                )
-                .await?;
+                send_json(&mut write, &DaemonMessage::PairPending).await?;
                 info!(
                     browser = request.browser_name.as_str(),
                     extension_id = request.extension_id.as_str(),
@@ -892,7 +848,7 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                             let active_connections = shared.active_connections.lock().await;
                             active_connector_keys(&active_connections)
                         };
-                        let device_id = {
+                        {
                             let mut config = shared.config.lock().await;
                             upsert_connector(
                                 &mut config.connectors,
@@ -913,7 +869,6 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                                     .map_err(WsServerError::Configuration)?,
                             );
                             shared.config_store.save(&config)?;
-                            config.device_id.clone()
                         };
                         let connector = ConnectedConnector {
                             browser_id: request.browser_id.clone(),
@@ -928,7 +883,6 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                             &mut write,
                             &DaemonMessage::PairApproved {
                                 token: token.0,
-                                device_id,
                                 protocol_version: CONNECTOR_PROTOCOL_VERSION,
                             },
                         )
@@ -955,13 +909,7 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                 }
             }
             ConnectorMessage::TestControl {
-                request:
-                    TestControlMessage::Event {
-                        entry,
-                        source,
-                        buffer_depth,
-                        buffer_bytes,
-                    },
+                request: TestControlMessage::Event { entry, source },
             } => {
                 if let Err(error) = validate_connector_source(&source) {
                     send_json(&mut write, &invalid_message_error(error.to_string())).await?;
@@ -977,7 +925,6 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                 };
                 match ingest_typed_entry(&shared, parsed, entry).await {
                     Ok(IngestSuccess { ack, mutations }) => {
-                        record_connector_buffer(&shared, buffer_depth, buffer_bytes).await;
                         send_json(&mut write, &ack).await?;
                         broadcast_mutations(&shared, mutations);
                     }
@@ -1032,30 +979,20 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                 title,
                 markdown,
                 html,
-                source,
-                buffer_depth,
-                buffer_bytes,
-            } => {
-                if let Err(error) = validate_connector_source(&source) {
-                    send_json(&mut write, &invalid_message_error(error.to_string())).await?;
-                    continue;
+            } => match ingest_snapshot(&shared, slug, ts, url, title, markdown, html).await {
+                Ok(IngestSuccess { ack, mutations }) => {
+                    send_json(&mut write, &ack).await?;
+                    broadcast_mutations(&shared, mutations);
                 }
-                match ingest_snapshot(&shared, slug, ts, url, title, markdown, html).await {
-                    Ok(IngestSuccess { ack, mutations }) => {
-                        record_connector_buffer(&shared, buffer_depth, buffer_bytes).await;
-                        send_json(&mut write, &ack).await?;
-                        broadcast_mutations(&shared, mutations);
-                    }
-                    Err(error) => {
-                        warn!(error = %error, "snapshot ingest failed");
-                        let message = format!("Snapshot ingest failed: {error}");
-                        pause_service(&shared, ErrorCode::FsError, message).await;
-                        if let Some(message) = paused_error(&shared).await {
-                            send_json(&mut write, &message).await?;
-                        }
+                Err(error) => {
+                    warn!(error = %error, "snapshot ingest failed");
+                    let message = format!("Snapshot ingest failed: {error}");
+                    pause_service(&shared, ErrorCode::FsError, message).await;
+                    if let Some(message) = paused_error(&shared).await {
+                        send_json(&mut write, &message).await?;
                     }
                 }
-            }
+            },
             ConnectorMessage::TestControl {
                 request:
                     TestControlMessage::Note {
@@ -1068,8 +1005,6 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                         title,
                         ts,
                         source,
-                        buffer_depth,
-                        buffer_bytes,
                     },
             } => {
                 if let Err(error) = validate_connector_source(&source) {
@@ -1082,7 +1017,6 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                 .await
                 {
                     Ok(IngestSuccess { ack, mutations }) => {
-                        record_connector_buffer(&shared, buffer_depth, buffer_bytes).await;
                         send_json(&mut write, &ack).await?;
                         broadcast_mutations(&shared, mutations);
                     }
@@ -1108,8 +1042,7 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
 fn message_requires_authentication(message: &ConnectorMessage) -> bool {
     !matches!(
         message,
-        ConnectorMessage::Ping
-            | ConnectorMessage::Auth { .. }
+        ConnectorMessage::Auth { .. }
             | ConnectorMessage::PairRequest { .. }
             | ConnectorMessage::TestControl {
                 request: TestControlMessage::ResetData | TestControlMessage::SeedData { .. },
@@ -1144,9 +1077,9 @@ async fn connector_is_approved(shared: &SharedState, active: &ConnectedConnector
     })
 }
 
-fn connected_snapshot_fields(
+fn connected_connectors_snapshot(
     active_connections: &HashMap<u64, ConnectedConnector>,
-) -> (Vec<String>, Vec<ConnectedConnector>) {
+) -> Vec<ConnectedConnector> {
     let mut unique_connectors = HashMap::<ConnectorKey, ConnectedConnector>::new();
     for connector in active_connections.values() {
         unique_connectors.insert(
@@ -1161,14 +1094,7 @@ fn connected_snapshot_fields(
             .then_with(|| left.browser_id.cmp(&right.browser_id))
             .then_with(|| left.extension_id.cmp(&right.extension_id))
     });
-    let mut connected_browsers = connected_connectors
-        .iter()
-        .map(|connector| connector.browser_name.clone())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    connected_browsers.sort();
-    (connected_browsers, connected_connectors)
+    connected_connectors
 }
 
 fn active_connector_keys(
@@ -1280,43 +1206,22 @@ async fn ingest_typed_entry(
     entry: LogEntry,
     raw_entry: Value,
 ) -> Result<IngestSuccess, WsServerError> {
-    {
-        let mut ingest = shared.ingest_status.lock().await;
-        ingest.buffer_depth += 1;
-    }
+    let device_id = {
+        let config = shared.config.lock().await;
+        config.device_id.clone()
+    };
+    let transaction = ReplayTransaction::begin(&shared.storage, &device_id)
+        .await
+        .map_err(WsServerError::Ingest)?;
+    let effects =
+        commit_entry_with_auto_pins(shared, transaction, entry.clone(), raw_entry.clone()).await?;
 
-    let outcome = async {
-        let device_id = {
-            let config = shared.config.lock().await;
-            config.device_id.clone()
-        };
-        let transaction = ReplayTransaction::begin(&shared.storage, &device_id)
-            .await
-            .map_err(WsServerError::Ingest)?;
-        let effects =
-            commit_entry_with_auto_pins(shared, transaction, entry.clone(), raw_entry.clone())
-                .await?;
-
-        let mutations = build_mutations(&entry, &raw_entry, &effects, &device_id)
-            .map_err(WsServerError::Ingest)?;
-        let acked_at = current_timestamp_millis()?;
-        let last_drained_at = entry.timestamp();
-        let mut ingest = shared.ingest_status.lock().await;
-        ingest.last_drained_at = Some(last_drained_at);
-        Ok(IngestSuccess {
-            ack: DaemonMessage::Ack {
-                acked_at,
-                buffer_depth: ingest.buffer_depth.saturating_sub(1),
-                last_drained_at,
-            },
-            mutations,
-        })
-    }
-    .await;
-
-    let mut ingest = shared.ingest_status.lock().await;
-    ingest.buffer_depth = ingest.buffer_depth.saturating_sub(1);
-    outcome
+    let mutations =
+        build_mutations(&entry, &raw_entry, &effects, &device_id).map_err(WsServerError::Ingest)?;
+    Ok(IngestSuccess {
+        ack: DaemonMessage::Ack,
+        mutations,
+    })
 }
 
 async fn commit_entry_with_auto_pins(
@@ -1614,12 +1519,6 @@ fn validate_connector_source(source: &str) -> Result<(), WsServerError> {
     Ok(())
 }
 
-async fn record_connector_buffer(shared: &SharedState, buffer_depth: usize, buffer_bytes: usize) {
-    let mut status = shared.connector_buffer_status.lock().await;
-    status.buffer_depth = buffer_depth;
-    status.buffer_bytes = buffer_bytes;
-}
-
 async fn commit_report_entry(
     shared: &SharedState,
     transaction: ReplayTransaction<'_>,
@@ -1749,11 +1648,6 @@ async fn run_shared_command(
         .map_err(WsServerError::Ingest)?;
     let response = outcome.response();
     broadcast_mutations(shared, outcome.mutations);
-    if action == "clearAllData" {
-        let mut status = shared.ingest_status.lock().await;
-        status.buffer_depth = 0;
-        status.last_drained_at = None;
-    }
     Ok(response)
 }
 
@@ -1791,24 +1685,22 @@ fn broadcast_mutations(shared: &SharedState, mutations: Vec<MutationPayload>) {
     if mutations.is_empty() {
         return;
     }
-    let message = DaemonMessage::Change { mutations };
-    let _ = shared.change_message_tx.send(message);
+    let _ = shared.change_message_tx.send(mutations);
 }
 
 async fn build_status_message(shared: &SharedState) -> DaemonMessage {
-    let snapshot = shared.snapshot.read().await.clone();
-    let ingest = shared.ingest_status.lock().await;
-    let connector = shared.connector_buffer_status.lock().await;
+    let authority = match &shared.snapshot.read().await.service_state {
+        ServiceState::Running => AuthorityStatus::Running,
+        ServiceState::Paused { code, message } => AuthorityStatus::Paused {
+            code: code.clone(),
+            message: message.clone(),
+        },
+    };
     let config = shared.config.lock().await;
     DaemonMessage::Status {
-        connected_browsers: snapshot.connected_browsers,
-        buffer_depth: connector.buffer_depth,
-        buffer_bytes: connector.buffer_bytes,
-        daemon_buffer_depth: ingest.buffer_depth,
-        last_drained_at: ingest.last_drained_at,
-        data_folder: config.data_dir.to_string_lossy().into_owned(),
         device_id: config.device_id.clone(),
         max_message_bytes: MAX_WEBSOCKET_MESSAGE_BYTES,
+        authority,
     }
 }
 
@@ -2050,59 +1942,6 @@ async fn handle_get_entity(shared: &SharedState, key: String) -> DaemonMessage {
     }
 }
 
-async fn handle_get_directory_info(shared: &SharedState) -> DaemonMessage {
-    let Some(name) = shared
-        .storage
-        .root()
-        .file_name()
-        .and_then(|value| value.to_str())
-        .map(str::to_string)
-    else {
-        return DaemonMessage::DirectoryInfoResult {
-            success: false,
-            info: None,
-            error: Some("data directory has no UTF-8 folder name".to_string()),
-        };
-    };
-    if let Err(error) = tokio::fs::read_dir(shared.storage.root()).await {
-        return DaemonMessage::DirectoryInfoResult {
-            success: false,
-            info: None,
-            error: Some(format!("data directory is not readable: {error}")),
-        };
-    }
-    DaemonMessage::DirectoryInfoResult {
-        success: true,
-        info: Some(DirectoryInfoPayload {
-            name,
-            has_permission: true,
-        }),
-        error: None,
-    }
-}
-
-async fn handle_get_directory_size(shared: &SharedState) -> DaemonMessage {
-    if let Err(error) = shared.storage.flush_checkpoints().await {
-        return DaemonMessage::DirectorySizeResult {
-            success: false,
-            size: 0,
-            error: Some(error.to_string()),
-        };
-    }
-    match shared.storage.directory_size().await {
-        Ok(size) => DaemonMessage::DirectorySizeResult {
-            success: true,
-            size,
-            error: None,
-        },
-        Err(error) => DaemonMessage::DirectorySizeResult {
-            success: false,
-            size: 0,
-            error: Some(error.to_string()),
-        },
-    }
-}
-
 async fn handle_clear_all_data(shared: &SharedState) -> DaemonMessage {
     let device_id = {
         let config = shared.config.lock().await;
@@ -2112,18 +1951,11 @@ async fn handle_clear_all_data(shared: &SharedState) -> DaemonMessage {
     let result = runtime::clear_all_data(&shared.storage, &device_id).await;
 
     match result {
-        Ok(deleted_count) => {
-            {
-                let mut status = shared.ingest_status.lock().await;
-                status.buffer_depth = 0;
-                status.last_drained_at = None;
-            }
-            DaemonMessage::ClearAllDataResult {
-                success: true,
-                deleted_count,
-                error: None,
-            }
-        }
+        Ok(deleted_count) => DaemonMessage::ClearAllDataResult {
+            success: true,
+            deleted_count,
+            error: None,
+        },
         Err(error) => DaemonMessage::ClearAllDataResult {
             success: false,
             deleted_count: 0,
@@ -2231,14 +2063,6 @@ async fn handle_test_reset_data(shared: &SharedState) -> DaemonMessage {
             .map_err(WsServerError::Ingest)?;
         set_device_id_internal(shared, device_id.clone()).await?;
         shared.storage.reset_cache();
-        {
-            let mut ingest = shared.ingest_status.lock().await;
-            *ingest = IngestStatus::default();
-        }
-        {
-            let mut connector = shared.connector_buffer_status.lock().await;
-            *connector = ConnectorBufferStatus::default();
-        }
         resume_service(shared).await;
         Ok::<(), WsServerError>(())
     }
@@ -2535,11 +2359,11 @@ fn websocket_config() -> WebSocketConfig {
 }
 
 async fn paused_error(shared: &SharedState) -> Option<DaemonMessage> {
-    let state = shared.service_state.read().await;
-    if let ServiceState::Paused { code, message } = &*state {
+    let snapshot = shared.snapshot.read().await;
+    if let ServiceState::Paused { code, message } = &snapshot.service_state {
         Some(DaemonMessage::Error {
             error: "paused".into(),
-            code: code.as_str().into(),
+            code: code.clone(),
             message: message.clone(),
         })
     } else {
@@ -2603,26 +2427,10 @@ async fn set_connected(
     } else {
         active_connections.remove(&connection_id);
     }
-    let no_connected_browsers = active_connections.is_empty();
-    let running = {
-        let service_state = shared.service_state.read().await;
-        matches!(*service_state, ServiceState::Running)
-    };
     let mut snapshot = shared.snapshot.write().await;
-    let (connected_browsers, connected_connectors) = connected_snapshot_fields(&active_connections);
-    snapshot.connected_browsers = connected_browsers;
-    snapshot.connected_connectors = connected_connectors;
-    if running {
-        snapshot.service_status = ServiceStatus::Running;
-        snapshot.last_error = None;
-        snapshot.last_error_code = None;
-    }
+    snapshot.connected_connectors = connected_connectors_snapshot(&active_connections);
     let _ = shared.snapshot_tx.send(snapshot.clone());
     drop(snapshot);
-    if no_connected_browsers {
-        let mut connector = shared.connector_buffer_status.lock().await;
-        *connector = ConnectorBufferStatus::default();
-    }
 }
 
 async fn revoke_connector(
@@ -2660,18 +2468,10 @@ async fn revoke_connector(
         active_connections.retain(|_, connector| {
             !(connector.browser_id == browser_id && connector.extension_id == extension_id)
         });
-        let no_connected_browsers = active_connections.is_empty();
-        let (connected_browsers, connected_connectors) =
-            connected_snapshot_fields(&active_connections);
         let mut snapshot = shared.snapshot.write().await;
-        snapshot.connected_browsers = connected_browsers;
-        snapshot.connected_connectors = connected_connectors;
+        snapshot.connected_connectors = connected_connectors_snapshot(&active_connections);
         let _ = shared.snapshot_tx.send(snapshot.clone());
         drop(snapshot);
-        if no_connected_browsers {
-            let mut connector = shared.connector_buffer_status.lock().await;
-            *connector = ConnectorBufferStatus::default();
-        }
     }
 
     Ok(changed)
@@ -2679,40 +2479,30 @@ async fn revoke_connector(
 
 async fn pause_service(shared: &SharedState, code: ErrorCode, reason: impl Into<String>) {
     let reason = reason.into();
-    {
-        let mut service_state = shared.service_state.write().await;
-        *service_state = ServiceState::Paused {
-            code,
-            message: reason.clone(),
-        };
-    }
     let mut snapshot = shared.snapshot.write().await;
-    snapshot.service_status = ServiceStatus::Paused;
-    snapshot.last_error = Some(reason);
-    snapshot.last_error_code = Some(code.as_str().to_string());
+    snapshot.service_state = ServiceState::Paused {
+        code: code.as_str().to_string(),
+        message: reason,
+    };
     let _ = shared.snapshot_tx.send(snapshot.clone());
 }
 
 async fn resume_service(shared: &SharedState) {
     {
-        let mut service_state = shared.service_state.write().await;
-        if matches!(*service_state, ServiceState::Running) {
+        let snapshot = shared.snapshot.read().await;
+        if matches!(snapshot.service_state, ServiceState::Running) {
             return;
         }
-        *service_state = ServiceState::Running;
     }
 
-    let (connected_browsers, connected_connectors) = {
+    let connected_connectors = {
         let active_connections = shared.active_connections.lock().await;
-        connected_snapshot_fields(&active_connections)
+        connected_connectors_snapshot(&active_connections)
     };
 
     let mut snapshot = shared.snapshot.write().await;
-    snapshot.connected_browsers = connected_browsers;
     snapshot.connected_connectors = connected_connectors;
-    snapshot.service_status = ServiceStatus::Running;
-    snapshot.last_error = None;
-    snapshot.last_error_code = None;
+    snapshot.service_state = ServiceState::Running;
     let _ = shared.snapshot_tx.send(snapshot.clone());
 }
 

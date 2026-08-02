@@ -154,23 +154,12 @@ export async function loadDesktopConnectorState() {
   ]) {
     requireNullableStringField(response, field, action);
   }
-  for (const field of ['hasToken', 'refuseMode']) {
-    requireBooleanField(response, field, action);
-  }
-  for (const field of [
-    'pendingCommands',
-    'pendingBytes',
-    'daemonBufferDepth',
-  ]) {
-    requireNonNegativeIntegerField(response, field, action);
-  }
-  for (const field of ['port', 'lastDrainedAt']) {
-    const value = response[field];
-    if (value !== null && (!Number.isSafeInteger(value) || value < 0)) {
-      throw new Error(
-        `${action} response ${field} must be a non-negative integer or null`,
-      );
-    }
+  requireBooleanField(response, 'hasToken', action);
+  const port = response.port;
+  if (port !== null && (!Number.isSafeInteger(port) || port < 0)) {
+    throw new Error(
+      `${action} response port must be a non-negative integer or null`,
+    );
   }
   if (response.state === 'setup_required') {
     if (

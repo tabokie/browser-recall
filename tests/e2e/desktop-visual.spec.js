@@ -966,14 +966,9 @@ async function installDesktopBridgeMock(page, options = {}) {
               port: setupComplete ? 28471 : null,
               deviceId: setupComplete ? 'visual-device' : null,
               hasToken: setupComplete,
-              pendingCommands: 0,
-              pendingBytes: 0,
-              refuseMode: false,
               lastError: null,
               lastErrorCode: null,
-              lastDrainedAt: null,
               dataFolder: setupComplete ? '/tmp/browser-recall-visual' : null,
-              daemonBufferDepth: 0,
             };
           case 'getDesktopShellState':
             return {

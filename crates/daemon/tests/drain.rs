@@ -72,7 +72,7 @@ async fn wait_for_ack(socket: &mut support::TestSocket) {
         let message = next_text_message(socket).await;
         let parsed: DaemonMessage = serde_json::from_str(&message).expect("daemon message json");
         match parsed {
-            DaemonMessage::Ack { .. } => return,
+            DaemonMessage::Ack => return,
             DaemonMessage::Error {
                 error,
                 code,
@@ -136,8 +136,6 @@ async fn drain_pipeline_preserves_fifo_order_for_page_updates() {
                     request: TestControlMessage::Event {
                         entry,
                         source: "extension".to_string(),
-                        buffer_depth: 0,
-                        buffer_bytes: 0,
                     },
                 })
                 .expect("event json"),
@@ -223,8 +221,6 @@ async fn drain_pipeline_reconciles_list_manifests_after_sequential_mutations() {
                     request: TestControlMessage::Event {
                         entry,
                         source: "extension".to_string(),
-                        buffer_depth: 0,
-                        buffer_bytes: 0,
                     },
                 })
                 .expect("event json"),

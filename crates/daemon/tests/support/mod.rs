@@ -85,12 +85,12 @@ pub(crate) async fn paired_socket(
     let _ = next_text_message(&mut socket).await;
     let approved = next_text_message(&mut socket).await;
     let approved: DaemonMessage = serde_json::from_str(&approved).expect("approved json");
-    let returned_device_id = match approved {
-        DaemonMessage::PairApproved { device_id, .. } => device_id,
+    match approved {
+        DaemonMessage::PairApproved { .. } => {}
         other => panic!("expected pair approved, got {other:?}"),
-    };
+    }
     let config = config_store.load_or_create().expect("config");
-    (socket, config.data_dir, returned_device_id)
+    (socket, config.data_dir, config.device_id)
 }
 
 pub(crate) fn test_server_options(config_store: ConfigStore) -> ServerStartOptions {

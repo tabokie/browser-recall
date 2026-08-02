@@ -6,7 +6,6 @@ export function createBadgeController({
   specialListIconPaths = normalIconPaths,
   specialNoteIconPaths = normalIconPaths,
   specialMixedIconPaths = normalIconPaths,
-  syncDesktopConnectorPauseState,
   readPageMarkers,
   readRecordingPausedState = async () => false,
   resolveTabUrl = (_tabId, url) => url,
@@ -86,16 +85,11 @@ export function createBadgeController({
   }
 
   function isConnectorUsable(connector = connectorState) {
-    return (
-      connector?.state === 'connected' &&
-      Boolean(connector.deviceId) &&
-      !connector.refuseMode
-    );
+    return connector?.state === 'connected' && Boolean(connector.deviceId);
   }
 
   function shouldShowConnectorBadge(connector = connectorState) {
     if (isConnectorUsable(connector)) return false;
-    if (connector.refuseMode) return true;
     if (
       ['starting', 'connecting'].includes(connector.state) &&
       ['socket_closed', 'manual_reconnect_exhausted'].includes(
@@ -114,11 +108,6 @@ export function createBadgeController({
   }
 
   function desktopConnectorBadgeTitle(connector = {}) {
-    if (connector.refuseMode)
-      return tr(
-        'extensionBrowserRecallQueueFull',
-        'Browser Recall Desktop queue is full',
-      );
     if (connector.lastError) return connector.lastError;
     switch (connector.state) {
       case 'connected':
@@ -326,8 +315,6 @@ export function createBadgeController({
         });
         return;
       }
-      syncDesktopConnectorPauseState(connectorState);
-
       const markers = await readPageMarkers(badgeUrl);
       if (!markers) {
         await clearPageMarkerBadge(tabId);

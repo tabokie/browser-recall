@@ -413,7 +413,7 @@ class SuccessfulWebSocket {
     if (payload.type === 'auth') {
       queueMicrotask(() =>
         this.#emit('message', {
-          data: JSON.stringify({ type: 'auth_ok', protocolVersion: 2 }),
+          data: JSON.stringify({ type: 'auth_ok', protocolVersion: 3 }),
         }),
       );
       return;
@@ -423,14 +423,9 @@ class SuccessfulWebSocket {
         this.#emit('message', {
           data: JSON.stringify({
             type: 'status',
-            connectedBrowsers: ['Firefox'],
             deviceId: 'firefox-device',
-            bufferDepth: 0,
-            bufferBytes: 0,
-            daemonBufferDepth: 0,
-            lastDrainedAt: Date.now(),
-            dataFolder: '/tmp/browser-recall-firefox-smoke',
             maxMessageBytes: 64 * 1024 * 1024,
+            authority: { state: 'running' },
           }),
         }),
       );
@@ -529,7 +524,10 @@ class SuccessfulWebSocket {
       );
       return;
     }
-    if (payload.type === 'list_history_files') {
+    if (
+      payload.type === 'test_control' &&
+      payload.request?.type === 'list_history_files'
+    ) {
       queueMicrotask(() =>
         this.#emit('message', {
           data: JSON.stringify({
@@ -542,7 +540,10 @@ class SuccessfulWebSocket {
       );
       return;
     }
-    if (payload.type === 'load_history_batch') {
+    if (
+      payload.type === 'test_control' &&
+      payload.request?.type === 'load_history_batch'
+    ) {
       queueMicrotask(() =>
         this.#emit('message', {
           data: JSON.stringify({
@@ -557,11 +558,7 @@ class SuccessfulWebSocket {
     if (payload.type === 'snapshot') {
       queueMicrotask(() => {
         this.#emit('message', {
-          data: JSON.stringify({
-            type: 'ack',
-            bufferDepth: 0,
-            lastDrainedAt: Date.now(),
-          }),
+          data: JSON.stringify({ type: 'ack' }),
         });
         this.#emit('message', {
           data: JSON.stringify({
@@ -569,15 +566,8 @@ class SuccessfulWebSocket {
             mutations: [
               {
                 type: 'snapshot',
-                listId: null,
-                pageSlug: null,
-                noteSlug: null,
-                oldNoteSlug: null,
-                slug: payload.slug,
                 url: payload.url,
                 urls: null,
-                key: null,
-                historyEntry: null,
               },
             ],
           }),
@@ -587,11 +577,7 @@ class SuccessfulWebSocket {
     }
     queueMicrotask(() =>
       this.#emit('message', {
-        data: JSON.stringify({
-          type: 'ack',
-          bufferDepth: 0,
-          lastDrainedAt: Date.now(),
-        }),
+        data: JSON.stringify({ type: 'ack' }),
       }),
     );
   }
@@ -664,6 +650,9 @@ async function withPatchedGlobals(patch, run) {
   try {
     return await run();
   } finally {
+    // Background startup is intentionally fire-and-forget. Give its queued
+    // WebSocket/storage continuations one turn before removing the mocked APIs.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     for (const key of Object.keys(patch)) {
       const descriptor = previous.get(key);
       if (descriptor) {
@@ -859,6 +848,13 @@ test.describe('Firefox extension smoke', () => {
           );
           vm.runInThisContext(shim, {
             filename: path.join(outDir, 'browser-api.js'),
+          });
+          const extensionSurface = readFileSync(
+            path.join(outDir, 'extension-surface.js'),
+            'utf8',
+          );
+          vm.runInThisContext(extensionSurface, {
+            filename: path.join(outDir, 'extension-surface.js'),
           });
 
           await import(pathToFileURL(path.join(outDir, 'popup.js')).href);

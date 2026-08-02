@@ -12,42 +12,12 @@ export const CONNECTOR_STATES = Object.freeze({
   OFFLINE: 'offline',
 });
 
-const TERMINAL_STATES = new Set([
-  CONNECTOR_STATES.CONNECTED,
-  CONNECTOR_STATES.PAUSED,
-  CONNECTOR_STATES.PAIR_PENDING,
-  CONNECTOR_STATES.PAIR_DENIED,
-  CONNECTOR_STATES.AUTH_FAILED,
-  CONNECTOR_STATES.INCOMPATIBLE,
-  CONNECTOR_STATES.OFFLINE,
-]);
-
-const MANUAL_READY_STATES = new Set([
-  CONNECTOR_STATES.CONNECTED,
-  CONNECTOR_STATES.PAUSED,
-  CONNECTOR_STATES.PAIR_PENDING,
-  CONNECTOR_STATES.PAIR_DENIED,
-  CONNECTOR_STATES.INCOMPATIBLE,
-]);
-
-const PROBE_READY_STATES = new Set([
-  CONNECTOR_STATES.CONNECTED,
-  CONNECTOR_STATES.PAUSED,
-  CONNECTOR_STATES.PAIR_DENIED,
-  CONNECTOR_STATES.AUTH_FAILED,
-  CONNECTOR_STATES.INCOMPATIBLE,
-]);
-
 export const CONNECTOR_STORAGE_KEYS = {
   deviceId: 'connectorDeviceId',
   port: 'connectorDaemonPort',
   state: 'connectorState',
   token: 'connectorAuthToken',
   lastError: 'connectorLastError',
-  lastErrorCode: 'connectorLastErrorCode',
-  lastDrainedAt: 'connectorLastDrainedAt',
-  dataFolder: 'connectorDataFolder',
-  daemonBufferDepth: 'connectorDaemonBufferDepth',
   lastDiagnostic: 'connectorLastDiagnostic',
 };
 
@@ -55,7 +25,6 @@ export const CONNECTOR_STATE_STORAGE_KEYS = [
   ...Object.values(CONNECTOR_STORAGE_KEYS),
   'desktopPendingCommands',
   'desktopPendingBytes',
-  'desktopRefuseMode',
 ];
 
 function storedOrInitial(stored, key, initialValue) {
@@ -108,18 +77,6 @@ export function connectorStateFromStorage(stored = {}) {
     storedOrInitial(stored, 'desktopPendingBytes', 0),
     'pending byte count',
   );
-  const refuseMode = storedOrInitial(stored, 'desktopRefuseMode', false);
-  if (typeof refuseMode !== 'boolean') {
-    throw new Error('Stored connector refuse mode must be a boolean');
-  }
-  const daemonBufferDepth = storedOrInitial(
-    stored,
-    CONNECTOR_STORAGE_KEYS.daemonBufferDepth,
-    null,
-  );
-  if (daemonBufferDepth !== null) {
-    requireNonNegativeInteger(daemonBufferDepth, 'daemon buffer depth');
-  }
   const lastDiagnostic = storedOrInitial(
     stored,
     CONNECTOR_STORAGE_KEYS.lastDiagnostic,
@@ -143,48 +100,16 @@ export function connectorStateFromStorage(stored = {}) {
     hasToken: requireNullableString(token, 'auth token') !== null,
     pendingCommands,
     pendingBytes,
-    refuseMode,
     lastError: requireNullableString(
       storedOrInitial(stored, CONNECTOR_STORAGE_KEYS.lastError, null),
       'last error',
     ),
-    lastErrorCode: requireNullableString(
-      storedOrInitial(stored, CONNECTOR_STORAGE_KEYS.lastErrorCode, null),
-      'last error code',
-    ),
-    lastDrainedAt: (() => {
-      const value = storedOrInitial(
-        stored,
-        CONNECTOR_STORAGE_KEYS.lastDrainedAt,
-        null,
-      );
-      if (value !== null)
-        requireNonNegativeInteger(value, 'last drained timestamp');
-      return value;
-    })(),
-    dataFolder: requireNullableString(
-      storedOrInitial(stored, CONNECTOR_STORAGE_KEYS.dataFolder, null),
-      'data folder',
-    ),
-    daemonBufferDepth,
     lastDiagnostic,
   };
 }
 
 export function hasConnectorStateStorageChange(changes = {}) {
   return CONNECTOR_STATE_STORAGE_KEYS.some((key) => key in changes);
-}
-
-export function isTerminalConnectorState(state) {
-  return TERMINAL_STATES.has(state);
-}
-
-export function isManualReadyConnectorState(state) {
-  return MANUAL_READY_STATES.has(state);
-}
-
-export function isProbeReadyConnectorState(state) {
-  return PROBE_READY_STATES.has(state);
 }
 
 export async function readCachedConnectorState() {

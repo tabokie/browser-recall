@@ -39,15 +39,12 @@ describe('bounded snapshot resource reads', () => {
   it('derives the HTML budget from the exact daemon message envelope', () => {
     const payload = {
       type: 'snapshot',
-      source: 'extension',
       slug: 'page',
       ts: 123,
       url: 'https://example.test/',
       title: 'Example',
       markdown: 'Markdown',
       html: '',
-      bufferDepth: 0,
-      bufferBytes: 0,
     };
     const maxMessageBytes = 1024;
     const budget = snapshotHtmlBudgetBytes({ maxMessageBytes, payload });

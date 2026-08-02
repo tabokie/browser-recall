@@ -1,7 +1,6 @@
 import { buildPairRequest, CONNECTOR_PROTOCOL_VERSION } from './pairing.js';
 import {
   bufferStats,
-  bufferedMessageSize,
   clearBufferedMessages,
   enqueueBufferedMessage,
   peekBufferedMessage,
@@ -12,9 +11,6 @@ import {
   CONNECTOR_STATE_STORAGE_KEYS,
   CONNECTOR_STORAGE_KEYS as STORAGE_KEYS,
   connectorStateFromStorage,
-  isManualReadyConnectorState,
-  isProbeReadyConnectorState,
-  isTerminalConnectorState,
 } from './state.js';
 import { logDebug, logError } from '../logger.js';
 import { canonicalizePageRequest, canonicalizePageUrl } from '../utils.js';
@@ -32,20 +28,125 @@ const SNAPSHOT_RESOURCE_CONCURRENCY = 6;
 const STATE_PROBE_TIMEOUT_MS = 2500;
 const MANUAL_PAIR_SETTLE_MS = 1500;
 
-let currentSocket = null;
-let reconnectTimer = null;
-let connectPromise = null;
-let flushPromise = null;
-let pendingRequest = null;
-let bridgeRequestQueue = Promise.resolve();
-let started = false;
+const CONNECTION_PHASES = Object.freeze({
+  OFFLINE: 'offline',
+  CONNECTING: 'connecting',
+  WAITING_FOR_APPROVAL: 'waiting_for_approval',
+  SYNCHRONIZING: 'synchronizing',
+  READY: 'ready',
+});
+
+const runtime = {
+  started: false,
+  session: null,
+  connectTask: null,
+  drainTask: null,
+  request: null,
+  requestTail: Promise.resolve(),
+  retryTimer: null,
+  connection: {
+    phase: CONNECTION_PHASES.OFFLINE,
+    authority: null,
+    failure: null,
+    retryAt: null,
+  },
+};
+
 let alarmListenerInstalled = false;
 let connectorStorageCache = {};
+let connectorStorageOperation = Promise.resolve();
 const connectorStateListeners = new Set();
 const daemonMutationListeners = new Set();
 
+function presentationStateForConnection(connection) {
+  switch (connection.phase) {
+    case CONNECTION_PHASES.CONNECTING:
+      return CONNECTOR_STATES.CONNECTING;
+    case CONNECTION_PHASES.WAITING_FOR_APPROVAL:
+      return CONNECTOR_STATES.PAIR_PENDING;
+    case CONNECTION_PHASES.SYNCHRONIZING:
+      return connection.failure
+        ? CONNECTOR_STATES.PAUSED
+        : CONNECTOR_STATES.CONNECTING;
+    case CONNECTION_PHASES.READY:
+      return connection.authority?.state === 'paused' || connection.failure
+        ? CONNECTOR_STATES.PAUSED
+        : CONNECTOR_STATES.CONNECTED;
+    case CONNECTION_PHASES.OFFLINE:
+    default:
+      switch (connection.failure?.code) {
+        case 'incompatible_protocol':
+          return CONNECTOR_STATES.INCOMPATIBLE;
+        case 'auth_failed':
+          return CONNECTOR_STATES.AUTH_FAILED;
+        case 'pair_denied':
+          return CONNECTOR_STATES.PAIR_DENIED;
+        case 'invalid_connector_port':
+        case 'invalid_connector_port_override':
+        case 'invalid_connector_configuration':
+          return CONNECTOR_STATES.PAUSED;
+        default:
+          return CONNECTOR_STATES.OFFLINE;
+      }
+  }
+}
+
+async function transitionConnection(
+  phase,
+  details = {},
+  presentationPatch = {},
+  expectedSession = null,
+) {
+  if (expectedSession && !isCurrentSession(expectedSession)) return false;
+  runtime.connection = {
+    phase,
+    authority: phase === CONNECTION_PHASES.READY ? { state: 'running' } : null,
+    failure: null,
+    retryAt: null,
+    ...details,
+  };
+  notifyConnectorStateListeners();
+  const written = await writeConnectionPresentation(
+    presentationPatch,
+    expectedSession,
+  );
+  return written && (!expectedSession || isCurrentSession(expectedSession));
+}
+
+async function setConnectionFailure(failure) {
+  runtime.connection = { ...runtime.connection, failure };
+  notifyConnectorStateListeners();
+  await writeState({
+    [STORAGE_KEYS.state]: presentationStateForConnection(runtime.connection),
+  });
+}
+
+function createSession(socket) {
+  const session = {
+    socket,
+    authenticated: false,
+    statusTask: null,
+    maxMessageBytes: null,
+    closePolicy: null,
+    ignoreClose: false,
+  };
+  runtime.session = session;
+  return session;
+}
+
+function isCurrentSession(session) {
+  return runtime.session === session;
+}
+
 function cachedConnectorState() {
-  return connectorStateFromStorage(connectorStorageCache);
+  const state = {
+    ...connectorStateFromStorage(connectorStorageCache),
+    connection: { ...runtime.connection },
+  };
+  if (runtime.started) {
+    state.state = presentationStateForConnection(runtime.connection);
+  }
+  return state;
 }
 
 function notifyConnectorStateListeners() {
@@ -94,7 +195,6 @@ function bufferStatePatch(stats) {
   return {
     desktopPendingCommands: stats.pendingCommands,
     desktopPendingBytes: stats.pendingBytes,
-    desktopRefuseMode: stats.refuseMode,
   };
 }
 
@@ -103,41 +203,19 @@ function broadcastDaemonMutations(mutations) {
     throw new Error('Desktop change message mutations must be an array');
   }
   for (const mutation of mutations) {
-    const expectedKeys = [
-      'type',
-      'listId',
-      'pageSlug',
-      'noteSlug',
-      'oldNoteSlug',
-      'slug',
-      'url',
-      'urls',
-      'key',
-      'historyEntry',
-    ];
     if (
       !mutation ||
       typeof mutation !== 'object' ||
       Array.isArray(mutation) ||
-      expectedKeys.some(
+      ['type', 'url', 'urls'].some(
         (key) => !Object.prototype.hasOwnProperty.call(mutation, key),
       ) ||
       typeof mutation.type !== 'string'
     ) {
       throw new Error('Desktop change message contains an invalid mutation');
     }
-    for (const key of [
-      'listId',
-      'pageSlug',
-      'noteSlug',
-      'oldNoteSlug',
-      'slug',
-      'url',
-      'key',
-    ]) {
-      if (mutation[key] !== null && typeof mutation[key] !== 'string') {
-        throw new Error(`Desktop mutation ${key} must be a string or null`);
-      }
+    if (mutation.url !== null && typeof mutation.url !== 'string') {
+      throw new Error('Desktop mutation url must be a string or null');
     }
     if (
       mutation.urls !== null &&
@@ -146,51 +224,11 @@ function broadcastDaemonMutations(mutations) {
     ) {
       throw new Error('Desktop mutation urls must be a string array or null');
     }
-    let historyEntry = null;
-    if (mutation.historyEntry !== null) {
-      const entry = mutation.historyEntry;
-      const requiredEntryKeys = [
-        'action',
-        'timestamp',
-        'url',
-        'title',
-        'userTitle',
-        'scrollDepth',
-        'timeOnPage',
-        'likes',
-        'deviceId',
-      ];
-      if (
-        !entry ||
-        typeof entry !== 'object' ||
-        Array.isArray(entry) ||
-        requiredEntryKeys.some(
-          (key) => !Object.prototype.hasOwnProperty.call(entry, key),
-        ) ||
-        !['visit_page', 'leave_page', 'rename_page', 'rate_page'].includes(
-          entry.action,
-        ) ||
-        !Number.isFinite(entry.timestamp) ||
-        typeof entry.url !== 'string' ||
-        !entry.url ||
-        (entry.title !== null && typeof entry.title !== 'string') ||
-        (entry.userTitle !== null && typeof entry.userTitle !== 'string') ||
-        (entry.scrollDepth !== null && !Number.isFinite(entry.scrollDepth)) ||
-        (entry.timeOnPage !== null && !Number.isFinite(entry.timeOnPage)) ||
-        (entry.likes !== null && !Number.isFinite(entry.likes)) ||
-        typeof entry.deviceId !== 'string' ||
-        !entry.deviceId
-      ) {
-        throw new Error('Desktop history mutation entry is invalid');
-      }
-      historyEntry = Object.fromEntries(
-        requiredEntryKeys.map((key) => [key, entry[key]]),
-      );
-    }
-    const canonicalMutation = Object.fromEntries(
-      expectedKeys.map((key) => [key, mutation[key]]),
-    );
-    canonicalMutation.historyEntry = historyEntry;
+    const canonicalMutation = {
+      type: mutation.type,
+      url: mutation.url,
+      urls: mutation.urls,
+    };
     for (const listener of [...daemonMutationListeners]) {
       try {
         listener(canonicalMutation);
@@ -214,14 +252,42 @@ function installReconnectAlarmListener() {
   alarmListenerInstalled = true;
   chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm?.name !== RECONNECT_ALARM_NAME) return;
-    reconnectTimer = null;
-    void connect();
+    runtime.retryTimer = null;
+    runtime.connection.retryAt = null;
+    notifyConnectorStateListeners();
+    launchConnect();
   });
 }
 
-async function writeState(patch) {
-  await chrome.storage.local.set(patch);
-  mergeConnectorStorageCache(patch);
+function withConnectorStorageOperation(operation) {
+  // Session callbacks must re-check ownership after every await; serializing
+  // persistence also prevents an older session write from landing last.
+  const run = connectorStorageOperation.then(operation, operation);
+  connectorStorageOperation = run.catch(() => {});
+  return run;
+}
+
+async function readState(keys) {
+  await connectorStorageOperation.catch(() => {});
+  return chrome.storage.local.get(keys);
+}
+
+async function writeState(patch, expectedSession = null) {
+  return withConnectorStorageOperation(async () => {
+    if (expectedSession && !isCurrentSession(expectedSession)) return false;
+    await chrome.storage.local.set(patch);
+    mergeConnectorStorageCache(patch);
+    return !expectedSession || isCurrentSession(expectedSession);
+  });
+}
+
+async function removeState(keys, expectedSession = null) {
+  return withConnectorStorageOperation(async () => {
+    if (expectedSession && !isCurrentSession(expectedSession)) return false;
+    await chrome.storage.local.remove(keys);
+    removeConnectorStorageCache(keys);
+    return !expectedSession || isCurrentSession(expectedSession);
+  });
 }
 
 async function syncBufferStats() {
@@ -230,11 +296,116 @@ async function syncBufferStats() {
   return stats;
 }
 
-async function setState(state, extra = {}) {
-  await writeState({
-    [STORAGE_KEYS.state]: state,
-    ...extra,
+async function writeConnectionPresentation(extra = {}, expectedSession = null) {
+  await writeState(
+    {
+      [STORAGE_KEYS.state]: presentationStateForConnection(runtime.connection),
+      ...extra,
+    },
+    expectedSession,
+  );
+  return !expectedSession || isCurrentSession(expectedSession);
+}
+
+async function publishUnexpectedConnectionFailure(error, source) {
+  const failure = {
+    code: error?.code || 'connector_runtime_failed',
+    message: error?.message || String(error),
+  };
+  logError(`[connector] ${source}:`, error);
+  runtime.connection = {
+    phase: CONNECTION_PHASES.OFFLINE,
+    authority: null,
+    failure,
+    retryAt: null,
+  };
+  notifyConnectorStateListeners();
+  try {
+    await writeConnectionPresentation({
+      [STORAGE_KEYS.lastError]: failure.message,
+      [STORAGE_KEYS.lastDiagnostic]: {
+        code: failure.code,
+        source,
+        message: failure.message,
+        at: Date.now(),
+      },
+    });
+  } catch (storageError) {
+    logError(
+      '[connector] Failed to persist connector runtime failure:',
+      storageError,
+    );
+  }
+  scheduleReconnect(RECONNECT_DELAY_MS);
+}
+
+function observeUnexpectedConnectionFailure(error, source) {
+  void publishUnexpectedConnectionFailure(error, source).catch(
+    (publicationError) => {
+      logError(
+        '[connector] Failed to publish unexpected connection failure:',
+        publicationError,
+      );
+    },
+  );
+}
+
+function launchConnect(options = {}) {
+  void connect(options).catch((error) => {
+    logError('[connector] Failed to finalize connection failure:', error);
   });
+}
+
+function launchDrain() {
+  void flushBufferedMessages().catch(async (error) => {
+    const failure = {
+      code: error?.code || 'buffer_flush_failed',
+      message: error?.message || String(error),
+    };
+    logError('[connector] background buffer drain failed:', error);
+    try {
+      await setDiagnostic('buffer_flush_failed', {
+        message: failure.message,
+        errorCode: failure.code,
+      });
+      await setConnectionFailure(failure);
+      await writeConnectionPresentation({
+        [STORAGE_KEYS.lastError]: failure.message,
+      });
+    } catch (publicationError) {
+      logError(
+        '[connector] Failed to publish background buffer drain failure:',
+        publicationError,
+      );
+    }
+  });
+}
+
+function isTerminalConnection(connection) {
+  return [
+    CONNECTION_PHASES.OFFLINE,
+    CONNECTION_PHASES.WAITING_FOR_APPROVAL,
+    CONNECTION_PHASES.READY,
+  ].includes(connection.phase);
+}
+
+function isManualReadyConnection(connection) {
+  if (connection.phase === CONNECTION_PHASES.READY) return true;
+  if (connection.phase === CONNECTION_PHASES.WAITING_FOR_APPROVAL) return true;
+  return (
+    connection.phase === CONNECTION_PHASES.OFFLINE &&
+    ['incompatible_protocol', 'pair_denied'].includes(connection.failure?.code)
+  );
+}
+
+function isProbeReadyConnection(connection) {
+  if (connection.phase === CONNECTION_PHASES.READY) return true;
+  return (
+    connection.phase === CONNECTION_PHASES.OFFLINE &&
+    ['incompatible_protocol', 'pair_denied', 'auth_failed'].includes(
+      connection.failure?.code,
+    )
+  );
 }
 
 async function setDiagnostic(code, details = {}) {
@@ -248,16 +419,17 @@ async function setDiagnostic(code, details = {}) {
   });
 }
 
-async function clearDiagnostic() {
-  await chrome.storage.local.remove(STORAGE_KEYS.lastDiagnostic);
-  removeConnectorStorageCache(STORAGE_KEYS.lastDiagnostic);
+async function clearDiagnostic(expectedSession = null) {
+  return removeState(STORAGE_KEYS.lastDiagnostic, expectedSession);
 }
 
 function clearReconnect() {
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
+  if (runtime.retryTimer) {
+    clearTimeout(runtime.retryTimer);
+    runtime.retryTimer = null;
   }
+  runtime.connection.retryAt = null;
+  notifyConnectorStateListeners();
   const clearResult = chrome.alarms?.clear?.(RECONNECT_ALARM_NAME);
   if (clearResult?.catch) {
     clearResult.catch((error) => {
@@ -269,12 +441,17 @@ function clearReconnect() {
 function scheduleReconnect(delayMs) {
   installReconnectAlarmListener();
   clearReconnect();
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    void connect();
+  const retryAt = Date.now() + delayMs;
+  runtime.connection.retryAt = retryAt;
+  notifyConnectorStateListeners();
+  runtime.retryTimer = setTimeout(() => {
+    runtime.retryTimer = null;
+    runtime.connection.retryAt = null;
+    notifyConnectorStateListeners();
+    launchConnect();
   }, delayMs);
   chrome.alarms?.create?.(RECONNECT_ALARM_NAME, {
-    when: Date.now() + delayMs,
+    when: retryAt,
   });
 }
 
@@ -296,66 +473,60 @@ function socketReadyStateName(socket) {
 async function waitForConnectorState(predicate, timeoutMs = 1500) {
   const initial = await getConnectorBridgeState();
   if (predicate(initial)) return initial;
-  if (!chrome.storage.onChanged?.addListener) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      const state = await getConnectorBridgeState();
-      if (predicate(state)) return state;
-    }
-    return getConnectorBridgeState();
-  }
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let settled = false;
-    const finish = async () => {
+    let timer = null;
+    let unsubscribe = () => {};
+    const finish = (state) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      chrome.storage.onChanged.removeListener(onChanged);
-      resolve(await getConnectorBridgeState());
+      unsubscribe();
+      resolve(state);
     };
-    const timer = setTimeout(finish, timeoutMs);
-    const onChanged = (changes, areaName) => {
-      if (areaName !== 'local') return;
-      if (
-        ![
-          STORAGE_KEYS.state,
-          STORAGE_KEYS.deviceId,
-          STORAGE_KEYS.lastError,
-          STORAGE_KEYS.lastErrorCode,
-        ].some((key) => key in changes)
-      ) {
-        return;
-      }
-      void getConnectorBridgeState().then((state) => {
-        if (predicate(state)) void finish();
-      });
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      unsubscribe();
+      reject(error);
     };
-    chrome.storage.onChanged.addListener(onChanged);
+    unsubscribe = subscribeConnectorBridgeState((state) => {
+      if (predicate(state)) finish(state);
+    });
+    timer = setTimeout(() => {
+      void getConnectorBridgeState().then(finish).catch(fail);
+    }, timeoutMs);
+    const current = cachedConnectorState();
+    if (predicate(current)) {
+      finish(current);
+    }
   });
 }
 
-function closeSocketForReconnect(socket) {
+function closeSessionForReconnect(session) {
+  const socket = session?.socket;
   if (!socket || socket.readyState === WebSocket.CLOSED) {
-    if (currentSocket === socket) currentSocket = null;
+    if (isCurrentSession(session)) runtime.session = null;
     return Promise.resolve();
   }
-  if (currentSocket === socket) currentSocket = null;
-  if (pendingRequest) {
-    pendingRequest.reject(new Error('Desktop bridge disconnected'));
-    pendingRequest = null;
+  if (isCurrentSession(session)) runtime.session = null;
+  if (runtime.request?.session === session) {
+    runtime.request.reject(new Error('Desktop bridge disconnected'));
+    runtime.request = null;
   }
   return new Promise((resolve) => {
     socket.addEventListener('close', resolve, { once: true });
-    socket._ignoreClose = true;
+    session.ignoreClose = true;
     socket.close();
   });
 }
 
 function hasAuthenticatedOpenSocket() {
   return (
-    currentSocket?._authenticated && currentSocket.readyState === WebSocket.OPEN
+    runtime.session?.authenticated &&
+    runtime.session.socket.readyState === WebSocket.OPEN
   );
 }
 
@@ -364,12 +535,12 @@ async function refreshAuthenticatedSocketStatus({
   logMessage,
   awaitFlush,
 }) {
-  const socket = currentSocket;
+  const session = runtime.session;
   if (!hasAuthenticatedOpenSocket()) return false;
   clearReconnect();
-  if (pendingRequest) {
-    await bridgeRequestQueue.catch(() => {});
-    if (currentSocket !== socket || !hasAuthenticatedOpenSocket()) {
+  if (runtime.request) {
+    await runtime.requestTail.catch(() => {});
+    if (!isCurrentSession(session) || !hasAuthenticatedOpenSocket()) {
       return false;
     }
   }
@@ -379,26 +550,22 @@ async function refreshAuthenticatedSocketStatus({
       code: error.code || null,
     });
     logDebug(logMessage, error.message);
+    if (isCurrentSession(session)) {
+      await closeSessionForReconnect(session);
+      await transitionConnection(CONNECTION_PHASES.OFFLINE, {
+        failure: {
+          code: error.code || diagnosticCode,
+          message: error.message,
+        },
+      });
+    }
     return null;
   });
   if (!status) return false;
-  if (currentSocket !== socket || !hasAuthenticatedOpenSocket()) return false;
-  // A successful status probe proves transport liveness, not daemon write
-  // health. Preserve stronger states such as PAUSED until a new session auth.
-  if (cachedConnectorState().state !== CONNECTOR_STATES.PAUSED) {
-    await setState(CONNECTOR_STATES.CONNECTED, {
-      [STORAGE_KEYS.lastError]: null,
-      [STORAGE_KEYS.lastErrorCode]: null,
-    });
-  }
-  // An await above can let close handling authenticate a replacement socket.
-  // Never publish fallback state here that could overwrite that newer session.
-  if (currentSocket !== socket || !hasAuthenticatedOpenSocket()) {
-    return false;
-  }
-  const flush = flushBufferedMessages();
-  if (awaitFlush) await flush;
-  else void flush;
+  if (!isCurrentSession(session) || !hasAuthenticatedOpenSocket()) return false;
+  if (status.authority.state === 'paused') return true;
+  if (awaitFlush) await flushBufferedMessages();
+  else launchDrain();
   return true;
 }
 
@@ -428,12 +595,7 @@ function requiredTimestamp(value) {
   return value;
 }
 
-function buildBufferedBridgePayload(next, stats) {
-  const base = {
-    bufferDepth: Math.max(stats.pendingCommands - 1, 0),
-    bufferBytes: Math.max(stats.pendingBytes - bufferedMessageSize(next), 0),
-  };
-
+function buildBufferedBridgePayload(next) {
   if (next.kind === 'command') {
     if (
       typeof next.action !== 'string' ||
@@ -445,7 +607,6 @@ function buildBufferedBridgePayload(next, stats) {
       return null;
     }
     return {
-      ...base,
       type: 'run_command',
       action: next.action,
       request: next.request,
@@ -455,11 +616,8 @@ function buildBufferedBridgePayload(next, stats) {
   return null;
 }
 
-function buildSnapshotBridgePayload(snapshot, stats) {
+function buildSnapshotBridgePayload(snapshot) {
   const payload = {
-    source: 'extension',
-    bufferDepth: stats.pendingCommands,
-    bufferBytes: stats.pendingBytes,
     type: 'snapshot',
     slug: requiredString(snapshot.slug, 'slug'),
     ts: requiredTimestamp(snapshot.ts),
@@ -481,7 +639,7 @@ async function waitForAuthenticatedSocket(timeoutMs = 1500) {
 }
 
 async function candidatePorts({ storedOnly = false } = {}) {
-  const stored = await chrome.storage.local.get([STORAGE_KEYS.port]);
+  const stored = await readState([STORAGE_KEYS.port]);
   const preferred = stored[STORAGE_KEYS.port];
   const hasPreferred = preferred !== undefined && preferred !== null;
   if (
@@ -557,20 +715,19 @@ function openSocket(port) {
 }
 
 async function connect(options = {}) {
+  const current = runtime.session;
   if (
-    currentSocket &&
-    (currentSocket.readyState === WebSocket.CLOSED ||
-      currentSocket.readyState === WebSocket.CLOSING)
+    current &&
+    (current.socket.readyState === WebSocket.CLOSED ||
+      current.socket.readyState === WebSocket.CLOSING)
   ) {
-    currentSocket = null;
+    runtime.session = null;
   }
-  if (currentSocket || connectPromise) return connectPromise;
+  if (runtime.session || runtime.connectTask) return runtime.connectTask;
 
-  connectPromise = (async () => {
+  runtime.connectTask = (async () => {
     await syncBufferStats();
-    await setState(
-      started ? CONNECTOR_STATES.CONNECTING : CONNECTOR_STATES.STARTING,
-    );
+    await transitionConnection(CONNECTION_PHASES.CONNECTING);
 
     let ports;
     try {
@@ -581,11 +738,14 @@ async function connect(options = {}) {
         message: error.message,
         errorCode,
       });
-      await setState(CONNECTOR_STATES.PAUSED, {
-        [STORAGE_KEYS.port]: null,
-        [STORAGE_KEYS.lastError]: error.message,
-        [STORAGE_KEYS.lastErrorCode]: errorCode,
-      });
+      await transitionConnection(
+        CONNECTION_PHASES.OFFLINE,
+        { failure: { code: errorCode, message: error.message } },
+        {
+          [STORAGE_KEYS.port]: null,
+          [STORAGE_KEYS.lastError]: error.message,
+        },
+      );
       return;
     }
     logDebug('[connector] connect start', {
@@ -594,15 +754,25 @@ async function connect(options = {}) {
     });
     const failures = [];
     for (const port of ports) {
+      let socket;
       try {
         logDebug('[connector] connecting port', { port, ports });
-        const socket = await openSocket(port);
-        currentSocket = socket;
+        socket = await openSocket(port);
+      } catch (error) {
+        failures.push({
+          port,
+          code: error.code || error.message || 'connect_error',
+        });
+        continue;
+      }
+
+      const session = createSession(socket);
+      try {
         await writeState({ [STORAGE_KEYS.port]: port });
         logDebug('[connector] socket open', { port });
-        attachSocket(socket);
+        attachSocket(session);
 
-        const stored = await chrome.storage.local.get([STORAGE_KEYS.token]);
+        const stored = await readState([STORAGE_KEYS.token]);
 
         if (stored[STORAGE_KEYS.token]) {
           socket.send(
@@ -613,82 +783,161 @@ async function connect(options = {}) {
             }),
           );
         } else {
+          await transitionConnection(CONNECTION_PHASES.WAITING_FOR_APPROVAL);
           socket.send(JSON.stringify(await buildPairRequest()));
         }
         return;
       } catch (error) {
-        failures.push({
-          port,
-          code: error.code || error.message || 'connect_error',
-        });
+        await closeSessionForReconnect(session);
+        throw error;
       }
     }
 
     await setDiagnostic('no_ports_reachable', { ports, failures });
-    await setState(CONNECTOR_STATES.OFFLINE);
+    await transitionConnection(CONNECTION_PHASES.OFFLINE, {
+      failure: { code: 'no_ports_reachable', failures },
+    });
     scheduleReconnect(RECONNECT_DELAY_MS);
   })();
 
   try {
-    await connectPromise;
+    return await runtime.connectTask;
+  } catch (error) {
+    await publishUnexpectedConnectionFailure(error, 'connection task failed');
   } finally {
-    connectPromise = null;
+    runtime.connectTask = null;
   }
 }
 
-async function markSocketAuthenticated(socket, { source, storagePatch = {} }) {
-  clearReconnect();
-  await clearDiagnostic();
-  if (Object.keys(storagePatch).length) {
-    await writeState(storagePatch);
+async function ensureConnection(options = {}) {
+  runtime.started = true;
+  if (
+    runtime.session &&
+    (runtime.session.socket.readyState === WebSocket.CLOSED ||
+      runtime.session.socket.readyState === WebSocket.CLOSING)
+  ) {
+    runtime.session = null;
   }
-  socket._authenticated = true;
+  if (runtime.connectTask) {
+    await runtime.connectTask;
+  } else if (!runtime.session) {
+    await connect(options);
+  }
+  return runtime.session;
+}
+
+async function markSessionAuthenticated(
+  session,
+  { source, storagePatch = {} },
+) {
+  if (!isCurrentSession(session)) return;
+  clearReconnect();
+  if (!(await clearDiagnostic(session))) return;
+  if (Object.keys(storagePatch).length) {
+    if (!(await writeState(storagePatch, session))) return;
+  }
+  if (!isCurrentSession(session)) return;
+  session.authenticated = true;
+  if (
+    !(await transitionConnection(
+      CONNECTION_PHASES.SYNCHRONIZING,
+      {},
+      {},
+      session,
+    ))
+  ) {
+    return;
+  }
+  session.statusTask = requestStatus(session);
   try {
-    await refreshAfterAuthentication();
-    if (cachedConnectorState().state !== CONNECTOR_STATES.PAUSED) {
-      await setState(CONNECTOR_STATES.CONNECTED, {
-        [STORAGE_KEYS.lastError]: null,
-        [STORAGE_KEYS.lastErrorCode]: null,
-      });
+    const status = await session.statusTask;
+    if (!isCurrentSession(session)) return;
+    if (status.authority.state === 'paused') return;
+    const drained = await flushBufferedMessages();
+    if (!isCurrentSession(session)) return;
+    if (!drained) {
+      if (cachedConnectorState().state === CONNECTOR_STATES.PAUSED) return;
+      const error = new Error(
+        'Desktop command outbox did not drain during connection synchronization',
+      );
+      error.code = 'outbox_sync_failed';
+      throw error;
     }
+    await transitionConnection(
+      CONNECTION_PHASES.READY,
+      {},
+      { [STORAGE_KEYS.lastError]: null },
+      session,
+    );
   } catch (error) {
+    if (!isCurrentSession(session)) return;
     await setDiagnostic('status_after_auth_failed', {
       source,
       message: error.message,
       code: error.code || null,
     });
     logDebug(`[connector] status after ${source} failed:`, error.message);
-    socket._closeState = CONNECTOR_STATES.OFFLINE;
-    socket._reconnectDelayMs = RECONNECT_DELAY_MS;
-    await setState(CONNECTOR_STATES.OFFLINE, {
-      [STORAGE_KEYS.lastError]: error.message,
-      [STORAGE_KEYS.lastErrorCode]: error.code || 'status_after_auth_failed',
-    });
-    socket.close();
+    session.closePolicy = {
+      delayMs: RECONNECT_DELAY_MS,
+      failure: {
+        code: error.code || 'status_after_auth_failed',
+        message: error.message,
+      },
+    };
+    await transitionConnection(
+      CONNECTION_PHASES.OFFLINE,
+      {
+        failure: {
+          code: error.code || 'status_after_auth_failed',
+          message: error.message,
+        },
+      },
+      { [STORAGE_KEYS.lastError]: error.message },
+      session,
+    );
+    if (!isCurrentSession(session)) return;
+    session.socket.close();
   }
 }
 
-async function setPausedState(payload) {
-  await setState(CONNECTOR_STATES.PAUSED, {
-    [STORAGE_KEYS.lastError]: payload.message || 'Browser Recall is paused',
-    [STORAGE_KEYS.lastErrorCode]: payload.code || 'paused',
-  });
+async function setPausedState(payload, expectedSession = runtime.session) {
+  const message = payload.message || 'Browser Recall is paused';
+  return transitionConnection(
+    CONNECTION_PHASES.READY,
+    {
+      authority: {
+        state: 'paused',
+        code: payload.code || 'paused',
+        message,
+      },
+    },
+    { [STORAGE_KEYS.lastError]: message },
+    expectedSession,
+  );
 }
 
-async function rejectIncompatibleDaemon(socket, payload) {
+async function rejectIncompatibleDaemon(session, payload) {
   const actual = payload.protocolVersion ?? null;
   await setDiagnostic('incompatible_protocol', {
     expected: CONNECTOR_PROTOCOL_VERSION,
     actual,
   });
-  socket._closeState = CONNECTOR_STATES.INCOMPATIBLE;
-  socket._reconnectDelayMs = RECONNECT_DELAY_MS;
-  await setState(CONNECTOR_STATES.INCOMPATIBLE, {
-    [STORAGE_KEYS.lastError]:
-      'Desktop app and browser extension versions are incompatible. Update and restart both.',
-    [STORAGE_KEYS.lastErrorCode]: 'incompatible_protocol',
-  });
-  socket.close();
+  if (!isCurrentSession(session)) return;
+  session.closePolicy = {
+    delayMs: RECONNECT_DELAY_MS,
+    failure: { code: 'incompatible_protocol' },
+  };
+  await transitionConnection(
+    CONNECTION_PHASES.OFFLINE,
+    { failure: { code: 'incompatible_protocol' } },
+    {
+      [STORAGE_KEYS.lastError]:
+        'Desktop app and browser extension versions are incompatible. Update and restart both.',
+    },
+    session,
+  );
+  if (!isCurrentSession(session)) return;
+  session.socket.close();
 }
 
 function hasCompatibleDaemonProtocol(payload) {
@@ -702,12 +951,17 @@ function daemonResponseError(payload) {
   return error;
 }
 
-async function settlePendingRequest(payload) {
-  if (!pendingRequest?.acceptTypes.includes(payload.type)) return false;
-  const request = pendingRequest;
-  pendingRequest = null;
+async function settlePendingRequest(session, payload) {
+  if (
+    runtime.request?.session !== session ||
+    !runtime.request.acceptTypes.includes(payload.type)
+  ) {
+    return false;
+  }
+  const request = runtime.request;
+  runtime.request = null;
   if (payload.type === 'error') {
-    if (payload.error === 'paused') await setPausedState(payload);
+    if (payload.error === 'paused') await setPausedState(payload, session);
     request.reject(daemonResponseError(payload));
   } else {
     request.resolve(payload);
@@ -715,62 +969,82 @@ async function settlePendingRequest(payload) {
   return true;
 }
 
-async function handleSocketMessage(socket, payload) {
-  if (await settlePendingRequest(payload)) return;
+async function handleSocketMessage(session, payload) {
+  if (!isCurrentSession(session)) return;
+  if (await settlePendingRequest(session, payload)) return;
+  if (!isCurrentSession(session)) return;
 
   switch (payload.type) {
     case 'pair_approved':
       if (!hasCompatibleDaemonProtocol(payload)) {
-        await rejectIncompatibleDaemon(socket, payload);
+        await rejectIncompatibleDaemon(session, payload);
         break;
       }
-      await markSocketAuthenticated(socket, {
+      await markSessionAuthenticated(session, {
         source: 'pair',
         storagePatch: {
-          [STORAGE_KEYS.deviceId]: payload.deviceId,
           [STORAGE_KEYS.token]: payload.token,
         },
       });
       break;
     case 'auth_ok':
       if (!hasCompatibleDaemonProtocol(payload)) {
-        await rejectIncompatibleDaemon(socket, payload);
+        await rejectIncompatibleDaemon(session, payload);
         break;
       }
-      await markSocketAuthenticated(socket, { source: 'auth' });
+      await markSessionAuthenticated(session, { source: 'auth' });
       break;
     case 'pair_pending':
-      await setState(CONNECTOR_STATES.PAIR_PENDING);
+      await transitionConnection(
+        CONNECTION_PHASES.WAITING_FOR_APPROVAL,
+        {},
+        {},
+        session,
+      );
       break;
     case 'auth_fail':
       await setDiagnostic('auth_fail', {
         reason: payload.reason || null,
       });
-      socket._closeState = CONNECTOR_STATES.AUTH_FAILED;
-      socket._reconnectDelayMs = 250;
-      await chrome.storage.local.remove([STORAGE_KEYS.token]);
-      removeConnectorStorageCache([STORAGE_KEYS.token]);
-      socket.close();
+      if (!isCurrentSession(session)) return;
+      session.closePolicy = {
+        delayMs: 250,
+        failure: {
+          code: 'auth_failed',
+          reason: payload.reason || null,
+        },
+      };
+      if (!(await removeState([STORAGE_KEYS.token], session))) return;
+      session.socket.close();
       break;
     case 'pair_denied':
       await setDiagnostic('pair_denied');
-      socket._closeState = CONNECTOR_STATES.PAIR_DENIED;
-      socket._reconnectDelayMs = 30_000;
-      socket.close();
+      if (!isCurrentSession(session)) return;
+      session.closePolicy = {
+        delayMs: 30_000,
+        failure: { code: 'pair_denied' },
+      };
+      session.socket.close();
       break;
     case 'error':
       if (payload.code === 'incompatible_protocol') {
-        await rejectIncompatibleDaemon(socket, payload);
+        await rejectIncompatibleDaemon(session, payload);
       } else if (payload.error === 'paused') {
-        await setPausedState(payload);
+        await setPausedState(payload, session);
       } else {
         await setDiagnostic(payload.code || payload.error || 'daemon_error', {
           message: payload.message || payload.error || 'Daemon error',
           error: payload.error || null,
         });
-        socket._closeState = CONNECTOR_STATES.OFFLINE;
-        socket._reconnectDelayMs = RECONNECT_DELAY_MS;
-        socket.close();
+        if (!isCurrentSession(session)) return;
+        session.closePolicy = {
+          delayMs: RECONNECT_DELAY_MS,
+          failure: {
+            code: payload.code || payload.error || 'daemon_error',
+            message: payload.message || payload.error || 'Daemon error',
+          },
+        };
+        session.socket.close();
       }
       break;
     case 'change':
@@ -783,74 +1057,96 @@ async function handleSocketMessage(socket, payload) {
   }
 }
 
-async function rejectInvalidDaemonMessage(socket, error) {
+async function rejectInvalidDaemonMessage(session, error) {
+  if (!isCurrentSession(session)) return;
   logError('[connector] invalid desktop message:', error);
   await setDiagnostic('invalid_daemon_message', {
     message: error.message,
   });
-  socket._closeState = CONNECTOR_STATES.OFFLINE;
-  socket._reconnectDelayMs = RECONNECT_DELAY_MS;
-  await setState(CONNECTOR_STATES.OFFLINE, {
-    [STORAGE_KEYS.lastError]: error.message,
-    [STORAGE_KEYS.lastErrorCode]: 'invalid_daemon_message',
-  });
-  socket.close();
+  if (!isCurrentSession(session)) return;
+  session.closePolicy = {
+    delayMs: RECONNECT_DELAY_MS,
+    failure: { code: 'invalid_daemon_message', message: error.message },
+  };
+  await writeConnectionPresentation(
+    { [STORAGE_KEYS.lastError]: error.message },
+    session,
+  );
+  if (!isCurrentSession(session)) return;
+  session.socket.close();
 }
 
-async function handleSocketClose(socket) {
-  if (socket._ignoreClose) return;
-  if (currentSocket === socket) currentSocket = null;
-  if (pendingRequest) {
-    pendingRequest.reject(new Error('Desktop bridge disconnected'));
-    pendingRequest = null;
+async function handleSocketClose(session) {
+  if (session.ignoreClose || !isCurrentSession(session)) return;
+  runtime.session = null;
+  if (runtime.request?.session === session) {
+    runtime.request.reject(new Error('Desktop bridge disconnected'));
+    runtime.request = null;
   }
-  if (socket._closeState) {
-    await setState(socket._closeState);
-    scheduleReconnect(socket._reconnectDelayMs ?? RECONNECT_DELAY_MS);
+  if (session.closePolicy) {
+    await transitionConnection(CONNECTION_PHASES.OFFLINE, {
+      failure: session.closePolicy.failure,
+    });
+    scheduleReconnect(session.closePolicy.delayMs);
     return;
   }
-  if (socket._authenticated) {
+  if (session.authenticated) {
     await setDiagnostic('socket_closed', {
       state: 'authenticated_socket_closed',
-      readyState: socketReadyStateName(socket),
+      readyState: socketReadyStateName(session.socket),
     });
-    await setState(CONNECTOR_STATES.CONNECTING);
-    void connect({ storedOnly: true });
+    await transitionConnection(CONNECTION_PHASES.CONNECTING);
+    launchConnect({ storedOnly: true });
     return;
   }
   await setDiagnostic('socket_closed', {
     state: 'unauthenticated_socket_closed',
-    readyState: socketReadyStateName(socket),
+    readyState: socketReadyStateName(session.socket),
   });
-  await setState(CONNECTOR_STATES.OFFLINE);
+  await transitionConnection(CONNECTION_PHASES.OFFLINE, {
+    failure: { code: 'socket_closed' },
+  });
   scheduleReconnect(RECONNECT_DELAY_MS);
 }
 
-function attachSocket(socket) {
-  socket.addEventListener('message', (event) => {
+function attachSocket(session) {
+  session.socket.addEventListener('message', (event) => {
     void (async () => {
       const payload = JSON.parse(event.data);
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
         throw new Error('Desktop connector message must be an object');
       }
-      await handleSocketMessage(socket, payload);
-    })().catch((error) => rejectInvalidDaemonMessage(socket, error));
+      await handleSocketMessage(session, payload);
+    })().catch(async (error) => {
+      try {
+        await rejectInvalidDaemonMessage(session, error);
+      } catch (rejectionError) {
+        logError(
+          '[connector] Failed to publish invalid desktop message:',
+          rejectionError,
+        );
+      }
+    });
   });
 
-  socket.addEventListener('close', () => handleSocketClose(socket), {
-    once: true,
-  });
-}
-
-async function refreshAfterAuthentication() {
-  await requestStatus();
-  await flushBufferedMessages();
+  session.socket.addEventListener(
+    'close',
+    () => {
+      void handleSocketClose(session).catch((error) =>
+        observeUnexpectedConnectionFailure(
+          error,
+          'socket close handler failed',
+        ),
+      );
+    },
+    { once: true },
+  );
 }
 
 async function sendBridgeMessage(message, acceptTypes, options = {}) {
-  const previous = bridgeRequestQueue;
+  const previous = runtime.requestTail;
   let releaseQueue;
-  bridgeRequestQueue = new Promise((resolve) => {
+  runtime.requestTail = new Promise((resolve) => {
     releaseQueue = resolve;
   });
 
@@ -868,34 +1164,26 @@ async function sendBridgeMessage(message, acceptTypes, options = {}) {
 async function ensureBridgeReadyForRequest() {
   if (hasAuthenticatedOpenSocket()) return;
 
-  const stored = await chrome.storage.local.get([STORAGE_KEYS.token]);
+  const stored = await readState([STORAGE_KEYS.token]);
   if (!stored[STORAGE_KEYS.token]) return;
 
-  if (currentSocket?.readyState === WebSocket.CLOSED) {
-    currentSocket = null;
-  }
-
-  if (!currentSocket) {
-    if (!started) started = true;
-    await connect({ storedOnly: true });
-  } else if (connectPromise) {
-    await connectPromise;
-  }
+  await ensureConnection({ storedOnly: true });
 
   if (await waitForAuthenticatedSocket()) return;
   throw new Error('Desktop bridge is not connected');
 }
 
 function sendBridgeMessageNow(message, acceptTypes, options = {}) {
-  if (!currentSocket || currentSocket.readyState !== WebSocket.OPEN) {
+  const session = runtime.session;
+  if (!session || session.socket.readyState !== WebSocket.OPEN) {
     throw new Error('Desktop bridge is not connected');
   }
-  if (pendingRequest) {
+  if (runtime.request) {
     throw new Error('Desktop bridge request already in flight');
   }
   const serializedMessage = JSON.stringify(message);
   if (message.type === 'snapshot') {
-    const maxMessageBytes = currentSocket._maxMessageBytes;
+    const maxMessageBytes = session.maxMessageBytes;
     if (!Number.isSafeInteger(maxMessageBytes) || maxMessageBytes <= 0) {
       const error = new Error(
         'Desktop did not advertise a valid snapshot message limit',
@@ -914,13 +1202,14 @@ function sendBridgeMessageNow(message, acceptTypes, options = {}) {
   }
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      if (pendingRequest?.timer !== timer) return;
-      pendingRequest = null;
+      if (runtime.request?.timer !== timer) return;
+      runtime.request = null;
       const error = new Error('Desktop bridge request timed out');
       error.code = 'bridge_timeout';
       reject(error);
     }, options.timeoutMs || BRIDGE_REQUEST_TIMEOUT_MS);
-    pendingRequest = {
+    runtime.request = {
+      session,
       resolve(value) {
         clearTimeout(timer);
         resolve(value);
@@ -933,10 +1222,10 @@ function sendBridgeMessageNow(message, acceptTypes, options = {}) {
       timer,
     };
     try {
-      currentSocket.send(serializedMessage);
+      session.socket.send(serializedMessage);
     } catch (error) {
       clearTimeout(timer);
-      pendingRequest = null;
+      runtime.request = null;
       reject(error);
     }
   });
@@ -950,17 +1239,7 @@ function requireNonNegativeInteger(value, field) {
 }
 
 function validateStatusPayload(payload) {
-  const requiredKeys = [
-    'type',
-    'connectedBrowsers',
-    'bufferDepth',
-    'bufferBytes',
-    'daemonBufferDepth',
-    'lastDrainedAt',
-    'dataFolder',
-    'deviceId',
-    'maxMessageBytes',
-  ];
+  const requiredKeys = ['type', 'deviceId', 'maxMessageBytes', 'authority'];
   for (const key of requiredKeys) {
     if (!Object.prototype.hasOwnProperty.call(payload, key)) {
       throw new Error(`Desktop status is missing field: ${key}`);
@@ -969,96 +1248,163 @@ function validateStatusPayload(payload) {
   if (payload.type !== 'status') {
     throw new Error('Desktop status response has the wrong message type');
   }
-  if (
-    !Array.isArray(payload.connectedBrowsers) ||
-    payload.connectedBrowsers.some(
-      (browser) => typeof browser !== 'string' || browser.length === 0,
-    )
-  ) {
-    throw new Error(
-      'Desktop status connectedBrowsers must contain non-empty strings',
-    );
-  }
-  requireNonNegativeInteger(payload.bufferDepth, 'bufferDepth');
-  requireNonNegativeInteger(payload.bufferBytes, 'bufferBytes');
-  requireNonNegativeInteger(payload.daemonBufferDepth, 'daemonBufferDepth');
   requireNonNegativeInteger(payload.maxMessageBytes, 'maxMessageBytes');
   if (payload.maxMessageBytes === 0) {
     throw new Error('Desktop status maxMessageBytes must be greater than zero');
   }
-  if (
-    payload.lastDrainedAt !== null &&
-    !Number.isSafeInteger(payload.lastDrainedAt)
-  ) {
-    throw new Error('Desktop status lastDrainedAt must be an integer or null');
+  if (typeof payload.deviceId !== 'string' || payload.deviceId.length === 0) {
+    throw new Error('Desktop status deviceId must be a non-empty string');
   }
-  for (const key of ['dataFolder', 'deviceId']) {
-    if (typeof payload[key] !== 'string' || payload[key].length === 0) {
-      throw new Error(`Desktop status ${key} must be a non-empty string`);
+  if (
+    !payload.authority ||
+    typeof payload.authority !== 'object' ||
+    Array.isArray(payload.authority) ||
+    !['running', 'paused'].includes(payload.authority.state)
+  ) {
+    throw new Error('Desktop status authority must be running or paused');
+  }
+  if (payload.authority.state === 'paused') {
+    for (const key of ['code', 'message']) {
+      if (
+        typeof payload.authority[key] !== 'string' ||
+        !payload.authority[key]
+      ) {
+        throw new Error(
+          `Paused desktop authority ${key} must be a non-empty string`,
+        );
+      }
     }
   }
   return payload;
 }
 
-async function requestStatus() {
-  if (!currentSocket?._authenticated) {
+async function requestStatus(expectedSession = runtime.session) {
+  if (!expectedSession?.authenticated || !isCurrentSession(expectedSession)) {
     throw new Error('Cannot request desktop status before authentication');
   }
-  const socket = currentSocket;
   const payload = validateStatusPayload(
     await sendBridgeMessage({ type: 'get_status' }, ['status', 'error']),
   );
-  if (currentSocket !== socket || !socket._authenticated) {
+  if (!isCurrentSession(expectedSession) || !expectedSession.authenticated) {
     throw new Error('Desktop bridge changed while reading status');
   }
-  socket._maxMessageBytes = payload.maxMessageBytes;
+  expectedSession.maxMessageBytes = payload.maxMessageBytes;
   const statePatch = {
-    [STORAGE_KEYS.daemonBufferDepth]: payload.daemonBufferDepth,
-    [STORAGE_KEYS.lastDrainedAt]: payload.lastDrainedAt,
-    [STORAGE_KEYS.dataFolder]: payload.dataFolder,
     [STORAGE_KEYS.deviceId]: payload.deviceId,
+    [STORAGE_KEYS.lastError]: null,
   };
-  if (cachedConnectorState().state !== CONNECTOR_STATES.PAUSED) {
-    statePatch[STORAGE_KEYS.lastError] = null;
-    statePatch[STORAGE_KEYS.lastErrorCode] = null;
+  if (payload.authority.state === 'paused') {
+    if (!(await setPausedState(payload.authority, expectedSession))) {
+      throw new Error('Desktop bridge changed while applying paused status');
+    }
+    if (
+      !(await writeState(
+        { [STORAGE_KEYS.deviceId]: payload.deviceId },
+        expectedSession,
+      ))
+    ) {
+      throw new Error('Desktop bridge changed while storing status identity');
+    }
+  } else if (runtime.connection.phase === CONNECTION_PHASES.SYNCHRONIZING) {
+    if (!(await writeState(statePatch, expectedSession))) {
+      throw new Error('Desktop bridge changed while storing status');
+    }
+  } else {
+    const existingFailure = runtime.connection.failure;
+    await transitionConnection(
+      CONNECTION_PHASES.READY,
+      existingFailure ? { failure: existingFailure } : {},
+      statePatch,
+      expectedSession,
+    );
   }
-  await writeState(statePatch);
-  await clearDiagnostic();
+  if (!(await clearDiagnostic(expectedSession))) {
+    throw new Error('Desktop bridge changed while clearing status diagnostics');
+  }
   return payload;
 }
 
+async function requireDesktopSnapshotMessageLimit() {
+  const session = runtime.session;
+  if (session?.statusTask) {
+    await session.statusTask;
+  }
+  if (!isCurrentSession(session) || !hasAuthenticatedOpenSocket()) {
+    const error = new Error(
+      'Desktop bridge changed before communicating the snapshot message limit',
+    );
+    error.code = 'desktop_bridge_changed';
+    throw error;
+  }
+  const maxMessageBytes = session.maxMessageBytes;
+  if (!Number.isSafeInteger(maxMessageBytes) || maxMessageBytes <= 0) {
+    const error = new Error(
+      'Desktop did not advertise a valid snapshot message limit',
+    );
+    error.code = 'missing_desktop_message_limit';
+    throw error;
+  }
+  return maxMessageBytes;
+}
+
 async function waitForIdleBridge() {
-  if (flushPromise) {
-    await flushPromise;
+  if (runtime.drainTask) {
+    await runtime.drainTask.promise;
   }
 }
 
-async function flushBufferedMessages() {
-  if (flushPromise) return flushPromise;
-  flushPromise = (async () => {
+async function flushBufferedMessages(expectedSession = runtime.session) {
+  if (
+    !expectedSession?.authenticated ||
+    !isCurrentSession(expectedSession) ||
+    expectedSession.socket.readyState !== WebSocket.OPEN
+  ) {
+    return false;
+  }
+  if (runtime.drainTask) {
+    if (runtime.drainTask.session === expectedSession) {
+      return runtime.drainTask.promise;
+    }
+    await runtime.drainTask.promise.catch(() => {});
+    if (
+      !isCurrentSession(expectedSession) ||
+      expectedSession.socket.readyState !== WebSocket.OPEN
+    ) {
+      return false;
+    }
+    return flushBufferedMessages(expectedSession);
+  }
+
+  const drain = { session: expectedSession, promise: null };
+  drain.promise = (async () => {
     while (
-      currentSocket?._authenticated &&
-      currentSocket.readyState === WebSocket.OPEN
+      isCurrentSession(expectedSession) &&
+      expectedSession.authenticated &&
+      expectedSession.socket.readyState === WebSocket.OPEN
     ) {
       const next = await peekBufferedMessage();
+      if (!isCurrentSession(expectedSession)) return false;
       if (!next) {
         await syncBufferStats();
-        return;
+        if (!isCurrentSession(expectedSession)) return false;
+        await setConnectionFailure(null);
+        return true;
       }
       try {
-        const stats = await bufferStats();
-        const payload = buildBufferedBridgePayload(next, stats);
+        const payload = buildBufferedBridgePayload(next);
         if (!payload) {
           const message = `Connector queue contains unsupported item kind: ${String(next.kind)}`;
           await setDiagnostic('invalid_buffer_item', {
             message,
             kind: next.kind ?? null,
           });
-          await setState(CONNECTOR_STATES.PAUSED, {
+          if (!isCurrentSession(expectedSession)) return false;
+          await setConnectionFailure({ code: 'invalid_buffer_item', message });
+          if (!isCurrentSession(expectedSession)) return false;
+          await writeConnectionPresentation({
             [STORAGE_KEYS.lastError]: message,
-            [STORAGE_KEYS.lastErrorCode]: 'invalid_buffer_item',
           });
-          return;
+          return false;
         }
         const response = await sendBridgeMessage(payload, [
           'ack',
@@ -1088,55 +1434,48 @@ async function flushBufferedMessages() {
           throw error;
         }
         await shiftBufferedMessage();
-        const commandResponse = response.response;
-        const statePatch = {
-          [STORAGE_KEYS.daemonBufferDepth]: payload.bufferDepth,
-          [STORAGE_KEYS.lastError]: null,
-          [STORAGE_KEYS.lastErrorCode]: null,
-        };
-        if (Number.isSafeInteger(commandResponse.timestamp)) {
-          statePatch[STORAGE_KEYS.lastDrainedAt] = commandResponse.timestamp;
-        }
-        await writeState(statePatch);
+        if (!isCurrentSession(expectedSession)) return false;
+        await writeState({ [STORAGE_KEYS.lastError]: null }, expectedSession);
       } catch (error) {
-        if (error.code === 'replay_error' || error.code === 'fs_error') {
-          await setState(CONNECTOR_STATES.PAUSED, {
-            [STORAGE_KEYS.lastError]: error.message,
-            [STORAGE_KEYS.lastErrorCode]: error.code,
+        if (!isCurrentSession(expectedSession)) return false;
+        const code = error.code || 'buffer_flush_failed';
+        if (!['replay_error', 'fs_error', 'invalid_message'].includes(code)) {
+          await setDiagnostic('buffer_flush_failed', {
+            message: error.message,
+            errorCode: code,
           });
-        } else if (error.code === 'invalid_message') {
-          await setState(CONNECTOR_STATES.PAUSED, {
-            [STORAGE_KEYS.lastError]: error.message,
-            [STORAGE_KEYS.lastErrorCode]: error.code,
-          });
-          return;
-        } else {
           logDebug('[connector] flush failed:', error.message);
         }
-        return;
+        if (!isCurrentSession(expectedSession)) return false;
+        await setConnectionFailure({ code, message: error.message });
+        if (!isCurrentSession(expectedSession)) return false;
+        await writeConnectionPresentation({
+          [STORAGE_KEYS.lastError]: error.message,
+        });
+        return false;
       }
     }
+    return false;
   })();
+  runtime.drainTask = drain;
 
   try {
-    await flushPromise;
+    return await drain.promise;
   } finally {
-    flushPromise = null;
+    if (runtime.drainTask === drain) runtime.drainTask = null;
   }
 }
 
 export async function flushDesktopBuffer() {
-  if (!started) {
+  if (!runtime.started) {
     await initConnectorBridge();
-  } else if (!currentSocket && !connectPromise) {
-    await connect();
-  } else if (connectPromise) {
-    await connectPromise;
+  } else {
+    await ensureConnection();
   }
 
-  if (currentSocket?._authenticated) {
-    await flushBufferedMessages();
-    await requestStatus();
+  if (runtime.session?.authenticated) {
+    const drained = await flushBufferedMessages();
+    if (drained) await requestStatus();
   }
 
   return getConnectorBridgeState();
@@ -1150,23 +1489,28 @@ export async function clearDesktopBuffer() {
 
 export async function initConnectorBridge() {
   installReconnectAlarmListener();
-  if (started) {
-    if (connectPromise) await connectPromise;
+  if (runtime.started) {
+    if (runtime.connectTask) await runtime.connectTask;
     return;
   }
-  started = true;
-  await setState(CONNECTOR_STATES.STARTING);
-  await connect();
+  runtime.started = true;
+  await ensureConnection();
 }
 
 export async function restartConnectorRuntimeForTest() {
   clearReconnect();
-  if (currentSocket) await closeSocketForReconnect(currentSocket);
-  started = false;
-  connectPromise = null;
-  flushPromise = null;
-  await setState(CONNECTOR_STATES.STARTING);
-  void initConnectorBridge();
+  const drainPromise = runtime.drainTask?.promise;
+  if (runtime.session) await closeSessionForReconnect(runtime.session);
+  await drainPromise?.catch(() => {});
+  runtime.started = false;
+  runtime.connectTask = null;
+  runtime.drainTask = null;
+  runtime.request = null;
+  runtime.requestTail = Promise.resolve();
+  await transitionConnection(CONNECTION_PHASES.OFFLINE);
+  void initConnectorBridge().catch((error) => {
+    observeUnexpectedConnectionFailure(error, 'connector restart failed');
+  });
 }
 
 export async function refreshConnectorBridgeState(
@@ -1184,36 +1528,19 @@ export async function refreshConnectorBridgeState(
     return getConnectorBridgeState();
   }
 
-  if (
-    currentSocket &&
-    (currentSocket.readyState === WebSocket.CLOSED ||
-      currentSocket.readyState === WebSocket.CLOSING)
-  ) {
-    currentSocket = null;
-  }
-
-  if (!started) {
-    started = true;
-    await setState(CONNECTOR_STATES.STARTING);
-    await connect();
-  } else if (connectPromise) {
-    await connectPromise;
-  } else if (!currentSocket) {
-    await connect();
-  }
+  await ensureConnection();
 
   return waitForConnectorState((candidate) => {
     if (
-      candidate.state === CONNECTOR_STATES.CONNECTED &&
-      candidate.deviceId &&
-      !candidate.refuseMode
+      candidate.connection.phase === CONNECTION_PHASES.READY &&
+      candidate.deviceId
     ) {
       return true;
     }
-    if (candidate.state === CONNECTOR_STATES.OFFLINE) {
-      return !currentSocket && !connectPromise;
+    if (candidate.connection.phase === CONNECTION_PHASES.OFFLINE) {
+      return !runtime.session && !runtime.connectTask;
     }
-    return isProbeReadyConnectorState(candidate.state);
+    return isProbeReadyConnection(candidate.connection);
   }, timeoutMs);
 }
 
@@ -1228,16 +1555,15 @@ export async function connectDesktopBridge() {
     return getConnectorBridgeState();
   }
   if (hasAuthenticatedOpenSocket()) {
-    if (currentSocket) {
-      await closeSocketForReconnect(currentSocket);
+    if (runtime.session) {
+      await closeSessionForReconnect(runtime.session);
     }
   }
 
   clearReconnect();
-  await setState(CONNECTOR_STATES.CONNECTING);
 
-  if (currentSocket) await closeSocketForReconnect(currentSocket);
-  if (!started) started = true;
+  if (runtime.session) await closeSessionForReconnect(runtime.session);
+  if (!runtime.started) runtime.started = true;
   const deadline = Date.now() + MANUAL_RECONNECT_DEADLINE_MS;
   let attempt = 0;
   while (Date.now() < deadline) {
@@ -1245,7 +1571,7 @@ export async function connectDesktopBridge() {
     clearReconnect();
     logDebug('[connector] manual reconnect attempt', {
       attempt,
-      previousSocket: socketReadyStateName(currentSocket),
+      previousSocket: socketReadyStateName(runtime.session?.socket),
     });
     await connect();
     // Auto-approved pairing still emits pair_pending before its final result.
@@ -1253,11 +1579,11 @@ export async function connectDesktopBridge() {
     // returned when the bounded wait expires.
     const state = await waitForConnectorState(
       (candidate) =>
-        isTerminalConnectorState(candidate.state) &&
-        candidate.state !== CONNECTOR_STATES.PAIR_PENDING,
+        isTerminalConnection(candidate.connection) &&
+        candidate.connection.phase !== CONNECTION_PHASES.WAITING_FOR_APPROVAL,
       MANUAL_PAIR_SETTLE_MS,
     );
-    if (isManualReadyConnectorState(state.state)) {
+    if (isManualReadyConnection(state.connection)) {
       return state;
     }
     logDebug('[connector] manual reconnect retry', {
@@ -1265,11 +1591,10 @@ export async function connectDesktopBridge() {
       state: state.state,
       diagnostic: state.lastDiagnostic?.code || null,
     });
-    if (currentSocket && !isManualReadyConnectorState(state.state)) {
-      await closeSocketForReconnect(currentSocket);
+    if (runtime.session && !isManualReadyConnection(state.connection)) {
+      await closeSessionForReconnect(runtime.session);
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
-    await setState(CONNECTOR_STATES.CONNECTING);
   }
   const finalState = await getConnectorBridgeState();
   const finalDiagnostic = finalState.lastDiagnostic || {};
@@ -1282,7 +1607,13 @@ export async function connectDesktopBridge() {
       : [],
     ports: Array.isArray(finalDiagnostic.ports) ? finalDiagnostic.ports : [],
   });
-  await setState(CONNECTOR_STATES.OFFLINE);
+  if (runtime.session) await closeSessionForReconnect(runtime.session);
+  await transitionConnection(CONNECTION_PHASES.OFFLINE, {
+    failure: {
+      code: 'manual_reconnect_exhausted',
+      message: 'Desktop reconnect attempts were exhausted',
+    },
+  });
   return getConnectorBridgeState();
 }
 
@@ -1294,12 +1625,25 @@ export async function enqueueDesktopCommand(action, request = {}) {
     request: canonicalRequest,
   });
   mergeConnectorStorageCache(bufferStatePatch(stats));
-  if (currentSocket?._authenticated) {
-    void flushBufferedMessages();
+  if (runtime.session?.authenticated) {
+    launchDrain();
   } else {
-    void connect();
+    launchConnect();
   }
   return stats;
+}
+
+async function prepareSnapshotRequest() {
+  await ensureBridgeReadyForRequest();
+  const maxMessageBytes = await requireDesktopSnapshotMessageLimit();
+  await flushBufferedMessages();
+  const stats = await bufferStats();
+  if (stats.pendingCommands > 0) {
+    const error = new Error('Desktop command queue did not drain');
+    error.code = 'desktop_queue_not_drained';
+    throw error;
+  }
+  return maxMessageBytes;
 }
 
 export async function enqueueDesktopSnapshot(snapshot) {
@@ -1313,58 +1657,30 @@ export async function enqueueDesktopSnapshot(snapshot) {
     markdown: snapshot.markdown,
     html: snapshot.html,
   };
-  await ensureBridgeReadyForRequest();
-  await flushBufferedMessages();
-  const stats = await bufferStats();
-  if (stats.pendingCommands > 0) {
-    const error = new Error('Desktop command queue did not drain');
-    error.code = 'desktop_queue_not_drained';
-    throw error;
-  }
-  const payload = buildSnapshotBridgePayload(message, stats);
-  const response = await sendBridgeMessage(payload, ['ack', 'error'], {
+  await prepareSnapshotRequest();
+  const payload = buildSnapshotBridgePayload(message);
+  await sendBridgeMessage(payload, ['ack', 'error'], {
     timeoutMs: SNAPSHOT_REQUEST_TIMEOUT_MS,
   });
   await writeState({
-    [STORAGE_KEYS.lastDrainedAt]: response.lastDrainedAt,
-    [STORAGE_KEYS.daemonBufferDepth]: response.bufferDepth,
     [STORAGE_KEYS.lastError]: null,
-    [STORAGE_KEYS.lastErrorCode]: null,
   });
   return await syncBufferStats();
 }
 
 export async function requestDesktopSnapshotCaptureBudget(snapshot) {
   const canonicalUrl = canonicalizePageUrl(snapshot.url);
-  await ensureBridgeReadyForRequest();
-  await flushBufferedMessages();
-  const stats = await bufferStats();
-  if (stats.pendingCommands > 0) {
-    const error = new Error('Desktop command queue did not drain');
-    error.code = 'desktop_queue_not_drained';
-    throw error;
-  }
-  const payload = buildSnapshotBridgePayload(
-    {
-      kind: 'snapshot',
-      slug: snapshot.slug,
-      ts: snapshot.ts,
-      url: canonicalUrl,
-      title: snapshot.title,
-      markdown: snapshot.markdown,
-      html: 'x',
-    },
-    stats,
-  );
+  const maxMessageBytes = await prepareSnapshotRequest();
+  const payload = buildSnapshotBridgePayload({
+    kind: 'snapshot',
+    slug: snapshot.slug,
+    ts: snapshot.ts,
+    url: canonicalUrl,
+    title: snapshot.title,
+    markdown: snapshot.markdown,
+    html: 'x',
+  });
   payload.html = '';
-  const maxMessageBytes = currentSocket?._maxMessageBytes;
-  if (!Number.isSafeInteger(maxMessageBytes) || maxMessageBytes <= 0) {
-    const error = new Error(
-      'Desktop did not advertise a valid snapshot message limit',
-    );
-    error.code = 'missing_desktop_message_limit';
-    throw error;
-  }
   return {
     maxEncodedHtmlBytes: snapshotHtmlBudgetBytes({
       maxMessageBytes,
@@ -1377,7 +1693,7 @@ export async function requestDesktopSnapshotCaptureBudget(snapshot) {
 
 export async function getConnectorBridgeState() {
   const stats = await bufferStats();
-  const stored = await chrome.storage.local.get(CONNECTOR_STATE_STORAGE_KEYS);
+  const stored = await readState(CONNECTOR_STATE_STORAGE_KEYS);
   connectorStorageCache = { ...stored, ...bufferStatePatch(stats) };
   return cachedConnectorState();
 }
@@ -1570,8 +1886,8 @@ export async function requestDesktopTestSeed(files) {
 export async function requestDesktopHistoryFiles(includeSizes = false) {
   const payload = await requestDesktopPayload(
     {
-      type: 'list_history_files',
-      includeSizes,
+      type: 'test_control',
+      request: { type: 'list_history_files', includeSizes },
     },
     ['history_files_result', 'error'],
   );
@@ -1595,8 +1911,8 @@ export async function requestDesktopHistoryFiles(includeSizes = false) {
 export async function requestDesktopHistoryBatch(files) {
   const payload = await requestDesktopPayload(
     {
-      type: 'load_history_batch',
-      files,
+      type: 'test_control',
+      request: { type: 'load_history_batch', files },
     },
     ['history_batch_result', 'error'],
   );
@@ -1621,8 +1937,6 @@ export async function requestDesktopCommand(action, request = {}) {
       type: 'run_command',
       action,
       request: canonicalRequest,
-      bufferDepth: 0,
-      bufferBytes: 0,
     },
     ['command_result', 'error'],
   );

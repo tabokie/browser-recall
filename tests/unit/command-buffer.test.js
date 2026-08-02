@@ -99,4 +99,33 @@ describe('connector command buffer', () => {
     ).toEqual([2]);
     expect(store.desktopPendingCommands).toBe(1);
   });
+
+  it('rejects only the overflowing enqueue and accepts later commands', async () => {
+    const store = installChromeStorageMock();
+    const { enqueueBufferedMessage } =
+      await import('../../apps/extension/connector/command-buffer.js');
+
+    await expect(
+      enqueueBufferedMessage({
+        kind: 'command',
+        action: 'createNote',
+        request: { content: 'x'.repeat(8 * 1024 * 1024) },
+      }),
+    ).rejects.toMatchObject({ code: 'buffer_full' });
+
+    await enqueueBufferedMessage({
+      kind: 'command',
+      action: 'reportVisit',
+      request: { timestamp: 1 },
+    });
+
+    expect(store.desktopCommandBuffer).toEqual([
+      {
+        kind: 'command',
+        action: 'reportVisit',
+        request: { timestamp: 1 },
+      },
+    ]);
+    expect(store.desktopPendingCommands).toBe(1);
+  });
 });

@@ -29,8 +29,6 @@ import {
   refreshConnectorBridgeState,
   subscribeConnectorBridgeState,
   subscribeDaemonMutations,
-  requestDesktopHistoryFiles,
-  requestDesktopHistoryBatch,
   requestDesktopPageInfo,
   requestDesktopPageSummary,
   requestDesktopSettings,
@@ -62,7 +60,6 @@ function tr(key, fallback, substitutions) {
   );
 }
 
-const DRAIN_INTERVAL_MS = 5000; // 5 seconds — connector queue is durable until drained
 const CONNECTOR_STATE_REFRESH_TIMEOUT_MS = 1000;
 const POPUP_PREPARE_TIMEOUT_MS = 1500;
 const POPUP_BOOTSTRAP_TTL_MS = 30_000;
@@ -90,55 +87,31 @@ async function badgeIdentityUrlForTab(tabId, url) {
   return url;
 }
 
-// Device ID for this instance. The daemon owns it in app config; the extension
-// mirrors it locally after connector status responses.
-let localDeviceId = null;
-
-// Service error state: null = healthy, { code, message, timestamp } = paused.
-// Error codes: 'session_quota', 'local_quota', 'desktop_buffer_full'.
-let serviceError = null;
-
-// Lazy getter: returns localDeviceId, asking the daemon connector on cache miss.
-// Handles both startup race and SW wakeup.
-async function getDeviceId() {
-  if (localDeviceId) return localDeviceId;
-  const connector = await getConnectorBridgeState();
-  syncDesktopConnectorPauseState(connector);
-  if (connector.deviceId) {
-    localDeviceId = connector.deviceId;
-    return localDeviceId;
-  }
-  return localDeviceId;
-}
+// Worker-local platform error state.
+let localFailure = null;
 
 // ─── Service Downtime State ───────────────────────────────────────────
 
-function pauseService(code, message) {
-  serviceError = { code, message, timestamp: Date.now() };
+function setLocalFailure(code, message) {
+  localFailure = { code, message, timestamp: Date.now() };
   badgeController
     .setServicePaused({ title: message })
     .catch((error) => logDebug('[badge] service pause failed:', error.message));
-  chrome.storage.session.set({ serviceError }).catch((error) => {
-    logError('[service] Failed to persist paused state:', error);
-  });
   logError(`Service paused: [${code}] ${message}`);
 }
 
-function resumeService() {
-  serviceError = null;
+function clearLocalFailure() {
+  localFailure = null;
   badgeController
     .setServiceActive()
     .catch((error) =>
       logDebug('[badge] service resume failed:', error.message),
     );
-  chrome.storage.session.remove(['serviceError']).catch((error) => {
-    logError('[service] Failed to clear paused state:', error);
-  });
   logDebug('Service resumed');
 }
 
-function isServicePaused() {
-  return serviceError !== null;
+function hasLocalFailure() {
+  return localFailure !== null;
 }
 
 async function getWorkspaceState() {
@@ -165,7 +138,7 @@ if (getBrowserCapabilities().supportsSessionAccessLevel) {
     })
     .catch((error) => {
       logError('[background] Could not expose session storage:', error);
-      pauseService('session_access_failed', error.message);
+      setLocalFailure('session_access_failed', error.message);
     });
 }
 
@@ -176,7 +149,6 @@ const badgeController = createBadgeController({
   specialListIconPaths: SPECIAL_LIST_ICON_PATHS,
   specialNoteIconPaths: SPECIAL_NOTE_ICON_PATHS,
   specialMixedIconPaths: SPECIAL_MIXED_ICON_PATHS,
-  syncDesktopConnectorPauseState,
   readPageMarkers: async (url) => {
     const summary = await handleGetPageSummary({ url });
     if (!summary.success || !summary.page) return null;
@@ -195,7 +167,6 @@ const badgeController = createBadgeController({
 
 async function handleGetDesktopConnectorState() {
   const connector = await refreshDesktopConnectorStateProbe();
-  syncDesktopConnectorPauseState(connector);
   badgeController.scheduleConnectorBadgeRefresh(connector);
   return { success: true, ...connector };
 }
@@ -206,25 +177,8 @@ async function refreshDesktopConnectorStateProbe() {
 
 async function handleConnectDesktopBridge() {
   const connector = await connectDesktopBridge();
-  syncDesktopConnectorPauseState(connector);
   badgeController.scheduleConnectorBadgeRefresh(connector);
   return { success: true, ...connector };
-}
-
-function syncDesktopConnectorPauseState(connector) {
-  if (connector?.refuseMode) {
-    pauseService(
-      'desktop_buffer_full',
-      tr(
-        'extensionDesktopBufferFull',
-        'Browser Recall Desktop buffer full - start the desktop app or wait for the queue to drain.',
-      ),
-    );
-    return;
-  }
-  if (serviceError?.code === 'desktop_buffer_full') {
-    resumeService();
-  }
 }
 
 async function nextLogTimestamp() {
@@ -241,23 +195,7 @@ function observeLogTimestamp(timestamp) {
 }
 
 async function enqueueCommand(action, request) {
-  try {
-    const stats = await enqueueDesktopCommand(action, request);
-    syncDesktopConnectorPauseState(stats);
-  } catch (error) {
-    if (error.code === 'buffer_full') {
-      pauseService(
-        'desktop_buffer_full',
-        tr(
-          'extensionDesktopBufferFull',
-          'Browser Recall Desktop buffer full - start the desktop app or wait for the queue to drain.',
-        ),
-      );
-      return;
-    }
-    logDebug('[desktop] command enqueue failed:', error.message);
-    throw error;
-  }
+  await enqueueDesktopCommand(action, request);
 }
 
 async function runDesktopCommand(action, request = {}) {
@@ -275,42 +213,11 @@ async function runDesktopCommand(action, request = {}) {
   }
 }
 
-async function loadDesktopHistoryRange(from, to) {
-  const filesResp = await requestDesktopHistoryFiles(false);
-  if (!filesResp?.success) {
-    throw new Error(filesResp?.error || 'Desktop history file list failed');
-  }
-  const files = filesResp.files
-    .filter((file) => {
-      const dateStr = file.replace('.jsonl', '');
-      return dateStr >= from && dateStr <= to;
-    })
-    .sort();
-  if (files.length === 0) return { entries: [], files: [] };
-  const batchResp = await requestDesktopHistoryBatch(files);
-  if (!batchResp?.success) {
-    throw new Error(batchResp?.error || 'Desktop history batch failed');
-  }
-  const entries = [...batchResp.entries].sort(
-    (left, right) => left.timestamp - right.timestamp,
-  );
-  return { entries, files };
-}
-
 async function mirrorSnapshotToDesktop(snapshot) {
   try {
-    const stats = await enqueueDesktopSnapshot(snapshot);
-    syncDesktopConnectorPauseState(stats);
+    await enqueueDesktopSnapshot(snapshot);
     return true;
   } catch (error) {
-    if (error.code === 'buffer_full') {
-      const message = tr(
-        'extensionDesktopEventQueueFull',
-        'Browser Recall Desktop event queue is full - start the desktop app or wait for the queue to drain.',
-      );
-      pauseService('desktop_buffer_full', message);
-      throw new Error(message);
-    }
     logDebug('[desktop] snapshot mirror failed:', error.message);
     throw error;
   }
@@ -497,34 +404,11 @@ async function notifyTabUserActionSuccess(
   }
 }
 
-// ─── Connector Queue Flush ───────────────────────────────────────────
-let drainNotifyTimer = null;
-
-function scheduleDrainNotify() {
-  if (drainNotifyTimer) return;
-  drainNotifyTimer = setTimeout(() => {
-    void drainNow().catch((error) => {
-      logDebug('[connector] scheduled flush failed:', error.message);
-    });
-  }, DRAIN_INTERVAL_MS);
-}
-
-async function drainNow() {
-  if (drainNotifyTimer) {
-    clearTimeout(drainNotifyTimer);
-    drainNotifyTimer = null;
-  }
-  const connector = await flushDesktopBuffer();
-  syncDesktopConnectorPauseState(connector);
-  return connector;
-}
-
 async function flushInteractiveWrites() {
-  return await drainNow();
+  return flushDesktopBuffer();
 }
 
 subscribeConnectorBridgeState((connector) => {
-  syncDesktopConnectorPauseState(connector);
   badgeController.scheduleConnectorBadgeRefresh(connector);
 });
 
@@ -535,7 +419,6 @@ subscribeDaemonMutations((mutation) => {
 
 async function applyCachedConnectorBadge(reason) {
   const connector = await getConnectorBridgeState();
-  syncDesktopConnectorPauseState(connector);
   await badgeController.setConnectorState(connector);
 }
 
@@ -560,15 +443,13 @@ function startConnectorBridge(reason) {
 // High-level: enqueue an observed browser command for Desktop. The connector
 // queue is the only durable extension-side command queue; snapshots use the live bridge.
 async function enqueueReportCommand(action, request, { flush = false } = {}) {
-  if (isServicePaused()) {
-    throw new Error(`Service paused [${serviceError.code}]`);
+  if (hasLocalFailure()) {
+    throw new Error(`Service paused [${localFailure.code}]`);
   }
   observeLogTimestamp(request.timestamp);
   await enqueueCommand(action, request);
   if (flush) {
     await flushInteractiveWrites();
-  } else {
-    scheduleDrainNotify();
   }
   return {};
 }
@@ -615,7 +496,6 @@ chrome.tabs.onUpdated?.addListener?.((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && snapshotViewerSlugFromUrl(tab?.url)) {
     void (async () => {
       const connector = await refreshDesktopConnectorStateProbe();
-      syncDesktopConnectorPauseState(connector);
       await badgeController.setConnectorState(connector);
       await badgeController.updateBadgeForTab(tabId, tab.url);
     })().catch((error) => {
@@ -1263,11 +1143,11 @@ async function handleCaptureCurrentPageFromPopup() {
 
 async function handleRecordPageActivity(request, sender) {
   try {
-    if (isServicePaused()) {
+    if (hasLocalFailure()) {
       return {
         success: false,
         error: tr('extensionBrowserRecallPaused', 'Browser Recall is paused'),
-        code: serviceError.code,
+        code: localFailure.code,
       };
     }
     const url = request.url;
@@ -1326,13 +1206,8 @@ async function handleRecordPageActivity(request, sender) {
 
 // ─── Message Handlers: Cache/Queue ───────────────────────────────────
 
-async function handleClearDesktopQueue() {
-  await clearDesktopBuffer();
-  return { success: true };
-}
-
 async function handleDrainDesktopQueue() {
-  const connector = await drainNow();
+  const connector = await flushDesktopBuffer();
   await new Promise((r) => setTimeout(r, 50));
   const refreshed = connector;
   if (
@@ -2014,24 +1889,6 @@ async function handleUpdateListTree(request) {
   return response;
 }
 
-// ─── Message Handlers: Filesystem ────────────────────────────────────
-
-async function handleInitializeFilesystem(request) {
-  const connector = await refreshConnectorBridgeState();
-  syncDesktopConnectorPauseState(connector);
-  if (connector.state !== 'connected') {
-    return {
-      success: false,
-      error: tr(
-        'extensionDesktopNotConnectedRefresh',
-        'Browser Recall Desktop is not connected yet. Start the desktop app and refresh from the popup.',
-      ),
-    };
-  }
-  if (connector.deviceId) localDeviceId = connector.deviceId;
-  return { success: true };
-}
-
 async function handleDeleteSnapshot(request) {
   const response = await runDesktopCommand('deleteSnapshot', {
     slug: request.slug,
@@ -2041,21 +1898,9 @@ async function handleDeleteSnapshot(request) {
   return response;
 }
 
-async function handleResumeService() {
-  resumeService();
-  scheduleDrainNotify();
-  return { success: true };
-}
-
 async function resetEphemeralConnectorStateForTest() {
-  localDeviceId = null;
   tabReportedUrls.clear();
-  serviceError = null;
-  if (drainNotifyTimer) {
-    clearTimeout(drainNotifyTimer);
-    drainNotifyTimer = null;
-  }
-  resumeService();
+  clearLocalFailure();
 }
 
 globalThis.browserRecallBackgroundTestControl = {
@@ -2063,9 +1908,6 @@ globalThis.browserRecallBackgroundTestControl = {
   flushDesktopBuffer,
   getConnectorBridgeState,
   resetEphemeralConnectorState: resetEphemeralConnectorStateForTest,
-  setLocalDeviceIdForTest(deviceId) {
-    localDeviceId = deviceId || null;
-  },
 };
 
 function handleRuntimeMutation(request) {
@@ -2144,9 +1986,6 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
           sendResponse(await handleRecordPageActivity(request, sender));
           break;
         // Cache/queue
-        case 'clearDesktopQueue':
-          sendResponse(await handleClearDesktopQueue());
-          break;
         case 'flushDesktopQueue':
           sendResponse(await handleDrainDesktopQueue());
           break;
@@ -2215,14 +2054,8 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
           sendResponse(await handleUpdateListTree(request));
           break;
         // Filesystem
-        case 'initializeFilesystem':
-          sendResponse(await handleInitializeFilesystem(request));
-          break;
         case 'deleteSnapshot':
           sendResponse(await handleDeleteSnapshot(request));
-          break;
-        case 'resumeService':
-          sendResponse(await handleResumeService());
           break;
         default:
           sendResponse({

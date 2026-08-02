@@ -129,10 +129,18 @@ describe('capture paths send error notifications', () => {
     // Background should NOT send showErrorNotification for popup captures — popup.js
     // now owns that responsibility. Only the keyboard shortcut path sends it from background.
     const popupCaseMatch = bgSource.match(
-      /case\s+'captureCurrentPageFromPopup'[\s\S]*?break;\s*case\s+'flushDesktopQueue'/,
+      /case\s+'captureCurrentPageFromPopup'[\s\S]*?break;\s*case/,
     );
     expect(popupCaseMatch).not.toBeNull();
     expect(popupCaseMatch[0]).not.toContain('showErrorNotification');
+  });
+
+  it('does not swallow connector outbox capacity failures', () => {
+    const enqueueMatch = bgSource.match(
+      /async function enqueueCommand[\s\S]*?^}/m,
+    );
+    expect(enqueueMatch).not.toBeNull();
+    expect(enqueueMatch[0]).not.toContain("error.code === 'buffer_full'");
   });
 });
 

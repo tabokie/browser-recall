@@ -2,7 +2,6 @@ const BUFFER_STORAGE_KEYS = {
   queue: 'desktopCommandBuffer',
   pendingCommands: 'desktopPendingCommands',
   pendingBytes: 'desktopPendingBytes',
-  refuseMode: 'desktopRefuseMode',
 };
 
 const MAX_BUFFER_BYTES = 8 * 1024 * 1024;
@@ -10,15 +9,10 @@ const encoder = new TextEncoder();
 
 let loaded = false;
 let queue = [];
-let refuseMode = false;
 let storageOperation = Promise.resolve();
 
 function itemSize(item) {
   return encoder.encode(JSON.stringify(item)).length;
-}
-
-export function bufferedMessageSize(message) {
-  return itemSize(message);
 }
 
 function queueSize(items = queue) {
@@ -34,12 +28,7 @@ async function ensureLoaded() {
   if (storedQueue !== undefined && !Array.isArray(storedQueue)) {
     throw new Error('Persisted desktop command buffer must be an array');
   }
-  const storedRefuseMode = stored[BUFFER_STORAGE_KEYS.refuseMode];
-  if (storedRefuseMode !== undefined && typeof storedRefuseMode !== 'boolean') {
-    throw new Error('Persisted desktop refuse mode must be a boolean');
-  }
   queue = storedQueue === undefined ? [] : storedQueue;
-  refuseMode = storedRefuseMode === undefined ? false : storedRefuseMode;
   await persist();
   loaded = true;
 }
@@ -56,20 +45,15 @@ function currentStats() {
   return {
     pendingCommands: queue.length,
     pendingBytes: queueSize(),
-    refuseMode,
   };
 }
 
 async function persist() {
   const pendingBytes = queueSize();
-  if (pendingBytes < MAX_BUFFER_BYTES) {
-    refuseMode = false;
-  }
   await chrome.storage.local.set({
     [BUFFER_STORAGE_KEYS.queue]: [...queue],
     [BUFFER_STORAGE_KEYS.pendingCommands]: queue.length,
     [BUFFER_STORAGE_KEYS.pendingBytes]: pendingBytes,
-    [BUFFER_STORAGE_KEYS.refuseMode]: refuseMode,
   });
 }
 
@@ -78,14 +62,6 @@ export async function enqueueBufferedMessage(message) {
     await ensureLoaded();
     const nextBytes = queueSize() + itemSize(message);
     if (nextBytes > MAX_BUFFER_BYTES) {
-      const previousRefuseMode = refuseMode;
-      refuseMode = true;
-      try {
-        await persist();
-      } catch (error) {
-        refuseMode = previousRefuseMode;
-        throw error;
-      }
       const error = new Error('Desktop buffer full');
       error.code = 'buffer_full';
       throw error;
@@ -127,14 +103,11 @@ export async function clearBufferedMessages() {
   return withStorageOperation(async () => {
     await ensureLoaded();
     const previousQueue = queue;
-    const previousRefuseMode = refuseMode;
     queue = [];
-    refuseMode = false;
     try {
       await persist();
     } catch (error) {
       queue = previousQueue;
-      refuseMode = previousRefuseMode;
       throw error;
     }
     return currentStats();

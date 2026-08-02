@@ -33,10 +33,9 @@ Worker-scoped: `daemon` (real Rust daemon process started before the browser), `
 
 ### Test Actions (background.js message handlers)
 
-- `resetForTest` — wipe daemon data + clear extension-local state; resets `localDeviceId = null`
+- `resetForTest` — wipe daemon data + clear extension-local state
 - `flushDesktopQueueForTest` — flushes the connector write queue after seeding
 - `setDesktopQueueForTest` — injects entries into the connector write queue
-- `getDesktopQueueForTest` — reports connector write queue length/watermark
 - `seedTestData` — writes raw files into the daemon data dir through the daemon's test-control WebSocket
 
 ### Seed Builder
@@ -59,7 +58,7 @@ Worker-scoped: `daemon` (real Rust daemon process started before the browser), `
 
 `**searchResults` mutation race**: Background mutation notifications can reset `searchResults` to `[]` mid-operation. Use `data-search-count` attribute on `#relatedResults` to poll for result count. Perform blur + keyboard dispatch in a single `evaluate()` call to minimize the race window.
 
-`**resetForTest` must reset ALL module-level state**: The SW process survives across tests. Missing resets (e.g., `localDeviceId = null`) cause stale state to leak between tests, hiding startup-only bugs. When adding new module-level mutable state to background.js, add matching reset handling in `resetForTest`.
+`**resetForTest` must reset ALL module-level state**: The SW process survives across tests. Missing resets cause stale state to leak between tests, hiding startup-only bugs. When adding new module-level mutable state to background.js, add matching reset handling in `resetForTest`.
 
 `**update_list_tree` uses per-device timestamps, not global LWW**: Two different devices can both apply their tree updates regardless of ordering. For deterministic test results, put both entries in a single device's log file.
 

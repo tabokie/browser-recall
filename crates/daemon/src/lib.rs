@@ -32,6 +32,6 @@ pub use pairing::{
     ApprovalFuture, PairingApprover, PairingDecision, PairingRequest, PairingTimeout,
 };
 pub use ws_server::{
-    ConnectedConnector, ServerHandle, ServerSnapshot, ServerStartOptions, ServiceStatus,
+    ConnectedConnector, ServerHandle, ServerSnapshot, ServerStartOptions, ServiceState,
     WsServerError,
 };
