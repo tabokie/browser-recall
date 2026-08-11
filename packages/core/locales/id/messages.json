@@ -312,7 +312,7 @@
     "description": "Desktop launch-at-login setting."
   },
   "desktopLaunchAtLoginUnsupported": {
-    "message": "Peluncuran saat masuk tersedia di macOS 13 atau lebih baru.",
+    "message": "Peluncuran saat masuk tidak tersedia di sistem ini.",
     "description": "Launch-at-login platform support notice."
   },
   "desktopLaunchAtLoginLong": {
@@ -1078,7 +1078,7 @@
     "description": "Extension fatal error reload button."
   },
   "extensionOpenAppFallback": {
-    "message": "Tidak dapat membuka aplikasi? Luncurkan dari folder Aplikasi Anda, lalu coba lagi.",
+    "message": "Tidak dapat membuka aplikasi? Jalankan dari peluncur aplikasi sistem Anda, lalu coba lagi.",
     "description": "Extension options fallback notice."
   },
   "extensionToggleRecording": {

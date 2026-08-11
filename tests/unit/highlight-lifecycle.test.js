@@ -125,25 +125,84 @@ describe('highlight lifecycle architecture invariants', () => {
     ).toBeNull();
   });
 
-  it('returns aligned excerpt and path arrays for cross-block selections', () => {
+  it('prepares aligned scoped chunks and applies the exact selected ranges', () => {
     document.body.innerHTML =
-      '<main><p>first selected text</p><p>second selected text</p></main>';
+      '<main><p>repeat selected text</p><p>repeat selected text</p></main>';
     const paragraphs = document.querySelectorAll('p');
     const range = document.createRange();
-    range.setStart(paragraphs[0].firstChild, 6);
+    range.setStart(paragraphs[0].firstChild, 7);
     range.setEnd(paragraphs[1].firstChild, 15);
     const selection = document.getSelection();
     selection.addRange(range);
-    lifecycle = createHighlightLifecycle({
-      document,
-      getCssPath: (element) =>
-        `main > p:nth-of-type(${[...paragraphs].indexOf(element) + 1})`,
-    });
+    const prepared = lifecycle.prepareSelection(selection);
 
-    expect(lifecycle.describeSelection(selection)).toMatchObject({
-      selectionText: 'selected text\nsecond selected',
-      selectionExcerpt: ['selected text', 'second selected'],
-      selectionCssPath: ['main > p:nth-of-type(1)', 'main > p:nth-of-type(2)'],
+    expect(prepared).toMatchObject({
+      text: 'selected text\nrepeat selected',
+      excerpt: ['selected text', 'repeat selected'],
+      cssPath: [
+        'browser-recall-text-anchor:v1:{"selector":"body > main > p:nth-of-type(1)","start":7,"end":20}',
+        'browser-recall-text-anchor:v1:{"selector":"body > main > p:nth-of-type(2)","start":0,"end":15}',
+      ],
     });
+    const marks = prepared.apply({ noteSlug: 'prepared-note' });
+    expect(marks).toHaveLength(2);
+    expect(
+      [...document.querySelectorAll('mark')].map((mark) => mark.textContent),
+    ).toEqual(['selected text', 'repeat selected']);
+  });
+
+  it('reapplies the selected occurrence when text repeats in one block', () => {
+    document.body.innerHTML = '<main><p>same middle same</p></main>';
+    const textNode = document.querySelector('p').firstChild;
+    const range = document.createRange();
+    range.setStart(textNode, 12);
+    range.setEnd(textNode, 16);
+    const selection = document.getSelection();
+    selection.addRange(range);
+
+    const prepared = lifecycle.prepareSelection(selection);
+    expect(prepared.cssPath).toHaveLength(1);
+    expect(prepared.cssPath[0]).toMatch(/^browser-recall-text-anchor:v1:/);
+
+    document.body.innerHTML = '<main><p>same middle same</p></main>';
+    lifecycle = createHighlightLifecycle({ document });
+    lifecycle.applySaved([
+      {
+        slug: 'same-block-second-occurrence',
+        excerpt: ['same'],
+        cssPath: prepared.cssPath,
+      },
+    ]);
+
+    const paragraph = document.querySelector('p');
+    const mark = paragraph.querySelector('mark');
+    expect(mark?.textContent).toBe('same');
+    expect(paragraph.textContent).toBe('same middle same');
+    expect(mark?.previousSibling?.textContent).toBe('same middle ');
+
+    document.body.innerHTML = '<main><p>same shifted middle same</p></main>';
+    lifecycle = createHighlightLifecycle({ document });
+    lifecycle.applySaved([
+      {
+        slug: 'same-block-stale-anchor',
+        excerpt: ['same'],
+        cssPath: prepared.cssPath,
+      },
+    ]);
+    expect(document.querySelector('mark')).toBeNull();
+  });
+
+  it('rejects a selection intersecting an existing owned mark', () => {
+    document.body.innerHTML =
+      '<main><p>before <mark class="browser-recall-highlight">saved text</mark> after</p></main>';
+    const mark = document.querySelector('mark');
+    const range = document.createRange();
+    range.selectNodeContents(mark);
+    const selection = document.getSelection();
+    selection.addRange(range);
+
+    expect(() => lifecycle.prepareSelection(selection)).toThrow(
+      'Selected text is already highlighted by Browser Recall',
+    );
   });
 });

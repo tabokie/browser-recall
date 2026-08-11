@@ -26,6 +26,29 @@ jobs:
 
       - run: npm run ci:test
 
+  test-extension-e2e:
+    name: Extension E2E Regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@1.97.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npm run ci:install-playwright
+
+      - run: npm run ci:test-extension-e2e
+
   test-rust:
     name: Rust Tests
     runs-on: ubuntu-latest
@@ -53,6 +76,8 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
+
+      - run: npm ci
 
       - run: npm run ci:test-rust
 
@@ -141,6 +166,36 @@ jobs:
           BROWSER_RECALL_ISOLATED_MACOS_SESSION: '1'
         run: node tests/smoke/macos-desktop-window-lifecycle.mjs
 
+  test-desktop-single-instance:
+    name: Desktop Windows Single Instance
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@1.97.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npm run ci:install-playwright
+
+      - name: Verify Windows extension system-font fallback
+        run: npm run ci:test-windows-extension-font
+
+      - run: npm run ci:test-windows-artifacts
+
+      - run: npm run build --workspace @browser-recall/desktop
+
+      - name: Exercise native single-instance deep-link forwarding
+        run: npm run test:desktop-single-instance
+
   lint-js:
     name: Lint & Format (JS)
     runs-on: ubuntu-latest
@@ -185,5 +240,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
+
+      - run: npm ci
 
       - run: npm run ci:lint-rust

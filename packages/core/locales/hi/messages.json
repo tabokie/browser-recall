@@ -312,7 +312,7 @@
     "description": "Desktop launch-at-login setting."
   },
   "desktopLaunchAtLoginUnsupported": {
-    "message": "लॉगिन पर लॉन्च macOS 13 या नए संस्करण पर उपलब्ध है।",
+    "message": "इस सिस्टम पर लॉगिन के समय लॉन्च उपलब्ध नहीं है।",
     "description": "Launch-at-login platform support notice."
   },
   "desktopLaunchAtLoginLong": {
@@ -1078,7 +1078,7 @@
     "description": "Extension fatal error reload button."
   },
   "extensionOpenAppFallback": {
-    "message": "ऐप नहीं खुल रहा? इसे अपने एप्लिकेशन फ़ोल्डर से लॉन्च करें, फिर पुनः प्रयास करें।",
+    "message": "ऐप नहीं खुल रहा? इसे अपने सिस्टम के ऐप लॉन्चर से खोलें, फिर दोबारा कोशिश करें।",
     "description": "Extension options fallback notice."
   },
   "extensionToggleRecording": {

@@ -312,7 +312,7 @@
     "description": "Desktop launch-at-login setting."
   },
   "desktopLaunchAtLoginUnsupported": {
-    "message": "Launch at login is available on macOS 13 or newer.",
+    "message": "Launch at login is unavailable on this system.",
     "description": "Launch-at-login platform support notice."
   },
   "desktopLaunchAtLoginLong": {
@@ -1106,7 +1106,7 @@
     "description": "Extension fatal error reload button."
   },
   "extensionOpenAppFallback": {
-    "message": "Can't open the app? Launch it from your Applications folder, then try again.",
+    "message": "Can't open the app? Launch it from your system's app launcher, then try again.",
     "description": "Extension options fallback notice."
   },
   "extensionToggleRecording": {

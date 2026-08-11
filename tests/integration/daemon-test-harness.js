@@ -53,17 +53,21 @@ export function ensureTestDaemonBuilt() {
   // would let watch-mode reruns execute a stale daemon binary.
   if (process[BUILD_PROMISE]) return process[BUILD_PROMISE];
   const build = new Promise((resolve, reject) => {
-    const child = spawn(
-      'cargo',
-      [
-        'build',
-        '-p',
-        'browser-recall-daemon',
-        '--bin',
-        'browser-recall-daemon',
-      ],
-      { cwd: ROOT, stdio: 'inherit' },
-    );
+    const cargoCommand = process.env.BROWSER_RECALL_TEST_CARGO || 'cargo';
+    const cargoArgs = [
+      'build',
+      '-p',
+      'browser-recall-daemon',
+      '--bin',
+      'browser-recall-daemon',
+    ];
+    if (process.env.BROWSER_RECALL_TEST_CARGO_SCRIPT) {
+      cargoArgs.unshift(process.env.BROWSER_RECALL_TEST_CARGO_SCRIPT);
+    }
+    const child = spawn(cargoCommand, cargoArgs, {
+      cwd: ROOT,
+      stdio: 'inherit',
+    });
     child.once('error', reject);
     child.once('exit', (code, signal) => {
       if (code === 0) {

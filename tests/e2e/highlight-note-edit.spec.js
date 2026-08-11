@@ -937,11 +937,16 @@ test.describe('Highlight note edit', () => {
       '我养的橘猫孩子已经走了一年半了。突然想起一件事',
       '它平时很警觉的，但某天我发现它一条猫瘫着。',
     ]);
-    expect(notesResp.notes[0].cssPath).toEqual([
-      'body > main > div:nth-of-type(1)',
-      'body > main > div:nth-of-type(2)',
-      'body > main > div:nth-of-type(3)',
-    ]);
+    expect(notesResp.notes[0].cssPath).toEqual(
+      notesResp.notes[0].excerpt.map(
+        (excerpt, index) =>
+          `browser-recall-text-anchor:v1:${JSON.stringify({
+            selector: `body > main > div:nth-of-type(${index + 1})`,
+            start: 0,
+            end: excerpt.length,
+          })}`,
+      ),
+    );
 
     await helper.close();
     await page.close();
@@ -1005,10 +1010,16 @@ test.describe('Highlight note edit', () => {
 
     expect(notesResp.success).toBe(true);
     expect(notesResp.notes).toHaveLength(1);
-    expect(notesResp.notes[0].excerpt).toEqual([
-      'Referer: https://developer.mozilla.org/en-US/docs/Web/JavaScript\nReferer: https://example.com/page?q=123\nReferer: https://example.com/',
+    const expectedExcerpt =
+      'Referer: https://developer.mozilla.org/en-US/docs/Web/JavaScript\nReferer: https://example.com/page?q=123\nReferer: https://example.com/';
+    expect(notesResp.notes[0].excerpt).toEqual([expectedExcerpt]);
+    expect(notesResp.notes[0].cssPath).toEqual([
+      `browser-recall-text-anchor:v1:${JSON.stringify({
+        selector: 'body > main > pre',
+        start: 0,
+        end: expectedExcerpt.length,
+      })}`,
     ]);
-    expect(notesResp.notes[0].cssPath).toEqual(['body > main > pre']);
 
     await helper.close();
     await page.close();

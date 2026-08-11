@@ -16,25 +16,24 @@ const DEFAULT_BACKGROUND = '#f4f0df';
 const SNAPSHOT_BACKGROUND = '#4969F6';
 const LIST_BACKGROUND = '#ff5f19';
 const MIXED_BACKGROUND = '#6932e6';
-const VIEWPORT_HEIGHT_PADDING_RATIO = 0.25;
-const MACOS_ICON_SIZES = [
-  ['icon_16x16.png', 16],
-  ['icon_16x16@2x.png', 32],
-  ['icon_32x32.png', 32],
-  ['icon_32x32@2x.png', 64],
-  ['icon_128x128.png', 128],
-  ['icon_128x128@2x.png', 256],
-  ['icon_256x256.png', 256],
-  ['icon_256x256@2x.png', 512],
-  ['icon_512x512.png', 512],
-  ['icon_512x512@2x.png', 1024],
+const WINDOWS_ICON_SIZES = [
+  16, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72, 80, 96, 112, 128, 256,
+];
+const MACOS_ICON_SLOTS = [
+  ['icp4', 16],
+  ['icp5', 32],
+  ['ic11', 32],
+  ['icp6', 64],
+  ['ic12', 64],
+  ['ic07', 128],
+  ['ic08', 256],
+  ['ic13', 256],
+  ['ic09', 512],
+  ['ic14', 512],
+  ['ic10', 1024],
 ];
 
 const iconJobs = [
-  {
-    source: 'icons/browser-recall-default.svg',
-    outputs: [['apps/desktop/src-tauri/icons/icon.png', 128]],
-  },
   {
     source: 'icons/browser-recall-default-transparent.svg',
     outputs: [['apps/desktop/src-tauri/icons/tray-icon.png', 128]],
@@ -171,6 +170,8 @@ function getHeadlessBrowserPath() {
 }
 
 export function generateAllIcons() {
+  generateWindowsAndLinuxDesktopIcons();
+
   for (const job of iconJobs) {
     for (const [output, size] of job.outputs) {
       screenshotSvg(job.source, output, size, {
@@ -187,21 +188,61 @@ export function generateAllIcons() {
   );
 }
 
-export function assertMacosIconTooling({
-  platform = process.platform,
-  execFileSyncImpl = execFileSync,
-} = {}) {
-  if (platform !== 'darwin') {
-    throw new Error(
-      'macOS .icns generation requires macOS iconutil. Run this script on macOS after changing icon SVG sources.',
-    );
+export function generateWindowsAndLinuxDesktopIcons() {
+  const source = 'icons/browser-recall-default.svg';
+  screenshotSvg(source, 'apps/desktop/src-tauri/icons/icon.png', 1024, {
+    renderSize: 1024,
+  });
+  generateWindowsIcon(source, 'apps/desktop/src-tauri/icons/icon.ico');
+}
+
+export function encodeWindowsIco(images) {
+  const headerSize = 6;
+  const entrySize = 16;
+  let imageOffset = headerSize + entrySize * images.length;
+  const header = Buffer.alloc(headerSize);
+  header.writeUInt16LE(1, 2);
+  header.writeUInt16LE(images.length, 4);
+  const entries = [];
+  const payloads = [];
+
+  for (const { size, png } of images) {
+    if (!Number.isInteger(size) || size < 1 || size > 256) {
+      throw new Error(`Invalid Windows icon size: ${size}`);
+    }
+    const entry = Buffer.alloc(entrySize);
+    entry[0] = size === 256 ? 0 : size;
+    entry[1] = size === 256 ? 0 : size;
+    entry.writeUInt16LE(1, 4);
+    entry.writeUInt16LE(32, 6);
+    entry.writeUInt32LE(png.length, 8);
+    entry.writeUInt32LE(imageOffset, 12);
+    entries.push(entry);
+    payloads.push(png);
+    imageOffset += png.length;
   }
+
+  return Buffer.concat([header, ...entries, ...payloads]);
+}
+
+export function generateWindowsIcon(source, output) {
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'browser-recall-windows-icon-'),
+  );
   try {
-    execFileSyncImpl('/usr/bin/which', ['iconutil'], { stdio: 'ignore' });
-  } catch {
-    throw new Error(
-      'macOS .icns generation requires iconutil, but iconutil is not available.',
-    );
+    const images = WINDOWS_ICON_SIZES.map((size) => {
+      const pngPath = path.join(tempDir, `icon-${size}.png`);
+      screenshotSvg(source, pngPath, size, {
+        renderSize: size,
+      });
+      forceRgbaPng(pngPath);
+      return { size, png: fs.readFileSync(pngPath) };
+    });
+    const outputPath = path.resolve(repoRoot, output);
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.writeFileSync(outputPath, encodeWindowsIco(images));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
   }
 }
 
@@ -212,7 +253,6 @@ function screenshotSvg(
   {
     artworkScale = 1,
     background = null,
-    cropToRenderSize = false,
     preserveEyeInterior = false,
     renderSize = SOURCE_SIZE,
   } = {},
@@ -232,10 +272,6 @@ function screenshotSvg(
       .replace(/height="128"/, `height="${renderSize}"`),
   );
   const tempPng = path.join(tempDir, 'icon.png');
-  const tempSquarePng = path.join(tempDir, 'icon-square.png');
-  const screenshotHeight = cropToRenderSize
-    ? renderSize + Math.ceil(renderSize * VIEWPORT_HEIGHT_PADDING_RATIO)
-    : renderSize;
   try {
     execFileSync(
       getHeadlessBrowserPath(),
@@ -243,20 +279,22 @@ function screenshotSvg(
         '--headless',
         '--disable-gpu',
         '--hide-scrollbars',
+        '--force-device-scale-factor=1',
         '--default-background-color=00000000',
         `--screenshot=${tempPng}`,
-        `--window-size=${renderSize},${screenshotHeight}`,
+        `--window-size=${renderSize},${renderSize}`,
         `file://${sourcePath}`,
       ],
       { stdio: 'ignore' },
     );
-    const sourcePng = cropToRenderSize
-      ? cropPng(tempPng, tempSquarePng, renderSize, renderSize)
-      : tempPng;
+    const sourcePng = tempPng;
     const outputPath = path.resolve(repoRoot, output);
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     if (size === renderSize) fs.copyFileSync(sourcePng, outputPath);
-    else resizePng(sourcePng, outputPath, size, size);
+    else {
+      forceRgbaPng(sourcePng);
+      resizePngWithAreaResampling(sourcePng, outputPath, size, size);
+    }
     forceRgbaPng(outputPath);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -284,83 +322,68 @@ function scaleSvgArtwork(sourceSvg, scale) {
 }
 
 function generateMacosIcon(source, output) {
-  assertMacosIconTooling();
   const tempDir = fs.mkdtempSync(
     path.join(os.tmpdir(), 'browser-recall-macos-icon-'),
   );
-  const iconsetDir = path.join(tempDir, 'BrowserRecall.iconset');
-  fs.mkdirSync(iconsetDir);
   try {
-    for (const [name, size] of MACOS_ICON_SIZES) {
-      screenshotSvg(source, path.join(iconsetDir, name), size, {
-        cropToRenderSize: true,
+    const images = MACOS_ICON_SLOTS.map(([type, size]) => {
+      const pngPath = path.join(tempDir, `${type}-${size}.png`);
+      screenshotSvg(source, pngPath, size, {
         renderSize: size,
       });
-    }
-    validateMacosIconset(iconsetDir);
+      validateMacosIconPng(pngPath, size, type);
+      return { type, png: fs.readFileSync(pngPath) };
+    });
     const outputPath = path.resolve(repoRoot, output);
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    execFileSync('iconutil', ['-c', 'icns', iconsetDir, '-o', outputPath], {
-      stdio: 'ignore',
-    });
+    fs.writeFileSync(outputPath, encodeMacosIcns(images));
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 }
 
-function resizePng(sourcePath, outputPath, width, height) {
-  const parsed = parsePng(fs.readFileSync(sourcePath));
-  const channels = parsed.colorType === 6 ? 4 : 3;
-  const pixels = unfilterPng(parsed);
-  const raw = Buffer.alloc((width * channels + 1) * height);
-  for (let y = 0; y < height; y += 1) {
-    raw[y * (width * channels + 1)] = 0;
-    const sourceY = Math.min(
-      parsed.height - 1,
-      Math.floor((y * parsed.height) / height),
-    );
-    for (let x = 0; x < width; x += 1) {
-      const sourceX = Math.min(
-        parsed.width - 1,
-        Math.floor((x * parsed.width) / width),
-      );
-      const sourceIndex = (sourceY * parsed.width + sourceX) * channels;
-      const outputIndex = y * (width * channels + 1) + 1 + x * channels;
-      pixels.copy(raw, outputIndex, sourceIndex, sourceIndex + channels);
+export function encodeMacosIcns(images) {
+  const chunks = images.map(({ type, png }) => {
+    if (typeof type !== 'string' || Buffer.byteLength(type, 'ascii') !== 4) {
+      throw new Error(`Invalid macOS icon slot type: ${type}`);
     }
-  }
-
-  fs.writeFileSync(
-    outputPath,
-    encodePng({
-      width,
-      height,
-      colorType: parsed.colorType,
-      raw,
-    }),
-  );
+    if (!Buffer.isBuffer(png) || png.length === 0) {
+      throw new Error(`macOS icon slot ${type} must contain PNG bytes`);
+    }
+    return Buffer.concat([
+      Buffer.from(type, 'ascii'),
+      Buffer.from(uint32be(png.length + 8)),
+      png,
+    ]);
+  });
+  const length = 8 + chunks.reduce((total, chunk) => total + chunk.length, 0);
+  return Buffer.concat([
+    Buffer.from('icns', 'ascii'),
+    Buffer.from(uint32be(length)),
+    ...chunks,
+  ]);
 }
 
-function cropPng(sourcePath, outputPath, width, height) {
+function resizePngWithAreaResampling(sourcePath, outputPath, width, height) {
   const parsed = parsePng(fs.readFileSync(sourcePath));
-  if (parsed.width < width || parsed.height < height) {
+  if (parsed.colorType !== 6) {
     throw new Error(
-      `Cannot crop ${sourcePath} to ${width}x${height}; source is ${parsed.width}x${parsed.height}`,
+      `Area-resampled PNG must be RGBA, received color type ${parsed.colorType}`,
     );
   }
-
-  const channels = parsed.colorType === 6 ? 4 : 3;
   const pixels = unfilterPng(parsed);
-  const croppedStride = width * channels;
-  const raw = Buffer.alloc((croppedStride + 1) * height);
+  const resized = resizeRgbaPixelsWithAreaResampling(
+    pixels,
+    parsed.width,
+    parsed.height,
+    width,
+    height,
+  );
+  const raw = Buffer.alloc((width * 4 + 1) * height);
   for (let y = 0; y < height; y += 1) {
-    raw[y * (croppedStride + 1)] = 0;
-    pixels.copy(
-      raw,
-      y * (croppedStride + 1) + 1,
-      y * parsed.width * channels,
-      y * parsed.width * channels + croppedStride,
-    );
+    const rawOffset = y * (width * 4 + 1);
+    raw[rawOffset] = 0;
+    resized.copy(raw, rawOffset + 1, y * width * 4, (y + 1) * width * 4);
   }
 
   fs.writeFileSync(
@@ -368,30 +391,84 @@ function cropPng(sourcePath, outputPath, width, height) {
     encodePng({
       width,
       height,
-      colorType: parsed.colorType,
+      colorType: 6,
       raw,
     }),
   );
-  return outputPath;
 }
 
-function validateMacosIconset(iconsetDir) {
-  for (const [name, size] of MACOS_ICON_SIZES) {
-    const iconPath = path.join(iconsetDir, name);
-    const parsed = parsePng(fs.readFileSync(iconPath));
-    const pixels = unfilterPng(parsed);
-    const channels = parsed.colorType === 6 ? 4 : 3;
-    const centerX = Math.floor(size / 2);
-    const lowerY = Math.floor(size * 0.86);
-    const alpha =
-      channels === 4
-        ? pixels[(lowerY * parsed.width + centerX) * channels + 3]
-        : 255;
-    if (alpha !== 255) {
-      throw new Error(
-        `Generated macOS icon ${name} is clipped near the lower center`,
-      );
+export function resizeRgbaPixelsWithAreaResampling(
+  pixels,
+  sourceWidth,
+  sourceHeight,
+  width,
+  height,
+) {
+  if (
+    !Buffer.isBuffer(pixels) ||
+    pixels.length !== sourceWidth * sourceHeight * 4
+  ) {
+    throw new Error('RGBA source pixel length does not match its dimensions');
+  }
+  const output = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    const sourceTop = (y * sourceHeight) / height;
+    const sourceBottom = ((y + 1) * sourceHeight) / height;
+    const firstY = Math.floor(sourceTop);
+    const lastY = Math.ceil(sourceBottom);
+    for (let x = 0; x < width; x += 1) {
+      const sourceLeft = (x * sourceWidth) / width;
+      const sourceRight = ((x + 1) * sourceWidth) / width;
+      const firstX = Math.floor(sourceLeft);
+      const lastX = Math.ceil(sourceRight);
+      let weightedAlpha = 0;
+      let weightedRed = 0;
+      let weightedGreen = 0;
+      let weightedBlue = 0;
+      let totalWeight = 0;
+      for (let sourceY = firstY; sourceY < lastY; sourceY += 1) {
+        const yWeight =
+          Math.min(sourceBottom, sourceY + 1) - Math.max(sourceTop, sourceY);
+        for (let sourceX = firstX; sourceX < lastX; sourceX += 1) {
+          const xWeight =
+            Math.min(sourceRight, sourceX + 1) - Math.max(sourceLeft, sourceX);
+          const weight = xWeight * yWeight;
+          const index = (sourceY * sourceWidth + sourceX) * 4;
+          const alpha = pixels[index + 3] / 255;
+          weightedAlpha += alpha * weight;
+          weightedRed += pixels[index] * alpha * weight;
+          weightedGreen += pixels[index + 1] * alpha * weight;
+          weightedBlue += pixels[index + 2] * alpha * weight;
+          totalWeight += weight;
+        }
+      }
+      const outputIndex = (y * width + x) * 4;
+      const outputAlpha = weightedAlpha / totalWeight;
+      if (weightedAlpha > 0) {
+        output[outputIndex] = Math.round(weightedRed / weightedAlpha);
+        output[outputIndex + 1] = Math.round(weightedGreen / weightedAlpha);
+        output[outputIndex + 2] = Math.round(weightedBlue / weightedAlpha);
+      }
+      output[outputIndex + 3] = Math.round(outputAlpha * 255);
     }
+  }
+  return output;
+}
+
+function validateMacosIconPng(iconPath, size, type) {
+  const parsed = parsePng(fs.readFileSync(iconPath));
+  const pixels = unfilterPng(parsed);
+  const channels = parsed.colorType === 6 ? 4 : 3;
+  const centerX = Math.floor(size / 2);
+  const lowerY = Math.floor(size * 0.86);
+  const alpha =
+    channels === 4
+      ? pixels[(lowerY * parsed.width + centerX) * channels + 3]
+      : 255;
+  if (alpha !== 255) {
+    throw new Error(
+      `Generated macOS icon ${type} is clipped near the lower center`,
+    );
   }
 }
 

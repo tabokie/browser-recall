@@ -711,7 +711,7 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
-  test('startup keeps one static ticket shell until connected page data is ready', async ({
+  test('startup keeps one dashboard shell while its diagnostic becomes page data', async ({
     extContext,
     extensionId,
     setupDir,
@@ -741,7 +741,7 @@ test.describe('Popup list chip behavior', () => {
         globalThis.__popupStartupVisibleShells = visibleShells;
 
         const recordVisibleShells = () => {
-          for (const id of ['loading', 'setup-required', 'dashboard']) {
+          for (const id of ['loading', 'dashboard']) {
             const element = document.getElementById(id);
             if (!element || element.style.display === 'none') continue;
             if (getComputedStyle(element).display === 'none') continue;
@@ -841,16 +841,17 @@ test.describe('Popup list chip behavior', () => {
       .toBe('rgb(247, 244, 234)');
     await expect
       .poll(() =>
-        popup.evaluate(() => document.body.getBoundingClientRect().height),
-      )
-      .toBeGreaterThanOrEqual(320);
-    await expect
-      .poll(() =>
         popup.evaluate(() => document.body.getBoundingClientRect().width),
       )
       .toBe(296);
     await expect(popup.locator('#dashboard')).toBeVisible();
     await expect(popup.locator('#loading')).toBeHidden();
+    await expect(popup.locator('#pageDiagnosticSection')).toBeVisible();
+    await expect(popup.locator('#pageDiagnosticTitle')).toHaveAttribute(
+      'data-i18n',
+      'extensionLookingForDesktop',
+    );
+    await expect(popup.locator('#setup-required')).toHaveCount(0);
     expect(
       await popup.evaluate(() => globalThis.__popupStartupVisibleShells),
     ).toEqual(['dashboard']);
@@ -996,6 +997,359 @@ test.describe('Popup list chip behavior', () => {
 
     await popup.close();
     await page.close();
+  });
+
+  test('disconnected toolbar popup opens promptly and reactively displays its diagnostic', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    localServer.addPage('/disconnected-popup-latency', {
+      title: 'Disconnected Popup Latency',
+      body: '<main>Disconnected popup latency</main>',
+    });
+    const url = localServer.url('/disconnected-popup-latency');
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+    await page.bringToFront();
+
+    const helper = await openHelperPage(extContext, extensionId);
+    const recordingDefault = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'setRecordingPaused',
+        paused: false,
+      }),
+    );
+    expect(recordingDefault).toMatchObject({ success: true });
+    const tabId = await helper.evaluate(async (pageUrl) => {
+      const [tab] = await chrome.tabs.query({ url: pageUrl });
+      return tab?.id || null;
+    }, url);
+    expect(tabId).toBeTruthy();
+    const expectedTitles = await helper.evaluate(() => ({
+      preparing: chrome.i18n.getMessage('extensionLookingForDesktop'),
+      offline: chrome.i18n.getMessage('extensionDesktopOffline'),
+    }));
+
+    let preparationReleased = false;
+
+    try {
+      await page.bringToFront();
+      const startedAt = Date.now();
+      const openRequest = helper.evaluate((targetTabId) => {
+        return chrome.runtime.sendMessage({
+          action: 'openPreparedPopupForTest',
+          tabId: targetTabId,
+          holdPreparation: true,
+          terminalConnectorState: 'offline',
+        });
+      }, tabId);
+
+      await expect
+        .poll(
+          () =>
+            helper.evaluate(() => {
+              const popup = chrome.extension.getViews({ type: 'popup' })[0];
+              return Boolean(
+                popup &&
+                !popup.document.documentElement.hasAttribute(
+                  'data-popup-hidden',
+                ),
+              );
+            }),
+          { timeout: 700, intervals: [25, 50, 100] },
+        )
+        .toBe(true);
+      expect(Date.now() - startedAt).toBeLessThan(700);
+
+      const firstPaint = await helper.evaluate(() => {
+        const popup = chrome.extension.getViews({ type: 'popup' })[0];
+        const dashboard = popup.document.getElementById('dashboard');
+        const diagnostic = popup.document.getElementById(
+          'pageDiagnosticSection',
+        );
+        return {
+          width: popup.document.body.getBoundingClientRect().width,
+          height: popup.document.body.getBoundingClientRect().height,
+          hasSetupSurface: Boolean(
+            popup.document.getElementById('setup-required'),
+          ),
+          dashboardVisible:
+            dashboard && popup.getComputedStyle(dashboard).display !== 'none',
+          diagnosticVisible:
+            diagnostic && popup.getComputedStyle(diagnostic).display !== 'none',
+          diagnosticTitle: popup.document
+            .getElementById('pageDiagnosticTitle')
+            .textContent.trim(),
+          diagnosticMessage: popup.document
+            .getElementById('pageDiagnosticMessage')
+            .textContent.trim(),
+          diagnosticActionCount: diagnostic?.querySelectorAll(
+            '#pageDiagnosticActions > *',
+          ).length,
+        };
+      });
+      expect(firstPaint).toMatchObject({
+        width: 296,
+        hasSetupSurface: false,
+        dashboardVisible: true,
+        diagnosticVisible: true,
+        diagnosticActionCount: 0,
+      });
+      expect(firstPaint.height).toBeGreaterThan(0);
+      expect(firstPaint.diagnosticTitle).toBe(expectedTitles.preparing);
+      expect(firstPaint.diagnosticMessage).toBeTruthy();
+
+      await expect(openRequest).resolves.toMatchObject({ success: true });
+      const releaseResult = await helper.evaluate(() =>
+        chrome.runtime.sendMessage({
+          action: 'releasePopupPreparationForTest',
+        }),
+      );
+      expect(releaseResult).toMatchObject({ success: true });
+      preparationReleased = true;
+      await expect
+        .poll(() =>
+          helper.evaluate(() => {
+            const popup = chrome.extension.getViews({ type: 'popup' })[0];
+            return {
+              title: popup?.document
+                .getElementById('pageDiagnosticTitle')
+                ?.textContent.trim(),
+              fatal:
+                popup?.document.getElementById('fatalReloadBtn')?.parentElement
+                  ?.textContent || '',
+            };
+          }),
+        )
+        .toEqual({ title: expectedTitles.offline, fatal: '' });
+      const terminalMessage = await helper.evaluate(() => {
+        const popup = chrome.extension.getViews({ type: 'popup' })[0];
+        return popup?.document
+          .getElementById('pageDiagnosticMessage')
+          ?.textContent.trim();
+      });
+      expect(terminalMessage).toBeTruthy();
+
+      await helper.evaluate(() => {
+        chrome.extension.getViews({ type: 'popup' })[0]?.close();
+      });
+    } finally {
+      if (!preparationReleased) {
+        await helper.evaluate(() =>
+          chrome.runtime.sendMessage({
+            action: 'releasePopupPreparationForTest',
+          }),
+        );
+      }
+      await helper.close();
+      await page.close();
+    }
+  });
+
+  test('toolbar popup releases unavailable-tab mappings before it closes and can reopen', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
+    void setupDir;
+    const helper = await openHelperPage(extContext, extensionId);
+    await helper.bringToFront();
+    const tabId = await helper.evaluate(async () => {
+      const tab = await chrome.tabs.getCurrent();
+      return tab?.id || null;
+    });
+    expect(tabId).toBeTruthy();
+    const unavailableTitle = await helper.evaluate(() =>
+      chrome.i18n.getMessage('extensionNotAvailablePage'),
+    );
+
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await helper.bringToFront();
+        const openRequest = helper.evaluate((targetTabId) => {
+          return chrome.runtime.sendMessage({
+            action: 'openPreparedPopupForTest',
+            tabId: targetTabId,
+          });
+        }, tabId);
+
+        await expect
+          .poll(() =>
+            helper.evaluate(
+              () => chrome.extension.getViews({ type: 'popup' }).length,
+            ),
+          )
+          .toBe(1);
+        await expect(openRequest).resolves.toMatchObject({ success: true });
+        await expect
+          .poll(() =>
+            helper.evaluate(() => {
+              const popup = chrome.extension.getViews({ type: 'popup' })[0];
+              return popup?.document
+                .getElementById('pageDiagnosticTitle')
+                ?.textContent.trim();
+            }),
+          )
+          .toBe(unavailableTitle);
+        await expect
+          .poll(() =>
+            helper.evaluate(
+              async (targetTabId) => ({
+                global: await chrome.action.getPopup({}),
+                tab: await chrome.action.getPopup({ tabId: targetTabId }),
+              }),
+              tabId,
+            ),
+          )
+          .toEqual({ global: '', tab: '' });
+
+        await helper.evaluate(() => {
+          chrome.extension.getViews({ type: 'popup' })[0]?.close();
+        });
+        await expect
+          .poll(() =>
+            helper.evaluate(
+              () => chrome.extension.getViews({ type: 'popup' }).length,
+            ),
+          )
+          .toBe(0);
+      }
+
+      const stale = await helper.evaluate(
+        (targetTabId) =>
+          chrome.runtime.sendMessage({
+            action: 'preparePopupBootstrapForTest',
+            tabId: targetTabId,
+          }),
+        tabId,
+      );
+      expect(stale).toMatchObject({ success: true, mode: 'unavailable' });
+      const reset = await helper.evaluate(() =>
+        chrome.runtime.sendMessage({ action: 'resetForTest' }),
+      );
+      expect(reset).toMatchObject({ success: true });
+      const recoveredPopup = await extContext.newPage();
+      await recoveredPopup.goto(
+        `chrome-extension://${extensionId}/${stale.popupPath}`,
+      );
+      await expect(recoveredPopup.locator('#pageDiagnosticTitle')).toHaveText(
+        unavailableTitle,
+      );
+      await expect(recoveredPopup.locator('#fatalReloadBtn')).toHaveCount(0);
+      await recoveredPopup.close();
+    } finally {
+      await helper.close();
+    }
+  });
+
+  test('prepared private handoff hydrates pause state and cannot overwrite a resume', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    localServer.addPage('/prepared-private-resume-race', {
+      title: 'Prepared Private Resume Race',
+      body: '<main>Prepared private resume race</main>',
+    });
+    const url = localServer.url('/prepared-private-resume-race');
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+    const helper = await openHelperPage(extContext, extensionId);
+    const prepared = await helper.evaluate(async (pageUrl) => {
+      const [tab] = await chrome.tabs.query({ url: pageUrl });
+      if (!tab?.id) return { success: false, error: 'Source tab not found' };
+      const paused = await chrome.runtime.sendMessage({
+        action: 'setRecordingPaused',
+        paused: true,
+      });
+      if (paused?.success !== true) return paused;
+      return chrome.runtime.sendMessage({
+        action: 'beginPopupBootstrapForTest',
+        tabId: tab.id,
+      });
+    }, url);
+    expect(prepared).toMatchObject({ success: true });
+
+    const popup = await extContext.newPage();
+    await popup.addInitScript(() => {
+      const patchRuntime = () => {
+        if (!globalThis.chrome?.runtime?.sendMessage) {
+          setTimeout(patchRuntime, 0);
+          return;
+        }
+        const originalSendMessage = chrome.runtime.sendMessage.bind(
+          chrome.runtime,
+        );
+        let releaseAwait;
+        globalThis.__releasePreparedPrivateHandoff = () => releaseAwait?.();
+        chrome.runtime.sendMessage = async (request, ...args) => {
+          const response = await originalSendMessage(request, ...args);
+          if (request?.action === 'awaitPopupBootstrap') {
+            await new Promise((resolve) => {
+              releaseAwait = resolve;
+            });
+          }
+          return response;
+        };
+      };
+      patchRuntime();
+    });
+
+    try {
+      await popup.goto(
+        `chrome-extension://${extensionId}/${prepared.popupPath}`,
+      );
+      await expect(popup.locator('#pageDiagnosticSection')).toBeVisible();
+      await expect(popup.locator('#recordingToggle')).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+
+      await popup.locator('#recordingToggle').click();
+      await expect
+        .poll(() =>
+          helper.evaluate(async () => {
+            const { workspace } = await chrome.storage.session.get([
+              'workspace',
+            ]);
+            return workspace?.mode;
+          }),
+        )
+        .toBe('default');
+      await expect(popup.locator('#recordingToggle')).toHaveAttribute(
+        'aria-pressed',
+        'false',
+      );
+
+      await popup.evaluate(() => globalThis.__releasePreparedPrivateHandoff());
+      await expect(popup.locator('#pageTitle')).toHaveText(
+        'Prepared Private Resume Race',
+      );
+      await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
+      await expect(popup.locator('#recordingToggle')).toHaveAttribute(
+        'aria-pressed',
+        'false',
+      );
+    } finally {
+      await helper.evaluate(() =>
+        chrome.runtime.sendMessage({
+          action: 'setRecordingPaused',
+          paused: false,
+        }),
+      );
+      await popup.close();
+      await helper.close();
+      await page.close();
+    }
   });
 
   test('prepared toolbar bootstrap invalidates when membership changes before popup opens', async ({

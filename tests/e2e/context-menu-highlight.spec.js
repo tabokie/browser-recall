@@ -149,9 +149,9 @@ test.describe('Context menu highlight', () => {
       'third line',
     ]);
     expect(notesResp.notes[0].cssPath).toEqual([
-      'body > main > p:nth-of-type(1)',
-      'body > main > p:nth-of-type(2)',
-      'body > main > p:nth-of-type(3)',
+      'browser-recall-text-anchor:v1:{"selector":"body > main > p:nth-of-type(1)","start":0,"end":10}',
+      'browser-recall-text-anchor:v1:{"selector":"body > main > p:nth-of-type(2)","start":0,"end":11}',
+      'browser-recall-text-anchor:v1:{"selector":"body > main > p:nth-of-type(3)","start":0,"end":10}',
     ]);
 
     await helper.close();

@@ -160,165 +160,7 @@ function initContentScript() {
     return getPageIdentity().slug;
   }
 
-  // Generate a CSS selector path for an element (for re-applying highlights)
-  function getCssPath(el) {
-    const parts = [];
-    while (el && el !== document.body) {
-      let selector = el.tagName.toLowerCase();
-      if (el.id) {
-        selector += '#' + cssEscape(el.id);
-        parts.unshift(selector);
-        return parts.join(' > ');
-      }
-      const parent = el.parentElement;
-      if (parent) {
-        const siblings = Array.from(parent.children).filter(
-          (c) => c.tagName === el.tagName,
-        );
-        if (siblings.length > 1) {
-          const idx = siblings.indexOf(el) + 1;
-          selector += `:nth-of-type(${idx})`;
-        }
-      }
-      parts.unshift(selector);
-      el = parent;
-    }
-    return 'body > ' + parts.join(' > ');
-  }
-
-  function cssEscape(value) {
-    if (window.CSS && typeof window.CSS.escape === 'function') {
-      return window.CSS.escape(value);
-    }
-    return String(value).replace(/[^a-zA-Z0-9_-]/g, (character) => {
-      return `\\${character.codePointAt(0).toString(16)} `;
-    });
-  }
-
-  function getCssPathsForChunks(chunks) {
-    return chunks.map((chunk) => getCssPath(chunk.block));
-  }
-
   // ─── Note overlay factory ────────────────────────────────────────────
-  function createHighlightEditOverlay({
-    positionStyle,
-    note,
-    placeholder,
-    confirmTitle,
-    editTitle,
-    deleteTitle,
-    onSave,
-    onSaved,
-    onDelete,
-  }) {
-    const prev = document.getElementById('browser-recall-highlight-overlay');
-    if (prev) prev.remove();
-
-    const host = document.createElement('div');
-    host.id = 'browser-recall-highlight-overlay';
-    host.style.cssText = positionStyle + ' z-index: 2147483647;';
-
-    // This tree contains private note text and mutation controls. Keep it
-    // closed, and stop its input events below so the host page cannot inspect
-    // the editor or react to ordinary save/delete interactions.
-    const shadow = host.attachShadow({ mode: 'closed' });
-    shadow.innerHTML = `
-    <style>
-      ${extensionSurface.shadowCss}
-      ${extensionSurface.highlightEntryCss}
-      .overlay {
-        width: 300px;
-        background: var(--br-bg-base);
-        border: var(--br-floating-border);
-        border-radius: 2px;
-        color: var(--br-text-primary);
-        font-family: var(--br-font-body);
-        font-size: 12px;
-        line-height: 1.45;
-        padding: 0 8px;
-      }
-      .highlight-item {
-        --br-highlight-side-padding: 0px;
-        border-top: 0;
-      }
-    </style>
-    <div class="overlay">
-      ${extensionSurface.highlightEntryHtml(note, {
-        deleteTitle,
-        editTitle,
-      })}
-    </div>
-  `;
-
-    document.body.appendChild(host);
-
-    for (const eventName of [
-      'pointerdown',
-      'pointerup',
-      'mousedown',
-      'mouseup',
-      'click',
-      'dblclick',
-      'touchstart',
-      'touchend',
-    ]) {
-      shadow.addEventListener(eventName, (event) => {
-        event.stopPropagation();
-      });
-    }
-
-    let handleOutsideClick;
-    const removeHost = () => {
-      if (handleOutsideClick) {
-        document.removeEventListener('mousedown', handleOutsideClick);
-      }
-      host.remove();
-    };
-    const item = shadow.querySelector('.highlight-item');
-    extensionSurface.openHighlightNoteEditor({
-      item,
-      note,
-      placeholder,
-      confirmTitle,
-      editTitle,
-      save: onSave,
-      async onSaved(...args) {
-        await onSaved(...args);
-        removeHost();
-      },
-      onError(error) {
-        if (!showExtensionReloadNotification(error)) {
-          showErrorNotification(
-            error?.message || tr('extensionUpdateFailed', 'Update failed'),
-          );
-        }
-      },
-    });
-
-    shadow
-      .querySelector('.note-action-btn.delete')
-      .addEventListener('click', () => {
-        onDelete();
-        removeHost();
-      });
-
-    handleOutsideClick = (event) => {
-      if (!host.contains(event.target)) {
-        removeHost();
-      }
-    };
-    setTimeout(() => {
-      if (host.isConnected) {
-        document.addEventListener('mousedown', handleOutsideClick);
-      }
-    }, 100);
-
-    return {
-      host,
-      editor: shadow.querySelector('.highlight-note-editor'),
-    };
-  }
-
   // Highlight lifecycle behavior is supplied by the generated classic-script
   // artifact. This file adapts browser messages and daemon reads to that module.
   const highlightLifecycle = highlightLifecycleModule.create({
@@ -328,29 +170,16 @@ function initContentScript() {
     onLoadError: showExtensionReloadNotification,
     onMark: attachMarkClickHandler,
     formatExcerpt: extensionSurface.formatHighlightExcerpt,
-    getCssPath,
     reapplyDisabled: () => isPdfPage() || markupHidden,
   });
 
   function getStructuredSelectionPayload() {
-    const { chunks: _chunks, ...payload } =
-      highlightLifecycle.describeSelection(window.getSelection());
-    return payload;
-  }
-
-  function wrapRangeWithMark(range, text, timestamp) {
-    return highlightLifecycle.createMark(range, text, { timestamp });
-  }
-
-  function highlightTextInPage(text) {
-    return highlightLifecycle.findAndMark(text);
-  }
-
-  function highlightTextInBlock(block, text, options = {}) {
-    return highlightLifecycle.findAndMark(text, {
-      root: block || document.body,
-      globalFallback: options.globalFallback !== false,
-    });
+    const prepared = highlightLifecycle.prepareSelection(window.getSelection());
+    return {
+      selectionText: prepared?.text || '',
+      selectionExcerpt: prepared?.excerpt || [],
+      selectionCssPath: prepared?.cssPath || [],
+    };
   }
 
   function unwrapGroupedMarks(timestamp) {
@@ -416,14 +245,16 @@ function initContentScript() {
         .filter(Boolean),
       note: existingNote,
     };
-    const { host, editor } = createHighlightEditOverlay({
-      positionStyle: 'position: absolute; visibility: hidden;',
+    extensionSurface.createHighlightEditOverlay({
+      doc: document,
+      view: window,
+      rect,
       note,
       placeholder: tr('extensionAddNote', 'Add a note...'),
       confirmTitle: tr('commonConfirm', 'Confirm'),
       editTitle: tr('extensionEditNote', 'Edit note'),
       deleteTitle: tr('extensionDeleteHighlight', 'Delete highlight'),
-      async onSave(nextNote) {
+      async save(nextNote) {
         if (nextNote === existingNote || !noteSlug) {
           return { noteSlug };
         }
@@ -448,18 +279,28 @@ function initContentScript() {
           highlightLifecycle.replaceNote(noteSlug, response.noteSlug);
         }
       },
-      onDelete() {
-        if (noteSlug) removeHighlightMarksByNoteSlug(noteSlug);
-        else unwrapHighlightMark(mark);
+      async onDelete() {
         if (noteSlug) {
-          chrome.runtime
-            .sendMessage({ action: 'deleteNote', noteSlug })
-            .catch((error) => showExtensionReloadNotification(error));
+          const response = await chrome.runtime.sendMessage({
+            action: 'deleteNote',
+            noteSlug,
+          });
+          if (response?.success !== true) {
+            throw new Error(response?.error || 'deleteNote failed');
+          }
+          removeHighlightMarksByNoteSlug(noteSlug);
+        } else {
+          unwrapHighlightMark(mark);
+        }
+      },
+      onError(error) {
+        if (!showExtensionReloadNotification(error)) {
+          showErrorNotification(
+            error?.message || tr('extensionUpdateFailed', 'Update failed'),
+          );
         }
       },
     });
-    extensionSurface.positionNearRect(host, rect);
-    editor?.focus();
   }
 
   // ─── Page Reporting ───────────────────────────────────────────────────
@@ -991,11 +832,18 @@ function initContentScript() {
     } else if (request.action === 'getPageIdentity') {
       sendResponse({ success: true, ...getPageIdentity() });
     } else if (request.action === 'getStructuredSelectionText') {
-      const payload = getStructuredSelectionPayload();
-      sendResponse({
-        success: true,
-        ...payload,
-      });
+      try {
+        const payload = getStructuredSelectionPayload();
+        sendResponse({
+          success: true,
+          ...payload,
+        });
+      } catch (error) {
+        sendResponse({
+          success: false,
+          error: error?.message || String(error),
+        });
+      }
     } else if (request.action === 'highlightSelection') {
       // Highlight selected text (triggered by Alt+H)
       const selection = window.getSelection();
@@ -1005,104 +853,91 @@ function initContentScript() {
       );
 
       if (selectedText.length > 0 && selection.rangeCount > 0) {
-        const range = selection.getRangeAt(0);
-        const selectionDescription =
-          highlightLifecycle.describeSelection(selection);
-        const cssPath = selectionDescription.selectionCssPath[0] || '';
-        const slug = getSlugForCurrentPage();
-        if (!slug) {
-          sendResponse({ success: false });
-          return;
+        let preparedSelection;
+        try {
+          preparedSelection = highlightLifecycle.prepareSelection(selection);
+        } catch (error) {
+          sendResponse({
+            success: false,
+            error: error?.message || String(error),
+          });
         }
-        const timestamp = Date.now();
 
-        const chunkInfos = selectionDescription.chunks;
-        if (chunkInfos.length > 1) {
-          // Cross-visual-block selection — split into per-block chunks.
-          console.log(
-            `[content] Multi-block selection detected, splitting by block`,
-          );
-          const texts = chunkInfos.map((c) => c.text);
-          const cssPaths = getCssPathsForChunks(chunkInfos);
-          chrome.runtime
-            .sendMessage({
-              action: 'createNote',
-              pageSlug: slug,
-              url: window.location.href,
-              excerpt: texts,
-              note: '',
-              cssPath: cssPaths,
-            })
-            .then((resp) => {
-              if (
-                showUserActionFailureFromResponse(
-                  resp,
-                  tr('extensionHighlightFailed', 'Highlight failed'),
-                  ['noteSlug'],
-                )
-              ) {
-                return;
-              }
-              const noteSlug = resp?.noteSlug;
-              const marks = [];
-              for (const { text, block } of chunkInfos) {
-                const m = highlightTextInBlock(block, text);
-                if (m && noteSlug) {
-                  m.dataset.noteSlug = noteSlug;
-                  marks.push(m);
+        if (preparedSelection) {
+          const slug = getSlugForCurrentPage();
+          const timestamp = Date.now();
+          if (preparedSelection.excerpt.length > 1) {
+            console.log(
+              '[content] Multi-block selection detected, splitting by block',
+            );
+          }
+          if (!slug) {
+            sendResponse({
+              success: false,
+              error: 'Current page identity is unavailable',
+            });
+          } else {
+            console.log(
+              `[content] Saving note: slug=${slug}, text="${preparedSelection.text.substring(0, 50)}"`,
+            );
+            chrome.runtime
+              .sendMessage({
+                action: 'createNote',
+                pageSlug: slug,
+                url: window.location.href,
+                excerpt: preparedSelection.excerpt,
+                note: '',
+                cssPath: preparedSelection.cssPath,
+              })
+              .then((resp) => {
+                if (
+                  showUserActionFailureFromResponse(
+                    resp,
+                    tr('extensionHighlightFailed', 'Highlight failed'),
+                    ['noteSlug'],
+                  )
+                ) {
+                  sendResponse({
+                    success: false,
+                    error:
+                      resp?.error ||
+                      tr('extensionHighlightFailed', 'Highlight failed'),
+                  });
+                  return;
                 }
-              }
-              if (marks.length > 0) {
+                const noteSlug = resp?.noteSlug;
+                const marks = preparedSelection.apply({
+                  timestamp,
+                  noteSlug,
+                });
+                if (marks.length !== preparedSelection.excerpt.length) {
+                  throw new Error(
+                    'The selected range could not be wrapped after the note committed',
+                  );
+                }
                 showHighlightEditOverlay(
                   marks[0],
-                  texts.join('\n'),
+                  preparedSelection.text,
                   noteSlug,
                   '',
                 );
-              }
-            })
-            .catch((error) => {
-              showExtensionReloadNotification(error);
-            });
-        } else {
-          // Case 1 & 2: same-block selection
-          console.log(
-            `[content] Saving note: slug=${slug}, text="${selectedText.substring(0, 50)}"`,
-          );
-          chrome.runtime
-            .sendMessage({
-              action: 'createNote',
-              pageSlug: slug,
-              url: window.location.href,
-              excerpt: [selectedText],
-              note: '',
-              cssPath: [cssPath],
-            })
-            .then((resp) => {
-              if (
-                showUserActionFailureFromResponse(
-                  resp,
-                  tr('extensionHighlightFailed', 'Highlight failed'),
-                  ['noteSlug'],
-                )
-              ) {
-                return;
-              }
-              const noteSlug = resp?.noteSlug;
-              const mark = wrapRangeWithMark(range, selectedText, timestamp);
-              if (!mark) {
-                throw new Error(
-                  'The selected range could not be wrapped after the note committed',
-                );
-              }
-              if (noteSlug) mark.dataset.noteSlug = noteSlug;
-              showHighlightEditOverlay(mark, selectedText, noteSlug, '');
-            })
-            .catch((error) => {
-              showExtensionReloadNotification(error);
-            });
+                selection.removeAllRanges();
+                sendResponse({ success: true });
+              })
+              .catch((error) => {
+                if (!showExtensionReloadNotification(error)) {
+                  showErrorNotification(
+                    error?.message ||
+                      tr('extensionHighlightFailed', 'Highlight failed'),
+                  );
+                }
+                sendResponse({
+                  success: false,
+                  error: error?.message || String(error),
+                });
+              });
+          }
         }
-        sendResponse({ success: true });
       } else {
         sendResponse({
           success: false,

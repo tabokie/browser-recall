@@ -14,9 +14,11 @@
   --accent-red: #ff2d20;
   --accent-red-soft: rgba(255, 45, 32, 0.14);
   --font-display:
-    ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+    SFMono-Regular, Menlo, Consolas, 'Liberation Mono', system-ui,
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-body:
-    ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+    SFMono-Regular, Menlo, Consolas, 'Liberation Mono', system-ui,
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --ease-smooth: cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 

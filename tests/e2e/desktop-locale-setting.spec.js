@@ -125,6 +125,7 @@ async function installDesktopShellBridge(page, helper, setupDir) {
             debugLogging: false,
             launchAtLogin: false,
             loginItemSupported: false,
+            loginItemError: null,
           };
         case 'getSyncAuthState':
           return { success: true, hasToken: false, rememberToken: false };

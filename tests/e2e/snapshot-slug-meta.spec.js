@@ -564,6 +564,14 @@ test.describe('Snapshot slug meta tag', () => {
     await expect(viewerPopup.locator('#notesSection')).toContainText(
       highlightText,
     );
+    const markupButton = viewerPopup.locator('#hideMarkupBtn');
+    await expect(markupButton).toBeVisible();
+    await markupButton.click();
+    await expect(markupButton).toHaveAttribute('aria-pressed', 'true');
+    await expect(frame.locator('mark')).toHaveCount(0);
+    await markupButton.click();
+    await expect(markupButton).toHaveAttribute('aria-pressed', 'false');
+    await expect(frame.locator('mark')).toHaveText(highlightText);
     await viewerPopup.close();
 
     await helper.evaluate(() =>
@@ -583,15 +591,19 @@ test.describe('Snapshot slug meta tag', () => {
     await sourcePage.close();
   });
 
-  test('snapshot viewer creates highlight notes with array excerpt metadata', async ({
+  test('snapshot highlight persists its repeated-text scope and rejects re-highlighting', async ({
     extContext,
     extensionId,
     setupDir,
   }) => {
-    const originalUrl = 'https://example.com/snapshot-create-highlight';
+    const caseSeed = 421;
+    const originalUrl = `https://example.com/snapshot-create-highlight-${caseSeed}`;
     const slug = getSlugForUrl(originalUrl);
     const timestamp = Date.now();
-    const highlightText = 'new snapshot highlight';
+    const highlightText = `new snapshot highlight ${caseSeed}`;
+    const repeatedParagraph = `Same block first: ${highlightText}. Same block second: ${highlightText}.`;
+    const selectedStart = repeatedParagraph.lastIndexOf(highlightText);
+    const repeatedBody = `<main><section><p>Other block: ${highlightText}.</p></section><section><p>${repeatedParagraph}</p></section></main>`;
 
     await resetAndSeed(extContext, extensionId, [
       settingsCheckpoint(),
@@ -608,11 +620,11 @@ test.describe('Snapshot slug meta tag', () => {
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'html'),
-        content: `<!doctype html><html><head><title>Snapshot Create Highlight</title></head><body><p>A saved page with ${highlightText} inside.</p></body></html>`,
+        content: `<!doctype html><html><head><title>Snapshot Create Highlight</title></head><body>${repeatedBody}</body></html>`,
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'md'),
-        content: `A saved page with ${highlightText} inside.`,
+        content: `First occurrence: ${highlightText}.\n\nSecond occurrence: ${highlightText}.`,
       },
     ]);
 
@@ -624,29 +636,55 @@ test.describe('Snapshot slug meta tag', () => {
     const frame = viewer.frameLocator('iframe');
     await expect(frame.locator('body')).toContainText(highlightText);
 
-    await frame.locator('body').evaluate((body) => {
-      const doc = body.ownerDocument;
-      const range = doc.createRange();
-      const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
-      let node;
-      while ((node = walker.nextNode())) {
-        const offset = node.textContent.indexOf('new snapshot highlight');
-        if (offset >= 0) {
-          range.setStart(node, offset);
-          range.setEnd(node, offset + 'new snapshot highlight'.length);
-          break;
+    await frame
+      .locator('section')
+      .nth(1)
+      .locator('p')
+      .evaluate((paragraph) => {
+        const doc = paragraph.ownerDocument;
+        const range = doc.createRange();
+        const walker = doc.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+        let node;
+        while ((node = walker.nextNode())) {
+          const offset = node.textContent.lastIndexOf(
+            'new snapshot highlight 421',
+          );
+          if (offset >= 0) {
+            range.setStart(node, offset);
+            range.setEnd(node, offset + 'new snapshot highlight 421'.length);
+            break;
+          }
         }
-      }
-      const selection = doc.getSelection();
-      selection.removeAllRanges();
-      selection.addRange(range);
-      doc.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-    });
+        const selection = doc.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        doc.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      });
 
-    await expect(frame.locator('mark')).toHaveText(highlightText);
+    await viewer.waitForTimeout(300);
+    await expect(frame.locator('mark')).toHaveCount(0);
 
     const helper = await openHelperPage(extContext, extensionId);
-    const notesResp = await helper.evaluate((pageSlug) => {
+    await viewer.bringToFront();
+    const commandResp = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'triggerCommandForTest',
+        command: 'highlight-selection',
+      }),
+    );
+    expect(commandResp).toEqual({ success: true });
+    await expect(frame.locator('section').nth(0).locator('mark')).toHaveCount(
+      0,
+    );
+    const secondMark = frame.locator('section').nth(1).locator('mark');
+    await expect(secondMark).toHaveText(highlightText);
+    await expect
+      .poll(() =>
+        secondMark.evaluate((mark) => mark.previousSibling?.textContent || ''),
+      )
+      .toContain('Same block second: ');
+
+    let notesResp = await helper.evaluate((pageSlug) => {
       return chrome.runtime.sendMessage({
         action: 'loadPageNotes',
         slug: pageSlug,
@@ -655,10 +693,250 @@ test.describe('Snapshot slug meta tag', () => {
     expect(notesResp.success).toBe(true);
     expect(notesResp.notes).toHaveLength(1);
     expect(notesResp.notes[0].excerpt).toEqual([highlightText]);
-    expect(notesResp.notes[0].cssPath).toEqual(['']);
+    expect(notesResp.notes[0].cssPath).toEqual([
+      `browser-recall-text-anchor:v1:${JSON.stringify({
+        selector: 'body > main > section:nth-of-type(2) > p',
+        start: selectedStart,
+        end: selectedStart + highlightText.length,
+      })}`,
+    ]);
+
+    await secondMark.evaluate((mark) => {
+      const doc = mark.ownerDocument;
+      const range = doc.createRange();
+      range.selectNodeContents(mark);
+      const selection = doc.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    await viewer.bringToFront();
+    const repeatResp = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'triggerCommandForTest',
+        command: 'highlight-selection',
+      }),
+    );
+    expect(repeatResp).toMatchObject({
+      success: false,
+      error: expect.stringMatching(/already highlighted/i),
+    });
+
+    notesResp = await helper.evaluate((pageSlug) => {
+      return chrome.runtime.sendMessage({
+        action: 'loadPageNotes',
+        slug: pageSlug,
+      });
+    }, slug);
+    expect(notesResp.notes).toHaveLength(1);
+
+    await viewer.reload();
+    await expect(frame.locator('section').nth(0).locator('mark')).toHaveCount(
+      0,
+    );
+    await expect(frame.locator('section').nth(1).locator('mark')).toHaveText(
+      highlightText,
+    );
+    await expect
+      .poll(() =>
+        frame
+          .locator('section')
+          .nth(1)
+          .locator('mark')
+          .evaluate((mark) => mark.previousSibling?.textContent || ''),
+      )
+      .toContain('Same block second: ');
 
     await helper.close();
     await viewer.close();
+  });
+
+  test('snapshot highlight persists and reloads inside nested shadow roots', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
+    void setupDir;
+    const caseSeed = 619;
+    const originalUrl = `https://example.com/snapshot-shadow-highlight-${caseSeed}`;
+    const slug = getSlugForUrl(originalUrl);
+    const timestamp = Date.now();
+    const highlightText = `shadow highlight ${caseSeed}`;
+    const paragraphText = `first ${highlightText} middle ${highlightText}`;
+    const selectedStart = paragraphText.lastIndexOf(highlightText);
+
+    await resetAndSeed(extContext, extensionId, [
+      settingsCheckpoint(),
+      {
+        path: pageCheckpointPath(slug),
+        data: pageEntityFixture({
+          slug,
+          url: originalUrl,
+          title: 'Snapshot Shadow Highlight',
+          parentIds: [],
+          childIds: [`snapshot:${slug}-${timestamp}`],
+          timestamps: { 'test-device': timestamp },
+        }),
+      },
+      {
+        path: snapshotSidecarPath(slug, timestamp, 'html'),
+        content: `<!doctype html><html><head><title>Snapshot Shadow Highlight</title></head><body>
+          <outer-card id="shadow-highlight-outer"><template data-savepage-shadowroot="">
+            <inner-card id="shadow-highlight-inner"><template data-savepage-shadowroot="">
+              <p id="shadow-highlight-copy">${paragraphText}</p>
+            </template></inner-card>
+          </template></outer-card>
+        </body></html>`,
+      },
+      {
+        path: snapshotSidecarPath(slug, timestamp, 'md'),
+        content: paragraphText,
+      },
+    ]);
+
+    const viewer = await extContext.newPage();
+    await viewer.goto(
+      `chrome-extension://${extensionId}/snapshot-viewer.html?slug=${encodeURIComponent(slug)}&ts=${timestamp}`,
+    );
+    const frame = viewer.frameLocator('iframe');
+    const paragraph = frame.locator('#shadow-highlight-copy');
+    await expect(paragraph).toHaveText(paragraphText);
+    await paragraph.evaluate(
+      (element, { start, length }) => {
+        const doc = element.ownerDocument;
+        const range = doc.createRange();
+        range.setStart(element.firstChild, start);
+        range.setEnd(element.firstChild, start + length);
+        const selection = doc.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      },
+      { start: selectedStart, length: highlightText.length },
+    );
+
+    const helper = await openHelperPage(extContext, extensionId);
+    await viewer.bringToFront();
+    const commandResponse = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'triggerCommandForTest',
+        command: 'highlight-selection',
+      }),
+    );
+    expect(commandResponse).toEqual({ success: true });
+
+    const mark = paragraph.locator('mark.browser-recall-highlight');
+    await expect(mark).toHaveText(highlightText);
+    await expect
+      .poll(() => mark.evaluate((node) => node.previousSibling?.textContent))
+      .toContain(`first ${highlightText} middle `);
+
+    const notesResponse = await helper.evaluate((pageSlug) => {
+      return chrome.runtime.sendMessage({
+        action: 'loadPageNotes',
+        slug: pageSlug,
+      });
+    }, slug);
+    expect(notesResponse.success).toBe(true);
+    expect(notesResponse.notes).toHaveLength(1);
+    expect(notesResponse.notes[0].cssPath).toEqual([
+      `browser-recall-text-anchor:v2:${JSON.stringify({
+        selectors: [
+          'outer-card#shadow-highlight-outer',
+          'inner-card#shadow-highlight-inner',
+          'p#shadow-highlight-copy',
+        ],
+        start: selectedStart,
+        end: selectedStart + highlightText.length,
+      })}`,
+    ]);
+
+    await viewer.reload();
+    await expect(
+      frame.locator('#shadow-highlight-copy mark.browser-recall-highlight'),
+    ).toHaveText(highlightText);
+
+    await helper.close();
+    await viewer.close();
+  });
+
+  test('snapshot and live-page highlight editors render from the same surface', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    const caseSeed = 173;
+    const path = `/highlight-editor-parity-${caseSeed}`;
+    const originalUrl = localServer.url(path);
+    const slug = getSlugForUrl(originalUrl);
+    const timestamp = Date.now();
+    const noteSlug = `highlight-editor-parity-${caseSeed}`;
+    const highlightText = `shared highlight editor excerpt ${caseSeed}`;
+    const noteText = `shared editor note ${caseSeed}`;
+    const pageBody = `<main><p>${highlightText}</p></main>`;
+
+    localServer.addPage(path, {
+      title: 'Highlight Editor Parity',
+      body: pageBody,
+    });
+    await resetAndSeed(extContext, extensionId, [
+      settingsCheckpoint(),
+      {
+        path: pageCheckpointPath(slug),
+        data: pageEntityFixture({
+          slug,
+          url: originalUrl,
+          title: 'Highlight Editor Parity',
+          parentIds: [],
+          childIds: [`note:${noteSlug}`, `snapshot:${slug}-${timestamp}`],
+          timestamps: { 'test-device': timestamp },
+        }),
+      },
+      {
+        path: `objects/notes/${noteSlug}.json`,
+        data: noteEntityFixture({
+          slug: noteSlug,
+          excerpt: [highlightText],
+          note: noteText,
+          cssPath: ['body > main:nth-of-type(1) > p:nth-of-type(1)'],
+          url: originalUrl,
+        }),
+      },
+      {
+        path: snapshotSidecarPath(slug, timestamp, 'html'),
+        content: `<!doctype html><html><head><title>Highlight Editor Parity</title></head><body>${pageBody}</body></html>`,
+      },
+      {
+        path: snapshotSidecarPath(slug, timestamp, 'md'),
+        content: highlightText,
+      },
+    ]);
+
+    const livePage = await extContext.newPage();
+    await livePage.goto(originalUrl);
+    const liveMark = livePage.locator('mark.browser-recall-highlight');
+    await expect(liveMark).toHaveText(highlightText);
+    await liveMark.click();
+    const liveEditor = livePage.locator('#browser-recall-highlight-overlay');
+    await expect(liveEditor).toBeVisible();
+    const liveEditorPixels = await liveEditor.screenshot();
+
+    const viewer = await extContext.newPage();
+    await viewer.goto(
+      `chrome-extension://${extensionId}/snapshot-viewer.html?slug=${encodeURIComponent(slug)}&ts=${timestamp}`,
+    );
+    const frame = viewer.frameLocator('iframe');
+    const snapshotMark = frame.locator('mark.browser-recall-highlight');
+    await expect(snapshotMark).toHaveText(highlightText);
+    await snapshotMark.click();
+    const snapshotEditor = frame.locator('#browser-recall-highlight-overlay');
+    await expect(snapshotEditor).toBeVisible();
+    const snapshotEditorPixels = await snapshotEditor.screenshot();
+
+    expect(snapshotEditorPixels.equals(liveEditorPixels)).toBe(true);
+
+    await viewer.close();
+    await livePage.close();
   });
 
   test('snapshot viewer reapplies highlights within stored css path scope', async ({

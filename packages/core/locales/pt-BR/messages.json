@@ -312,7 +312,7 @@
     "description": "Desktop launch-at-login setting."
   },
   "desktopLaunchAtLoginUnsupported": {
-    "message": "O lançamento no login está disponível no macOS 13 ou mais recente.",
+    "message": "A inicialização no login não está disponível neste sistema.",
     "description": "Launch-at-login platform support notice."
   },
   "desktopLaunchAtLoginLong": {
@@ -1078,7 +1078,7 @@
     "description": "Extension fatal error reload button."
   },
   "extensionOpenAppFallback": {
-    "message": "Não consegue abrir o aplicativo? Inicie-o na pasta Aplicativos e tente novamente.",
+    "message": "Não consegue abrir o aplicativo? Inicie-o pelo inicializador de aplicativos do sistema e tente novamente.",
     "description": "Extension options fallback notice."
   },
   "extensionToggleRecording": {

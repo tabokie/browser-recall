@@ -49,6 +49,11 @@ export const test = base.extend({
         );
         userDataDirs.push(userDataDir);
         const ctx = await chromium.launchPersistentContext(userDataDir, {
+          channel:
+            process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'chrome' ||
+            process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'msedge'
+              ? process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE
+              : undefined,
           headless: false,
           args: [
             '--headless=new',

@@ -210,6 +210,93 @@ if (
 const pageUrl = pageResp.entry.url;
 const html = htmlResp.html;
 const frame = document.getElementById('frame');
+const viewerTab = await chrome.tabs.getCurrent();
+if (!Number.isSafeInteger(viewerTab?.id)) {
+  throw new Error('Snapshot viewer tab identity is unavailable');
+}
+
+let activateSnapshotSelection = async () => ({
+  success: false,
+  error: 'Snapshot highlight controls are still loading',
+});
+let snapshotHighlightLifecycle = null;
+let snapshotMarkupHidden = false;
+
+async function loadSnapshotNotes() {
+  const response = await chrome.runtime.sendMessage({
+    action: 'loadPageNotes',
+    slug,
+  });
+  if (response?.success !== true || !Array.isArray(response.notes)) {
+    throw new Error(response?.error || 'loadPageNotes returned invalid notes');
+  }
+  return response.notes;
+}
+
+async function handleSnapshotViewerAction(request) {
+  switch (request.action) {
+    case 'highlightSelection':
+      return activateSnapshotSelection(request);
+    case 'getHighlightMarkupState':
+      return { success: true, hidden: snapshotMarkupHidden };
+    case 'hideHighlightMarkup':
+      if (!snapshotHighlightLifecycle) {
+        return {
+          success: false,
+          error: 'Snapshot highlight controls are still loading',
+        };
+      }
+      frame.contentDocument
+        ?.getElementById('browser-recall-highlight-overlay')
+        ?.remove();
+      snapshotHighlightLifecycle.dispose({ clearExisting: true });
+      snapshotMarkupHidden = true;
+      return { success: true };
+    case 'showHighlightMarkup': {
+      if (!snapshotHighlightLifecycle) {
+        return {
+          success: false,
+          error: 'Snapshot highlight controls are still loading',
+        };
+      }
+      const notes = await loadSnapshotNotes();
+      snapshotHighlightLifecycle.dispose({ clearExisting: true });
+      snapshotHighlightLifecycle.applySaved(notes);
+      snapshotMarkupHidden = false;
+      return { success: true };
+    }
+    default:
+      return null;
+  }
+}
+
+chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+  if (
+    ![
+      'highlightSelection',
+      'getHighlightMarkupState',
+      'hideHighlightMarkup',
+      'showHighlightMarkup',
+    ].includes(request.action) ||
+    request.targetTabId !== viewerTab.id
+  ) {
+    return false;
+  }
+  handleSnapshotViewerAction(request)
+    .then((response) => {
+      if (response?.success !== true) {
+        showSnapshotError(
+          new Error(response?.error || 'Snapshot highlight action failed'),
+        );
+      }
+      sendResponse(response);
+    })
+    .catch((error) => {
+      showSnapshotError(error);
+      sendResponse({ success: false, error: error.message });
+    });
+  return true;
+});
 
 const parsed = new DOMParser().parseFromString(html, 'text/html');
 prepareDeclarativeShadowRoots(parsed);
@@ -225,78 +312,78 @@ frame.addEventListener('load', async () => {
     }
     restoreSerializedShadowRootsInFrameTree(doc);
 
-    const resp = await chrome.runtime.sendMessage({
-      action: 'loadPageNotes',
-      slug,
-    });
-    if (resp?.success !== true || !Array.isArray(resp.notes)) {
-      throw new Error(resp?.error || 'loadPageNotes returned invalid notes');
-    }
+    const notes = await loadSnapshotNotes();
 
-    let highlightLifecycle;
-    highlightLifecycle = createHighlightLifecycle({
+    snapshotHighlightLifecycle?.dispose();
+    const highlightLifecycle = createHighlightLifecycle({
       document: doc,
       formatExcerpt: extensionSurface.formatHighlightExcerpt,
       onMark: (mark) => attachMarkClickHandler(doc, mark, highlightLifecycle),
     });
-    highlightLifecycle.applySaved(resp.notes);
+    snapshotHighlightLifecycle = highlightLifecycle;
+    if (!snapshotMarkupHidden) highlightLifecycle.applySaved(notes);
 
-    doc.addEventListener('mouseup', () => {
+    activateSnapshotSelection = async (request) => {
       const selection = doc.getSelection();
       const selectedText = selection?.toString().trim();
-      if (!selectedText || selection.rangeCount === 0) return;
-      const anchor = selection.anchorNode;
+      if (!selectedText || selection.rangeCount === 0) {
+        return {
+          success: false,
+          error: 'Select text before creating a highlight',
+        };
+      }
       if (
-        anchor &&
-        (anchor.nodeType === Node.TEXT_NODE
-          ? anchor.parentElement
-          : anchor
-        )?.closest?.('mark')
+        typeof request.selectionText === 'string' &&
+        request.selectionText.trim() !== selectedText
       ) {
-        return;
+        return {
+          success: false,
+          error: 'The selected text changed before it could be highlighted',
+        };
       }
 
-      const range = selection.getRangeAt(0);
-      chrome.runtime
-        .sendMessage({
-          action: 'createNote',
-          pageSlug: slug,
-          url: pageUrl,
-          excerpt: [selectedText],
-          note: '',
-          cssPath: [''],
-        })
-        .then((response) => {
-          if (
-            response?.success !== true ||
-            typeof response.noteSlug !== 'string' ||
-            !response.noteSlug
-          ) {
-            throw new Error(
-              response?.error || 'createNote returned invalid data',
-            );
-          }
-          const noteSlug = response.noteSlug;
-          const mark = highlightLifecycle.createMark(range, selectedText, {
-            noteSlug,
-          });
-          if (!mark) {
-            throw new Error(
-              'Saved highlight could not be applied to the snapshot',
-            );
-          }
-          showHighlightEditOverlay(
-            doc,
-            mark,
-            selectedText,
-            noteSlug,
-            '',
-            highlightLifecycle,
-          );
-          selection.removeAllRanges();
-        })
-        .catch(showSnapshotError);
-    });
+      const preparedSelection = highlightLifecycle.prepareSelection(selection);
+      if (!preparedSelection) {
+        return {
+          success: false,
+          error: 'Select text before creating a highlight',
+        };
+      }
+      const response = await chrome.runtime.sendMessage({
+        action: 'createNote',
+        pageSlug: slug,
+        url: pageUrl,
+        excerpt: preparedSelection.excerpt,
+        note: '',
+        cssPath: preparedSelection.cssPath,
+      });
+      if (
+        response?.success !== true ||
+        typeof response.noteSlug !== 'string' ||
+        !response.noteSlug
+      ) {
+        throw new Error(response?.error || 'createNote returned invalid data');
+      }
+
+      const noteSlug = response.noteSlug;
+      const marks = preparedSelection.apply({ noteSlug });
+
+      if (marks.length !== preparedSelection.excerpt.length) {
+        throw new Error(
+          'The selected range could not be wrapped after the note committed',
+        );
+      }
+      showHighlightEditOverlay(
+        doc,
+        marks[0],
+        preparedSelection.excerpt.join('\n'),
+        noteSlug,
+        '',
+        highlightLifecycle,
+      );
+      selection.removeAllRanges();
+      return { success: true };
+    };
   } catch (error) {
     showSnapshotError(error);
   }
@@ -333,48 +420,6 @@ function attachMarkClickHandler(doc, mark, highlightLifecycle) {
   });
 }
 
-const OVERLAY_STYLE = `
-  ${extensionSurface.shadowCss}
-  .overlay {
-    width: 300px;
-    background: var(--br-bg-base); border: var(--br-floating-border);
-    border-radius: 2px; color: var(--br-text-primary);
-    font-family: var(--br-font-body); font-size: 12px; line-height: 1.45;
-    padding: 8px;
-  }
-  .br-note-label {
-    margin-bottom: 7px; color: var(--br-text-muted); font-size: 10px;
-    font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase;
-  }
-  .br-note-excerpt {
-    margin-bottom: 8px; padding: 7px 0 8px;
-    border-top: 1px dotted var(--br-border-section);
-    border-bottom: 1px dotted var(--br-border-section);
-    color: var(--br-text-muted); font-style: italic; line-height: 1.45;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-  .br-note-editor { display: flex; align-items: flex-start; gap: 8px; }
-  .br-note-body { flex: 1; min-width: 0; }
-  .delete-btn {
-    flex-shrink: 0; width: 30px; height: 30px; display: flex;
-    align-items: center; justify-content: center; background: none;
-    border: 1px solid var(--br-border-section); border-radius: 2px;
-    cursor: pointer; color: var(--br-text-muted); padding: 0;
-  }
-  .delete-btn:hover { background: var(--br-bg-surface-active); border-color: var(--br-text-primary); color: var(--br-text-primary); }
-  .delete-btn svg { width: 16px; height: 16px; fill: currentColor; }
-  textarea {
-    width: 100%; min-height: 30px; height: 30px;
-    border: 1px solid var(--br-border-section); border-radius: 2px;
-    padding: 4px 8px; font-family: inherit; font-size: 12px;
-    resize: none; box-sizing: border-box; line-height: 18px; overflow: hidden;
-    background: transparent; color: var(--br-text-primary);
-  }
-  textarea::placeholder { color: var(--br-text-muted); }
-  textarea:focus { outline: none; border-color: var(--br-accent-primary); box-shadow: 0 0 0 3px var(--br-accent-soft); }
-`;
-
 function showHighlightEditOverlay(
   doc,
   mark,
@@ -383,72 +428,58 @@ function showHighlightEditOverlay(
   existingNote,
   highlightLifecycle,
 ) {
-  doc.getElementById('browser-recall-highlight-overlay')?.remove();
-
   const rect = mark.getBoundingClientRect();
-  const win = doc.defaultView;
-  const host = doc.createElement('div');
-  host.id = 'browser-recall-highlight-overlay';
-  host.style.cssText =
-    'position: absolute; z-index: 2147483647; visibility: hidden;';
-
-  const shadow = host.attachShadow({ mode: 'closed' });
-  shadow.innerHTML = `<style>${OVERLAY_STYLE}</style><div class="overlay">${extensionSurface.noteOverlayHtml({ excerpt: text || '', placeholder: tr('extensionAddNoteEsc', 'Add a note... Esc to save.', undefined), includeDelete: true, deleteTitle: tr('commonDelete', 'Delete', undefined) })}</div>`;
-  doc.body.appendChild(host);
-  extensionSurface.positionNearRect(host, rect, win);
-
-  const textarea = shadow.querySelector('textarea');
-  const deleteBtn = shadow.querySelector('.delete-btn');
-  textarea.value = existingNote || '';
-  textarea.focus();
-
-  let saved = false;
-  function saveAndClose() {
-    if (saved) return;
-    saved = true;
-    const note = textarea.value;
-    if (note !== existingNote && noteSlug) {
-      chrome.runtime
-        .sendMessage({ action: 'updateNote', noteSlug, note })
-        .then((response) => {
-          if (
-            response?.success !== true ||
-            typeof response.noteSlug !== 'string' ||
-            !response.noteSlug
-          ) {
-            throw new Error(
-              response?.error || 'updateNote returned invalid data',
-            );
-          }
-          highlightLifecycle.replaceNote(noteSlug, response.noteSlug);
-        })
-        .catch(showSnapshotError);
-    }
-    host.remove();
-  }
-
-  deleteBtn.addEventListener('click', (event) => {
-    event.stopPropagation();
-    highlightLifecycle.remove(noteSlug ? { noteSlug } : { mark });
-    if (noteSlug)
-      chrome.runtime
-        .sendMessage({ action: 'deleteNote', noteSlug })
-        .then((response) => {
-          if (response?.success !== true) {
-            throw new Error(response?.error || 'deleteNote failed');
-          }
-        })
-        .catch(showSnapshotError);
-    host.remove();
-  });
-  textarea.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') saveAndClose();
-  });
-  const handleOutsideClick = (event) => {
-    if (!host.contains(event.target)) {
-      saveAndClose();
-      doc.removeEventListener('mousedown', handleOutsideClick);
-    }
+  const note = {
+    slug: noteSlug || '',
+    excerpt: String(text || mark.textContent)
+      .split('\n')
+      .filter(Boolean),
+    note: existingNote,
   };
-  setTimeout(() => doc.addEventListener('mousedown', handleOutsideClick), 100);
+  extensionSurface.createHighlightEditOverlay({
+    doc,
+    view: doc.defaultView,
+    rect,
+    note,
+    placeholder: tr('extensionAddNote', 'Add a note...', undefined),
+    confirmTitle: tr('commonConfirm', 'Confirm', undefined),
+    editTitle: tr('extensionEditNote', 'Edit note', undefined),
+    deleteTitle: tr('extensionDeleteHighlight', 'Delete highlight', undefined),
+    async save(nextNote) {
+      if (nextNote === existingNote || !noteSlug) return { noteSlug };
+      const response = await chrome.runtime.sendMessage({
+        action: 'updateNote',
+        noteSlug,
+        note: nextNote,
+      });
+      if (
+        response?.success !== true ||
+        typeof response.noteSlug !== 'string' ||
+        !response.noteSlug
+      ) {
+        throw new Error(response?.error || 'updateNote returned invalid data');
+      }
+      return response;
+    },
+    onSaved(response) {
+      if (response?.noteSlug && response.noteSlug !== noteSlug) {
+        highlightLifecycle.replaceNote(noteSlug, response.noteSlug);
+      }
+    },
+    async onDelete() {
+      if (noteSlug) {
+        const response = await chrome.runtime.sendMessage({
+          action: 'deleteNote',
+          noteSlug,
+        });
+        if (response?.success !== true) {
+          throw new Error(response?.error || 'deleteNote failed');
+        }
+        highlightLifecycle.remove({ noteSlug });
+      } else {
+        highlightLifecycle.remove({ mark });
+      }
+    },
+    onError: showSnapshotError,
+  });
 }

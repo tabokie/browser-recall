@@ -312,7 +312,7 @@
     "description": "Desktop launch-at-login setting."
   },
   "desktopLaunchAtLoginUnsupported": {
-    "message": "ログイン時の起動は macOS 13 以降で利用できます。",
+    "message": "このシステムではログイン時の起動を利用できません。",
     "description": "Launch-at-login platform support notice."
   },
   "desktopLaunchAtLoginLong": {
@@ -1078,7 +1078,7 @@
     "description": "Extension fatal error reload button."
   },
   "extensionOpenAppFallback": {
-    "message": "アプリを開けませんか?アプリケーション フォルダーから起動して、もう一度試してください。",
+    "message": "アプリを開けない場合は、システムのアプリランチャーから起動して、もう一度お試しください。",
     "description": "Extension options fallback notice."
   },
   "extensionToggleRecording": {

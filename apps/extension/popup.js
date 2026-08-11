@@ -10,8 +10,6 @@ import { pageKey } from './entity-types.js';
 import { formatDesktopConnectorState } from './connector-diagnostics.js';
 import {
   hasConnectorStateStorageChange,
-  readCachedConnectorState,
-  requestConnectorBridgeConnect,
   requestConnectorState,
 } from './connector/state.js';
 import {
@@ -50,15 +48,16 @@ const currentPage = {
   pageSummaryState: 'idle',
 };
 let frozenChipOrder = null; // Array of list slugs — frozen on first render to keep order stable
-let desktopConnectInFlight = false;
 const recordingUiState = {
   hydrated: false,
   paused: false,
   pending: false,
 };
 const popupShellState = {
-  surface: 'dashboard',
+  surface: 'diagnostic',
 };
+let connectorDiagnosticActive = true;
+let connectorDiagnosticGeneration = 0;
 const popupUiMutationState = {
   active: false,
   silentActive: false,
@@ -122,12 +121,9 @@ function setPopupCompact(compact) {
 function renderPopupShell(options = {}) {
   const { reveal = true } = options;
   const loading = document.getElementById('loading');
-  const setup = document.getElementById('setup-required');
   const dashboard = document.getElementById('dashboard');
   const content = document.getElementById('dashboardContent');
   const surface = popupShellState.surface;
-  const setupVisible = surface === 'setup';
-  const dashboardVisible = surface !== 'setup';
   const contentVisible = surface === 'dashboard' || surface === 'diagnostic';
   const compact =
     surface === 'banner' ||
@@ -135,8 +131,7 @@ function renderPopupShell(options = {}) {
     surface === 'dashboard-loading';
 
   if (loading) loading.style.display = 'none';
-  if (setup) setup.style.display = setupVisible ? 'block' : 'none';
-  if (dashboard) dashboard.style.display = dashboardVisible ? 'flex' : 'none';
+  if (dashboard) dashboard.style.display = 'flex';
   if (content) content.style.display = contentVisible ? 'block' : 'none';
   setPopupCompact(compact);
   applyRecordingBarState();
@@ -196,8 +191,6 @@ function setPopupInteractionDisabled(disabled) {
     .querySelectorAll(
       [
         '#captureBtn',
-        '#setupRequiredBtn',
-        '#setupDesktopConnectBtn',
         '#captureOnceBtn',
         '.section-action',
         '.capture-once-btn',
@@ -308,32 +301,53 @@ function renderConnectorDiagnostic(connector, options = {}) {
   if (!connector || typeof connector !== 'object' || Array.isArray(connector)) {
     throw new Error('Connector diagnostic requires connector state');
   }
-  const { reveal = true } = options;
-  hideElement('blacklisted');
-  setPopupSurface('setup', { reveal });
-  clearSetupDiagnostic();
-  applyDesktopConnectorUi(connector);
-
+  const {
+    reveal = true,
+    title: titleOverride,
+    message: messageOverride,
+  } = options;
   const formatted = formatDesktopConnectorState(connector);
-  const title = document.getElementById('setupRequiredTitle');
-  if (title) title.textContent = formatted.status;
+  renderPageDiagnostic({
+    title: titleOverride || formatted.status,
+    message: messageOverride || formatted.meta,
+    kind: 'connector',
+    reveal,
+  });
+}
 
-  const openButton = document.getElementById('setupRequiredBtn');
-  if (openButton && !openButton.dataset.bound) {
-    openButton.dataset.bound = '1';
-    openButton.addEventListener('click', () => {
-      openDesktopApp();
-    });
-  }
+function replaceConnectorDiagnosticOwner(active) {
+  connectorDiagnosticActive = active;
+  connectorDiagnosticGeneration += 1;
+}
+
+function currentConnectorDiagnosticOwner() {
+  return connectorDiagnosticVisible() ? connectorDiagnosticGeneration : null;
+}
+
+function connectorDiagnosticOwnedBy(owner) {
+  return (
+    owner !== null &&
+    connectorDiagnosticVisible() &&
+    connectorDiagnosticGeneration === owner
+  );
 }
 
 function renderBannerOnly() {
+  replaceConnectorDiagnosticOwner(false);
   setPopupSurface('banner');
 }
 
-function renderPageDiagnostic({ title, message, detail = null, actions = [] }) {
+function renderPageDiagnostic({
+  title,
+  message,
+  detail = null,
+  actions = [],
+  kind = 'page',
+  reveal = true,
+}) {
   hideElement('blacklisted');
-  setPopupSurface('diagnostic');
+  replaceConnectorDiagnosticOwner(kind === 'connector');
+  setPopupSurface('diagnostic', { reveal });
   resetDashboardSections();
   const section = document.getElementById('pageDiagnosticSection');
   const titleEl = document.getElementById('pageDiagnosticTitle');
@@ -344,7 +358,7 @@ function renderPageDiagnostic({ title, message, detail = null, actions = [] }) {
   if (section) section.style.display = '';
   if (titleEl) titleEl.textContent = title;
   if (messageEl) messageEl.textContent = message;
-  const detailText = formatSetupDiagnostic(detail);
+  const detailText = formatDiagnosticDetail(detail);
   if (detailEl) {
     detailEl.textContent = detailText;
     detailEl.style.display = detailText ? 'block' : 'none';
@@ -358,15 +372,12 @@ function renderPageDiagnostic({ title, message, detail = null, actions = [] }) {
       button.id = action.id;
       button.className = action.className || 'page-diagnostic-link';
       button.textContent = action.label;
+      button.disabled = action.disabled === true;
       if (action.onClick) button.addEventListener('click', action.onClick);
       actionsEl.appendChild(button);
     }
   }
   if (pageHeader) pageHeader.style.display = 'none';
-}
-
-function showSetupRequired(connector, options = {}) {
-  renderConnectorDiagnostic(connector, options);
 }
 
 function showUnavailablePage(
@@ -511,72 +522,25 @@ function formatDuration(ms) {
   return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-function applyDesktopConnectorUi(connector) {
-  const formatted = formatDesktopConnectorState(connector);
-  const pending = desktopConnectInFlight || connector.state === 'pair_pending';
-  const checking = desktopConnectInFlight;
-
-  const title = document.getElementById('setupRequiredTitle');
-  if (title) title.textContent = formatted.status;
-  const meta = document.getElementById('setupRequiredMeta');
-  if (meta) meta.textContent = formatted.meta;
-
-  const connectButton = document.getElementById('setupDesktopConnectBtn');
-  if (!connectButton) return;
-  connectButton.disabled = pending;
-  connectButton.textContent = pending
-    ? tr('extensionWaitingApproval', 'Waiting for Approval', undefined)
-    : tr('extensionCheckAgain', 'Check Again', undefined);
-  connectButton.classList.toggle('is-checking', checking);
+function applyDesktopConnectorUi(connector, owner) {
+  if (!connectorDiagnosticOwnedBy(owner)) return;
+  renderConnectorDiagnostic(connector);
 }
 
 function showDesktopConnectorError(message) {
-  applyDesktopConnectorUi({ state: 'offline', hasToken: false });
-  const title = document.getElementById('setupRequiredTitle');
-  if (title)
-    title.textContent = tr(
-      'extensionDesktopOffline',
-      'Desktop Offline',
-      undefined,
-    );
-  const meta = document.getElementById('setupRequiredMeta');
-  if (meta)
-    meta.textContent =
-      message ||
-      tr(
-        'extensionStartDesktopCapture',
-        'Start Browser Recall Desktop to resume live capture.',
-        undefined,
-      );
-}
-
-function showDesktopUnavailable(
-  message = tr(
-    'extensionDesktopOfflineMixed',
-    'Browser Recall Desktop is offline.',
-    undefined,
-  ),
-) {
-  const defaultOfflineMessage = tr(
-    'extensionDesktopOfflineMixed',
-    'Browser Recall Desktop is offline.',
-    undefined,
+  renderConnectorDiagnostic(
+    { state: 'offline', hasToken: false },
+    {
+      title: tr('extensionDesktopOffline', 'Desktop Offline', undefined),
+      message:
+        message ||
+        tr(
+          'extensionStartDesktopCapture',
+          'Start Browser Recall Desktop to resume live capture.',
+          undefined,
+        ),
+    },
   );
-  renderConnectorDiagnostic({ state: 'offline', hasToken: true });
-  const title = document.getElementById('setupRequiredTitle');
-  if (title) {
-    title.textContent =
-      message === defaultOfflineMessage
-        ? tr('extensionDesktopOffline', 'Desktop Offline', undefined)
-        : message;
-  }
-  const meta = document.getElementById('setupRequiredMeta');
-  if (meta)
-    meta.textContent = tr(
-      'extensionStartDesktopCapture',
-      'Start Browser Recall Desktop to resume live capture.',
-      undefined,
-    );
 }
 
 function showDesktopDataUnavailable(
@@ -598,26 +562,7 @@ function showDesktopDataUnavailable(
   });
 }
 
-function clearSetupDiagnostic() {
-  const el = document.getElementById('setupDiagnostic');
-  if (!el) return;
-  el.style.display = 'none';
-  el.textContent = '';
-}
-
-function renderSetupDiagnostic(diagnostic) {
-  const el = document.getElementById('setupDiagnostic');
-  if (!el) return;
-  const text = formatSetupDiagnostic(diagnostic);
-  if (!text) {
-    clearSetupDiagnostic();
-    return;
-  }
-  el.textContent = text;
-  el.style.display = 'block';
-}
-
-function formatSetupDiagnostic(diagnostic) {
+function formatDiagnosticDetail(diagnostic) {
   if (!diagnostic) return '';
   const lines = [];
   if (diagnostic.reason) lines.push(`reason: ${diagnostic.reason}`);
@@ -705,29 +650,28 @@ function clearPageDiagnosticSection() {
 }
 
 async function refreshDesktopConnectorState() {
+  const diagnosticOwner = currentConnectorDiagnosticOwner();
   try {
     const connector = await requestConnectorState();
-    applyDesktopConnectorUi(connector);
+    applyDesktopConnectorUi(connector, diagnosticOwner);
     return connector;
   } catch (error) {
-    showDesktopConnectorError(
-      error.message ||
-        tr(
-          'extensionDesktopBridgeUnavailable',
-          'Desktop bridge unavailable.',
-          undefined,
-        ),
-    );
+    if (connectorDiagnosticOwnedBy(diagnosticOwner)) {
+      showDesktopConnectorError(
+        error.message ||
+          tr(
+            'extensionDesktopBridgeUnavailable',
+            'Desktop bridge unavailable.',
+            undefined,
+          ),
+      );
+    }
     throw error;
   }
 }
 
-async function getCachedDesktopConnectorState() {
-  return readCachedConnectorState();
-}
-
-function setupRequiredVisible() {
-  return popupShellState.surface === 'setup';
+function connectorDiagnosticVisible() {
+  return connectorDiagnosticActive && popupShellState.surface === 'diagnostic';
 }
 
 async function loadDashboardIfConnected(connector) {
@@ -741,25 +685,6 @@ async function loadDashboardIfConnected(connector) {
   });
   await currentPage.loadInFlight;
   return true;
-}
-
-async function connectDesktopBridge() {
-  if (desktopConnectInFlight) return;
-  desktopConnectInFlight = true;
-  applyDesktopConnectorUi({ state: 'connecting' });
-  try {
-    const connector = await requestConnectorBridgeConnect();
-    applyDesktopConnectorUi(connector);
-  } catch (error) {
-    showDesktopConnectorError(
-      error.message ||
-        tr('extensionRefreshFailed', 'Failed to refresh.', undefined),
-    );
-  } finally {
-    desktopConnectInFlight = false;
-    const connector = await refreshDesktopConnectorState();
-    await loadDashboardIfConnected(connector);
-  }
 }
 
 // Render snapshots section
@@ -871,6 +796,26 @@ function renderVisitsAndLikes(entry) {
   }
 }
 
+function isSnapshotViewerTab(tab) {
+  if (typeof tab?.url !== 'string' || !tab.url) return false;
+  try {
+    const actual = new URL(tab.url);
+    const viewer = new URL(chrome.runtime.getURL('snapshot-viewer.html'));
+    return (
+      actual.origin === viewer.origin && actual.pathname === viewer.pathname
+    );
+  } catch {
+    return false;
+  }
+}
+
+function sendHighlightMarkupAction(tabId, action) {
+  if (isSnapshotViewerTab(currentPage.tab)) {
+    return chrome.runtime.sendMessage({ action, targetTabId: tabId });
+  }
+  return chrome.tabs.sendMessage(tabId, { action });
+}
+
 async function refreshHighlightMarkupState() {
   const tabId = currentPage.tab?.id;
   if (!Number.isInteger(tabId)) {
@@ -878,9 +823,10 @@ async function refreshHighlightMarkupState() {
   }
   let response;
   try {
-    response = await chrome.tabs.sendMessage(tabId, {
-      action: 'getHighlightMarkupState',
-    });
+    response = await sendHighlightMarkupAction(
+      tabId,
+      'getHighlightMarkupState',
+    );
   } catch (error) {
     // This tab RPC gates only the markup toggle. Authoritative notes come from
     // the desktop and must still render when a loading/restricted tab has no
@@ -928,7 +874,7 @@ function renderMarkupControls() {
       const action = currentPage.markupHidden
         ? 'showHighlightMarkup'
         : 'hideHighlightMarkup';
-      const response = await chrome.tabs.sendMessage(tabId, { action });
+      const response = await sendHighlightMarkupAction(tabId, action);
       requireSuccessfulResponse(response, action);
       currentPage.markupHidden = !currentPage.markupHidden;
       renderMarkupButtonState();
@@ -2103,16 +2049,6 @@ document.querySelector('.recording-copy').addEventListener('click', () => {
   openDesktopApp();
 });
 
-for (const id of ['setupDesktopConnectBtn']) {
-  const button = document.getElementById(id);
-  if (!button) continue;
-  button.addEventListener('click', () => {
-    void runPopupUiMutation('connect-desktop', connectDesktopBridge).catch(
-      (error) => showErrorBubble(error.message),
-    );
-  });
-}
-
 // Capture button handler
 document.getElementById('captureBtn').addEventListener('click', () => {
   void runPopupUiMutation('capture-frame', async () => {
@@ -2268,7 +2204,7 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
           },
         );
       } else {
-        showSetupRequired(connector);
+        renderConnectorDiagnostic(connector);
       }
       return false;
     }
@@ -2293,7 +2229,7 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
         },
       );
     } else {
-      showSetupRequired(connector);
+      renderConnectorDiagnostic(connector);
     }
     return false;
   }
@@ -2372,6 +2308,7 @@ chrome.runtime.onMessage.addListener((request) => {
 function renderPageDashboardShell(options = {}) {
   const { updateRecordingBar = true } = options;
   hideElement('blacklisted');
+  replaceConnectorDiagnosticOwner(false);
   setPopupSurface('dashboard');
   if (updateRecordingBar) void renderRecordingBar();
 }
@@ -2429,6 +2366,7 @@ async function finishDashboardRender(tab, generation) {
 // Show dashboard for a tab: set up state, fetch data, render sections
 async function showDashboard(tab, options = {}) {
   const { hideContentUntilReady = false, compactUntilReady = false } = options;
+  replaceConnectorDiagnosticOwner(false);
   const generation = nextCurrentPageGeneration();
   const previousSlug = currentPage.slug;
   if (hideContentUntilReady) {
@@ -2601,17 +2539,64 @@ function popupBootstrapToken() {
   return new URL(window.location.href).searchParams.get('bootstrap');
 }
 
+function popupActionTabId() {
+  const value = new URL(window.location.href).searchParams.get('actionTabId');
+  if (!value) return null;
+  const tabId = Number(value);
+  return Number.isSafeInteger(tabId) && tabId > 0 ? tabId : null;
+}
+
+let popupBootstrapLifecyclePort = null;
+
 async function consumePopupBootstrap() {
   const token = popupBootstrapToken();
   if (!token) return null;
+  const targetTabId = popupActionTabId();
+  popupBootstrapLifecyclePort = chrome.runtime.connect({
+    name: `popup-bootstrap:${token}:${targetTabId ?? ''}`,
+  });
+  popupBootstrapLifecyclePort.onDisconnect.addListener(() => {
+    popupBootstrapLifecyclePort = null;
+  });
   // Background prepared the popup model before opening this URL. The token is
   // an in-memory one-shot handoff, not extension-side product persistence.
   const response = await chrome.runtime.sendMessage({
     action: 'consumePopupBootstrap',
     token,
+    ...(targetTabId === null ? {} : { targetTabId }),
   });
+  if (response?.success === true && response.missing === true) {
+    popupBootstrapLifecyclePort.disconnect?.();
+    popupBootstrapLifecyclePort = null;
+    return null;
+  }
   if (response?.success !== true) {
     throw new Error(response?.error || 'Popup bootstrap consume failed');
+  }
+  if (
+    !response.bootstrap ||
+    typeof response.bootstrap !== 'object' ||
+    Array.isArray(response.bootstrap)
+  ) {
+    throw new Error('Popup bootstrap response is missing its prepared model');
+  }
+  return {
+    bootstrap: response.bootstrap,
+    pending: response.pending === true,
+    token,
+    targetTabId,
+  };
+}
+
+async function awaitPopupBootstrap(token, targetTabId) {
+  const response = await chrome.runtime.sendMessage({
+    action: 'awaitPopupBootstrap',
+    token,
+    ...(targetTabId === null ? {} : { targetTabId }),
+  });
+  if (response?.success === true && response.missing === true) return null;
+  if (response?.success !== true) {
+    throw new Error(response?.error || 'Popup bootstrap preparation failed');
   }
   if (
     !response.bootstrap ||
@@ -2624,6 +2609,7 @@ async function consumePopupBootstrap() {
 }
 
 async function renderPreparedDashboard(bootstrap) {
+  replaceConnectorDiagnosticOwner(false);
   const generation = nextCurrentPageGeneration();
   const tab = bootstrap.tab;
   const identity = bootstrap.identity;
@@ -2675,11 +2661,37 @@ async function renderPreparedPopup(bootstrap) {
   if (typeof bootstrap.mode !== 'string') {
     throw new Error('Prepared popup model is missing its mode');
   }
-  if (bootstrap.connector) applyDesktopConnectorUi(bootstrap.connector);
+  if (bootstrap.tab && typeof bootstrap.tab === 'object') {
+    currentPage.tab = bootstrap.tab;
+  }
+
+  // Session storage is the authority for the recording control. Prepared page
+  // data may have been computed before a pause/resume command completed, so a
+  // pending local command owns the surface until it settles.
+  const { paused } = await loadRecordingState();
+  if (recordingUiState.pending) return;
+  if (
+    paused &&
+    (bootstrap.mode === 'private' || bootstrap.mode === 'dashboard')
+  ) {
+    renderBannerOnly();
+    revealPopup();
+    return;
+  }
+  if (bootstrap.mode === 'private') {
+    if (!bootstrap.tab || typeof bootstrap.tab !== 'object') {
+      throw new Error('Private popup model is missing its tab');
+    }
+    await showDashboard(bootstrap.tab, {
+      hideContentUntilReady: true,
+      compactUntilReady: true,
+    });
+    return;
+  }
 
   switch (bootstrap.mode) {
-    case 'setup':
-      showSetupRequired(bootstrap.connector);
+    case 'connector-diagnostic':
+      renderConnectorDiagnostic(bootstrap.connector);
       return;
     case 'unavailable':
       if (typeof bootstrap.message !== 'string' || !bootstrap.message) {
@@ -2687,15 +2699,6 @@ async function renderPreparedPopup(bootstrap) {
       }
       showUnavailablePage(bootstrap.message);
       return;
-    case 'private': {
-      if (!bootstrap.tab || typeof bootstrap.tab !== 'object') {
-        throw new Error('Private popup model is missing its tab');
-      }
-      currentPage.tab = bootstrap.tab;
-      renderBannerOnly();
-      revealPopup();
-      return;
-    }
     case 'blacklisted': {
       if (
         !bootstrap.tab ||
@@ -2738,15 +2741,31 @@ async function initPopup() {
   await initializeExtensionI18n();
   localizeDocument();
   await applyTheme();
-  const bootstrap = await consumePopupBootstrap();
-  if (bootstrap) {
-    await renderPreparedPopup(bootstrap);
-    return;
+  // Hydrate the session-authoritative pause state while the static shell is
+  // still hidden, before any prepared diagnostic or controls are revealed.
+  await loadRecordingState();
+  const handoff = await consumePopupBootstrap();
+  if (handoff) {
+    await renderPreparedPopup(handoff.bootstrap);
+    if (handoff.pending) {
+      const bootstrap = await awaitPopupBootstrap(
+        handoff.token,
+        handoff.targetTabId,
+      );
+      if (bootstrap) {
+        await renderPreparedPopup(bootstrap);
+        return;
+      }
+      popupBootstrapLifecyclePort?.disconnect?.();
+      popupBootstrapLifecyclePort = null;
+    } else {
+      return;
+    }
   }
 
   const connector = await refreshDesktopConnectorState();
   if (connector.state !== 'connected' || !connector.deviceId) {
-    showSetupRequired(connector);
+    renderConnectorDiagnostic(connector);
     return;
   }
 
@@ -2760,13 +2779,13 @@ popupInitialization.catch((err) => showFatalError(err.message));
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== 'local') return;
   if (!hasConnectorStateStorageChange(changes)) return;
+  if (!connectorDiagnosticVisible()) return;
   void (async () => {
-    const connector = setupRequiredVisible()
-      ? await refreshDesktopConnectorState()
-      : await getCachedDesktopConnectorState();
-    applyDesktopConnectorUi(connector);
-    if (setupRequiredVisible()) {
+    const connector = await refreshDesktopConnectorState();
+    if (connectorDiagnosticVisible()) {
       await loadDashboardIfConnected(connector);
     }
-  })();
+  })().catch((error) => {
+    logDebug('[popup] reactive connector refresh failed:', error.message);
+  });
 });

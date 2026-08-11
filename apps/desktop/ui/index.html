@@ -34,7 +34,9 @@
         --highlight-history-muted-ink: #767676;
         --highlight-history-selection-fill: rgba(118, 118, 118, 0.3);
         --highlight-history-action-hover: rgba(0, 0, 0, 0.06);
-        --highlight-history-font: 'Gentium Book Plus', Georgia, serif;
+        --highlight-history-font:
+          'Gentium Book Plus', system-ui, -apple-system, BlinkMacSystemFont,
+          'Segoe UI', sans-serif;
       }
 
       html[data-color-scheme='mono'] {
@@ -139,6 +141,13 @@
         display: flex;
         flex-direction: column;
         overflow: hidden;
+      }
+
+      button,
+      input,
+      select,
+      textarea {
+        font-family: inherit;
       }
 
       .sidebar-header {
@@ -2258,7 +2267,7 @@
       }
 
       .data-path {
-        font-family: 'Monaco', 'Menlo', monospace;
+        font-family: var(--font-body);
         font-size: 12px;
         color: var(--text-primary);
         word-break: break-all;
@@ -2543,7 +2552,7 @@
         border: 1px solid var(--border-glass);
         border-radius: var(--radius-pill);
         font-size: 13px;
-        font-family: 'Monaco', 'Menlo', monospace;
+        font-family: var(--font-body);
         background: var(--bg-surface);
         color: var(--text-primary);
         box-shadow: var(--highlight-top), var(--highlight-edge);
@@ -2575,7 +2584,7 @@
         border-radius: 4px;
         margin-bottom: 4px;
         font-size: 12px;
-        font-family: 'Monaco', 'Menlo', monospace;
+        font-family: var(--font-body);
         color: var(--text-primary);
         word-break: break-all;
       }
@@ -2623,6 +2632,7 @@
         border: 1px solid var(--border-subtle);
         border-radius: 4px;
         font-size: 12px;
+        font-family: var(--font-body);
         background: var(--bg-surface);
         flex-shrink: 0;
       }
@@ -4260,6 +4270,14 @@
         font: 12px var(--font-body);
         color: var(--text-muted);
       }
+      #onboardingLaunchAtLoginError,
+      #launchAtLoginError {
+        display: none;
+        margin-top: 6px;
+        font: 12px/1.4 var(--font-body);
+        color: var(--accent-red);
+        overflow-wrap: anywhere;
+      }
       #onboardingDirBtn {
         padding: 8px 18px;
         border: 1px solid var(--accent-primary);
@@ -4548,8 +4566,9 @@
             id="onboardingLaunchAtLoginUnsupported"
             data-i18n="desktopLaunchAtLoginUnsupported"
           >
-            Launch at login is available on macOS 13 or newer.
+            Launch at login is unavailable on this system.
           </p>
+          <p id="onboardingLaunchAtLoginError" class="selectable-text"></p>
         </div>
 
         <div class="onboarding-section onboarding-required">
@@ -5069,8 +5088,9 @@
                     color: var(--text-muted);
                   "
                 >
-                  Launch at login is currently available on macOS 13 or newer.
+                  Launch at login is unavailable on this system.
                 </div>
+                <div id="launchAtLoginError" class="selectable-text"></div>
               </div>
               <div class="option">
                 <div class="option-row" style="align-items: flex-start">

@@ -312,7 +312,7 @@
     "description": "Desktop launch-at-login setting."
   },
   "desktopLaunchAtLoginUnsupported": {
-    "message": "登录时启动仅适用于 macOS 13 或更高版本。",
+    "message": "此系统不支持登录时启动。",
     "description": "Launch-at-login platform support notice."
   },
   "desktopLaunchAtLoginLong": {
@@ -1078,7 +1078,7 @@
     "description": "Extension fatal error reload button."
   },
   "extensionOpenAppFallback": {
-    "message": "无法打开应用？请从“应用程序”文件夹启动它，然后重试。",
+    "message": "无法打开应用？请从系统的应用启动器中启动它，然后重试。",
     "description": "Extension options fallback notice."
   },
   "extensionToggleRecording": {

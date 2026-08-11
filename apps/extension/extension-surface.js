@@ -13,7 +13,7 @@
       --br-accent-soft: rgba(23, 23, 19, 0.055);
       --br-accent-red: #ff2d20;
       --br-accent-red-soft: rgba(255, 45, 32, 0.14);
-      --br-font-body: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+      --br-font-body: SFMono-Regular, Menlo, Consolas, 'Liberation Mono', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       --br-ease-smooth: cubic-bezier(0.25, 0.1, 0.25, 1);
     }
 
@@ -303,6 +303,120 @@
     selection.addRange(range);
   }
 
+  function createHighlightEditOverlay({
+    doc = document,
+    view = doc.defaultView || window,
+    rect,
+    note,
+    placeholder,
+    confirmTitle,
+    editTitle,
+    deleteTitle,
+    save,
+    onSaved,
+    onDelete,
+    onError = () => {},
+  }) {
+    doc.getElementById('browser-recall-highlight-overlay')?.remove();
+
+    const host = doc.createElement('div');
+    host.id = 'browser-recall-highlight-overlay';
+    host.style.cssText =
+      'position: absolute; z-index: 2147483647; visibility: hidden;';
+
+    // This tree contains private note text and mutation controls. Keep it
+    // closed, and stop its input events below so an archived or live page
+    // cannot inspect the editor or react to its save/delete interactions.
+    const shadow = host.attachShadow({ mode: 'closed' });
+    shadow.innerHTML = `
+      <style>
+        ${SHADOW_CSS}
+        ${HIGHLIGHT_ENTRY_CSS}
+        .overlay {
+          width: 300px;
+          background: var(--br-bg-base);
+          border: var(--br-floating-border);
+          border-radius: 2px;
+          color: var(--br-text-primary);
+          font-family: var(--br-font-body);
+          font-size: 12px;
+          line-height: 1.45;
+          padding: 0 8px;
+        }
+        .highlight-item {
+          --br-highlight-side-padding: 0px;
+          border-top: 0;
+        }
+      </style>
+      <div class="overlay">
+        ${highlightEntryHtml(note, { deleteTitle, editTitle })}
+      </div>
+    `;
+    doc.body.appendChild(host);
+
+    for (const eventName of [
+      'pointerdown',
+      'pointerup',
+      'mousedown',
+      'mouseup',
+      'click',
+      'dblclick',
+      'touchstart',
+      'touchend',
+    ]) {
+      shadow.addEventListener(eventName, (event) => event.stopPropagation());
+    }
+
+    let handleOutsideClick;
+    const removeHost = () => {
+      if (handleOutsideClick) {
+        doc.removeEventListener('mousedown', handleOutsideClick);
+      }
+      host.remove();
+    };
+    const item = shadow.querySelector('.highlight-item');
+    openHighlightNoteEditor({
+      item,
+      note,
+      placeholder,
+      confirmTitle,
+      editTitle,
+      save,
+      async onSaved(...args) {
+        await onSaved(...args);
+        removeHost();
+      },
+      onError,
+      view,
+    });
+
+    const deleteAction = shadow.querySelector('.note-action-btn.delete');
+    deleteAction.addEventListener('click', async () => {
+      deleteAction.disabled = true;
+      try {
+        await onDelete();
+        removeHost();
+      } catch (error) {
+        onError(error);
+        if (host.isConnected) deleteAction.disabled = false;
+      }
+    });
+
+    handleOutsideClick = (event) => {
+      if (!host.contains(event.target)) removeHost();
+    };
+    setTimeout(() => {
+      if (host.isConnected) {
+        doc.addEventListener('mousedown', handleOutsideClick);
+      }
+    }, 100);
+
+    positionNearRect(host, rect, view);
+    const editor = shadow.querySelector('.highlight-note-editor');
+    editor?.focus();
+    return { host, editor, remove: removeHost };
+  }
+
   function positionNearRect(host, rect, win = window, options = {}) {
     const gap = options.gap ?? 4;
     const margin = options.margin ?? 8;
@@ -332,47 +446,16 @@
     host.style.visibility = 'visible';
   }
 
-  function trashButtonHtml(title = '') {
-    return `<button class="delete-btn" title="${escapeHtml(title)}"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></button>`;
-  }
-
-  function noteOverlayHtml({
-    title,
-    excerpt,
-    placeholder,
-    includeDelete = false,
-    deleteTitle = '',
-  } = {}) {
-    const label = title
-      ? `<div class="br-note-label">${escapeHtml(title)}</div>`
-      : '';
-    const quote =
-      excerpt === undefined
-        ? ''
-        : `<div class="br-note-excerpt">${escapeHtml(excerpt)}</div>`;
-    return `
-      ${label}
-      ${quote}
-      <div class="br-note-editor">
-        ${includeDelete ? trashButtonHtml(deleteTitle) : ''}
-        <div class="br-note-body">
-          <textarea placeholder="${escapeHtml(placeholder || '')}"></textarea>
-        </div>
-      </div>
-    `;
-  }
-
   globalThis.browserRecallExtensionSurface = {
+    createHighlightEditOverlay,
     escapeHtml,
     formatHighlightExcerpt,
     highlightEntryCss: HIGHLIGHT_ENTRY_CSS,
     highlightEntryHtml,
     highlightExcerptParts,
     installHighlightEntryStyles,
-    noteOverlayHtml,
     openHighlightNoteEditor,
     positionNearRect,
     shadowCss: SHADOW_CSS,
-    trashButtonHtml,
   };
 })();

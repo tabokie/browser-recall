@@ -1,0 +1,10 @@
+- I'm testing the app on a Windows machine. During the build it says "_options-stub.html has hardcoded localized UI text: Mac OS X"
+- Why do you use "._" as a way to test macos? I think it's a very hacky way of doing things.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) based on prompts/STAGING.txt
+- Fix them all, including architectural improvement
+- Please review my uncommitted changes
+- Fix them
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.6 Sol
+- Sure
+- As code comment somewhere
+- Sure

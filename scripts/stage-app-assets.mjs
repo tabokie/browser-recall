@@ -65,23 +65,45 @@ const targets = {
   },
 };
 
-function copyDir(sourceDir, outDir) {
+const APPLEDOUBLE_MAGIC = 0x00051607;
+
+function isAppleDoubleMetadata(filePath) {
+  if (!path.basename(filePath).startsWith('._')) return false;
+  if (!fs.statSync(filePath).isFile()) return false;
+
+  const header = Buffer.allocUnsafe(4);
+  const descriptor = fs.openSync(filePath, 'r');
+  try {
+    return (
+      fs.readSync(descriptor, header, 0, header.length, 0) === header.length &&
+      header.readUInt32BE(0) === APPLEDOUBLE_MAGIC
+    );
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function sourceTreeEntryIncluded(filePath, excludedBasenames = new Set()) {
+  const basename = path.basename(filePath);
+  return (
+    basename !== '.DS_Store' &&
+    !isAppleDoubleMetadata(filePath) &&
+    !excludedBasenames.has(basename)
+  );
+}
+
+export function copyStagedSourceTree(
+  sourceDir,
+  outDir,
+  { excludedBasenames = [] } = {},
+) {
+  const excluded = new Set(excludedBasenames);
   fs.rmSync(outDir, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(outDir), { recursive: true });
   fs.cpSync(sourceDir, outDir, {
     recursive: true,
     dereference: true,
-    filter: (source) => {
-      const basename = path.basename(source);
-      if (basename === 'package.json') return false;
-      if (
-        sourceDir === extensionSourceDir &&
-        extensionProductionExcludes.has(basename)
-      ) {
-        return false;
-      }
-      return true;
-    },
+    filter: (source) => sourceTreeEntryIncluded(source, excluded),
   });
 }
 
@@ -262,25 +284,36 @@ export function validateLocaleMessage(
 function collectLocalizationSources(dir, relativeRoot = repoRoot) {
   const sources = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const filePath = path.join(dir, entry.name);
+    if (!sourceTreeEntryIncluded(filePath, localizationSourceExcludes)) {
+      continue;
+    }
     if (
       entry.isDirectory() &&
       ['_locales', 'lib', 'savepage'].includes(entry.name)
     ) {
       continue;
     }
-    const filePath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       sources.push(...collectLocalizationSources(filePath, relativeRoot));
       continue;
     }
     if (!/\.(?:html|js|json)$/.test(entry.name)) continue;
-    if (localizationSourceExcludes.has(entry.name)) continue;
     sources.push({
       path: path.relative(relativeRoot, filePath),
       source: fs.readFileSync(filePath, 'utf8'),
     });
   }
   return sources;
+}
+
+export function discoverLocalizationSources(
+  sourceDirs = [extensionSourceDir, desktopUiSourceDir],
+  { relativeRoot = repoRoot } = {},
+) {
+  return sourceDirs.flatMap((dir) =>
+    collectLocalizationSources(dir, relativeRoot),
+  );
 }
 
 function referencedLocalizationKeys(source) {
@@ -508,10 +541,7 @@ export function validateLocalizedUiSource(filePath, source) {
 
 export function validateLocalizationReferences(
   catalogs,
-  sources = [
-    ...collectLocalizationSources(extensionSourceDir),
-    ...collectLocalizationSources(desktopUiSourceDir),
-  ],
+  sources = discoverLocalizationSources(),
 ) {
   const defaultCatalog =
     catalogs.get(DEFAULT_LOCALE) || catalogs.get('en') || new Map();
@@ -690,10 +720,14 @@ function writeExtensionManifest(outDir, browser = 'chrome') {
 function stageTarget(name, outDir = targets[name].defaultOutDir) {
   const target = targets[name];
   validateLocaleCatalogs();
-  copyDir(target.sourceDir, outDir);
-  fs.cpSync(sharedCoreDir, path.join(outDir, 'core'), {
-    recursive: true,
-    dereference: true,
+  copyStagedSourceTree(target.sourceDir, outDir, {
+    excludedBasenames: [
+      'package.json',
+      ...(name === 'extension' ? extensionProductionExcludes : []),
+    ],
+  });
+  copyStagedSourceTree(sharedCoreDir, path.join(outDir, 'core'), {
+    excludedBasenames: ['package.json'],
   });
   rewriteCoreImports(outDir, target);
   return outDir;

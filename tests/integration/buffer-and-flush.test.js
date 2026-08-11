@@ -822,6 +822,85 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     );
   }, 30_000);
 
+  it('waits for status-task publication after authentication', async () => {
+    const dir = mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-snapshot-status-publication-'),
+    );
+    tempDirs.push(dir);
+
+    originalWebSocket = globalThis.WebSocket;
+    originalChrome = globalThis.chrome;
+    originalNavigator = globalThis.navigator;
+    originalSetTimeout = globalThis.setTimeout;
+
+    const { chrome, store } = createChromeMock();
+    globalThis.chrome = chrome;
+    globalThis.WebSocket = BrowserLikeWebSocket;
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { userAgent: 'Chrome/123.0.0.0 Safari/537.36' },
+      configurable: true,
+    });
+    globalThis.setTimeout = (fn, delay, ...args) => {
+      const timer = originalSetTimeout(fn, delay, ...args);
+      timer?.unref?.();
+      return timer;
+    };
+
+    let releaseStatusPublication;
+    const statusPublicationGate = new Promise((resolve) => {
+      releaseStatusPublication = resolve;
+    });
+    let statusPublicationBlocked = false;
+    let connectingStateWrites = 0;
+    const setStorage = chrome.storage.local.set;
+    chrome.storage.local.set = async (values) => {
+      if (values.connectorState === 'connecting') connectingStateWrites += 1;
+      if (
+        !statusPublicationBlocked &&
+        values.connectorState === 'connecting' &&
+        connectingStateWrites === 2
+      ) {
+        statusPublicationBlocked = true;
+        await statusPublicationGate;
+      }
+      await setStorage(values);
+    };
+
+    const wsClient =
+      await import('../../apps/extension/connector/ws-client.js');
+    const child = launchDaemon(dir, 'allow');
+    childProcesses.push(child);
+    store.connectorDaemonPort = await waitForListening(child);
+
+    await wsClient.initConnectorBridge();
+    await waitFor(() => statusPublicationBlocked);
+
+    const budgetOutcome = wsClient
+      .requestDesktopSnapshotCaptureBudget({
+        slug: 'status-publication-snapshot',
+        ts: 1710000002726,
+        url: 'https://example.com/status-publication-snapshot',
+        title: null,
+        markdown: null,
+      })
+      .then(
+        (value) => ({ status: 'resolved', value }),
+        (error) => ({ status: 'rejected', error }),
+      );
+    const earlyOutcome = await Promise.race([
+      budgetOutcome,
+      new Promise((resolve) =>
+        originalSetTimeout(() => resolve({ status: 'pending' }), 50),
+      ),
+    ]);
+    releaseStatusPublication();
+
+    expect(earlyOutcome).toEqual({ status: 'pending' });
+    const outcome = await budgetOutcome;
+    expect(outcome.status).toBe('resolved');
+    expect(outcome.value.maxEncodedHtmlBytes).toBeGreaterThan(0);
+  }, 30_000);
+
   it('does not let a replaced authentication callback publish state or credentials', async () => {
     const dir = mkdtempSync(
       path.join(tmpdir(), 'browser-recall-replaced-auth-callback-'),

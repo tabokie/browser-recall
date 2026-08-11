@@ -70,6 +70,10 @@ const BROWSER_CAPABILITIES = getBrowserCapabilities();
 let lastLogTimestamp = 0;
 const pendingPopupBootstraps = new Map();
 let popupBootstrapMutationRevision = 0;
+let preparedActionPopupUpdateTail = Promise.resolve();
+let preparedActionPopupGlobalOwner = null;
+const preparedActionPopupTabOwners = new Map();
+let popupPreparationGateForTest = null;
 
 // tabId → URL from the content script's initial recordPageActivity.
 // Used by popup to avoid slug mismatch when tab.url drifts (SPA pushState, etc.).
@@ -847,6 +851,18 @@ async function handleContextMenuHighlight(url, title, selectionText, tabId) {
   return { success: true, noteSlug: response.noteSlug };
 }
 
+async function highlightSnapshotSelection(tab, selectionText) {
+  const response = await chrome.runtime.sendMessage({
+    action: 'highlightSelection',
+    targetTabId: tab.id,
+    ...(selectionText ? { selectionText } : {}),
+  });
+  if (!response || typeof response.success !== 'boolean') {
+    throw new Error('Snapshot highlight response is incomplete');
+  }
+  return response;
+}
+
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId !== 'browser-recall-highlight') return;
   if (!info.selectionText) return;
@@ -864,12 +880,15 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 
   try {
-    const response = await handleContextMenuHighlight(
-      activeTab.url,
-      activeTab.title,
-      info.selectionText.trim(),
-      activeTab.id,
-    );
+    const selectionText = info.selectionText.trim();
+    const response = snapshotViewerSlugFromUrl(activeTab.url)
+      ? await highlightSnapshotSelection(activeTab, selectionText)
+      : await handleContextMenuHighlight(
+          activeTab.url,
+          activeTab.title,
+          selectionText,
+          activeTab.id,
+        );
     if (response?.success !== true) {
       await notifyTabUserActionError(
         activeTab.id,
@@ -898,10 +917,13 @@ chrome.commands.onCommand.addListener(async (command) => {
   }
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const snapshotSlug = snapshotViewerSlugFromUrl(tab?.url);
+  const targetsSnapshotViewer =
+    command === 'highlight-selection' && Boolean(snapshotSlug);
   if (
-    !tab ||
+    !tab?.url ||
     isInternalBrowserUrl(tab.url) ||
-    tab.url.startsWith('chrome-extension://')
+    (tab.url.startsWith('chrome-extension://') && !targetsSnapshotViewer)
   ) {
     logDebug('[background] Command ignored: no suitable tab');
     return { success: true, handled: false, reason: 'no_suitable_tab' };
@@ -959,9 +981,11 @@ chrome.commands.onCommand.addListener(async (command) => {
   } else if (command === 'highlight-selection') {
     try {
       logDebug(`[background] Sending highlightSelection to tab ${tab.id}`);
-      const resp = await chrome.tabs.sendMessage(tab.id, {
-        action: 'highlightSelection',
-      });
+      const resp = snapshotSlug
+        ? await highlightSnapshotSelection(tab)
+        : await chrome.tabs.sendMessage(tab.id, {
+            action: 'highlightSelection',
+          });
       logDebug('[background] highlightSelection response:', resp);
       if (resp?.success !== true) {
         await notifyTabUserActionError(
@@ -1227,7 +1251,21 @@ function popupBootstrapToken() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function storePopupBootstrap(bootstrap, mutationRevision) {
+function popupBootstrapPath(token, actionTabId = null) {
+  const params = new URLSearchParams({ bootstrap: token });
+  if (Number.isSafeInteger(actionTabId) && actionTabId > 0) {
+    params.set('actionTabId', String(actionTabId));
+  }
+  return `popup.html?${params.toString()}`;
+}
+
+function storePopupBootstrap({
+  bootstrap,
+  mutationRevision,
+  targetTabId,
+  preparation = null,
+  refreshAfterMutation = true,
+}) {
   // The popup can only receive a URL from chrome.action.openPopup(), not an
   // object payload. Keep the prepared model in memory and pass a one-shot token
   // so normal toolbar opens avoid extension-side persistent product caches.
@@ -1235,28 +1273,53 @@ function storePopupBootstrap(bootstrap, mutationRevision) {
   pendingPopupBootstraps.set(token, {
     bootstrap,
     mutationRevision,
+    targetTabId: Number.isFinite(targetTabId) ? targetTabId : null,
+    refreshAfterMutation,
+    lifecycleConnected: false,
+    claimed: false,
+    preparation:
+      preparation === null
+        ? null
+        : Promise.resolve(preparation).then(
+            (preparedBootstrap) => ({
+              success: true,
+              bootstrap: preparedBootstrap,
+            }),
+            (error) => ({
+              success: false,
+              error: error?.message || String(error),
+            }),
+          ),
     expiresAt: Date.now() + POPUP_BOOTSTRAP_TTL_MS,
   });
   setTimeout(() => {
     const entry = pendingPopupBootstraps.get(token);
-    if (entry?.expiresAt <= Date.now()) pendingPopupBootstraps.delete(token);
+    if (entry?.expiresAt <= Date.now()) {
+      pendingPopupBootstraps.delete(token);
+      void releasePreparedActionPopup(token);
+    }
   }, POPUP_BOOTSTRAP_TTL_MS + 1000);
   return token;
 }
 
-async function consumePopupBootstrapEntry(token, entry) {
-  if (token) pendingPopupBootstraps.delete(token);
-  if (entry.expiresAt <= Date.now()) {
-    return { success: false, error: 'Popup bootstrap expired' };
+function deletePopupBootstrap(token, entry) {
+  if (pendingPopupBootstraps.get(token) === entry) {
+    pendingPopupBootstraps.delete(token);
   }
-  if (entry.mutationRevision !== popupBootstrapMutationRevision) {
-    const preparedTab = entry.bootstrap?.tab;
-    let tab = preparedTab;
-    if (Number.isFinite(preparedTab?.id)) {
+}
+
+async function resolvePopupBootstrapEntry(entry) {
+  let bootstrap = entry.bootstrap;
+  while (
+    entry.refreshAfterMutation &&
+    entry.mutationRevision !== popupBootstrapMutationRevision
+  ) {
+    const preparationRevision = popupBootstrapMutationRevision;
+    let tab = bootstrap?.tab;
+    if (Number.isFinite(entry.targetTabId)) {
       try {
-        tab = await chrome.tabs.get(preparedTab.id);
+        tab = await chrome.tabs.get(entry.targetTabId);
       } catch (error) {
-        clearPreparedActionPopup(preparedTab.id);
         return {
           success: false,
           error: `Popup bootstrap tab is unavailable: ${error.message}`,
@@ -1264,42 +1327,156 @@ async function consumePopupBootstrapEntry(token, entry) {
       }
     }
     if (!tab) {
-      clearPreparedActionPopup(preparedTab?.id);
       return { success: false, error: 'Popup bootstrap invalidated' };
     }
-    const bootstrap = await preparePopupBootstrapWithTimeout(tab);
-    clearPreparedActionPopup(tab.id);
-    return { success: true, bootstrap };
+    bootstrap = await preparePopupBootstrapWithTimeout(tab);
+    entry.bootstrap = bootstrap;
+    entry.mutationRevision = preparationRevision;
   }
-  clearPreparedActionPopup(entry.bootstrap?.tab?.id);
-  return { success: true, bootstrap: entry.bootstrap };
+  return { success: true, bootstrap };
 }
 
 async function handleConsumePopupBootstrap(request) {
   const token = typeof request.token === 'string' ? request.token : '';
+  const targetTabId =
+    Number.isSafeInteger(request.targetTabId) && request.targetTabId > 0
+      ? request.targetTabId
+      : null;
+  await releasePreparedActionPopup(token, targetTabId);
   const entry = token ? pendingPopupBootstraps.get(token) : null;
-  if (entry) return await consumePopupBootstrapEntry(token, entry);
-  return { success: false, error: 'Popup bootstrap not found' };
-}
-
-function clearPreparedActionPopup(tabId) {
-  if (!chrome.action?.setPopup) return;
-  const clearDetails = [{ popup: '' }];
-  if (Number.isFinite(tabId)) clearDetails.push({ tabId, popup: '' });
-  for (const details of clearDetails) {
-    chrome.action
-      .setPopup(details)
-      .catch((error) =>
-        logDebug('[popup] action popup clear failed:', error.message),
-      );
+  if (!entry) return { success: true, missing: true };
+  if (entry.expiresAt <= Date.now()) {
+    deletePopupBootstrap(token, entry);
+    return { success: false, error: 'Popup bootstrap expired' };
+  }
+  if (entry.claimed) {
+    return { success: false, error: 'Popup bootstrap already consumed' };
+  }
+  entry.claimed = true;
+  if (entry.preparation) {
+    return { success: true, pending: true, bootstrap: entry.bootstrap };
+  }
+  try {
+    return await resolvePopupBootstrapEntry(entry);
+  } finally {
+    deletePopupBootstrap(token, entry);
   }
 }
 
-async function setPreparedActionPopup(tabId, popupPath) {
-  await chrome.action.setPopup({ popup: popupPath });
-  if (Number.isFinite(tabId)) {
-    await chrome.action.setPopup({ tabId, popup: popupPath });
+async function handleAwaitPopupBootstrap(request) {
+  const token = typeof request.token === 'string' ? request.token : '';
+  const targetTabId =
+    Number.isSafeInteger(request.targetTabId) && request.targetTabId > 0
+      ? request.targetTabId
+      : null;
+  await releasePreparedActionPopup(token, targetTabId);
+  const entry = token ? pendingPopupBootstraps.get(token) : null;
+  if (!entry) return { success: true, missing: true };
+  if (!entry.claimed) {
+    return { success: false, error: 'Popup bootstrap has not been consumed' };
   }
+  if (!entry.preparation) {
+    return { success: false, error: 'Popup bootstrap is not pending' };
+  }
+
+  try {
+    const outcome = await entry.preparation;
+    if (outcome.success !== true) return outcome;
+    entry.bootstrap = outcome.bootstrap;
+    entry.preparation = null;
+    return await resolvePopupBootstrapEntry(entry);
+  } finally {
+    deletePopupBootstrap(token, entry);
+  }
+}
+
+function queuePreparedActionPopupUpdate(update) {
+  const task = preparedActionPopupUpdateTail.then(update, update);
+  preparedActionPopupUpdateTail = task.catch((error) => {
+    logDebug('[popup] action popup update failed:', error.message);
+  });
+  return task;
+}
+
+async function applyPreparedActionPopupClears(details) {
+  const outcomes = await Promise.allSettled(
+    details.map((entry) => chrome.action.setPopup(entry)),
+  );
+  for (const outcome of outcomes) {
+    if (outcome.status === 'rejected') {
+      logDebug('[popup] action popup clear failed:', outcome.reason?.message);
+    }
+  }
+}
+
+function releasePreparedActionPopup(token, targetTabId = null) {
+  if (!token || !chrome.action?.setPopup) return Promise.resolve();
+  return queuePreparedActionPopupUpdate(async () => {
+    const clearDetails = [];
+    if (preparedActionPopupGlobalOwner === token) {
+      preparedActionPopupGlobalOwner = null;
+      clearDetails.push({ popup: '' });
+    }
+    if (Number.isFinite(targetTabId)) {
+      const owner = preparedActionPopupTabOwners.get(targetTabId);
+      if (owner === undefined || owner === token) {
+        preparedActionPopupTabOwners.delete(targetTabId);
+        clearDetails.push({ tabId: targetTabId, popup: '' });
+      }
+    }
+    for (const [tabId, owner] of preparedActionPopupTabOwners) {
+      if (owner !== token) continue;
+      preparedActionPopupTabOwners.delete(tabId);
+      clearDetails.push({ tabId, popup: '' });
+    }
+    await applyPreparedActionPopupClears(clearDetails);
+  });
+}
+
+function resetPreparedActionPopups() {
+  if (!chrome.action?.setPopup) return Promise.resolve();
+  return queuePreparedActionPopupUpdate(async () => {
+    const clearDetails = [
+      { popup: '' },
+      ...[...preparedActionPopupTabOwners.keys()].map((tabId) => ({
+        tabId,
+        popup: '',
+      })),
+    ];
+    preparedActionPopupGlobalOwner = null;
+    preparedActionPopupTabOwners.clear();
+    await applyPreparedActionPopupClears(clearDetails);
+  });
+}
+
+chrome.runtime.onConnect.addListener((port) => {
+  const prefix = 'popup-bootstrap:';
+  if (typeof port.name !== 'string' || !port.name.startsWith(prefix)) return;
+  const [token, encodedTabId = ''] = port.name.slice(prefix.length).split(':');
+  const parsedTabId = Number(encodedTabId);
+  const targetTabId =
+    encodedTabId && Number.isSafeInteger(parsedTabId) && parsedTabId > 0
+      ? parsedTabId
+      : null;
+  void releasePreparedActionPopup(token, targetTabId);
+  const entry = pendingPopupBootstraps.get(token);
+  if (!entry) return;
+  entry.lifecycleConnected = true;
+  port.onDisconnect.addListener(() => {
+    deletePopupBootstrap(token, entry);
+  });
+});
+
+function setPreparedActionPopup(token, tabId, popupPath) {
+  return queuePreparedActionPopupUpdate(async () => {
+    if (Number.isFinite(tabId)) {
+      await chrome.action.setPopup({ tabId, popup: popupPath });
+      preparedActionPopupTabOwners.set(tabId, token);
+      return;
+    }
+    await chrome.action.setPopup({ popup: popupPath });
+    preparedActionPopupGlobalOwner = token;
+  });
 }
 
 function snapshotViewerSlugFromUrl(url) {
@@ -1526,7 +1703,7 @@ async function preparePopupBootstrapForTab(tab) {
   const connector = await getConnectorBridgeState();
   if (!summary?.success) {
     if (connector?.state !== 'connected' || !connector?.deviceId) {
-      return { mode: 'setup', connector };
+      return { mode: 'connector-diagnostic', connector };
     }
     return {
       mode: 'data-unavailable',
@@ -1610,32 +1787,83 @@ async function preparePopupBootstrapWithTimeout(tab) {
 async function preparePopupOpenPayload(tab) {
   const mutationRevision = popupBootstrapMutationRevision;
   const bootstrap = await preparePopupBootstrapWithTimeout(tab);
-  const token = storePopupBootstrap(bootstrap, mutationRevision);
+  const token = storePopupBootstrap({
+    bootstrap,
+    mutationRevision,
+    targetTabId: tab?.id,
+  });
   return {
     bootstrap,
-    popupPath: `popup.html?bootstrap=${encodeURIComponent(token)}`,
+    popupPath: popupBootstrapPath(token),
   };
 }
 
-async function openPreparedActionPopup(tab) {
-  const { popupPath } = await preparePopupOpenPayload(tab);
+function initialPopupBootstrap(tab) {
+  if (popupTabIsUnavailable(tab)) {
+    return {
+      mode: 'unavailable',
+      message: tr('extensionNotAvailablePage', 'Not available for this page'),
+    };
+  }
+  return {
+    mode: 'connector-diagnostic',
+    connector: { state: 'starting' },
+    tab: {
+      id: tab.id,
+      url: tab.url,
+      title: tab.title || '',
+    },
+  };
+}
+
+function beginPopupOpenPayload(tab, options = {}) {
+  const mutationRevision = popupBootstrapMutationRevision;
+  const bootstrap = initialPopupBootstrap(tab);
+  const preparation =
+    bootstrap.mode === 'connector-diagnostic'
+      ? Promise.resolve(options.preparationGate).then(() =>
+          options.preparedBootstrap
+            ? options.preparedBootstrap
+            : preparePopupBootstrapWithTimeout(tab),
+        )
+      : null;
+  const token = storePopupBootstrap({
+    bootstrap,
+    mutationRevision,
+    targetTabId: tab?.id,
+    preparation,
+    refreshAfterMutation: !options.preparedBootstrap,
+  });
+  return {
+    token,
+    popupPath: popupBootstrapPath(token, options.actionTabId),
+  };
+}
+
+async function openPreparedActionPopup(tab, options = {}) {
+  const tabId = Number.isFinite(tab?.id) ? tab.id : undefined;
+  const { token, popupPath } = beginPopupOpenPayload(tab, {
+    ...options,
+    actionTabId: tabId,
+  });
   if (!chrome.action?.setPopup || !chrome.action?.openPopup) {
     await chrome.tabs.create({ url: chrome.runtime.getURL(popupPath) });
     return;
   }
-  const tabId = Number.isFinite(tab?.id) ? tab.id : undefined;
   try {
-    await setPreparedActionPopup(tabId, popupPath);
+    await setPreparedActionPopup(token, tabId, popupPath);
     await chrome.action.openPopup();
   } catch (error) {
-    clearPreparedActionPopup(tabId);
+    await releasePreparedActionPopup(token);
     throw error;
   } finally {
-    // Some engines resolve/callback openPopup before the popup document has
-    // consumed its token. Prefer cleanup in handleConsumePopupBootstrap(); this
-    // expiry prevents a stale mapping if the popup never opens.
+    // Some engines resolve/callback openPopup before its document connects the
+    // lifecycle port. If that never happens, clear the otherwise stale mapping.
     setTimeout(() => {
-      clearPreparedActionPopup(tabId);
+      const entry = pendingPopupBootstraps.get(token);
+      if (entry && !entry.lifecycleConnected) {
+        void releasePreparedActionPopup(token);
+      }
     }, POPUP_ACTION_MAPPING_FALLBACK_CLEAR_MS);
   }
 }
@@ -1661,9 +1889,58 @@ globalThis.browserRecallPreparedPopupForTest = {
       popupPath,
     };
   },
+  async open(request = {}) {
+    let preparationGate = null;
+    if (request.holdPreparation === true) {
+      if (popupPreparationGateForTest) {
+        throw new Error('Popup preparation test gate is already active');
+      }
+      let release;
+      preparationGate = new Promise((resolve) => {
+        release = resolve;
+      });
+      popupPreparationGateForTest = { release };
+    }
+    let preparedBootstrap = null;
+    if (request.terminalConnectorState !== undefined) {
+      if (request.terminalConnectorState !== 'offline') {
+        throw new Error('Unsupported popup terminal connector state');
+      }
+      preparedBootstrap = {
+        mode: 'connector-diagnostic',
+        connector: { state: 'offline', hasToken: true },
+      };
+    }
+    const tab = Number.isFinite(request.tabId)
+      ? await chrome.tabs.get(request.tabId)
+      : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
+    await openPreparedActionPopup(tab, {
+      preparationGate,
+      preparedBootstrap,
+    });
+    return { success: true };
+  },
+  async releasePreparation() {
+    const gate = popupPreparationGateForTest;
+    if (!gate) {
+      return { success: false, error: 'Popup preparation gate is not active' };
+    }
+    popupPreparationGateForTest = null;
+    gate.release();
+    return { success: true };
+  },
+  async begin(request = {}) {
+    const tab = Number.isFinite(request.tabId)
+      ? await chrome.tabs.get(request.tabId)
+      : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
+    const { popupPath } = beginPopupOpenPayload(tab);
+    return { success: true, popupPath };
+  },
   async reset() {
+    popupPreparationGateForTest?.release();
+    popupPreparationGateForTest = null;
     pendingPopupBootstraps.clear();
-    clearPreparedActionPopup();
+    await resetPreparedActionPopups();
   },
 };
 
@@ -1936,6 +2213,7 @@ async function handleSetRecordingPaused(request) {
       mode: paused ? 'private' : 'default',
     },
   });
+  popupBootstrapMutationRevision += 1;
   await badgeController.setRecordingPaused(paused);
   return { success: true };
 }
@@ -1945,6 +2223,19 @@ async function handleSetRecordingPaused(request) {
 chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
   // Skip Save Page WE messages (they use `type` field, handled by separate listener)
   if (request.type && !request.action) return false;
+  // Snapshot viewers receive these targeted extension-page broadcasts. The
+  // background must not claim the response channel itself.
+  if (
+    request.targetTabId != null &&
+    [
+      'highlightSelection',
+      'getHighlightMarkupState',
+      'hideHighlightMarkup',
+      'showHighlightMarkup',
+    ].includes(request.action)
+  ) {
+    return false;
+  }
   if (globalThis.browserRecallBackgroundTestActions?.has(request.action)) {
     return false;
   }
@@ -1997,6 +2288,9 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
           break;
         case 'consumePopupBootstrap':
           sendResponse(await handleConsumePopupBootstrap(request));
+          break;
+        case 'awaitPopupBootstrap':
+          sendResponse(await handleAwaitPopupBootstrap(request));
           break;
         case 'mutation':
           sendResponse(handleRuntimeMutation(request));

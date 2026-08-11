@@ -1,3 +1,4 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![cfg_attr(
     not(test),
     deny(
@@ -12,6 +13,9 @@ mod config;
 mod logging;
 mod login_item;
 mod search;
+mod shell_contract;
+#[cfg(target_os = "windows")]
+mod windows_icon;
 
 use browser_recall_daemon::command_authority::CommandAuthority;
 use browser_recall_daemon::commands::{
@@ -40,7 +44,7 @@ use browser_recall_daemon::ws_server::{
 use browser_recall_daemon::{ConfigStore, DaemonConfig};
 use parking_lot::Mutex;
 use search::{CancelSearchRequest, SearchRequest, StreamingSearchRequest};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -75,6 +79,7 @@ struct ShellState {
     data_dir: String,
     log_dir: String,
     login_item_supported: bool,
+    login_item_error: Option<String>,
     launch_at_login: bool,
     debug_logging: bool,
     setup_complete: bool,
@@ -483,47 +488,12 @@ fn create_main_window(app: &AppHandle) -> Result<WebviewWindow, String> {
         .map_err(|error| error.to_string())
 }
 
-#[derive(Serialize)]
-struct UiModel {
-    is_paused: bool,
-    error: Option<String>,
-    endpoint: String,
-    data_dir: String,
-    log_dir: String,
-    device_id: String,
-    launch_at_login: bool,
-    debug_logging: bool,
-    setup_complete: bool,
-    route: Option<String>,
+fn shell_has_error(state: &ShellState) -> bool {
+    !matches!(&state.snapshot.service_state, ServiceState::Running) || state.error.is_some()
 }
 
-impl UiModel {
-    fn from_state(state: &ShellState) -> Self {
-        let endpoint = format!("ws://127.0.0.1:{}", state.snapshot.port);
-        let daemon_error = match &state.snapshot.service_state {
-            ServiceState::Running => None,
-            ServiceState::Paused { message, .. } => Some(message.clone()),
-        };
-        let paused_error = daemon_error.or_else(|| state.error.clone());
-        let is_paused = paused_error.is_some();
-
-        Self {
-            is_paused,
-            error: paused_error,
-            endpoint,
-            data_dir: state.data_dir.clone(),
-            log_dir: state.log_dir.clone(),
-            device_id: state.snapshot.device_id.clone(),
-            launch_at_login: state.launch_at_login,
-            debug_logging: state.debug_logging,
-            setup_complete: state.setup_complete,
-            route: state.route.clone(),
-        }
-    }
-}
-
-fn window_title(model: &UiModel) -> String {
-    if model.is_paused {
+fn window_title(state: &ShellState) -> String {
+    if shell_has_error(state) {
         "Browser Recall - Error".to_string()
     } else {
         "Browser Recall".to_string()
@@ -536,31 +506,48 @@ mod tests {
     use browser_recall_daemon::pairing::static_approver;
     use std::sync::atomic::AtomicUsize;
 
-    fn ui_model(is_paused: bool) -> UiModel {
-        UiModel {
-            is_paused,
-            error: None,
-            endpoint: "ws://127.0.0.1:0".to_string(),
+    fn shell_state(service_state: ServiceState) -> ShellState {
+        ShellState {
+            snapshot: ServerSnapshot {
+                port: 0,
+                device_id: "test-device".to_string(),
+                service_state,
+                connected_connectors: Vec::new(),
+            },
             data_dir: String::new(),
             log_dir: String::new(),
-            device_id: "test-device".to_string(),
+            login_item_supported: true,
+            login_item_error: None,
             launch_at_login: false,
             debug_logging: false,
             setup_complete: true,
             route: None,
+            error: None,
         }
     }
 
     #[test]
     fn window_title_is_plain_when_connected() {
-        let model = ui_model(false);
-        assert_eq!(window_title(&model), "Browser Recall");
+        let state = shell_state(ServiceState::Running);
+        assert_eq!(window_title(&state), "Browser Recall");
     }
 
     #[test]
     fn window_title_keeps_error_state() {
-        let model = ui_model(true);
-        assert_eq!(window_title(&model), "Browser Recall - Error");
+        let state = shell_state(ServiceState::Paused {
+            code: "test".to_string(),
+            message: "test failure".to_string(),
+        });
+        assert_eq!(window_title(&state), "Browser Recall - Error");
+    }
+
+    #[test]
+    fn login_item_diagnostic_does_not_pause_the_desktop_shell() {
+        let mut state = shell_state(ServiceState::Running);
+        state.login_item_error = Some("registration failed".to_string());
+
+        assert_eq!(window_title(&state), "Browser Recall");
+        assert!(!shell_has_error(&state));
     }
 
     #[test]
@@ -702,11 +689,13 @@ fn apply_shell_state(app: &AppHandle) {
         return;
     };
     let shell = state.shell.lock().clone();
-    let model = UiModel::from_state(&shell);
+    let route = shell_contract::ShellRoute {
+        route: shell.route.as_deref(),
+    };
 
     if let Some(window) = app.get_webview_window("main") {
-        log_window_error(window.set_title(&window_title(&model)), "set title");
-        match serde_json::to_string(&model) {
+        log_window_error(window.set_title(&window_title(&shell)), "set title");
+        match serde_json::to_string(&route) {
             Ok(payload) => {
                 let script = format!(
                     "window.__BR_STATE__ = {payload}; if (window.__renderBrowserRecall) window.__renderBrowserRecall();"
@@ -717,7 +706,7 @@ fn apply_shell_state(app: &AppHandle) {
         }
     }
 
-    if model.route.is_some() {
+    if route.route.is_some() {
         let mut shell = state.shell.lock();
         shell.route = None;
     }
@@ -737,7 +726,8 @@ where
 
 #[tauri::command]
 fn update_shell_settings(app: AppHandle, payload: ShellSettingsUpdate) -> Result<(), String> {
-    if payload.launch_at_login && !login_item::is_supported() {
+    let login_item = login_item::SystemLoginItem::new(&app);
+    if payload.launch_at_login && !login_item.supported() {
         return Err("Launch at login is unavailable on this OS".to_string());
     }
 
@@ -753,6 +743,7 @@ fn update_shell_settings(app: AppHandle, payload: ShellSettingsUpdate) -> Result
             .config_store
             .load_or_create()
             .map_err(|error| error.to_string())?;
+        let previous_log_level = config.log_level.clone();
         config.launch_at_login = payload.launch_at_login;
         config.log_level = desired_log_level.clone();
 
@@ -760,15 +751,24 @@ fn update_shell_settings(app: AppHandle, payload: ShellSettingsUpdate) -> Result
             .logging
             .set_level(&desired_log_level)
             .map_err(|error| error.to_string())?;
-        login_item::sync_login_item(payload.launch_at_login).map_err(|error| error.to_string())?;
-        state
-            .config_store
-            .save(&config)
-            .map_err(|error| error.to_string())?;
+        if let Err(error) =
+            login_item.persist(payload.launch_at_login, || state.config_store.save(&config))
+        {
+            let error = if let Err(rollback_error) = state.logging.set_level(&previous_log_level) {
+                format!(
+                    "{error}; restoring the previous logging level also failed: {rollback_error}"
+                )
+            } else {
+                error.to_string()
+            };
+            state.shell.lock().login_item_error = Some(error.clone());
+            return Err(error);
+        }
     }
 
     update_shell_state(&app, |state| {
         state.launch_at_login = payload.launch_at_login;
+        state.login_item_error = None;
         state.debug_logging = payload.debug_logging;
         state.route = Some("settings".to_string());
     });
@@ -1319,6 +1319,7 @@ fn choose_desktop_data_folder(app: &AppHandle) -> Result<Value, String> {
 
 async fn complete_desktop_setup(app: &AppHandle, request: &Value) -> Result<Value, String> {
     let config_store = app.state::<DesktopState>().config_store.clone();
+    let login_item = login_item::SystemLoginItem::new(app);
     let mut config = config_store
         .load_or_create()
         .map_err(|error| error.to_string())?;
@@ -1329,19 +1330,21 @@ async fn complete_desktop_setup(app: &AppHandle, request: &Value) -> Result<Valu
         .get("launchAtLogin")
         .and_then(Value::as_bool)
         .ok_or_else(|| "completeDesktopSetup missing launchAtLogin".to_string())?;
-    if launch_at_login && !login_item::is_supported() {
+    if launch_at_login && !login_item.supported() {
         return Err("Launch at login is unavailable on this OS".to_string());
     }
 
     config.launch_at_login = launch_at_login;
-    login_item::sync_login_item(launch_at_login).map_err(|error| error.to_string())?;
-    config_store
-        .save(&config)
-        .map_err(|error| error.to_string())?;
+    if let Err(error) = login_item.persist(launch_at_login, || config_store.save(&config)) {
+        let error = error.to_string();
+        app.state::<DesktopState>().shell.lock().login_item_error = Some(error.clone());
+        return Err(error);
+    }
     update_shell_state(app, |state| {
         state.data_dir = config.data_dir.display().to_string();
         state.setup_complete = true;
         state.launch_at_login = launch_at_login;
+        state.login_item_error = None;
     });
     let snapshot = start_shell_server(app).await?;
 
@@ -1404,16 +1407,18 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             let state = app.state::<DesktopState>();
             let shell = state.shell.lock();
             let paired_browsers = paired_browser_payloads(&state.config_store, &snapshot)?;
-            json!({
-                "success": true,
-                "loginItemSupported": shell.login_item_supported,
-                "launchAtLogin": shell.launch_at_login,
-                "debugLogging": shell.debug_logging,
-                "setupComplete": shell.setup_complete,
-                "dataDir": shell.data_dir,
-                "systemLocale": sys_locale::get_locale(),
-                "pairedBrowsers": paired_browsers,
+            serde_json::to_value(shell_contract::DesktopShellStateResponse {
+                success: true,
+                login_item_supported: shell.login_item_supported,
+                login_item_error: shell.login_item_error.as_deref(),
+                launch_at_login: shell.launch_at_login,
+                debug_logging: shell.debug_logging,
+                setup_complete: shell.setup_complete,
+                data_dir: shell_contract::data_dir_payload(&shell.data_dir),
+                system_locale: sys_locale::get_locale(),
+                paired_browsers,
             })
+            .map_err(|error| error.to_string())?
         }
         "startWindowDrag" => {
             let window = app
@@ -2026,9 +2031,7 @@ fn parse_deep_link_route(url: &str) -> Option<String> {
 fn configure_deep_links(app: &AppHandle) {
     if std::env::var_os("BROWSER_RECALL_SKIP_DEEP_LINK_REGISTRATION").is_some() {
         info!("skipping deep-link registration for isolated runtime test");
-        return;
-    }
-    if let Err(error) = app.deep_link().register("browser-recall") {
+    } else if let Err(error) = app.deep_link().register("browser-recall") {
         warn!(%error, "failed to register deep-link scheme");
     }
     app.deep_link().on_open_url({
@@ -2059,10 +2062,21 @@ fn configure_deep_links(app: &AppHandle) {
 }
 
 fn main() -> tauri::Result<()> {
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        show_main_window(app);
+    }));
+    let builder = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_deep_link::init());
+    #[cfg(target_os = "linux")]
+    let builder = builder.plugin(tauri_plugin_autostart::init(
+        tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+        None,
+    ));
+    let app = builder
         .invoke_handler(tauri::generate_handler![
             bridge_action,
             update_shell_settings,
@@ -2078,6 +2092,10 @@ fn main() -> tauri::Result<()> {
             bridge_storage_broadcast
         ])
         .setup(|app| {
+            #[cfg(target_os = "windows")]
+            if let Some(window) = app.get_webview_window("main") {
+                windows_icon::install_webview(&window).map_err(std::io::Error::other)?;
+            }
             let app_handle = app.handle().clone();
             let bootstrap = config::bootstrap(&app_handle)?;
             let logging = logging::init(&bootstrap.log_dir, &bootstrap.config.log_level)?;
@@ -2086,6 +2104,9 @@ fn main() -> tauri::Result<()> {
                 log_dir = %bootstrap.log_dir.display(),
                 "starting browser recall desktop shell"
             );
+            if let Some(error) = &bootstrap.login_item_error {
+                warn!(%error, "could not reconcile launch-at-login registration");
+            }
 
             let (server_handle, initial_snapshot, watcher_bundle) =
                 if bootstrap.config.is_configured() {
@@ -2130,7 +2151,9 @@ fn main() -> tauri::Result<()> {
                     snapshot: initial_snapshot,
                     data_dir: bootstrap.config.data_dir.display().to_string(),
                     log_dir: bootstrap.log_dir.display().to_string(),
-                    login_item_supported: login_item::is_supported(),
+                    login_item_supported: login_item::SystemLoginItem::new(app.handle())
+                        .supported(),
+                    login_item_error: bootstrap.login_item_error.clone(),
                     launch_at_login: bootstrap.config.launch_at_login,
                     debug_logging: bootstrap.config.log_level == "debug",
                     setup_complete: bootstrap.config.is_configured(),
@@ -2178,6 +2201,12 @@ fn main() -> tauri::Result<()> {
             }
             WindowEvent::Focused(true) if window.label() == "main" => {
                 set_main_window_focus_pending(window.app_handle(), false);
+            }
+            #[cfg(target_os = "windows")]
+            WindowEvent::ScaleFactorChanged { .. } if window.label() == "main" => {
+                if let Err(error) = windows_icon::install(window) {
+                    warn!(%error, "failed to refresh DPI-specific Windows icons");
+                }
             }
             _ => {}
         })

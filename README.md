@@ -46,8 +46,8 @@ Then load the extension in Chrome:
 
 The extension's options page is now only a stub that opens the desktop app. The main product UI is in `apps/desktop/ui/`.
 
-`Launch at login` currently targets macOS only, with a macOS 13+ baseline. The
-project does not carry legacy `LSSharedFileList` support.
+`Launch at login` supports Windows, Linux, and macOS 13+. macOS uses
+`SMAppService`; the project does not carry legacy `LSSharedFileList` support.
 
 See [DEVELOPMENT.md](./DEVELOPMENT.md) for detailed setup, testing, and debugging instructions.
 

@@ -112,15 +112,6 @@ export function hasConnectorStateStorageChange(changes = {}) {
   return CONNECTOR_STATE_STORAGE_KEYS.some((key) => key in changes);
 }
 
-export async function readCachedConnectorState() {
-  const stored = await chrome.storage.local.get(CONNECTOR_STATE_STORAGE_KEYS);
-  return connectorStateFromStorage(stored);
-}
-
 export async function requestConnectorState() {
   return sendAction({ action: 'getDesktopConnectorState' });
-}
-
-export async function requestConnectorBridgeConnect() {
-  return sendAction({ action: 'connectDesktopBridge' });
 }

@@ -67,12 +67,12 @@
         --radius-sm: 3px;
         --ease-smooth: cubic-bezier(0.25, 0.1, 0.25, 1);
         --font-display:
-          ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono',
-          monospace;
+          SFMono-Regular, Menlo, Consolas, 'Liberation Mono', system-ui,
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         --font-display-weight: 700;
         --font-body:
-          ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono',
-          monospace;
+          SFMono-Regular, Menlo, Consolas, 'Liberation Mono', system-ui,
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         width: 296px;
         min-height: 320px;
         font-family: var(--font-body);
@@ -495,7 +495,15 @@
       }
 
       .page-diagnostic-detail {
+        display: none;
         margin-top: 10px;
+        padding-top: 9px;
+        border-top: 1px solid var(--border-section);
+        color: var(--text-muted);
+        font-size: 10px;
+        line-height: 1.55;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
       }
 
       .page-diagnostic-actions {
@@ -518,6 +526,12 @@
 
       .page-diagnostic-link:hover {
         color: var(--text-primary);
+      }
+
+      .page-diagnostic-link:disabled {
+        color: var(--text-muted);
+        cursor: default;
+        opacity: 0.6;
       }
 
       .list-chips {
@@ -930,183 +944,12 @@
         border-color: var(--text-muted);
         cursor: default;
       }
-
-      .setup-required {
-        padding: 14px;
-        color: var(--text-secondary);
-      }
-
-      .setup-ledger {
-        border-top: 1px solid var(--border-section);
-        border-bottom: 1px solid var(--border-section);
-        padding: 13px 0 14px;
-      }
-
-      .setup-brand {
-        display: flex;
-        margin-bottom: 13px;
-        color: var(--text-muted);
-        font-size: 10px;
-        font-weight: 900;
-        letter-spacing: 0.08em;
-      }
-
-      .setup-required-title {
-        font-family: var(--font-display);
-        font-size: 15px;
-        font-weight: 900;
-        line-height: 1.15;
-        letter-spacing: 0.02em;
-        color: var(--text-primary);
-        text-transform: uppercase;
-      }
-
-      .setup-required-meta {
-        margin-top: 8px;
-        color: var(--text-muted);
-        font-size: 11px;
-        line-height: 1.45;
-        min-height: calc(11px * 1.45 * 2);
-        overflow-wrap: anywhere;
-        white-space: normal;
-      }
-
-      .setup-diagnostic {
-        display: none;
-        margin-top: 10px;
-        padding-top: 9px;
-        border-top: 1px solid var(--border-section);
-        color: var(--text-muted);
-        font-size: 10px;
-        line-height: 1.55;
-        overflow-wrap: anywhere;
-        white-space: pre-wrap;
-      }
-
-      .setup-actions {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        margin-top: 15px;
-      }
-
-      .setup-action-btn {
-        position: relative;
-        width: 100%;
-        min-height: 34px;
-        padding: 9px 10px;
-        border: 1px solid var(--text-primary);
-        border-radius: 2px;
-        background: transparent;
-        color: var(--text-primary);
-        cursor: pointer;
-        font-family: var(--font-body);
-        font-size: 12px;
-        font-weight: 900;
-        letter-spacing: 0.08em;
-        text-align: left;
-        text-transform: uppercase;
-        overflow: hidden;
-        transition:
-          background 0.16s var(--ease-smooth),
-          border-color 0.16s var(--ease-smooth),
-          color 0.16s var(--ease-smooth);
-      }
-
-      .setup-action-btn.primary {
-        background: var(--text-primary);
-        color: var(--bg-base);
-      }
-
-      .setup-action-btn:hover {
-        background: var(--text-primary);
-        border-color: var(--text-primary);
-        color: var(--bg-base);
-      }
-
-      .setup-action-btn:disabled {
-        border-color: var(--border-section);
-        background: transparent;
-        color: var(--text-muted);
-        cursor: default;
-      }
-
-      .setup-action-btn.is-checking {
-        border-color: var(--text-primary);
-        color: var(--text-primary);
-      }
-
-      .setup-action-btn.is-checking::after {
-        content: '';
-        position: absolute;
-        top: 50%;
-        right: 11px;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--recording-hot);
-        transform: translateY(-50%);
-        animation: setup-check-dot 0.82s step-end infinite;
-      }
-
-      @keyframes setup-check-dot {
-        0%,
-        68% {
-          opacity: 0;
-        }
-
-        68.01%,
-        100% {
-          opacity: 1;
-        }
-      }
     </style>
     <link rel="stylesheet" href="color-schemes.css" />
   </head>
-  <body>
+  <body class="popup-compact">
     <div id="loading" class="popup-shell loading" style="display: none">
       <span class="spinner"></span>
-    </div>
-
-    <div
-      id="setup-required"
-      class="popup-shell setup-required"
-      style="display: none"
-    >
-      <div class="setup-ledger">
-        <div class="setup-brand" data-i18n="extensionName">BROWSER RECALL</div>
-        <div
-          class="setup-required-title"
-          id="setupRequiredTitle"
-          data-i18n="extensionDesktopOffline"
-        >
-          DESKTOP OFFLINE
-        </div>
-        <div
-          class="setup-required-meta"
-          id="setupRequiredMeta"
-          data-i18n="extensionStartDesktop"
-        >
-          Start Browser Recall Desktop to resume live capture.
-        </div>
-        <div class="setup-diagnostic" id="setupDiagnostic"></div>
-        <div class="setup-actions">
-          <button
-            class="setup-action-btn primary"
-            id="setupRequiredBtn"
-            data-i18n="extensionOpenDesktop"
-          >
-            Open Desktop
-          </button>
-          <button
-            class="setup-action-btn"
-            id="setupDesktopConnectBtn"
-            data-i18n="extensionCheckAgain"
-          >
-            Check Again
-          </button>
-        </div>
-      </div>
     </div>
 
     <div id="dashboard">
@@ -1134,17 +977,30 @@
       </div>
 
       <div id="dashboardContent">
-        <div class="section" id="pageDiagnosticSection" style="display: none">
-          <div class="page-diagnostic-title" id="pageDiagnosticTitle"></div>
-          <div class="page-diagnostic-message" id="pageDiagnosticMessage"></div>
+        <div class="section" id="pageDiagnosticSection">
           <div
-            class="setup-diagnostic page-diagnostic-detail"
-            id="pageDiagnosticDetail"
+            class="page-diagnostic-title"
+            id="pageDiagnosticTitle"
+            data-i18n="extensionLookingForDesktop"
+          >
+            LOOKING FOR BROWSER RECALL DESKTOP
+          </div>
+          <div
+            class="page-diagnostic-message"
+            id="pageDiagnosticMessage"
+            data-i18n="extensionStartDesktopCapture"
+          >
+            Start Browser Recall Desktop to resume live capture.
+          </div>
+          <div class="page-diagnostic-detail" id="pageDiagnosticDetail"></div>
+          <div
+            class="page-diagnostic-actions"
+            id="pageDiagnosticActions"
+            style="display: none"
           ></div>
-          <div class="page-diagnostic-actions" id="pageDiagnosticActions"></div>
         </div>
 
-        <div class="header" id="pageHeader">
+        <div class="header" id="pageHeader" style="display: none">
           <div class="page-title" id="pageTitle" data-i18n="extensionName">
             BROWSER RECALL
           </div>
@@ -1189,32 +1045,32 @@
           </button>
         </div>
       </div>
-      <!-- Native IME composition belongs to this node; keep it mounted and unreparented for the popup lifetime. -->
-      <div class="list-picker-host" id="listPickerHost">
-        <input
-          class="list-search-capture"
-          id="listSearchInput"
-          type="text"
-          tabindex="-1"
+    </div>
+    <!-- Native IME composition belongs to this node; keep it mounted and unreparented for the popup lifetime. -->
+    <div class="list-picker-host" id="listPickerHost">
+      <input
+        class="list-search-capture"
+        id="listSearchInput"
+        type="text"
+        tabindex="-1"
+        aria-hidden="true"
+        autocomplete="off"
+        autocapitalize="off"
+        spellcheck="false"
+      />
+      <div class="list-picker-list-row">
+        <div class="list-picker-list" id="listPickerList" role="listbox">
+          <div class="list-picker-options" id="listPickerOptions"></div>
+        </div>
+        <div
+          class="list-picker-scrollbar"
+          id="listPickerScrollbar"
           aria-hidden="true"
-          autocomplete="off"
-          autocapitalize="off"
-          spellcheck="false"
-        />
-        <div class="list-picker-list-row">
-          <div class="list-picker-list" id="listPickerList" role="listbox">
-            <div class="list-picker-options" id="listPickerOptions"></div>
-          </div>
+        >
           <div
-            class="list-picker-scrollbar"
-            id="listPickerScrollbar"
-            aria-hidden="true"
-          >
-            <div
-              class="list-picker-scroll-thumb"
-              id="listPickerScrollThumb"
-            ></div>
-          </div>
+            class="list-picker-scroll-thumb"
+            id="listPickerScrollThumb"
+          ></div>
         </div>
       </div>
     </div>

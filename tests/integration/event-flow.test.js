@@ -1170,9 +1170,9 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     );
     expect(settingsRaw).toContain('"theme": "dark"');
 
-    const orphanedRaw = readFileSync(
+    const orphanedRaw = await waitForFileContent(
       manifestPath(path.join(dir, 'browser-data'), 'orphaned.json'),
-      'utf8',
+      (raw) => !raw.includes('"list:reading-list"'),
     );
     expect(orphanedRaw).not.toContain('"list:reading-list"');
 

@@ -68,6 +68,8 @@ Optional references may be omitted only when they are valid non-page URLs; malfo
 - Avoid compatibility paths after an intentional schema migration. Migrate the data, then remove fallback readers/writers so drift is visible.
 - When a verifier validates production behavior, keep the verifier on the production implementation rather than porting policy into another language.
 - Generate classic-script bridges from the shared module factory and verify their staged output; never maintain mirrored production implementations.
+- Keep schema-producing Tauri plugins as unconditional Cargo dependencies, even when runtime initialization is platform-gated, so generated ACL schemas remain identical across build hosts.
+- Persisted DOM anchors must encode composed-tree host traversal and exact text offsets; document-only CSS selectors cannot distinguish repeated text or address content inside shadow roots.
 
 ## CSS Lessons
 

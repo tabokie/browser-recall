@@ -312,7 +312,7 @@
     "description": "Desktop launch-at-login setting."
   },
   "desktopLaunchAtLoginUnsupported": {
-    "message": "L'avvio all'accesso è disponibile su macOS 13 o versioni successive.",
+    "message": "L'avvio all'accesso non è disponibile su questo sistema.",
     "description": "Launch-at-login platform support notice."
   },
   "desktopLaunchAtLoginLong": {
@@ -1078,7 +1078,7 @@
     "description": "Extension fatal error reload button."
   },
   "extensionOpenAppFallback": {
-    "message": "Non riesci ad aprire l'app? Avvialo dalla cartella Applicazioni, quindi riprova.",
+    "message": "Non riesci ad aprire l'app? Avviala dal launcher delle app di sistema, quindi riprova.",
     "description": "Extension options fallback notice."
   },
   "extensionToggleRecording": {

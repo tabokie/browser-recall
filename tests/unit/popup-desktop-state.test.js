@@ -146,6 +146,9 @@ function installChromeMock({ tab, responses }) {
       getURL: (resource) => `chrome-extension://abcdefghijklmnop/${resource}`,
       onMessage: runtimeMessages,
       reload: vi.fn(),
+      connect: vi.fn(() => ({
+        onDisconnect: { addListener: vi.fn() },
+      })),
       sendMessage: vi.fn(async (request) => {
         if (
           ['trimTitle', 'getPopupAccessState', 'getPopupLists'].includes(
@@ -338,7 +341,9 @@ describe('popup desktop state rendering', () => {
         'Page Data Unavailable',
     );
 
-    expect(document.getElementById('dashboard').style.display).toBe('flex');
+    expect(getComputedStyle(document.getElementById('dashboard')).display).toBe(
+      'flex',
+    );
     expect(document.getElementById('dashboardContent').style.display).toBe(
       'block',
     );
@@ -436,9 +441,7 @@ describe('popup desktop state rendering', () => {
 
     expect(document.getElementById('dashboard').style.display).toBe('flex');
     expect(document.getElementById('loading').style.display).toBe('none');
-    expect(document.getElementById('setup-required').style.display).toBe(
-      'none',
-    );
+    expect(document.getElementById('setup-required')).toBeNull();
     expect(document.getElementById('pageUrl').textContent).toBe(tab.url);
     expect(document.getElementById('listCount').textContent).toBe('00');
     expect(
@@ -451,6 +454,76 @@ describe('popup desktop state rendering', () => {
         ([request]) => request.action === 'getPopupLists',
       ),
     ).toBe(false);
+  });
+
+  it('does not let a stale connector rejection replace a newer page diagnostic', async () => {
+    const tab = {
+      id: 46,
+      url: 'https://example.com/prepared-diagnostic-owner',
+      title: 'Prepared Diagnostic Owner',
+    };
+    const connectorRefresh = deferred();
+    const finalHandoff = deferred();
+    installDom(
+      'chrome-extension://abcdefghijklmnop/popup.html?bootstrap=diagnostic-owner',
+    );
+    const { storageChanged } = installChromeMock({
+      tab,
+      responses: {
+        consumePopupBootstrap: {
+          success: true,
+          pending: true,
+          bootstrap: {
+            mode: 'connector-diagnostic',
+            connector: { state: 'starting' },
+            tab,
+          },
+        },
+        awaitPopupBootstrap: () => finalHandoff.promise,
+        getDesktopConnectorState: () => connectorRefresh.promise,
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+    await waitFor(
+      () =>
+        document.getElementById('pageDiagnosticTitle').textContent ===
+        'Looking for Browser Recall Desktop',
+    );
+
+    storageChanged.emit(
+      { connectorState: { oldValue: 'starting', newValue: 'offline' } },
+      'local',
+    );
+    await waitFor(() =>
+      chrome.runtime.sendMessage.mock.calls.some(
+        ([request]) => request.action === 'getDesktopConnectorState',
+      ),
+    );
+
+    finalHandoff.resolve({
+      success: true,
+      bootstrap: {
+        mode: 'data-unavailable',
+        error: 'The page-specific diagnostic owns the popup now.',
+        diagnostic: { reason: 'prepared-page-data-unavailable' },
+      },
+    });
+    await waitFor(
+      () =>
+        document.getElementById('pageDiagnosticTitle').textContent ===
+        'Page Data Unavailable',
+    );
+
+    connectorRefresh.reject(new Error('stale connector refresh failed'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(document.getElementById('pageDiagnosticTitle').textContent).toBe(
+      'Page Data Unavailable',
+    );
+    expect(document.getElementById('pageDiagnosticMessage').textContent).toBe(
+      'The page-specific diagnostic owns the popup now.',
+    );
   });
 
   it('clears a stale page diagnostic after page summary recovers', async () => {
@@ -1048,7 +1121,11 @@ describe('popup desktop state rendering', () => {
 
     await waitFor(
       () =>
-        document.getElementById('dashboardContent')?.style.display === 'block',
+        document.getElementById('dashboardContent')?.style.display ===
+          'block' &&
+        document.getElementById('pageDiagnosticSection')?.style.display ===
+          'none' &&
+        document.getElementById('pageTitle')?.textContent === tab.title,
     );
     const toggle = document.getElementById('recordingToggle');
     toggle.click();
@@ -1337,19 +1414,24 @@ describe('popup desktop state rendering', () => {
     await import('../../apps/extension/popup.js');
 
     await waitFor(
-      () => document.getElementById('setup-required').style.display === 'block',
+      () =>
+        document.getElementById('pageDiagnosticTitle').textContent ===
+        'DESKTOP OFFLINE',
     );
 
-    expect(document.getElementById('setupRequiredTitle').textContent).toBe(
+    expect(document.getElementById('pageDiagnosticTitle').textContent).toBe(
       'DESKTOP OFFLINE',
     );
-    expect(document.getElementById('setupRequiredMeta').textContent).toContain(
+    const diagnosticMessage = document.getElementById(
+      'pageDiagnosticMessage',
+    ).textContent;
+    expect(diagnosticMessage).toContain(
       'Desktop approved, but connection failed.',
     );
-    expect(document.getElementById('setupRequiredMeta').textContent).toContain(
+    expect(diagnosticMessage).toContain(
       'Last check: desktop connection did not succeed in 15s.',
     );
-    expect(document.getElementById('setupRequiredMeta').textContent).toContain(
+    expect(diagnosticMessage).toContain(
       'Last port failures: 28471: connect_error, 28472: connect_timeout.',
     );
   });
@@ -1410,18 +1492,18 @@ describe('popup desktop state rendering', () => {
       () => document.getElementById('pageTitle').textContent === tab.title,
     );
 
-    expect(document.getElementById('setup-required').style.display).toBe(
-      'none',
-    );
+    expect(document.getElementById('setup-required')).toBeNull();
     expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
     expect(document.getElementById('pageUrl').textContent).toBe(tab.url);
     expect(document.getElementById('visitsLikesSection').style.display).toBe(
       'none',
     );
-    expect(document.getElementById('setupDiagnostic').textContent).toBe('');
+    expect(document.getElementById('pageDiagnosticDetail').textContent).toBe(
+      '',
+    );
   });
 
-  it('keeps the static ticket shell visible while desktop state probing is still pending', async () => {
+  it('keeps the standard diagnostic panel visible while desktop state probing is still pending', async () => {
     const tab = {
       id: 45,
       url: 'https://example.com/offline-pending',
@@ -1445,15 +1527,28 @@ describe('popup desktop state rendering', () => {
       'rgb(247, 244, 234)',
     );
     expect(getComputedStyle(document.body).width).toBe('296px');
-    expect(getComputedStyle(document.body).minHeight).toBe('320px');
+    expect(getComputedStyle(document.body).minHeight).toBe('0');
     expect(document.getElementById('loading').style.display).toBe('none');
-    expect(document.getElementById('setup-required').style.display).toBe(
-      'none',
+    expect(document.getElementById('setup-required')).toBeNull();
+    expect(getComputedStyle(document.getElementById('dashboard')).display).toBe(
+      'flex',
     );
-    expect(document.getElementById('dashboard').style.display).toBe('');
-    expect(document.getElementById('pageTitle').textContent).toBe(
-      'Browser Recall',
+    expect(
+      document.getElementById('pageDiagnosticSection').style.display,
+    ).not.toBe('none');
+    expect(document.getElementById('pageDiagnosticTitle').textContent).toBe(
+      'Looking for Browser Recall Desktop',
     );
+    expect(document.getElementById('pageDiagnosticMessage').textContent).toBe(
+      'Start Browser Recall Desktop to resume live capture.',
+    );
+    expect(
+      getComputedStyle(document.querySelector('.page-diagnostic-actions'))
+        .display,
+    ).toBe('none');
+    expect(
+      document.getElementById('pageDiagnosticActions').children,
+    ).toHaveLength(0);
 
     connectorState.resolve({
       success: true,
@@ -1461,12 +1556,14 @@ describe('popup desktop state rendering', () => {
       hasToken: true,
     });
     await waitFor(
-      () => document.getElementById('setup-required').style.display === 'block',
+      () =>
+        document.getElementById('pageDiagnosticTitle').textContent ===
+        'DESKTOP OFFLINE',
     );
     expect(document.documentElement.dataset.popupHidden).toBeUndefined();
   });
 
-  it('keeps the connected ticket shell visible while page details are still loading', async () => {
+  it('keeps the connected dashboard shell visible while page details are still loading', async () => {
     const tab = {
       id: 44,
       url: 'https://example.com/slow-popup-summary',

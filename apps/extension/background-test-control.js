@@ -135,6 +135,30 @@ async function handlePreparePopupBootstrapForTest(request) {
   return control.prepare(request);
 }
 
+async function handleOpenPreparedPopupForTest(request) {
+  const control = globalThis.browserRecallPreparedPopupForTest;
+  if (!control) {
+    return { success: false, error: 'Prepared popup test hook unavailable' };
+  }
+  return control.open(request);
+}
+
+async function handleBeginPopupBootstrapForTest(request) {
+  const control = globalThis.browserRecallPreparedPopupForTest;
+  if (!control) {
+    return { success: false, error: 'Prepared popup test hook unavailable' };
+  }
+  return control.begin(request);
+}
+
+async function handleReleasePopupPreparationForTest() {
+  const control = globalThis.browserRecallPreparedPopupForTest;
+  if (!control) {
+    return { success: false, error: 'Prepared popup test hook unavailable' };
+  }
+  return control.releasePreparation();
+}
+
 async function handleFailNextTabMessageForTest(request) {
   const failures = globalThis.browserRecallTabMessageFailuresForTest;
   if (!failures)
@@ -202,6 +226,9 @@ const testMessageHandlers = new Map([
   ['seedTestData', handleSeedTestData],
   ['getActionIconForTest', handleGetActionIconForTest],
   ['preparePopupBootstrapForTest', handlePreparePopupBootstrapForTest],
+  ['beginPopupBootstrapForTest', handleBeginPopupBootstrapForTest],
+  ['openPreparedPopupForTest', handleOpenPreparedPopupForTest],
+  ['releasePopupPreparationForTest', handleReleasePopupPreparationForTest],
   ['failNextTabMessageForTest', handleFailNextTabMessageForTest],
   [
     'navigateTabBeforeNextImmediateScriptForTest',
@@ -212,6 +239,23 @@ const testMessageHandlers = new Map([
   [
     'restartConnectorRuntimeForTest',
     async () => {
+      await restartConnectorRuntimeForTest();
+      return { success: true };
+    },
+  ],
+  [
+    'setConnectorPortsForTest',
+    async (request) => {
+      if (
+        !Array.isArray(request.ports) ||
+        request.ports.length === 0 ||
+        !request.ports.every(
+          (port) => Number.isInteger(port) && port > 0 && port < 65_536,
+        )
+      ) {
+        return { success: false, error: 'Test connector ports are invalid' };
+      }
+      globalThis.__BROWSER_RECALL_CONNECTOR_PORTS = [...request.ports];
       await restartConnectorRuntimeForTest();
       return { success: true };
     },

@@ -48,7 +48,7 @@ function desktopVisualSeed(colorScheme = 'amber', options = {}) {
     blacklistEnabled: true,
     urlBlacklist: options.urlBlacklist || ['chrome://', 'edge://', 'about:'],
     titleCleanupEnabled: true,
-    titleTrimRules: [],
+    titleTrimRules: options.titleTrimRules || [],
     syncEnabled: false,
     syncMethod: 'github',
     syncRetentionDays: 7,
@@ -344,6 +344,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       fullscreenScrollResetDelayMs,
       initialRoute,
       systemLocale,
+      loginItemError,
       previewRuleMatchesByPattern,
     }) => {
       if (initialRoute) window.__BR_STATE__ = { route: initialRoute };
@@ -974,6 +975,7 @@ async function installDesktopBridgeMock(page, options = {}) {
             return {
               success: true,
               loginItemSupported: true,
+              loginItemError,
               launchAtLogin: true,
               debugLogging: false,
               setupComplete,
@@ -1398,6 +1400,7 @@ async function installDesktopBridgeMock(page, options = {}) {
         options.fullscreenScrollResetDelayMs ?? null,
       initialRoute: options.initialRoute || '',
       systemLocale: options.systemLocale || 'en',
+      loginItemError: options.loginItemError || null,
       previewRuleMatchesByPattern: options.previewRuleMatchesByPattern || {},
     },
   );
@@ -1520,6 +1523,34 @@ async function expectNoHistorySearchDuringVisibilityRefresh(
 }
 
 test.describe('desktop visual regression', () => {
+  test('CJK glyphs fall through the product fonts to the system UI font', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        localeOverride: 'zh-CN',
+      });
+
+      const fontStacks = await page.evaluate(() => {
+        const styles = getComputedStyle(document.documentElement);
+        return {
+          body: styles.getPropertyValue('--font-body').trim(),
+          display: styles.getPropertyValue('--font-display').trim(),
+          highlights: styles
+            .getPropertyValue('--highlight-history-font')
+            .trim(),
+        };
+      });
+
+      expect(fontStacks.body).toMatch(/^['"]Nunito['"],\s*system-ui,/);
+      expect(fontStacks.display).toMatch(/^['"]Fraunces['"],\s*system-ui,/);
+      expect(fontStacks.highlights).toMatch(
+        /^['"]Gentium Book Plus['"],\s*system-ui,/,
+      );
+    });
+  });
+
   test('first-run onboarding keeps the warm desktop visual language', async ({
     page,
   }) => {
@@ -4212,7 +4243,7 @@ test.describe('desktop visual regression', () => {
     });
   });
 
-  test('settings connection section shows only browsers active today', async ({
+  test('settings renders nullable profiles and only browsers active today', async ({
     page,
   }) => {
     const now = Date.now();
@@ -4224,7 +4255,7 @@ test.describe('desktop visual regression', () => {
           {
             browserId: 'active-brave',
             browserName: 'Brave',
-            browserProfile: 'Default profile',
+            browserProfile: null,
             extensionId: 'abcdefghijklmnop',
             approvedAt: now - 10 * 86400000,
             lastSeen: now - 60_000,
@@ -4246,6 +4277,12 @@ test.describe('desktop visual regression', () => {
       await expect(page.getByText('Connection')).toBeVisible();
       await expect(page.getByText('Browsers active today')).toBeVisible();
       await expect(page.getByText('Brave', { exact: true })).toBeVisible();
+      await expect(page.locator('.paired-browser-profile')).toContainText(
+        'active-brave',
+      );
+      await expect(page.locator('.paired-browser-profile')).not.toContainText(
+        'null',
+      );
       await expect(page.getByText('Google Chrome')).toHaveCount(0);
       await expect(page.getByText('Desktop Shell')).toHaveCount(0);
       await expect(page.locator('#storagePath')).toHaveText(
@@ -4254,6 +4291,71 @@ test.describe('desktop visual regression', () => {
       await expect(page.locator('#storageDeviceName')).toHaveText(
         'Device visual-device',
       );
+    });
+  });
+
+  test('settings renders a nonfatal launch-at-login diagnostic next to its toggle', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        loginItemError: 'Registry access was denied',
+      });
+
+      await page.locator('#settingsBtn').click();
+      await expect(page.locator('#launchAtLoginError')).toHaveText(
+        'Registry access was denied',
+      );
+      await expect(page.locator('#launchAtLoginError')).toBeVisible();
+      await expect(page.locator('#serviceErrorBanner')).toBeHidden();
+      await expect(page.locator('#launchAtLoginToggle')).toBeEnabled();
+    });
+  });
+
+  test('settings paths and title-cleanup rules use the desktop body font', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        titleTrimRules: [
+          {
+            urlPrefix: 'https://example.com/articles/',
+            action: 'remove_after_pipe',
+          },
+        ],
+      });
+
+      await page.locator('#settingsBtn').click();
+      await expect(page.locator('#trimEntries .blacklist-entry')).toHaveCount(
+        1,
+      );
+
+      const fontFamilies = await page.evaluate(() => {
+        const family = (selector) =>
+          getComputedStyle(document.querySelector(selector)).fontFamily;
+        return {
+          body: family('body'),
+          storagePath: family('#storagePath'),
+          trimInput: family('#trimUrlInput'),
+          trimAction: family('#trimActionSelect'),
+          trimEntry: family('#trimEntries .blacklist-entry'),
+          excludedInput: family('#blacklistInput'),
+          excludedEntry: family('#blacklistEntries .blacklist-entry'),
+        };
+      });
+
+      expect(fontFamilies).toEqual({
+        body: fontFamilies.body,
+        storagePath: fontFamilies.body,
+        trimInput: fontFamilies.body,
+        trimAction: fontFamilies.body,
+        trimEntry: fontFamilies.body,
+        excludedInput: fontFamilies.body,
+        excludedEntry: fontFamilies.body,
+      });
     });
   });
 
@@ -4306,7 +4408,7 @@ test.describe('desktop visual regression', () => {
       );
       await expect(page.locator('#clearBtn')).toContainText('删除');
       await expect(page.locator('#launchAtLoginUnsupported')).toHaveText(
-        '登录时启动仅适用于 macOS 13 或更高版本。',
+        '此系统不支持登录时启动。',
       );
       await expect(page.locator('#syncAuthConnected')).toContainText('已连接');
       await expect(page.locator('#syncDisconnectBtn')).toHaveText('清除');
@@ -4322,7 +4424,7 @@ test.describe('desktop visual regression', () => {
       );
       await expect(
         page.locator('#onboardingLaunchAtLoginUnsupported'),
-      ).toHaveText('登录时启动仅适用于 macOS 13 或更高版本。');
+      ).toHaveText('此系统不支持登录时启动。');
       await expect(page.locator('.paired-browser-status')).toHaveText([
         '· 已连接',
         '· 已断开',

@@ -76,6 +76,7 @@ export async function loadDesktopShellState() {
     requireBooleanField(response, field, action);
   }
   requireNullableStringField(response, 'dataDir', action);
+  requireNullableStringField(response, 'loginItemError', action);
   requireNullableStringField(response, 'systemLocale', action);
   const browsers = requireArrayField(response, 'pairedBrowsers', action);
   for (const [index, browser] of browsers.entries()) {
@@ -84,17 +85,21 @@ export async function loadDesktopShellState() {
         `${action} response pairedBrowsers[${index}] must be an object`,
       );
     }
-    for (const field of [
-      'browserId',
-      'browserName',
-      'browserProfile',
-      'extensionId',
-    ]) {
+    for (const field of ['browserId', 'browserName', 'extensionId']) {
       if (typeof browser[field] !== 'string' || !browser[field].trim()) {
         throw new Error(
           `${action} response pairedBrowsers[${index}].${field} must be a non-empty string`,
         );
       }
+    }
+    if (
+      browser.browserProfile !== null &&
+      (typeof browser.browserProfile !== 'string' ||
+        !browser.browserProfile.trim())
+    ) {
+      throw new Error(
+        `${action} response pairedBrowsers[${index}].browserProfile must be a non-empty string or null`,
+      );
     }
     for (const field of ['approvedAt', 'lastSeen']) {
       if (!Number.isSafeInteger(browser[field]) || browser[field] <= 0) {

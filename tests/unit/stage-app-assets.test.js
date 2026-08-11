@@ -1,17 +1,22 @@
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   writeFileSync,
 } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  copyStagedSourceTree,
   cleanupStagedAssets,
   defaultArtifactDirs,
+  discoverLocalizationSources,
   stageExtensionAssets,
   stageFirefoxExtensionAssets,
   validateLocalizationReferences,
@@ -19,7 +24,10 @@ import {
   validateLocaleMessage,
 } from '../../scripts/stage-app-assets.mjs';
 import { DAEMON_PORTS } from '../../scripts/lib/desktop-test-runtime.mjs';
-import { collectDesktopArtifacts } from '../../scripts/collect-desktop-artifacts.mjs';
+import {
+  collectDesktopArtifacts,
+  replaceWindowsOutput,
+} from '../../scripts/collect-desktop-artifacts.mjs';
 import { createTestExtensionDir } from '../fixtures/test-extension.mjs';
 
 const stagedDirs = [];
@@ -82,6 +90,57 @@ describe('extension staged assets', () => {
     ).toThrow('popup.html has hardcoded localized UI text');
   });
 
+  it('excludes AppleDouble metadata at the source-tree boundary', () => {
+    const root = mkdtempSync(join(tmpdir(), 'browser-recall-source-tree-'));
+    const sourceDir = join(root, 'source');
+    const outDir = join(root, 'staged');
+    mkdirSync(sourceDir, { recursive: true });
+    writeFileSync(
+      join(sourceDir, 'options-stub.html'),
+      '<p data-i18n="extensionKnown"></p>',
+    );
+    writeFileSync(
+      join(sourceDir, '._options-stub.html'),
+      '\u0000\u0005\u0016\u0007Mac OS X\u0000\u0002',
+    );
+    writeFileSync(
+      join(sourceDir, '._intentional.html'),
+      '<p data-i18n="extensionKnown"></p>',
+    );
+    writeFileSync(join(sourceDir, '.DS_Store'), 'Finder metadata');
+    stagedDirs.push(root);
+
+    const sources = discoverLocalizationSources([sourceDir], {
+      relativeRoot: root,
+    });
+    expect(sources.map(({ path }) => path).sort()).toEqual(
+      [
+        join('source', '._intentional.html'),
+        join('source', 'options-stub.html'),
+      ].sort(),
+    );
+    expect(() =>
+      validateLocalizationReferences(
+        new Map([['en', { extensionKnown: { message: 'Known' } }]]),
+        sources,
+      ),
+    ).not.toThrow();
+
+    copyStagedSourceTree(sourceDir, outDir);
+    expect(existsSync(join(outDir, 'options-stub.html'))).toBe(true);
+    expect(existsSync(join(outDir, '._options-stub.html'))).toBe(false);
+    expect(existsSync(join(outDir, '._intentional.html'))).toBe(true);
+    expect(existsSync(join(outDir, '.DS_Store'))).toBe(false);
+    expect(() =>
+      validateLocalizationReferences(new Map(), [
+        {
+          path: 'injected/._options-stub.html',
+          source: 'Mac OS X',
+        },
+      ]),
+    ).toThrow('has hardcoded localized UI text');
+  });
+
   it('rejects localized HTML whose tags are misnested', () => {
     expect(() =>
       validateLocaleMessage(
@@ -95,14 +154,18 @@ describe('extension staged assets', () => {
 
   it('uses one dist artifact tree for default staged apps', () => {
     expect(
-      defaultArtifactDirs.chromeExtension.endsWith('/dist/extension/chrome'),
+      defaultArtifactDirs.chromeExtension.endsWith(
+        join('dist', 'extension', 'chrome'),
+      ),
     ).toBe(true);
     expect(
-      defaultArtifactDirs.firefoxExtension.endsWith('/dist/extension/firefox'),
+      defaultArtifactDirs.firefoxExtension.endsWith(
+        join('dist', 'extension', 'firefox'),
+      ),
     ).toBe(true);
-    expect(defaultArtifactDirs.desktopUi.endsWith('/dist/desktop/ui')).toBe(
-      true,
-    );
+    expect(
+      defaultArtifactDirs.desktopUi.endsWith(join('dist', 'desktop', 'ui')),
+    ).toBe(true);
   });
 
   it('stages popup entity helpers into the loadable extension bundle', async () => {
@@ -227,7 +290,10 @@ describe('extension staged assets', () => {
     expect(manifest.action.default_popup).toBeUndefined();
     expect(backgroundSource).toContain('chrome.action.onClicked.addListener');
     expect(backgroundSource).toMatch(
-      /try\s*\{\s*await setPreparedActionPopup\(tabId, popupPath\)/,
+      /try\s*\{\s*await setPreparedActionPopup\(token, tabId, popupPath\)/,
+    );
+    expect(backgroundSource).toContain(
+      'await releasePreparedActionPopup(token);',
     );
     expect(backgroundSource).not.toContain('schedulePreparedPopupPrewarm');
     expect(backgroundSource).not.toContain('POPUP_BOOTSTRAP_SESSION_KEY');
@@ -235,11 +301,12 @@ describe('extension staged assets', () => {
     expect(popupHtml).not.toContain('Desktop Shell');
     expect(popupHtml).not.toContain('Setup Required');
     expect(popupHtml).not.toContain('Connection');
-    expect(popupHtml).toContain('id="setupDesktopConnectBtn"');
-    expect(popupHtml).toContain('DESKTOP OFFLINE');
-    expect(popupHtml).toContain(
-      'Start Browser Recall Desktop to resume live capture.',
-    );
+    expect(popupHtml).not.toContain('id="desktopOpenBtn"');
+    expect(popupHtml).not.toContain('id="desktopConnectBtn"');
+    expect(popupHtml).toContain('id="pageDiagnosticSection"');
+    expect(popupHtml).not.toContain('id="setup-required"');
+    expect(popupHtml).toContain('LOOKING FOR BROWSER RECALL DESKTOP');
+    expect(popupHtml).not.toContain('DESKTOP OFFLINE');
     expect(popupHtml).toContain('--bg-base: #f7f4ea');
     expect(popupHtml).toContain('--text-primary: #171713');
     expect(popupHtml).not.toContain('href="shared.css"');
@@ -251,7 +318,7 @@ describe('extension staged assets', () => {
     expect(popupHtml).toContain('<div id="dashboard">');
     expect(popupHtml).toContain('@keyframes spin');
     expect(popupHtml).not.toContain(
-      '.setup-action-btn:hover {\n        background: var(--recording-hot);',
+      '.page-diagnostic-link:hover {\n        background: var(--recording-hot);',
     );
     expect(popupHtml).not.toContain(
       '.delete-btn:hover {\n        color: var(--accent-red);',
@@ -268,7 +335,7 @@ describe('extension staged assets', () => {
     );
     expect(popupSource).not.toContain('background:rgba(180,30,30,0.92)');
     expect(popupHtml).toContain('.recording-toggle:hover');
-    expect(popupHtml).toContain('Check Again');
+    expect(popupHtml).not.toContain('Check Again');
     expect(popupHtml).not.toContain('Pair with desktop');
     expect(popupHtml).not.toContain('Try to reconnect');
   });
@@ -360,10 +427,11 @@ describe('extension staged assets', () => {
     );
     expect(extensionSurfaceSource).toContain('--br-bg-base: #f7f4ea');
     expect(extensionSurfaceSource).toContain('--br-text-primary: #171713');
-    expect(extensionSurfaceSource).toContain('br-note-label');
-    expect(extensionSurfaceSource).toContain('br-note-excerpt');
     expect(extensionSurfaceSource).toContain('highlightEntryHtml');
     expect(extensionSurfaceSource).toContain('openHighlightNoteEditor');
+    expect(extensionSurfaceSource).toContain(
+      'function createHighlightEditOverlay',
+    );
     expect(extensionSurfaceSource).toContain(
       'border-left: 3px solid var(--br-accent-red, var(--accent-red));',
     );
@@ -379,8 +447,14 @@ describe('extension staged assets', () => {
     );
     expect(contentSource).not.toContain('SCHEME_PALETTES');
     expect(contentSource).not.toContain('EXTENSION_SURFACE_CSS');
-    expect(contentSource).toContain('extensionSurface.positionNearRect');
-    expect(snapshotViewerSource).toContain('extensionSurface.positionNearRect');
+    expect(contentSource).toContain(
+      'extensionSurface.createHighlightEditOverlay',
+    );
+    expect(snapshotViewerSource).toContain(
+      'extensionSurface.createHighlightEditOverlay',
+    );
+    expect(contentSource).not.toContain('function createHighlightEditOverlay');
+    expect(snapshotViewerSource).not.toContain('const OVERLAY_STYLE');
     expect(snapshotViewerSource).toContain("from './extension-ui-tokens.js'");
     expect(snapshotViewerSource).not.toContain(
       'background:rgba(180,30,30,0.92)',
@@ -523,6 +597,7 @@ describe('extension staged assets', () => {
     );
     expect(existsSync(join(outDir, 'background-test-actions.js'))).toBe(true);
     expect(existsSync(join(outDir, 'background-test-control.js'))).toBe(true);
+    expect(existsSync(join(outDir, 'core', 'package.json'))).toBe(false);
     expect(
       testBackground.indexOf("import './background-test-actions.js';"),
     ).toBeLessThan(testBackground.indexOf("import './background.js';"));
@@ -552,6 +627,165 @@ describe('extension staged assets', () => {
 });
 
 describe('desktop artifact collection', () => {
+  it('promotes complete Windows output while replacing the executable', () => {
+    const root = mkdtempSync(
+      join(tmpdir(), 'browser-recall-desktop-artifacts-'),
+    );
+    const cargoReleaseDir = join(root, 'target-release');
+    const outDir = join(root, 'dist-desktop');
+    mkdirSync(join(cargoReleaseDir, 'bundle', 'msi'), { recursive: true });
+    mkdirSync(join(outDir, 'windows', 'bin'), { recursive: true });
+    mkdirSync(join(outDir, 'windows', 'stale-bundle'), { recursive: true });
+    writeFileSync(
+      join(cargoReleaseDir, 'browser-recall-desktop.exe'),
+      'new release',
+    );
+    writeFileSync(
+      join(cargoReleaseDir, 'bundle', 'msi', 'Browser Recall.msi'),
+      'new installer',
+    );
+    writeFileSync(
+      join(outDir, 'windows', 'bin', 'browser-recall-desktop.exe'),
+      'old release',
+    );
+    writeFileSync(
+      join(outDir, 'windows', 'stale-bundle', 'Old Installer.msi'),
+      'stale installer',
+    );
+    stagedDirs.push(root);
+
+    collectDesktopArtifacts({
+      cargoReleaseDir,
+      outDir,
+      platformName: 'windows',
+      bundles: ['msi'],
+    });
+
+    expect(
+      readFileSync(
+        join(outDir, 'windows', 'bin', 'browser-recall-desktop.exe'),
+        'utf8',
+      ),
+    ).toBe('new release');
+    expect(
+      readFileSync(
+        join(outDir, 'windows', 'msi', 'Browser Recall.msi'),
+        'utf8',
+      ),
+    ).toBe('new installer');
+    expect(existsSync(join(outDir, 'windows', 'stale-bundle'))).toBe(false);
+  });
+
+  it('restores the complete prior Windows output when remainder promotion fails', () => {
+    const root = mkdtempSync(
+      join(tmpdir(), 'browser-recall-desktop-artifacts-rollback-'),
+    );
+    const platformOutDir = join(root, 'windows');
+    const stagedDir = join(root, 'windows.staging');
+    mkdirSync(join(platformOutDir, 'bin'), { recursive: true });
+    mkdirSync(join(platformOutDir, 'msi'), { recursive: true });
+    mkdirSync(join(stagedDir, 'bin'), { recursive: true });
+    mkdirSync(join(stagedDir, 'msi'), { recursive: true });
+    writeFileSync(
+      join(platformOutDir, 'bin', 'browser-recall-desktop.exe'),
+      'old release',
+    );
+    writeFileSync(join(platformOutDir, 'msi', 'Browser Recall.msi'), 'old msi');
+    writeFileSync(
+      join(stagedDir, 'bin', 'browser-recall-desktop.exe'),
+      'new release',
+    );
+    writeFileSync(join(stagedDir, 'msi', 'Browser Recall.msi'), 'new msi');
+    stagedDirs.push(root);
+
+    expect(() =>
+      replaceWindowsOutput(platformOutDir, stagedDir, () => {}, {
+        promote(_source, destination) {
+          mkdirSync(join(destination, 'msi'), { recursive: true });
+          writeFileSync(
+            join(destination, 'msi', 'Browser Recall.msi'),
+            'partial new msi',
+          );
+          throw new Error('simulated remainder promotion failure');
+        },
+      }),
+    ).toThrow('simulated remainder promotion failure');
+
+    expect(
+      readFileSync(
+        join(platformOutDir, 'bin', 'browser-recall-desktop.exe'),
+        'utf8',
+      ),
+    ).toBe('old release');
+    expect(
+      readFileSync(join(platformOutDir, 'msi', 'Browser Recall.msi'), 'utf8'),
+    ).toBe('old msi');
+    expect(
+      readdirSync(root).filter((name) => name.startsWith('windows.backup-')),
+    ).toEqual([]);
+  });
+
+  it.runIf(process.platform === 'win32')(
+    'replaces Windows output while the previously collected executable is running',
+    async () => {
+      const root = mkdtempSync(
+        join(tmpdir(), 'browser-recall-desktop-artifacts-'),
+      );
+      const cargoReleaseDir = join(root, 'target-release');
+      const outDir = join(root, 'dist-desktop');
+      const currentExecutable = join(
+        outDir,
+        'windows',
+        'bin',
+        'browser-recall-desktop.exe',
+      );
+      mkdirSync(cargoReleaseDir, { recursive: true });
+      mkdirSync(join(outDir, 'windows', 'bin'), { recursive: true });
+      writeFileSync(
+        join(cargoReleaseDir, 'browser-recall-desktop.exe'),
+        'new release',
+      );
+      copyFileSync(
+        join(process.env.WINDIR, 'System32', 'ping.exe'),
+        currentExecutable,
+      );
+      stagedDirs.push(root);
+
+      const runningArtifact = spawn(currentExecutable, ['-t', '127.0.0.1'], {
+        stdio: 'ignore',
+        windowsHide: true,
+      });
+      const warnings = [];
+      await new Promise((resolve, reject) => {
+        runningArtifact.once('spawn', resolve);
+        runningArtifact.once('error', reject);
+      });
+
+      try {
+        collectDesktopArtifacts({
+          cargoReleaseDir,
+          outDir,
+          platformName: 'windows',
+          warn: (message) => warnings.push(message),
+        });
+
+        expect(readFileSync(currentExecutable, 'utf8')).toBe('new release');
+        expect(runningArtifact.exitCode).toBeNull();
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain(
+          'Build succeeded and installed the new desktop executable',
+        );
+        expect(warnings[0]).toContain(
+          'Quit Browser Recall from its tray menu; closing the window only hides it',
+        );
+        expect(warnings[0]).not.toContain('EPERM');
+      } finally {
+        runningArtifact.kill();
+        await new Promise((resolve) => runningArtifact.once('close', resolve));
+      }
+    },
+  );
+
   it('copies the expected platform executable and bundle into dist/desktop shape', () => {
     const root = mkdtempSync(
       join(tmpdir(), 'browser-recall-desktop-artifacts-'),

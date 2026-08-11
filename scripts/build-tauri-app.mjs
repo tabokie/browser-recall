@@ -1,18 +1,16 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
+import { desktopBuildPlan } from './desktop-build-plan.mjs';
+
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '..');
-const tauriBinary = path.join(
-  repoRoot,
-  'node_modules',
-  '.bin',
-  process.platform === 'win32' ? 'tauri.cmd' : 'tauri',
-);
+const require = createRequire(import.meta.url);
 const localAdHocSigning =
   !process.env.APPLE_SIGNING_IDENTITY ||
   process.env.APPLE_SIGNING_IDENTITY === '-';
@@ -47,24 +45,39 @@ function forwardLine(line, target) {
   target.write(line);
 }
 
-const child = spawn(tauriBinary, ['build', '--bundles', 'app'], {
-  cwd: path.join(repoRoot, 'apps', 'desktop'),
-  env: process.env,
-  stdio: ['inherit', 'pipe', 'pipe'],
-});
+export function tauriBuildInvocation({ platform = process.platform } = {}) {
+  const buildArgs = desktopBuildPlan(platform).tauriArgs;
+  return {
+    command: process.execPath,
+    args: [require.resolve('@tauri-apps/cli/tauri.js'), ...buildArgs],
+  };
+}
 
-forwardBuildOutput(child.stdout, process.stdout);
-forwardBuildOutput(child.stderr, process.stderr);
+export function runTauriBuild() {
+  const { command, args } = tauriBuildInvocation();
+  const child = spawn(command, args, {
+    cwd: path.join(repoRoot, 'apps', 'desktop'),
+    env: process.env,
+    stdio: ['inherit', 'pipe', 'pipe'],
+  });
 
-child.on('error', (error) => {
-  process.stderr.write(`Could not start Tauri build: ${error.message}\n`);
-  process.exitCode = 1;
-});
-child.on('exit', (code, signal) => {
-  if (signal) {
-    process.stderr.write(`Tauri build stopped by ${signal}\n`);
+  forwardBuildOutput(child.stdout, process.stdout);
+  forwardBuildOutput(child.stderr, process.stderr);
+
+  child.on('error', (error) => {
+    process.stderr.write(`Could not start Tauri build: ${error.message}\n`);
     process.exitCode = 1;
-    return;
-  }
-  process.exitCode = code ?? 1;
-});
+  });
+  child.on('exit', (code, signal) => {
+    if (signal) {
+      process.stderr.write(`Tauri build stopped by ${signal}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    process.exitCode = code ?? 1;
+  });
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  runTauriBuild();
+}

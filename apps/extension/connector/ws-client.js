@@ -22,6 +22,7 @@ const MANUAL_RECONNECT_DEADLINE_MS = 15_000;
 const RECONNECT_DELAY_MS = 15_000;
 const SOCKET_OPEN_TIMEOUT_MS = 5000;
 const BRIDGE_REQUEST_TIMEOUT_MS = 1500;
+const STATUS_SYNCHRONIZATION_TIMEOUT_MS = BRIDGE_REQUEST_TIMEOUT_MS * 2 + 500;
 const SNAPSHOT_REQUEST_TIMEOUT_MS = 60_000;
 const SNAPSHOT_CAPTURE_ENVELOPE_RESERVE_BYTES = 64 * 1024;
 const SNAPSHOT_RESOURCE_CONCURRENCY = 6;
@@ -837,18 +838,23 @@ async function markSessionAuthenticated(
     if (!(await writeState(storagePatch, session))) return;
   }
   if (!isCurrentSession(session)) return;
+  // Authentication opens the request gate, so publish statusTask in the same
+  // synchronous turn. Do not insert an await between these assignments:
+  // status-dependent callers need the task before they can proceed safely.
   session.authenticated = true;
-  if (
-    !(await transitionConnection(
-      CONNECTION_PHASES.SYNCHRONIZING,
-      {},
-      {},
-      session,
-    ))
-  ) {
-    return;
-  }
-  session.statusTask = requestStatus(session);
+  session.statusTask = (async () => {
+    if (
+      !(await transitionConnection(
+        CONNECTION_PHASES.SYNCHRONIZING,
+        {},
+        {},
+        session,
+      ))
+    ) {
+      throw new Error('Desktop bridge changed before status synchronization');
+    }
+    return requestStatus(session);
+  })();
   try {
     const status = await session.statusTask;
     if (!isCurrentSession(session)) return;
@@ -1165,9 +1171,9 @@ async function ensureBridgeReadyForRequest() {
   if (hasAuthenticatedOpenSocket()) return;
 
   const stored = await readState([STORAGE_KEYS.token]);
-  if (!stored[STORAGE_KEYS.token]) return;
-
-  await ensureConnection({ storedOnly: true });
+  await ensureConnection(
+    stored[STORAGE_KEYS.token] ? { storedOnly: true } : undefined,
+  );
 
   if (await waitForAuthenticatedSocket()) return;
   throw new Error('Desktop bridge is not connected');
@@ -1325,26 +1331,49 @@ async function requestStatus(expectedSession = runtime.session) {
 }
 
 async function requireDesktopSnapshotMessageLimit() {
-  const session = runtime.session;
-  if (session?.statusTask) {
-    await session.statusTask;
+  // Authentication and the status exchange are separate protocol phases. A
+  // reconnect may replace the authenticated session while its status request
+  // is settling, so snapshot callers must follow the current session instead
+  // of failing against the stale one they first observed.
+  while (true) {
+    await ensureBridgeReadyForRequest();
+    const session = runtime.session;
+    try {
+      if (!session?.statusTask) {
+        throw new Error(
+          'Desktop status synchronization was not published after authentication',
+        );
+      }
+      let timeout;
+      await Promise.race([
+        session.statusTask,
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => {
+            const error = new Error(
+              'Desktop status synchronization timed out before snapshot capture',
+            );
+            error.code = 'desktop_status_timeout';
+            reject(error);
+          }, STATUS_SYNCHRONIZATION_TIMEOUT_MS);
+        }),
+      ]).finally(() => clearTimeout(timeout));
+    } catch (error) {
+      if (isCurrentSession(session)) throw error;
+      continue;
+    }
+    if (!isCurrentSession(session) || !hasAuthenticatedOpenSocket()) {
+      continue;
+    }
+    const maxMessageBytes = session.maxMessageBytes;
+    if (!Number.isSafeInteger(maxMessageBytes) || maxMessageBytes <= 0) {
+      const error = new Error(
+        'Desktop did not advertise a valid snapshot message limit',
+      );
+      error.code = 'missing_desktop_message_limit';
+      throw error;
+    }
+    return maxMessageBytes;
   }
-  if (!isCurrentSession(session) || !hasAuthenticatedOpenSocket()) {
-    const error = new Error(
-      'Desktop bridge changed before communicating the snapshot message limit',
-    );
-    error.code = 'desktop_bridge_changed';
-    throw error;
-  }
-  const maxMessageBytes = session.maxMessageBytes;
-  if (!Number.isSafeInteger(maxMessageBytes) || maxMessageBytes <= 0) {
-    const error = new Error(
-      'Desktop did not advertise a valid snapshot message limit',
-    );
-    error.code = 'missing_desktop_message_limit';
-    throw error;
-  }
-  return maxMessageBytes;
 }
 
 async function waitForIdleBridge() {

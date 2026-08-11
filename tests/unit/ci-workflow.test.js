@@ -33,7 +33,12 @@ function jobBody(jobName, nextJobName) {
 
 describe('GitHub CI prerequisites', () => {
   test.each([
-    ['test', 'test-rust', 'ci:test'],
+    ['test', 'test-extension-e2e', 'ci:test'],
+    [
+      'test-extension-e2e',
+      'test-rust',
+      'ci:install-playwright ci:test-extension-e2e',
+    ],
     ['test-rust', 'test-desktop-visual', 'ci:test-rust'],
     [
       'test-desktop-visual',
@@ -48,17 +53,23 @@ describe('GitHub CI prerequisites', () => {
     for (const script of scripts.split(' ')) {
       expect(body).toContain(`npm run ${script}`);
     }
+    if (job.endsWith('rust')) {
+      expect(body).toMatch(new RegExp(`npm ci[\\s\\S]*npm run ${scripts}`));
+    }
   });
 
   test('local CI composes every locally safe GitHub CI job', () => {
     expect(packageJson.scripts.ci).toBe(
-      'npm run ci:test && npm run ci:test-rust && npm run ci:install-desktop-visual-browsers && npm run ci:test-desktop-visual && npm run ci:cold-scripts && npm run ci:lint-js && npm run ci:lint-rust',
+      'npm run ci:test && npm run ci:install-playwright && npm run ci:test-extension-e2e && npm run ci:test-rust && npm run ci:install-desktop-visual-browsers && npm run ci:test-desktop-visual && npm run ci:cold-scripts && npm run ci:lint-js && npm run ci:lint-rust',
     );
     expect(packageJson.scripts['ci:install-playwright']).toBe(
       'playwright install --no-shell chromium',
     );
     expect(packageJson.scripts['ci:install-desktop-visual-browsers']).toBe(
       'playwright install --no-shell chromium webkit',
+    );
+    expect(packageJson.scripts['ci:test-extension-e2e']).toBe(
+      'playwright test tests/e2e/extension-font-fallback.spec.js tests/e2e/popup-lists.spec.js tests/e2e/snapshot-slug-meta.spec.js',
     );
     expect(packageJson.scripts['test:visual']).toBe(
       'npm run build:desktop-ui && npm run test:visual:wkwebview && npm run test:visual:chromium && npm run test:visual:webkit',
@@ -70,7 +81,7 @@ describe('GitHub CI prerequisites', () => {
       'playwright test tests/e2e/desktop-visual.spec.js',
     );
     expect(packageJson.scripts['test:visual:webkit']).toBe(
-      'BROWSER_RECALL_PLAYWRIGHT_ENGINE=webkit playwright test tests/e2e/desktop-visual.spec.js --browser=webkit --grep @webkit',
+      'playwright test --config playwright.webkit.config.js tests/e2e/desktop-visual.spec.js --browser=webkit --grep @webkit',
     );
     const nativeJob = jobBody('test-desktop-native-bundle', 'lint-js');
     expect(nativeJob).toContain(
@@ -96,7 +107,7 @@ describe('GitHub CI prerequisites', () => {
     expect(rustToolchain).toContain('channel = "1.97.0"');
     expect(rustToolchain).toContain('"llvm-tools-preview"');
     expect(ciWorkflow.match(/dtolnay\/rust-toolchain@1\.97\.0/g)).toHaveLength(
-      5,
+      7,
     );
     expect(ciWorkflow).not.toContain('dtolnay/rust-toolchain@stable');
   });
@@ -128,6 +139,19 @@ describe('GitHub CI prerequisites', () => {
     expect(macosLifecycleSmoke).toContain('waitForProcessExit(pid)');
     expect(macosLifecycleSmoke).not.toContain(
       'visible Resume Service did not start the absent daemon',
+    );
+  });
+
+  test('Windows CI exercises locked artifact replacement before native smoke', () => {
+    const windowsJob = jobBody('test-desktop-single-instance', 'lint-js');
+    expect(windowsJob).toContain('npm run ci:install-playwright');
+    expect(windowsJob).toContain('npm run ci:test-windows-extension-font');
+    expect(packageJson.scripts['ci:test-windows-extension-font']).toBe(
+      'playwright test tests/e2e/extension-font-fallback.spec.js',
+    );
+    expect(windowsJob).toContain('npm run ci:test-windows-artifacts');
+    expect(packageJson.scripts['ci:test-windows-artifacts']).toBe(
+      'vitest run tests/unit/stage-app-assets.test.js',
     );
   });
 });

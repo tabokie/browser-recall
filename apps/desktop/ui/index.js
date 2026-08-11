@@ -570,13 +570,16 @@ async function initializeOnboardingLaunchAtLogin() {
   const unsupported = document.getElementById(
     'onboardingLaunchAtLoginUnsupported',
   );
-  if (!input || !row || !unsupported) return;
+  const loginError = document.getElementById('onboardingLaunchAtLoginError');
+  if (!input || !row || !unsupported || !loginError) return;
   const shell = await loadDesktopShellState();
   const supported = shell.loginItemSupported;
   input.disabled = !supported;
   input.checked = supported ? shell.launchAtLogin : false;
   row.classList.toggle('disabled', !supported);
   unsupported.style.display = supported ? 'none' : 'block';
+  loginError.textContent = shell.loginItemError || '';
+  loginError.style.display = shell.loginItemError ? 'block' : 'none';
   if (!shell.setupComplete && shell.dataDir) {
     const dirBtn = document.getElementById('onboardingDirBtn');
     if (dirBtn) {
@@ -6208,11 +6211,14 @@ async function refreshDesktopShellSettings() {
   const loginToggle = document.getElementById('launchAtLoginToggle');
   const loginOption = document.getElementById('launchAtLoginOption');
   const loginUnsupported = document.getElementById('launchAtLoginUnsupported');
+  const loginError = document.getElementById('launchAtLoginError');
   const loginItemSupported = shell.loginItemSupported;
   loginToggle.checked = shell.launchAtLogin;
   loginToggle.disabled = !loginItemSupported;
   loginOption.classList.toggle('disabled', !loginItemSupported);
   loginUnsupported.style.display = loginItemSupported ? 'none' : 'block';
+  loginError.textContent = shell.loginItemError || '';
+  loginError.style.display = shell.loginItemError ? 'block' : 'none';
   document.getElementById('debugLoggingToggle').checked = shell.debugLogging;
   await chrome.storage.session.set({ debugLogging: shell.debugLogging });
   renderPairedBrowsers(shell.pairedBrowsers);
@@ -6230,7 +6236,10 @@ function renderPairedBrowsers(browsers) {
       const lastSeen = new Date(browser.lastSeen).toLocaleString(
         getActiveLocale(),
       );
-      const profile = `${escapeHtml(browser.browserProfile)} · `;
+      const profile =
+        browser.browserProfile === null
+          ? ''
+          : `${escapeHtml(browser.browserProfile)} · `;
       const browserName = formatBrowserName(browser.browserName);
       const connectionStatus = browser.connected
         ? tr('desktopConnected', 'Connected')

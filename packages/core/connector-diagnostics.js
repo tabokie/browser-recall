@@ -203,7 +203,12 @@ const STATE_FORMATS = {
     tone: 'error',
   },
   starting: {
-    status: () => tr('extensionDesktopOffline', 'Desktop Offline', undefined),
+    status: () =>
+      tr(
+        'extensionLookingForDesktop',
+        'Looking for Browser Recall Desktop',
+        undefined,
+      ),
     meta: (connector) =>
       appendConnectorDiagnostic(
         tr(

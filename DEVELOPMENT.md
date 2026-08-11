@@ -36,7 +36,24 @@ This is the canonical build command. It builds every artifact needed for manual 
 
 Tauri still uses `target/` internally as a Rust build cache, but release artifacts that users need are collected under `dist/`.
 
-The canonical build intentionally does not create a DMG/installer. Installer packaging is a release-only step because macOS may open installer UI during DMG creation.
+Artifact collection stages a complete platform tree before replacing
+`dist/desktop/<platform>/`. On Windows this allows `npm run build` to finish
+while a previously collected executable is still running: the executable is
+retired and the staged executable is installed inside the stable platform
+directory, which WebView2 may keep locked as a whole, before stale
+non-executable output is replaced by the staged remainder. If any promotion
+step fails, the collector restores the complete prior executable and remainder
+tree before reporting the failure. If Windows retains the renamed old
+executable until its process exits, the collector explicitly reports that the
+new executable was installed successfully, explains that closing the window
+only hides the app, and reports the retained old file separately. Quit Browser
+Recall from its tray menu to release that file; the next build retries cleanup
+automatically.
+
+The canonical build intentionally does not create an installer. It produces an
+`.app` bundle on macOS and the raw desktop executable on other platforms.
+Installer packaging is a release-only step because macOS may open installer UI
+during DMG creation.
 
 On macOS, the canonical desktop build signs the complete `.app` bundle and then runs `scripts/verify-macos-app-bundle.mjs`. Local builds use Tauri's ad-hoc `-` identity so `Info.plist` and resources are bound instead of leaving only the linker-signed executable; `scripts/finalize-macos-app-bundle.mjs` replaces the per-build CDHash designated requirement with the stable bundle identifier. `scripts/build-tauri-app.mjs` classifies Tauri's missing-notarization-credentials message as expected local-build information while preserving every other warning; distribution builds still show and enforce notarization failures. This stabilizes local OS identity but does not authenticate a publisher. If an Apple Development or Developer ID Application certificate is installed, set `APPLE_SIGNING_IDENTITY` to the identity reported by `security find-identity -v -p codesigning`; Tauri gives that environment variable precedence and the local ad-hoc finalization is skipped. DMG builds fail before bundling unless this Apple identity is present, and distribution also requires notarization.
 
@@ -60,6 +77,26 @@ Place PNG icons in `apps/extension/icons/`:
 - `icon128.png` (128x128)
 
 See `apps/extension/icons/README.md` for details.
+
+### Desktop Icons
+
+Desktop and extension raster assets are generated from the root SVG sources:
+
+```bash
+npm run generate:icons
+```
+
+The command is cross-platform. It renders every desktop slot directly at its
+native target size so already-antialiased SVG edges are not softened by a
+second downsampling pass. The Windows `.ico` includes 16, 20, 24, 28, 32, 36,
+40, 48, 56, 64, 72, 80, 96, 112, 128, and 256 px representations for standard
+shell DPI variants. At runtime, the Windows desktop assigns matching small and
+large representations to its HWND and refreshes them after monitor DPI changes.
+The macOS `.icns` includes every standard and Retina PNG-backed slot without
+requiring `iconutil`. Extension toolbar slots retain their separately tuned
+supersampling pipeline. Commit the regenerated assets with any source icon
+change. Tauri's build script watches the desktop PNG, ICO, and ICNS files so
+the executable and app bundle are re-embedded after regeneration.
 
 ## Loading the Extension
 
@@ -96,7 +133,7 @@ The extension options page is only a stub. The main UI runs in the desktop app w
 
 ### Full Local CI
 
-Run the complete GitHub CI test and lint suite locally with:
+Run the complete cross-platform CI test and lint chain locally with:
 
 ```bash
 npm run ci
@@ -104,10 +141,10 @@ npm run ci
 
 GitHub's locally safe jobs delegate to the same `ci:*` package scripts, so local
 and hosted verification cannot drift into different command sets. The native
-macOS lifecycle job is the explicit exception: it requires the isolated session
-described below and is not part of `npm run ci`. Run the complete local suite
-before committing and the native lifecycle job on a disposable runner when its
-covered paths change.
+macOS lifecycle and Windows single-instance jobs are explicit exceptions: they
+require their platform-specific environments described below and are not part
+of `npm run ci`. Run the complete local chain before committing and the relevant
+native smoke on its required platform when those paths change.
 
 ### Unit Tests (Vitest)
 
@@ -134,6 +171,33 @@ npm run test:visual                          # build UI; run native WKWebView, C
 
 Config: `playwright.config.js`. Tests: `tests/e2e/*.spec.js`. Runs use one worker; Chromium is the default channel, and the tagged desktop visual pass selects WebKit explicitly.
 
+Hosted CI also runs `npm run ci:test-extension-e2e`, covering the popup,
+snapshot-highlight, and actual platform-font regression suites with pinned
+Chromium. The Windows job separately runs the Win32-only locked-artifact
+replacement test before building and launching the native smoke executable.
+
+Canonical local and hosted runs use Playwright's pinned Chromium. When that
+browser has not yet been downloaded but stable Google Chrome is installed, a
+focused desktop-only run can explicitly select the system Chrome channel:
+
+```powershell
+$env:BROWSER_RECALL_PLAYWRIGHT_ENGINE = 'chrome'
+npx playwright test tests/e2e/desktop-visual.spec.js --grep "settings renders nullable profiles"
+Remove-Item Env:BROWSER_RECALL_PLAYWRIGHT_ENGINE
+```
+
+This opt-in changes only the local browser executable; CI continues to install
+and run the pinned Chromium build. Chrome-branded builds 137 and newer reject
+command-line loading of unpacked extensions, so do not use the `chrome` channel
+for extension E2E. On Windows, installed Edge remains a valid local Chromium
+extension runner when the pinned browser cannot be downloaded:
+
+```powershell
+$env:BROWSER_RECALL_PLAYWRIGHT_ENGINE = 'msedge'
+npx playwright test tests/e2e/extension-font-fallback.spec.js
+Remove-Item Env:BROWSER_RECALL_PLAYWRIGHT_ENGINE
+```
+
 `npm run test:visual` is the canonical desktop visual check. It first stages
 `dist/desktop/ui/`, runs a native macOS WKWebView chart-layout probe when on
 macOS, runs the full `tests/e2e/desktop-visual.spec.js` suite in Chromium, then
@@ -149,6 +213,28 @@ BROWSER_RECALL_ISOLATED_MACOS_SESSION=1 npm run test:desktop-native
 ```
 
 It verifies the actual bundle, painted startup-error reporting, repaired-storage relaunch, accessible tray placement/menu activation, repeated reopening, focus, and frame preservation. Playwright separately covers visible Resume command wiring, while Rust exercises the real absent-daemon repair-and-restart boundary and concurrent start serialization. The smoke test unregisters its test app before deleting the temporary bundle, but the ephemeral-session requirement remains because Control Center can retain status-item ownership state independently of Launch Services. GitHub CI runs this scenario on a fresh macOS 26 VM so the native test covers the Control Center generation where the regression occurred without polluting a developer login session.
+
+Windows has a separate native single-instance smoke test. Build the desktop app,
+close any running Browser Recall instance, then run:
+
+```powershell
+npm run test:desktop-single-instance
+```
+
+It launches the real executable twice, verifies that the second process exits,
+and waits for the original process to log the forwarded
+`browser-recall://settings` route. Before launch it also uses the native Win32
+icon API to verify that every generated ICO representation is embedded in the
+executable pixel-for-pixel, then inspects the running HWND to require native
+DPI-sized small and taskbar icons. The processes use disposable configuration,
+log, and WebView2 profiles and suppress protocol and launch-at-login
+registration, so the smoke does not read product data, start sync, reuse the
+installed app's browser state, or replace the user's OS registrations. The
+production single-instance identifier is still exercised,
+so a running Browser Recall process must be closed first. Run the resource-only
+icon check without stopping an existing desktop process with
+`node tests/smoke/windows-desktop-single-instance.mjs --icons-only`. Hosted CI
+runs the complete smoke test on `windows-latest`.
 
 When running under a filesystem/process sandbox, Chromium launch may require an unsandboxed command approval. If every visual test fails at `0ms` with `browserType.launch: Target page, context or browser has been closed`, `SIGABRT`, or `kill EPERM`, rerun the same command with browser-launch permissions instead of changing the tests or package script. A focused `npx playwright test ... -g "<name>"` run can pass while the sandboxed npm visual script fails, because the failure is at browser launch before any test code runs.
 

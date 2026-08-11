@@ -1,12 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import {
-  chmodSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -26,33 +19,32 @@ describe('daemon integration test harness', () => {
   it('rechecks the daemon build on sequential test runs', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'browser-recall-build-test-'));
     tempDirs.push(dir);
-    const binDir = path.join(dir, 'bin');
-    const cargoPath = path.join(binDir, 'cargo');
+    const cargoScriptPath = path.join(dir, 'fake-cargo.mjs');
     const countPath = path.join(dir, 'build-count');
     const runnerPath = path.join(dir, 'runner.mjs');
     const harnessUrl = pathToFileURL(
       path.join(process.cwd(), 'tests/integration/daemon-test-harness.js'),
     ).href;
 
-    mkdirSync(binDir);
     writeFileSync(
-      cargoPath,
-      `#!/bin/sh\nprintf 'built\\n' >> '${countPath}'\n`,
-      { mode: 0o755, flag: 'w' },
+      cargoScriptPath,
+      `import { appendFileSync } from 'node:fs';\nappendFileSync(${JSON.stringify(countPath)}, 'built\\n');\n`,
     );
-    chmodSync(cargoPath, 0o755);
     writeFileSync(
       runnerPath,
       `import { ensureTestDaemonBuilt } from ${JSON.stringify(harnessUrl)};\nawait ensureTestDaemonBuilt();\nawait ensureTestDaemonBuilt();\n`,
     );
 
+    const childEnv = {
+      ...process.env,
+      BROWSER_RECALL_TEST_CARGO: process.execPath,
+      BROWSER_RECALL_TEST_CARGO_SCRIPT: cargoScriptPath,
+      TMPDIR: dir,
+    };
+
     const run = spawnSync(process.execPath, [runnerPath], {
       cwd: process.cwd(),
-      env: {
-        ...process.env,
-        PATH: `${binDir}${path.delimiter}${process.env.PATH || ''}`,
-        TMPDIR: dir,
-      },
+      env: childEnv,
       encoding: 'utf8',
     });
 
