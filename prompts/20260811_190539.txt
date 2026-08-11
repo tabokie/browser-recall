@@ -1,0 +1,7 @@
+- Fix a few issues: (1) Sometimes when opening extension popup, it briefly enters unavailable state before showing the data. It changes too fast so I couldn't see the specific message. (2) Unpausing the popup should immediately show the page data. (3) Desktop UI should by default use light mode instead of system mode.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) 
+- Fix them including architectural improvement
+- Please review my uncommitted changes
+- Fix them
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.6 Sol
+- As code comment somewhere

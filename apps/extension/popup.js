@@ -51,8 +51,11 @@ let frozenChipOrder = null; // Array of list slugs — frozen on first render to
 const recordingUiState = {
   hydrated: false,
   paused: false,
-  pending: false,
 };
+const DASHBOARD_LOADING_PRESENTATION = Object.freeze({
+  PRESERVE: 'preserve',
+  SHELL: 'shell',
+});
 const popupShellState = {
   surface: 'diagnostic',
 };
@@ -87,6 +90,16 @@ function resetCurrentPageIdentity({ slug, url, title, tab }) {
 
 function nextCurrentPageGeneration() {
   return ++currentPage.generation;
+}
+
+async function waitForPopupUiMutationSettlement() {
+  while (isPopupUiMutating()) {
+    if (hasActivePopupUiMutation()) {
+      await waitForActivePopupUiMutation();
+    } else {
+      await popupUiMutationQueue;
+    }
+  }
 }
 
 // ─── Error UI ────────────────────────────────────────────────────────
@@ -125,10 +138,7 @@ function renderPopupShell(options = {}) {
   const content = document.getElementById('dashboardContent');
   const surface = popupShellState.surface;
   const contentVisible = surface === 'dashboard' || surface === 'diagnostic';
-  const compact =
-    surface === 'banner' ||
-    surface === 'diagnostic' ||
-    surface === 'dashboard-loading';
+  const compact = surface === 'banner' || surface === 'diagnostic';
 
   if (loading) loading.style.display = 'none';
   if (dashboard) dashboard.style.display = 'flex';
@@ -1908,7 +1918,7 @@ function applyRecordingBarState() {
   if (!bar || !button || !label) return;
 
   const paused = recordingUiState.paused;
-  const pending = recordingUiState.pending || isPopupUiMutating();
+  const pending = isPopupUiMutating();
   bar.classList.toggle('is-paused', paused);
   button.disabled = pending;
   button.setAttribute('aria-disabled', pending ? 'true' : 'false');
@@ -1928,32 +1938,25 @@ async function renderRecordingBar() {
 
 async function handleRecordingToggleClick() {
   await loadRecordingState();
-  if (recordingUiState.pending) return;
   const paused = recordingUiState.paused;
   const nextPaused = !paused;
-  recordingUiState.pending = true;
-  applyRecordingBarState();
   try {
     await saveRecordingState(nextPaused);
     recordingUiState.paused = nextPaused;
-    nextCurrentPageGeneration();
+    const transitionGeneration = nextCurrentPageGeneration();
     applyRecordingBarState();
 
     // Resuming recording: record the current page visit and show details.
     if (paused && !nextPaused && currentPage.tab) {
-      const url = currentPage.tab._effectiveUrl || currentPage.tab.url;
-      const response = await chrome.runtime.sendMessage({
-        action: 'recordPageActivity',
-        url,
-        title: currentPage.tab.title || null,
-        slug: generateSlugFromUrl(url),
-        isInitialLoad: true,
-      });
-      requireSuccessfulResponse(response, 'recordPageActivity');
-      await showDashboard(currentPage.tab, {
-        hideContentUntilReady: true,
-        compactUntilReady: true,
-      });
+      const resumedTab = currentPage.tab;
+      const hasRenderedPageData = currentPage.summary !== null;
+      if (hasRenderedPageData) restoreDashboardContent();
+      if (hasRenderedPageData) {
+        await recordCurrentPageActivity(resumedTab);
+        await refreshCurrentPageSummary();
+        return;
+      }
+      await resumeDashboard(resumedTab, transitionGeneration);
       return;
     }
 
@@ -1967,7 +1970,6 @@ async function handleRecordingToggleClick() {
       renderBannerOnly();
     }
   } finally {
-    recordingUiState.pending = false;
     applyRecordingBarState();
   }
 }
@@ -2242,7 +2244,6 @@ async function refreshCurrentPageSummary(options = {}) {
   const { paused } = await loadRecordingState();
   if (
     paused ||
-    recordingUiState.pending ||
     !['dashboard', 'diagnostic'].includes(popupShellState.surface) ||
     !document.getElementById('dashboardContent')
   ) {
@@ -2363,17 +2364,76 @@ async function finishDashboardRender(tab, generation) {
   scheduleDelayedTitleCheck(tab, tab.title || '');
 }
 
+async function recordCurrentPageActivity(tab) {
+  const url = tab._effectiveUrl || tab.url;
+  const response = await chrome.runtime.sendMessage({
+    action: 'recordPageActivity',
+    url,
+    title: tab.title || null,
+    slug: generateSlugFromUrl(url),
+    isInitialLoad: true,
+  });
+  requireSuccessfulResponse(response, 'recordPageActivity');
+}
+
+function renderProvisionalDashboardShell(tab) {
+  if (
+    !tab ||
+    typeof tab !== 'object' ||
+    typeof tab.url !== 'string' ||
+    !tab.url
+  ) {
+    throw new Error('Provisional dashboard shell requires a browser tab URL');
+  }
+  const title = typeof tab.title === 'string' ? tab.title : '';
+  resetCurrentPageIdentity({ slug: '', url: tab.url, title, tab });
+  document.getElementById('pageTitle').textContent = title;
+  document.getElementById('pageUrl').textContent = tab.url;
+  resetDashboardSections();
+  renderPageDashboardShell();
+}
+
+async function resumeDashboard(tab, generation) {
+  // Browser-reported tab metadata is presentation-only until background-owned
+  // page identity resolves; never use the provisional URL for semantic work.
+  renderProvisionalDashboardShell(tab);
+  try {
+    await resolveEffectiveUrl(tab);
+  } catch (error) {
+    if (generation === currentPage.generation) {
+      showDesktopDataUnavailable(error.message, {
+        reason: 'popup-page-identity-failed',
+        url: tab.url,
+      });
+    }
+    return;
+  }
+  if (generation !== currentPage.generation) return;
+  await showDashboard(tab, {
+    loadingPresentation: DASHBOARD_LOADING_PRESENTATION.SHELL,
+    beforeFetch: () => recordCurrentPageActivity(tab),
+  });
+}
+
+function validateDashboardLoadingPresentation(presentation) {
+  if (!Object.values(DASHBOARD_LOADING_PRESENTATION).includes(presentation)) {
+    throw new Error(`Unknown dashboard loading presentation: ${presentation}`);
+  }
+}
+
 // Show dashboard for a tab: set up state, fetch data, render sections
 async function showDashboard(tab, options = {}) {
-  const { hideContentUntilReady = false, compactUntilReady = false } = options;
+  const {
+    loadingPresentation = DASHBOARD_LOADING_PRESENTATION.PRESERVE,
+    beforeFetch = null,
+  } = options;
+  validateDashboardLoadingPresentation(loadingPresentation);
+  if (beforeFetch !== null && typeof beforeFetch !== 'function') {
+    throw new Error('Dashboard beforeFetch must be a function or null');
+  }
   replaceConnectorDiagnosticOwner(false);
   const generation = nextCurrentPageGeneration();
   const previousSlug = currentPage.slug;
-  if (hideContentUntilReady) {
-    setPopupSurface('dashboard-loading');
-  }
-  if (compactUntilReady) setPopupCompact(true);
-
   const { slug, url, title } = await resolvePageIdentity(tab);
   if (generation !== currentPage.generation) return;
   if (slug !== previousSlug) frozenChipOrder = null;
@@ -2381,6 +2441,11 @@ async function showDashboard(tab, options = {}) {
   document.getElementById('pageTitle').textContent = title;
   document.getElementById('pageUrl').textContent = url;
   resetDashboardSections();
+  if (loadingPresentation === DASHBOARD_LOADING_PRESENTATION.SHELL) {
+    showDashboardUI();
+  }
+  if (beforeFetch) await beforeFetch();
+  if (generation !== currentPage.generation) return;
 
   const updated = await fetchAndRenderPageData(tab, slug, {
     resetSections: false,
@@ -2654,6 +2719,59 @@ async function renderPreparedDashboard(bootstrap) {
   schedulePendingLiveListRefresh();
 }
 
+async function renderPendingPopup(bootstrap) {
+  if (
+    bootstrap?.mode !== 'connector-diagnostic' ||
+    !bootstrap.tab ||
+    typeof bootstrap.tab !== 'object'
+  ) {
+    throw new Error('Pending popup model is missing its current tab');
+  }
+  const generation = nextCurrentPageGeneration();
+  currentPage.tab = bootstrap.tab;
+  const { paused } = await loadRecordingState();
+  if (generation !== currentPage.generation) return generation;
+  if (paused) {
+    renderBannerOnly();
+    revealPopup();
+    return generation;
+  }
+
+  renderProvisionalDashboardShell(bootstrap.tab);
+  return generation;
+}
+
+async function renderPendingPopupHandoff(handoff) {
+  const handoffGeneration = await renderPendingPopup(handoff.bootstrap);
+  let bootstrap = null;
+  let preparationError = null;
+  try {
+    bootstrap = await awaitPopupBootstrap(handoff.token, handoff.targetTabId);
+  } catch (error) {
+    preparationError = error;
+  }
+
+  // Retain the completed outcome across an active mutation; after settlement,
+  // the page generation is the sole authority for whether it may repaint.
+  if (handoffGeneration !== currentPage.generation) return true;
+  await waitForPopupUiMutationSettlement();
+  if (handoffGeneration !== currentPage.generation) return true;
+  if (preparationError) {
+    showDesktopDataUnavailable(preparationError.message, {
+      reason: 'popup-bootstrap-preparation-failed',
+    });
+    return true;
+  }
+  if (bootstrap) {
+    await renderPreparedPopup(bootstrap);
+    return true;
+  }
+
+  popupBootstrapLifecyclePort?.disconnect?.();
+  popupBootstrapLifecyclePort = null;
+  return false;
+}
+
 async function renderPreparedPopup(bootstrap) {
   if (!bootstrap || typeof bootstrap !== 'object' || Array.isArray(bootstrap)) {
     throw new Error('Prepared popup model must be an object');
@@ -2665,11 +2783,10 @@ async function renderPreparedPopup(bootstrap) {
     currentPage.tab = bootstrap.tab;
   }
 
-  // Session storage is the authority for the recording control. Prepared page
-  // data may have been computed before a pause/resume command completed, so a
-  // pending local command owns the surface until it settles.
+  // Session storage is the authority for the recording control. The handoff
+  // generation checked by the caller prevents stale prepared data from
+  // painting after a local pause/resume transition starts.
   const { paused } = await loadRecordingState();
-  if (recordingUiState.pending) return;
   if (
     paused &&
     (bootstrap.mode === 'private' || bootstrap.mode === 'dashboard')
@@ -2683,8 +2800,7 @@ async function renderPreparedPopup(bootstrap) {
       throw new Error('Private popup model is missing its tab');
     }
     await showDashboard(bootstrap.tab, {
-      hideContentUntilReady: true,
-      compactUntilReady: true,
+      loadingPresentation: DASHBOARD_LOADING_PRESENTATION.SHELL,
     });
     return;
   }
@@ -2733,8 +2849,9 @@ async function loadConnectedDashboard(connector) {
   if (!tab) return;
   await resolveEffectiveUrl(tab);
   if (await handlePrivateMode(tab)) return;
-  setPopupSurface('dashboard-shell', { reveal: false });
-  await showDashboard(tab);
+  await showDashboard(tab, {
+    loadingPresentation: DASHBOARD_LOADING_PRESENTATION.SHELL,
+  });
 }
 
 async function initPopup() {
@@ -2746,19 +2863,10 @@ async function initPopup() {
   await loadRecordingState();
   const handoff = await consumePopupBootstrap();
   if (handoff) {
-    await renderPreparedPopup(handoff.bootstrap);
     if (handoff.pending) {
-      const bootstrap = await awaitPopupBootstrap(
-        handoff.token,
-        handoff.targetTabId,
-      );
-      if (bootstrap) {
-        await renderPreparedPopup(bootstrap);
-        return;
-      }
-      popupBootstrapLifecyclePort?.disconnect?.();
-      popupBootstrapLifecyclePort = null;
+      if (await renderPendingPopupHandoff(handoff)) return;
     } else {
+      await renderPreparedPopup(handoff.bootstrap);
       return;
     }
   }

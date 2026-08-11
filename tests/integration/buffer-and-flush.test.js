@@ -1166,7 +1166,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
         'utf8',
       ),
     );
-    expect(settings.theme).toBe('system');
+    expect(settings.theme).toBe('light');
     expect(store.desktopPendingCommands).toBe(2);
     expect(store.desktopCommandBuffer).toHaveLength(2);
     expect(store.desktopCommandBuffer[0].kind).toBe('unknown');

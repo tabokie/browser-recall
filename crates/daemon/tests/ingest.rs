@@ -2511,10 +2511,7 @@ async fn popup_summary_returns_page_info_and_compact_lists() {
             assert!(success);
             assert!(error.is_none());
             let settings = settings.expect("default settings");
-            assert_eq!(
-                settings.get("theme").and_then(Value::as_str),
-                Some("system")
-            );
+            assert_eq!(settings.get("theme").and_then(Value::as_str), Some("light"));
             assert_eq!(settings.len(), 13);
         }
         other => panic!("expected settings result, got {other:?}"),

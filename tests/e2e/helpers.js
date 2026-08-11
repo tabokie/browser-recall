@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { generateSlugFromUrl } from '../../packages/core/page-identity.js';
 
 const DEFAULT_SETTINGS = Object.freeze({
-  theme: 'system',
+  theme: 'light',
   colorScheme: 'amber',
   localeOverride: 'system',
   historyFileBatch: 10,

@@ -75,6 +75,19 @@ let preparedActionPopupGlobalOwner = null;
 const preparedActionPopupTabOwners = new Map();
 let popupPreparationGateForTest = null;
 
+function createPopupPreparationGateForTest(holdPreparation) {
+  if (holdPreparation !== true) return null;
+  if (popupPreparationGateForTest) {
+    throw new Error('Popup preparation test gate is already active');
+  }
+  let release;
+  const preparationGate = new Promise((resolve) => {
+    release = resolve;
+  });
+  popupPreparationGateForTest = { release };
+  return preparationGate;
+}
+
 // tabId → URL from the content script's initial recordPageActivity.
 // Used by popup to avoid slug mismatch when tab.url drifts (SPA pushState, etc.).
 const tabReportedUrls = new Map();
@@ -1890,17 +1903,9 @@ globalThis.browserRecallPreparedPopupForTest = {
     };
   },
   async open(request = {}) {
-    let preparationGate = null;
-    if (request.holdPreparation === true) {
-      if (popupPreparationGateForTest) {
-        throw new Error('Popup preparation test gate is already active');
-      }
-      let release;
-      preparationGate = new Promise((resolve) => {
-        release = resolve;
-      });
-      popupPreparationGateForTest = { release };
-    }
+    const preparationGate = createPopupPreparationGateForTest(
+      request.holdPreparation,
+    );
     let preparedBootstrap = null;
     if (request.terminalConnectorState !== undefined) {
       if (request.terminalConnectorState !== 'offline') {
@@ -1930,10 +1935,13 @@ globalThis.browserRecallPreparedPopupForTest = {
     return { success: true };
   },
   async begin(request = {}) {
+    const preparationGate = createPopupPreparationGateForTest(
+      request.holdPreparation,
+    );
     const tab = Number.isFinite(request.tabId)
       ? await chrome.tabs.get(request.tabId)
       : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
-    const { popupPath } = beginPopupOpenPayload(tab);
+    const { popupPath } = beginPopupOpenPayload(tab, { preparationGate });
     return { success: true, popupPath };
   },
   async reset() {

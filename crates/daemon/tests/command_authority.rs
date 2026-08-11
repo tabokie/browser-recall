@@ -471,7 +471,7 @@ async fn clearing_data_recreates_the_complete_authoritative_settings_schema() {
         .await
         .expect("complete settings projection")
         .expect("settings checkpoint");
-    assert_eq!(settings.get("theme"), Some(&json!("system")));
+    assert_eq!(settings.get("theme"), Some(&json!("light")));
     assert_eq!(
         settings.len(),
         browser_recall_replay::PERSISTENT_SETTINGS_KEYS.len()

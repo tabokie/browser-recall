@@ -158,6 +158,12 @@ function installChromeMock({ tab, responses }) {
           throw new Error(`Obsolete popup RPC invoked: ${request.action}`);
         }
         if (request.action === 'resolvePopupPageIdentity') {
+          const identityHandler = responses.resolvePopupPageIdentity;
+          if (identityHandler) {
+            return await (typeof identityHandler === 'function'
+              ? identityHandler(request)
+              : identityHandler);
+          }
           const reported = responses.getReportedUrl;
           const effectiveUrl =
             reported?.success === true && typeof reported.url === 'string'
@@ -372,160 +378,6 @@ describe('popup desktop state rendering', () => {
     ).toBe(false);
   });
 
-  it('renders a prepared toolbar-click bootstrap without refetching page summary', async () => {
-    const tab = {
-      id: 45,
-      url: 'https://example.com/prepared-popup',
-      title: 'Untrimmed Browser Title',
-    };
-    const bootstrap = {
-      mode: 'dashboard',
-      connector: {
-        success: true,
-        state: 'connected',
-        deviceId: 'test-device',
-        hasToken: true,
-      },
-      tab,
-      identity: {
-        slug: 'prepared-popup',
-        url: tab.url,
-        title: 'Prepared Desktop Title',
-      },
-      summary: completePopupSummary(tab, {
-        success: true,
-        url: tab.url,
-        page: {
-          slug: 'prepared-popup',
-          url: tab.url,
-          title: 'Prepared Desktop Title',
-          visitDates: [20260617],
-          likes: 1,
-        },
-        notes: [],
-        snapshots: [],
-        lists: compactPopupListFixtures(
-          [{ slug: 'reading', name: 'Reading', pins: [] }],
-          generateSlugFromUrl(tab.url),
-        ),
-      }),
-    };
-    installDom(
-      'chrome-extension://abcdefghijklmnop/popup.html?bootstrap=token-1',
-    );
-    installChromeMock({
-      tab,
-      responses: {
-        consumePopupBootstrap: (request) => {
-          expect(request.token).toBe('token-1');
-          return { success: true, bootstrap };
-        },
-        getPageSummary: () => {
-          throw new Error('prepared popup should not refetch page summary');
-        },
-        getPopupLists: () => {
-          throw new Error('prepared popup should not refetch popup lists');
-        },
-        readDesktopValue: { success: true, value: null },
-      },
-    });
-
-    await import('../../apps/extension/popup.js');
-
-    await waitFor(
-      () =>
-        document.getElementById('pageTitle').textContent ===
-          'Prepared Desktop Title' &&
-        document.getElementById('dashboard').style.display === 'flex',
-    );
-
-    expect(document.getElementById('dashboard').style.display).toBe('flex');
-    expect(document.getElementById('loading').style.display).toBe('none');
-    expect(document.getElementById('setup-required')).toBeNull();
-    expect(document.getElementById('pageUrl').textContent).toBe(tab.url);
-    expect(document.getElementById('listCount').textContent).toBe('00');
-    expect(
-      chrome.runtime.sendMessage.mock.calls.some(
-        ([request]) => request.action === 'getPageSummary',
-      ),
-    ).toBe(false);
-    expect(
-      chrome.runtime.sendMessage.mock.calls.some(
-        ([request]) => request.action === 'getPopupLists',
-      ),
-    ).toBe(false);
-  });
-
-  it('does not let a stale connector rejection replace a newer page diagnostic', async () => {
-    const tab = {
-      id: 46,
-      url: 'https://example.com/prepared-diagnostic-owner',
-      title: 'Prepared Diagnostic Owner',
-    };
-    const connectorRefresh = deferred();
-    const finalHandoff = deferred();
-    installDom(
-      'chrome-extension://abcdefghijklmnop/popup.html?bootstrap=diagnostic-owner',
-    );
-    const { storageChanged } = installChromeMock({
-      tab,
-      responses: {
-        consumePopupBootstrap: {
-          success: true,
-          pending: true,
-          bootstrap: {
-            mode: 'connector-diagnostic',
-            connector: { state: 'starting' },
-            tab,
-          },
-        },
-        awaitPopupBootstrap: () => finalHandoff.promise,
-        getDesktopConnectorState: () => connectorRefresh.promise,
-      },
-    });
-
-    await import('../../apps/extension/popup.js');
-    await waitFor(
-      () =>
-        document.getElementById('pageDiagnosticTitle').textContent ===
-        'Looking for Browser Recall Desktop',
-    );
-
-    storageChanged.emit(
-      { connectorState: { oldValue: 'starting', newValue: 'offline' } },
-      'local',
-    );
-    await waitFor(() =>
-      chrome.runtime.sendMessage.mock.calls.some(
-        ([request]) => request.action === 'getDesktopConnectorState',
-      ),
-    );
-
-    finalHandoff.resolve({
-      success: true,
-      bootstrap: {
-        mode: 'data-unavailable',
-        error: 'The page-specific diagnostic owns the popup now.',
-        diagnostic: { reason: 'prepared-page-data-unavailable' },
-      },
-    });
-    await waitFor(
-      () =>
-        document.getElementById('pageDiagnosticTitle').textContent ===
-        'Page Data Unavailable',
-    );
-
-    connectorRefresh.reject(new Error('stale connector refresh failed'));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(document.getElementById('pageDiagnosticTitle').textContent).toBe(
-      'Page Data Unavailable',
-    );
-    expect(document.getElementById('pageDiagnosticMessage').textContent).toBe(
-      'The page-specific diagnostic owns the popup now.',
-    );
-  });
-
   it('clears a stale page diagnostic after page summary recovers', async () => {
     const tab = {
       id: 43,
@@ -640,33 +492,44 @@ describe('popup desktop state rendering', () => {
     expect(document.getElementById('pageHeader').style.display).toBe('none');
   });
 
-  it('keeps paused popup compact and restores the active page non-progressively when recording resumes', async () => {
+  it('shows the active page shell immediately while a resumed popup refreshes its data', async () => {
     const tab = {
       id: 44,
-      url: 'https://example.com/resume-from-paused-popup',
+      url: 'chrome-extension://abcdefghijklmnop/snapshot-viewer.html?slug=saved-page',
       title: 'Resume From Paused Popup',
     };
+    const effectiveTab = {
+      ...tab,
+      url: 'https://example.com/resume-from-paused-popup',
+    };
+    const identity = deferred();
+    const finalHandoff = deferred();
+    const pageActivity = deferred();
     const pageSummary = deferred();
-    installDom();
+    installDom(
+      'chrome-extension://abcdefghijklmnop/popup.html?bootstrap=resume-pending',
+    );
     const { sessionStore } = installChromeMock({
       tab,
       responses: {
-        getDesktopConnectorState: {
+        consumePopupBootstrap: {
           success: true,
-          state: 'connected',
-          deviceId: 'test-device',
-          hasToken: true,
+          pending: true,
+          bootstrap: {
+            mode: 'connector-diagnostic',
+            connector: { state: 'starting' },
+            tab,
+          },
         },
-        getReportedUrl: { success: true, url: tab.url },
+        awaitPopupBootstrap: () => finalHandoff.promise,
+        resolvePopupPageIdentity: () => identity.promise,
         setRecordingPaused: (request) => {
           sessionStore.workspace = request.paused
             ? { mode: 'private' }
             : { mode: 'default' };
           return { success: true };
         },
-        recordPageActivity: { success: true },
-        trimTitle: (request) => ({ title: request.title }),
-        readDesktopValue: { success: true, value: null },
+        recordPageActivity: () => pageActivity.promise,
         getPageSummary: () => pageSummary.promise,
         getPopupLists: { success: true, lists: [] },
       },
@@ -683,6 +546,26 @@ describe('popup desktop state rendering', () => {
     expect(getComputedStyle(document.body).minHeight).toBe('0');
     document.getElementById('recordingToggle').click();
 
+    await waitFor(
+      () =>
+        document.getElementById('dashboardContent')?.style.display === 'block',
+    );
+    expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
+    expect(document.getElementById('pageUrl').textContent).toBe(tab.url);
+    expect(
+      chrome.runtime.sendMessage.mock.calls.some(
+        ([request]) => request.action === 'recordPageActivity',
+      ),
+    ).toBe(false);
+
+    identity.resolve({
+      success: true,
+      identity: {
+        slug: generateSlugFromUrl(effectiveTab.url),
+        url: effectiveTab.url,
+        title: effectiveTab.title,
+      },
+    });
     await waitFor(() =>
       chrome.runtime.sendMessage.mock.calls.some(
         ([request]) => request.action === 'recordPageActivity',
@@ -691,30 +574,35 @@ describe('popup desktop state rendering', () => {
 
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
       action: 'recordPageActivity',
-      url: tab.url,
-      title: tab.title,
-      slug: generateSlugFromUrl(tab.url),
+      url: effectiveTab.url,
+      title: effectiveTab.title,
+      slug: generateSlugFromUrl(effectiveTab.url),
       isInitialLoad: true,
     });
+    expect(document.body.classList.contains('popup-compact')).toBe(false);
+    expect(document.getElementById('dashboardContent').style.display).toBe(
+      'block',
+    );
+    expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
+    expect(document.getElementById('pageUrl').textContent).toBe(
+      effectiveTab.url,
+    );
 
+    pageActivity.resolve({ success: true });
     await waitFor(() =>
       chrome.runtime.sendMessage.mock.calls.some(
         ([request]) => request.action === 'getPageSummary',
       ),
     );
-    expect(document.body.classList.contains('popup-compact')).toBe(true);
-    expect(document.getElementById('dashboardContent').style.display).toBe(
-      'none',
-    );
 
     pageSummary.resolve(
-      completePopupSummary(tab, {
+      completePopupSummary(effectiveTab, {
         success: true,
-        url: tab.url,
+        url: effectiveTab.url,
         page: {
-          slug: generateSlugFromUrl(tab.url),
-          url: tab.url,
-          title: tab.title,
+          slug: generateSlugFromUrl(effectiveTab.url),
+          url: effectiveTab.url,
+          title: effectiveTab.title,
           visitDates: [],
         },
         notes: [],
@@ -729,6 +617,122 @@ describe('popup desktop state rendering', () => {
     );
     expect(document.getElementById('dashboardContent')).toBeTruthy();
     expect(document.body.classList.contains('popup-compact')).toBe(false);
+    expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
+  });
+
+  it('keeps the final bootstrap when a concurrent recording toggle fails', async () => {
+    const tab = {
+      id: 48,
+      url: 'https://example.com/failed-pending-toggle',
+      title: 'Failed Pending Toggle',
+    };
+    const pauseSave = deferred();
+    const finalHandoff = deferred();
+    installDom(
+      'chrome-extension://abcdefghijklmnop/popup.html?bootstrap=failed-toggle',
+    );
+    installChromeMock({
+      tab,
+      responses: {
+        consumePopupBootstrap: {
+          success: true,
+          pending: true,
+          bootstrap: {
+            mode: 'connector-diagnostic',
+            connector: { state: 'starting' },
+            tab,
+          },
+        },
+        awaitPopupBootstrap: () => finalHandoff.promise,
+        setRecordingPaused: () => pauseSave.promise,
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+    await waitFor(
+      () => document.getElementById('pageTitle').textContent === tab.title,
+    );
+    document.getElementById('recordingToggle').click();
+    await waitFor(() =>
+      chrome.runtime.sendMessage.mock.calls.some(
+        ([request]) => request.action === 'setRecordingPaused',
+      ),
+    );
+
+    finalHandoff.resolve({
+      success: true,
+      bootstrap: {
+        mode: 'data-unavailable',
+        error: 'The completed bootstrap remains authoritative.',
+        diagnostic: { reason: 'prepared-page-data-unavailable' },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    pauseSave.resolve({ success: false, error: 'Pause failed' });
+
+    await waitFor(
+      () =>
+        document.getElementById('pageDiagnosticMessage').textContent ===
+        'The completed bootstrap remains authoritative.',
+    );
+    expect(
+      document.getElementById('recordingToggle').getAttribute('aria-pressed'),
+    ).toBe('false');
+  });
+
+  it('ignores a rejected pending handoff after resume owns the popup', async () => {
+    const tab = {
+      id: 49,
+      url: 'https://example.com/rejected-stale-handoff',
+      title: 'Rejected Stale Handoff',
+    };
+    const finalHandoff = deferred();
+    const pageActivity = deferred();
+    installDom(
+      'chrome-extension://abcdefghijklmnop/popup.html?bootstrap=rejected-handoff',
+    );
+    const { sessionStore } = installChromeMock({
+      tab,
+      responses: {
+        consumePopupBootstrap: {
+          success: true,
+          pending: true,
+          bootstrap: {
+            mode: 'connector-diagnostic',
+            connector: { state: 'starting' },
+            tab,
+          },
+        },
+        awaitPopupBootstrap: () => finalHandoff.promise,
+        setRecordingPaused: (request) => {
+          sessionStore.workspace = request.paused
+            ? { mode: 'private' }
+            : { mode: 'default' };
+          return { success: true };
+        },
+        recordPageActivity: () => pageActivity.promise,
+      },
+    });
+    sessionStore.workspace = { mode: 'private' };
+
+    await import('../../apps/extension/popup.js');
+    await waitFor(
+      () =>
+        document.getElementById('dashboardContent')?.style.display === 'none',
+    );
+    document.getElementById('recordingToggle').click();
+    await waitFor(() =>
+      chrome.runtime.sendMessage.mock.calls.some(
+        ([request]) => request.action === 'recordPageActivity',
+      ),
+    );
+
+    finalHandoff.reject(new Error('Prepared handoff failed late'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(document.getElementById('fatalReloadBtn')).toBeNull();
+    expect(document.getElementById('dashboardContent').style.display).toBe(
+      'block',
+    );
     expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
   });
 

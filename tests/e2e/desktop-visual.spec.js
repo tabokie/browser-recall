@@ -123,6 +123,7 @@ function desktopVisualSeed(colorScheme = 'amber', options = {}) {
   if (options.extraSession) {
     Object.assign(base.session, options.extraSession);
   }
+  if (options.omitSessionTheme) delete base.session.theme;
   if (options.logDevices) {
     base.session['manifest:log-devices'] = options.logDevices;
   }
@@ -2199,11 +2200,13 @@ test.describe('desktop visual regression', () => {
   }) => {
     await serveDesktopUi(async (desktopUrl) => {
       await page.setViewportSize({ width: 1280, height: 820 });
+      await page.emulateMedia({ colorScheme: 'dark' });
       await installDesktopBridgeMock(page, {
         setupComplete: true,
         colorScheme: 'amber',
         getSettingsDelayMs: 3000,
         localeOverride: 'es',
+        omitSessionTheme: true,
       });
       await page.goto(desktopUrl);
 
@@ -2216,6 +2219,12 @@ test.describe('desktop visual regression', () => {
           { timeout: 1000 },
         )
         .toBe('1');
+      await expect
+        .poll(
+          () => page.evaluate(() => document.documentElement.dataset.theme),
+          { timeout: 1000 },
+        )
+        .toBe('light');
       await expect(page.locator('#searchDraftInput')).toBeVisible({
         timeout: 1000,
       });

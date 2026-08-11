@@ -21,7 +21,7 @@ pub const PERSISTENT_SETTINGS_KEYS: &[&str] = &[
 
 pub fn default_values() -> BTreeMap<String, Value> {
     BTreeMap::from([
-        ("theme".to_string(), json!("system")),
+        ("theme".to_string(), json!("light")),
         ("colorScheme".to_string(), json!("amber")),
         ("localeOverride".to_string(), json!("system")),
         ("historyFileBatch".to_string(), json!(10)),

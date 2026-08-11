@@ -1,5 +1,5 @@
 // Theme management — shared by the desktop UI and connector popup
-// Values: 'light', 'dark', 'system' (default)
+// Values: 'light' (default), 'dark', 'system'
 
 function getDarkQuery() {
   return typeof window !== 'undefined' && window.matchMedia
@@ -9,7 +9,10 @@ function getDarkQuery() {
 
 function resolveTheme(pref) {
   if (pref === 'light' || pref === 'dark') return pref;
-  return getDarkQuery()?.matches ? 'dark' : 'light';
+  if (pref === 'system') {
+    return getDarkQuery()?.matches ? 'dark' : 'light';
+  }
+  throw new Error('Stored theme must be light, dark, or system');
 }
 
 export async function applyTheme() {
@@ -17,7 +20,7 @@ export async function applyTheme() {
     'theme',
     'colorScheme',
   ]);
-  const effective = theme || 'system';
+  const effective = theme === undefined ? 'light' : theme;
   document.documentElement.setAttribute('data-theme', resolveTheme(effective));
   if (colorScheme && colorScheme !== 'amber') {
     document.documentElement.setAttribute('data-color-scheme', colorScheme);
