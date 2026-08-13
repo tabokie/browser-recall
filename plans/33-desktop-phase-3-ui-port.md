@@ -125,7 +125,7 @@ Permissions and declarations that change from the current manifest:
 | `permissions: webNavigation` | ✓ | | `onCommitted` for referrer + visit events |
 | `permissions: storage` | ✓ | | Buffer + token + session UI state |
 | `permissions: scripting` | ✓ | | Content script injection for Save Page WE |
-| `permissions: commands` | ✓ | | Keyboard shortcuts (Alt+S, Alt+H, Alt+L, Alt+D) |
+| `permissions: commands` | ✓ | | Keyboard shortcuts (Alt+R, Alt+S, Alt+H, Alt+L) |
 | `permissions: contextMenus` | ✓ | | Right-click actions |
 | `permissions: bookmarks` | ✓ | | Bookmark import (triggered from desktop UI) |
 | `permissions: history` | ✓ | | History import (triggered from desktop UI) |

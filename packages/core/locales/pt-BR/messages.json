@@ -8,8 +8,12 @@
     "description": "Lowercase product mark used in compact desktop UI."
   },
   "extensionDescription": {
-    "message": "Conector do Chrome para Browser Recall Desktop. Capture páginas no navegador e abra o aplicativo completo localmente.",
+    "message": "Conector de navegador para Browser Recall Desktop. Capture páginas no navegador e abra o aplicativo completo localmente.",
     "description": "Extension store and browser management description."
+  },
+  "commandOpenPopup": {
+    "message": "Abrir o pop-up do Browser Recall",
+    "description": "Descrição do comando do navegador."
   },
   "commandHighlightSelection": {
     "message": "Destaque o texto selecionado",
@@ -404,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "Abra o pop-up do Browser Recall no Chrome e clique em “Parear com o desktop”.",
+    "message": "Abra o pop-up do Browser Recall no seu navegador e clique em “Parear com o desktop”.",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -1086,7 +1090,7 @@
     "description": "Extension popup recording toggle accessibility label."
   },
   "desktopAlreadyPaired": {
-    "message": "Chrome já está emparelhado com Browser Recall Desktop",
+    "message": "Este navegador já está emparelhado com Browser Recall Desktop",
     "description": "Localized UI text."
   },
   "desktopApprovePairing": {
@@ -1354,7 +1358,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "Abra o pop-up do Browser Recall no Chrome e clique em “Parear com o desktop”.",
+    "message": "Abra o pop-up do Browser Recall no seu navegador e clique em “Parear com o desktop”.",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {

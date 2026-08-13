@@ -38,10 +38,10 @@ Set up automatic rules to categorize pages based on URL patterns or keywords. Pa
 If you want multi-device sync, connect Browser Recall Desktop to a GitHub repository you control.
 
 **Keyboard shortcuts**
+- Alt+R — Open the Browser Recall popup
 - Alt+S — Capture snapshot
 - Alt+H — Highlight selected text
 - Alt+L — Like current page
-- Alt+D — Dislike current page
 
 **Privacy by design**
 No analytics. No tracking. No accounts. No Browser Recall cloud. Data stays local unless you explicitly configure your own GitHub sync destination.

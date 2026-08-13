@@ -1,15 +1,13 @@
 (function installBrowserRecallWebExtensionApi(globalScope) {
+  // Build target, browser product identity, and execution context are separate
+  // facts. Do not infer one from another or from namespace availability.
   const nativeChrome = globalScope.chrome;
   const nativeBrowser = globalScope.browser;
+  const buildTarget = globalScope.browserRecallBuildTarget;
 
-  function detectEngine() {
-    const userAgent = globalScope.navigator?.userAgent || '';
-    if (/\bFirefox\//.test(userAgent)) return 'firefox';
-    if (/\b(?:HeadlessChrome|Chrome|Chromium|Edg)\//.test(userAgent)) {
-      return 'chromium';
-    }
+  if (!['chromium', 'firefox'].includes(buildTarget)) {
     throw new Error(
-      `Unsupported browser user agent: ${userAgent || '<empty>'}`,
+      `Browser Recall build target is missing or invalid: ${String(buildTarget)}`,
     );
   }
 
@@ -20,8 +18,32 @@
     );
   }
 
-  const engine = detectEngine();
-  if (engine === 'chromium') {
+  function detectExecutionContext() {
+    if (!globalScope.document) return 'background';
+    const protocol =
+      globalScope.document.location?.protocol || globalScope.location?.protocol;
+    if (protocol === 'chrome-extension:' || protocol === 'moz-extension:') {
+      return 'extension-page';
+    }
+    return 'content';
+  }
+
+  function getOpenOrClosedShadowRoot(element) {
+    if (!element) return null;
+    if (element.shadowRoot) return element.shadowRoot;
+    if (
+      buildTarget === 'chromium' &&
+      typeof nativeChrome?.dom?.openOrClosedShadowRoot === 'function' &&
+      (typeof globalScope.HTMLElement !== 'function' ||
+        element instanceof globalScope.HTMLElement)
+    ) {
+      return nativeChrome.dom.openOrClosedShadowRoot(element);
+    }
+    return null;
+  }
+
+  const executionContext = detectExecutionContext();
+  if (buildTarget === 'chromium') {
     if (
       !nativeChrome?.runtime?.id ||
       typeof nativeChrome.runtime.getURL !== 'function'
@@ -31,7 +53,9 @@
     globalScope.browser = nativeChrome;
     globalScope.browserRecallWebExtension = {
       api: nativeChrome,
-      engine: 'chromium',
+      buildTarget,
+      executionContext,
+      getOpenOrClosedShadowRoot,
       isRuntimeFailure,
     };
     return;
@@ -44,12 +68,6 @@
     throw new Error('Browser Recall requires the Firefox WebExtension API');
   }
   const rawApi = nativeBrowser;
-  if (!rawApi.action) {
-    throw new Error('Browser Recall requires the Firefox action API');
-  }
-  if (!rawApi.contextMenus) {
-    throw new Error('Browser Recall requires the Firefox contextMenus API');
-  }
 
   function bindPromiseMethod(target, methodName) {
     const method = target?.[methodName];
@@ -63,6 +81,11 @@
       }
       return result;
     };
+  }
+
+  function bindSyncMethod(target, methodName) {
+    const method = target?.[methodName];
+    return typeof method === 'function' ? method.bind(target) : method;
   }
 
   function wrapStorageArea(target) {
@@ -80,11 +103,11 @@
     return wrapped;
   }
 
-  function wrapObject(target, methodNames) {
+  function wrapObject(target, promiseMethodNames) {
     if (!target) return target;
     const wrapped = { ...target };
     if ('id' in target) wrapped.id = target.id;
-    for (const methodName of methodNames) {
+    for (const methodName of promiseMethodNames) {
       wrapped[methodName] = bindPromiseMethod(target, methodName);
     }
     return wrapped;
@@ -104,14 +127,10 @@
     'openOptionsPage',
     'sendMessage',
   ]);
-  if (runtime && typeof rawApi.runtime?.getManifest === 'function') {
-    runtime.getManifest = rawApi.runtime.getManifest.bind(rawApi.runtime);
-  }
-  if (runtime && typeof rawApi.runtime?.reload === 'function') {
-    runtime.reload = rawApi.runtime.reload.bind(rawApi.runtime);
-  }
-  if (runtime && typeof rawApi.runtime?.getURL === 'function') {
-    runtime.getURL = rawApi.runtime.getURL.bind(rawApi.runtime);
+  for (const methodName of ['connect', 'getManifest', 'reload', 'getURL']) {
+    if (runtime && typeof rawApi.runtime?.[methodName] === 'function') {
+      runtime[methodName] = bindSyncMethod(rawApi.runtime, methodName);
+    }
   }
   if (!runtime || typeof runtime.getURL !== 'function') {
     throw new Error('Browser Recall requires runtime.getURL');
@@ -120,6 +139,8 @@
   const api = {
     ...rawApi,
     action: wrapObject(rawApi.action, [
+      'setPopup',
+      'openPopup',
       'setBadgeBackgroundColor',
       'setBadgeText',
       'setIcon',
@@ -135,6 +156,7 @@
     tabs: wrapObject(rawApi.tabs, [
       'create',
       'get',
+      'getCurrent',
       'query',
       'sendMessage',
       'update',
@@ -145,7 +167,9 @@
   globalScope.browser = nativeBrowser;
   globalScope.browserRecallWebExtension = {
     api,
-    engine,
+    buildTarget,
+    executionContext,
+    getOpenOrClosedShadowRoot,
     isRuntimeFailure,
   };
 })(globalThis);

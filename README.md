@@ -1,6 +1,6 @@
 # Browser Recall
 
-Browser Recall is a desktop-first browsing memory app: a Tauri desktop app and daemon own the data, UI, and sync, while the Chrome extension acts as a connector for capture and popup actions.
+Browser Recall is a desktop-first browsing memory app: a Tauri desktop app and daemon own the data, UI, and sync, while the browser extension acts as a connector for capture and popup actions.
 
 ## Key Features
 
@@ -77,17 +77,22 @@ See [ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the full technical deep-dive.
 ## Technology Stack
 
 - **Rust + JavaScript** — replay, daemon, and local search logic
-- **Chrome Extension MV3** — connector, popup, content capture
+- **WebExtension MV3** — connector, popup, content capture
 - **Tauri + Tokio** — desktop shell and local daemon runtime
 - **Vanilla JavaScript** — no frameworks, minimal extension size
 - **Playwright + Vitest** — E2E and unit test suites
 
 ## Browser Support
 
-The connector targets Chromium browsers with MV3 support:
+The connector is packaged for Chromium and Firefox:
 
 - Chrome
 - Edge
+- Orion, by loading `dist/extension/chrome` as a Chrome extension
+- Firefox, by loading `dist/extension/firefox`
+
+Orion runs through its Chrome-extension compatibility surface and therefore
+uses Browser Recall's Chromium adapter and compatibility paths.
 
 The desktop app is required for normal use.
 

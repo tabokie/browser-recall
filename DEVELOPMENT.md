@@ -172,9 +172,19 @@ npm run test:visual                          # build UI; run native WKWebView, C
 Config: `playwright.config.js`. Tests: `tests/e2e/*.spec.js`. Runs use one worker; Chromium is the default channel, and the tagged desktop visual pass selects WebKit explicitly.
 
 Hosted CI also runs `npm run ci:test-extension-e2e`, covering the popup,
-snapshot-highlight, and actual platform-font regression suites with pinned
-Chromium. The Windows job separately runs the Win32-only locked-artifact
-replacement test before building and launching the native smoke executable.
+snapshot-highlight, snapshot resource/shadow-DOM, and actual platform-font
+regression suites with pinned Chromium, followed by the staged Firefox
+compatibility smoke suite. The Windows job separately runs the Win32-only
+locked-artifact replacement test before building and launching the native smoke
+executable.
+
+Two opt-in local smokes cross native browser boundaries that headless
+Playwright cannot: `npm run test:shortcut:native` launches a disposable headed
+Chromium profile on macOS and sends a system Option+R event, while
+`npm run test:firefox:real` launches the staged Firefox artifact through the
+pinned `web-ext@10.5.0` runner and verifies Firefox's actual content-script API
+shape. The latter uses `FIREFOX_BINARY` when set and otherwise uses the standard
+macOS Firefox path.
 
 Canonical local and hosted runs use Playwright's pinned Chromium. When that
 browser has not yet been downloaded but stable Google Chrome is installed, a
@@ -334,7 +344,7 @@ cargo run -q -p browser-recall-replay --bin replay-verify -- --verbose          
 ├── apps/desktop/
 │   ├── src-tauri/          # Tauri shell and desktop bridge
 │   └── ui/                 # Main Browser Recall interface
-├── apps/extension/         # Chrome connector extension
+├── apps/extension/         # Chromium/Firefox connector extension
 │   ├── manifest.json       # MV3 manifest
 │   ├── background.js       # Connector service worker
 │   ├── connector/          # Pairing, WS bridge, command buffer

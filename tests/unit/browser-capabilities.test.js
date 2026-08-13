@@ -8,7 +8,7 @@ afterEach(() => {
 
 describe('browser capabilities', () => {
   it('uses promise message responses for Firefox', () => {
-    vi.stubGlobal('browserRecallWebExtension', { engine: 'firefox' });
+    vi.stubGlobal('browserRecallWebExtension', { buildTarget: 'firefox' });
     vi.stubGlobal('chrome', {
       storage: {
         session: {
@@ -18,13 +18,13 @@ describe('browser capabilities', () => {
     });
 
     expect(getBrowserCapabilities()).toMatchObject({
-      engine: 'firefox',
+      buildTarget: 'firefox',
       supportsPromiseOnMessage: true,
     });
   });
 
   it('uses callback message responses for Chromium browsers', () => {
-    vi.stubGlobal('browserRecallWebExtension', { engine: 'chromium' });
+    vi.stubGlobal('browserRecallWebExtension', { buildTarget: 'chromium' });
     vi.stubGlobal('chrome', {
       storage: {
         session: {
@@ -34,7 +34,7 @@ describe('browser capabilities', () => {
     });
 
     expect(getBrowserCapabilities()).toMatchObject({
-      engine: 'chromium',
+      buildTarget: 'chromium',
       supportsPromiseOnMessage: false,
     });
   });

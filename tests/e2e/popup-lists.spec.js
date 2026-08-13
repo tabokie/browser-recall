@@ -3733,6 +3733,49 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
+  test('open-popup command handler opens the current-page popup', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    localServer.addPage('/keyboard-popup', {
+      title: 'Keyboard Popup',
+      body: '<main>Keyboard popup page</main>',
+    });
+    const url = localServer.url('/keyboard-popup');
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    const helper = await openHelperPage(extContext, extensionId);
+    await page.bringToFront();
+    const command = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'triggerCommandForTest',
+        command: 'open-popup',
+      }),
+    );
+    expect(command).toEqual({ success: true });
+    await expect
+      .poll(() =>
+        helper.evaluate(() => {
+          const popup = chrome.extension.getViews({ type: 'popup' })[0];
+          return (
+            popup?.document.getElementById('pageTitle')?.textContent ?? null
+          );
+        }),
+      )
+      .toBe('Keyboard Popup');
+
+    await helper.evaluate(() =>
+      chrome.extension.getViews({ type: 'popup' })[0]?.close(),
+    );
+    await helper.close();
+    await page.close();
+  });
+
   test(`open popup and badge consume live desktop mutations seed=${POPUP_MUTATION_SEED}`, async ({
     extContext,
     extensionId,

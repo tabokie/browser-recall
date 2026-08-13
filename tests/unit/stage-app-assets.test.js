@@ -499,7 +499,7 @@ describe('extension staged assets', () => {
     expect(existsSync(join(outDir, 'icons/icon128-special.png'))).toBe(false);
   });
 
-  it('stages browser API shim before first-party extension entry points', () => {
+  it('stages explicit build metadata and the browser API shim before first-party extension entry points', () => {
     const outDir = mkdtempSync(join(tmpdir(), 'browser-recall-stage-test-'));
     stagedDirs.push(outDir);
     stageExtensionAssets(outDir);
@@ -513,6 +513,7 @@ describe('extension staged assets', () => {
       'spa-navigation-bridge.js',
     ]);
     expect(manifest.content_scripts[1].js).toEqual([
+      'browser-build-target.js',
       'browser-api.js',
       'extension-surface.js',
       'browser-recall-page-identity.js',
@@ -521,6 +522,7 @@ describe('extension staged assets', () => {
       'content.js',
     ]);
     expect(manifest.content_scripts[2].js).toEqual([
+      'browser-build-target.js',
       'browser-api.js',
       'savepage/content-fontface.js',
     ]);
@@ -540,9 +542,9 @@ describe('extension staged assets', () => {
     stageFirefoxExtensionAssets(outDir);
 
     const manifest = JSON.parse(readFileSync(join(outDir, 'manifest.json')));
-    expect(manifest.action.default_popup).toBe('popup.html');
+    expect(manifest.action.default_popup).toBeUndefined();
     expect(manifest.background).toEqual({
-      scripts: ['browser-api.js', 'background.js'],
+      scripts: ['background.js'],
       type: 'module',
     });
     expect(manifest.background.service_worker).toBeUndefined();

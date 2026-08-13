@@ -1529,13 +1529,17 @@ export async function initConnectorBridge() {
 export async function restartConnectorRuntimeForTest() {
   clearReconnect();
   const drainPromise = runtime.drainTask?.promise;
+  const requestTail = runtime.requestTail;
   if (runtime.session) await closeSessionForReconnect(runtime.session);
+  // Closing the socket rejects its active request, but that rejection still
+  // has to unwind through sendBridgeMessage. Keep the evolving serialization
+  // tail intact: another caller can extend it while this restart is awaiting
+  // teardown, and replacing it would detach that caller from the request slot.
+  await requestTail.catch(() => {});
   await drainPromise?.catch(() => {});
   runtime.started = false;
   runtime.connectTask = null;
   runtime.drainTask = null;
-  runtime.request = null;
-  runtime.requestTail = Promise.resolve();
   await transitionConnection(CONNECTION_PHASES.OFFLINE);
   void initConnectorBridge().catch((error) => {
     observeUnexpectedConnectionFailure(error, 'connector restart failed');

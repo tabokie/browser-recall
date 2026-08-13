@@ -263,7 +263,8 @@ export async function waitForDesktopConnector(
             hasChrome: Boolean(globalThis.chrome),
             hasBrowser: Boolean(globalThis.browser),
             chromeEqualsBrowser: globalThis.chrome === globalThis.browser,
-            engine: globalThis.browserRecallWebExtension?.engine || null,
+            buildTarget:
+              globalThis.browserRecallWebExtension?.buildTarget || null,
             hasBackgroundControl: Boolean(
               globalThis.browserRecallBackgroundTestControl,
             ),

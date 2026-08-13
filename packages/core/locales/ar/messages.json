@@ -8,8 +8,12 @@
     "description": "Lowercase product mark used in compact desktop UI."
   },
   "extensionDescription": {
-    "message": "موصل Chrome لـ Browser Recall Desktop. التقط الصفحات في المتصفح وافتح التطبيق الكامل محليًا.",
+    "message": "موصل متصفح لـ Browser Recall Desktop. التقط الصفحات في المتصفح وافتح التطبيق الكامل محليًا.",
     "description": "Extension store and browser management description."
+  },
+  "commandOpenPopup": {
+    "message": "فتح نافذة Browser Recall المنبثقة",
+    "description": "وصف أمر المتصفح."
   },
   "commandHighlightSelection": {
     "message": "قم بتمييز النص المحدد",
@@ -404,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "افتح نافذة Browser Recall المنبثقة في Chrome وانقر على «الإقران بسطح المكتب».",
+    "message": "افتح نافذة Browser Recall المنبثقة في متصفحك وانقر على «الإقران بسطح المكتب».",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -1086,7 +1090,7 @@
     "description": "Extension popup recording toggle accessibility label."
   },
   "desktopAlreadyPaired": {
-    "message": "Chrome مقترن بالفعل بتطبيق Browser Recall Desktop",
+    "message": "هذا المتصفح مقترن بالفعل بتطبيق Browser Recall Desktop",
     "description": "Localized UI text."
   },
   "desktopApprovePairing": {
@@ -1354,7 +1358,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "افتح نافذة Browser Recall المنبثقة في Chrome وانقر على «الإقران بسطح المكتب».",
+    "message": "افتح نافذة Browser Recall المنبثقة في متصفحك وانقر على «الإقران بسطح المكتب».",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {

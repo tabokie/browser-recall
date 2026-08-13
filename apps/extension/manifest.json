@@ -28,12 +28,21 @@
     },
     {
       "matches": ["<all_urls>"],
-      "js": ["browser-api.js", "extension-surface.js", "content.js"],
+      "js": [
+        "browser-build-target.js",
+        "browser-api.js",
+        "extension-surface.js",
+        "content.js"
+      ],
       "run_at": "document_idle"
     },
     {
       "matches": ["<all_urls>"],
-      "js": ["browser-api.js", "savepage/content-fontface.js"],
+      "js": [
+        "browser-build-target.js",
+        "browser-api.js",
+        "savepage/content-fontface.js"
+      ],
       "run_at": "document_start",
       "all_frames": true
     }
@@ -61,6 +70,10 @@
     "128": "icons/icon128.png"
   },
   "commands": {
+    "open-popup": {
+      "suggested_key": { "default": "Alt+R" },
+      "description": "__MSG_commandOpenPopup__"
+    },
     "highlight-selection": {
       "suggested_key": { "default": "Alt+H" },
       "description": "__MSG_commandHighlightSelection__"
@@ -74,7 +87,6 @@
       "description": "__MSG_commandLikePage__"
     },
     "dislike-page": {
-      "suggested_key": { "default": "Alt+D" },
       "description": "__MSG_commandDislikePage__"
     }
   }

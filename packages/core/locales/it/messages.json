@@ -8,8 +8,12 @@
     "description": "Lowercase product mark used in compact desktop UI."
   },
   "extensionDescription": {
-    "message": "Connettore Chrome per Browser Recall Desktop. Cattura le pagine nel browser e apri l'app completa localmente.",
+    "message": "Connettore del browser per Browser Recall Desktop. Cattura le pagine nel browser e apri l'app completa localmente.",
     "description": "Extension store and browser management description."
+  },
+  "commandOpenPopup": {
+    "message": "Apri il popup di Browser Recall",
+    "description": "Descrizione del comando del browser."
   },
   "commandHighlightSelection": {
     "message": "Evidenzia il testo selezionato",
@@ -404,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "Apri il popup di Browser Recall in Chrome e fai clic su «Associa al desktop».",
+    "message": "Apri il popup di Browser Recall nel browser e fai clic su «Associa al desktop».",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -1086,7 +1090,7 @@
     "description": "Extension popup recording toggle accessibility label."
   },
   "desktopAlreadyPaired": {
-    "message": "Chrome è già associato a Browser Recall Desktop",
+    "message": "Questo browser è già associato a Browser Recall Desktop",
     "description": "Localized UI text."
   },
   "desktopApprovePairing": {
@@ -1354,7 +1358,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "Apri il popup di Browser Recall in Chrome e fai clic su «Associa al desktop».",
+    "message": "Apri il popup di Browser Recall nel browser e fai clic su «Associa al desktop».",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {

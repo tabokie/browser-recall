@@ -8,8 +8,12 @@
     "description": "Lowercase product mark used in compact desktop UI."
   },
   "extensionDescription": {
-    "message": "Chrome-Erweiterung für Browser Recall Desktop. Erfassen Sie Seiten im Browser und öffnen Sie die vollständige App lokal.",
+    "message": "Browser-Erweiterung für Browser Recall Desktop. Erfassen Sie Seiten im Browser und öffnen Sie die vollständige App lokal.",
     "description": "Extension store and browser management description."
+  },
+  "commandOpenPopup": {
+    "message": "Browser Recall-Pop-up öffnen",
+    "description": "Beschreibung des Browserbefehls."
   },
   "commandHighlightSelection": {
     "message": "Markieren Sie den ausgewählten Text",
@@ -404,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "Öffnen Sie das Browser Recall-Popup in Chrome und klicken Sie auf „Mit Desktop koppeln“.",
+    "message": "Öffnen Sie das Browser Recall-Popup in Ihrem Browser und klicken Sie auf „Mit Desktop koppeln“.",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -1086,7 +1090,7 @@
     "description": "Extension popup recording toggle accessibility label."
   },
   "desktopAlreadyPaired": {
-    "message": "Chrome ist bereits mit Browser Recall Desktop gekoppelt",
+    "message": "Dieser Browser ist bereits mit Browser Recall Desktop gekoppelt",
     "description": "Localized UI text."
   },
   "desktopApprovePairing": {
@@ -1354,7 +1358,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "Öffnen Sie das Browser Recall-Popup in Chrome und klicken Sie auf „Mit Desktop koppeln“.",
+    "message": "Öffnen Sie das Browser Recall-Popup in Ihrem Browser und klicken Sie auf „Mit Desktop koppeln“.",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {

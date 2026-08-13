@@ -1,0 +1,16 @@
+- Add another extension key shortcuts Alt+R to open the browser-recall's popup window.
+- Agree.
+- Is it implemented for all supported browser, including Firefox?
+- Triage thoroughly and carefully all behavior of the extension, check if they are consistent between Chrome, Orion, and Firefox.
+- > Orion cannot run Browser Recall
+This is not true. Orion can run the extension as a Chrome extension. I have manually tested it as well. In fact, we planted several compatibility stubs around the code to make it work because some Chrome-native APIs are not available in Orion.
+
+For other issues, let's align the behavior to Chrome. And prefer to use E2E testing to verify the important behavior locally.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix all of them, including the architectural improvement.
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.6 Sol
+- Continue
+- As code comment somewhere
+- Yes
+- Yes
+-  Yes

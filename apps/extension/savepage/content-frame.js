@@ -40,6 +40,10 @@ frameScript();
 
 function frameScript()
 {
+    var extensionEngine = globalThis.browserRecallWebExtension?.buildTarget;
+    if (extensionEngine != "chromium" && extensionEngine != "firefox")
+        throw new Error("Browser Recall snapshot capture requires an explicit WebExtension build target");
+
     /********************************************************************/
 
     /* Initialize on script load */
@@ -225,8 +229,7 @@ function frameScript()
 
         if (sourceNode.localName != "audio" && sourceNode.localName != "video" && sourceNode.localName != "use")
         {
-            if (typeof browser != "undefined") shadowroot = sourceNode.shadowRoot || sourceNode.openOrClosedShadowRoot;
-            else shadowroot = sourceNode.shadowRoot || ((chrome.dom && sourceNode instanceof HTMLElement) ? chrome.dom.openOrClosedShadowRoot(sourceNode) : null);
+            shadowroot = globalThis.browserRecallWebExtension.getOpenOrClosedShadowRoot(sourceNode);
 
             if (shadowroot != null)
             {

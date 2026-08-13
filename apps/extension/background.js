@@ -1,7 +1,9 @@
 // Background service worker for Browser Recall.
 // Central authority for extension reads and mutations. Persistent data and
 // replay are owned by the desktop daemon.
+import './browser-build-target.js';
 import './browser-api.js';
+import { requirePrivilegedBrowserApis } from './browser-privileged-api.js';
 import {
   generateSlugFromUrl,
   isInternalBrowserUrl,
@@ -46,6 +48,15 @@ import {
 import { prepareSnapshotHtml } from '../../packages/core/snapshot-html.js';
 
 logDebug('Background script loading...');
+
+requirePrivilegedBrowserApis([
+  'action',
+  'commands',
+  'contextMenus',
+  'runtime',
+  'storage',
+  'tabs',
+]);
 
 function tr(key, fallback, substitutions) {
   return (
@@ -607,7 +618,7 @@ function callContextMenuMethod(methodName, ...args) {
   const method = chrome.contextMenus[methodName].bind(chrome.contextMenus);
   // Firefox exposes context-menu promises; Chromium-compatible engines may
   // report callback-only failures through runtime.lastError.
-  if (globalThis.browserRecallWebExtension?.engine === 'firefox') {
+  if (globalThis.browserRecallWebExtension?.buildTarget === 'firefox') {
     return Promise.resolve(method(...args));
   }
   return new Promise((resolve, reject) => {
@@ -924,8 +935,21 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
 // ─── Keyboard Shortcuts ───────────────────────────────────────────────
 
-chrome.commands.onCommand.addListener(async (command) => {
+chrome.commands.onCommand.addListener(async (command, commandTab) => {
   logDebug(`[background] Command received: ${command}`);
+
+  if (command === 'open-popup') {
+    try {
+      const tab = Number.isFinite(commandTab?.id)
+        ? commandTab
+        : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
+      await openPreparedActionPopup(tab);
+      return { success: true };
+    } catch (error) {
+      logDebug('[popup] keyboard shortcut failed:', error.message);
+      return { success: false, error: error.message };
+    }
+  }
 
   const recordingState = await getWorkspaceState();
   if (recordingState && recordingState.mode === 'private') {
@@ -1872,14 +1896,29 @@ async function openPreparedActionPopup(tab, options = {}) {
   });
   if (!chrome.action?.setPopup || !chrome.action?.openPopup) {
     await chrome.tabs.create({ url: chrome.runtime.getURL(popupPath) });
-    return;
+    return { presentation: 'tab' };
   }
   try {
     await setPreparedActionPopup(token, tabId, popupPath);
     await chrome.action.openPopup();
+    return { presentation: 'popup' };
   } catch (error) {
     await releasePreparedActionPopup(token);
-    throw error;
+    // Preserve the one-shot bootstrap when the host rejects its native popup;
+    // the same prepared extension page remains valid as a deterministic tab.
+    logDebug(
+      '[popup] native action popup failed; opening an extension tab:',
+      error.message,
+    );
+    try {
+      await chrome.tabs.create({ url: chrome.runtime.getURL(popupPath) });
+      return { presentation: 'tab', actionError: error.message };
+    } catch (tabError) {
+      throw new AggregateError(
+        [error, tabError],
+        `Could not open Browser Recall popup: ${error.message}; tab fallback failed: ${tabError.message}`,
+      );
+    }
   } finally {
     // Some engines resolve/callback openPopup before its document connects the
     // lifecycle port. If that never happens, clear the otherwise stale mapping.

@@ -64,7 +64,7 @@ async function renderShortcuts() {
 customizeShortcuts.addEventListener('click', () => {
   const capabilities = getBrowserCapabilities();
   const url =
-    capabilities.engine === 'firefox'
+    capabilities.buildTarget === 'firefox'
       ? 'about:addons'
       : 'chrome://extensions/shortcuts';
   chrome.tabs.create({ url });

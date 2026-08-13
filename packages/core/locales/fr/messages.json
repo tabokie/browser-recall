@@ -8,8 +8,12 @@
     "description": "Lowercase product mark used in compact desktop UI."
   },
   "extensionDescription": {
-    "message": "Connecteur Chrome pour Browser Recall Desktop. Capturez des pages dans le navigateur et ouvrez l'application complète localement.",
+    "message": "Extension de navigateur pour Browser Recall Desktop. Capturez des pages dans le navigateur et ouvrez l'application complète localement.",
     "description": "Extension store and browser management description."
+  },
+  "commandOpenPopup": {
+    "message": "Ouvrir la fenêtre contextuelle de Browser Recall",
+    "description": "Description de la commande du navigateur."
   },
   "commandHighlightSelection": {
     "message": "Mettez en surbrillance le texte sélectionné",
@@ -404,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "Ouvrez la fenêtre contextuelle Browser Recall dans Chrome, puis cliquez sur « Associer à l’application de bureau ».",
+    "message": "Ouvrez la fenêtre contextuelle Browser Recall dans votre navigateur, puis cliquez sur « Associer à l’application de bureau ».",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -1086,7 +1090,7 @@
     "description": "Extension popup recording toggle accessibility label."
   },
   "desktopAlreadyPaired": {
-    "message": "Chrome est déjà associé à Browser Recall Desktop",
+    "message": "Ce navigateur est déjà associé à Browser Recall Desktop",
     "description": "Localized UI text."
   },
   "desktopApprovePairing": {
@@ -1354,7 +1358,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "Ouvrez la fenêtre contextuelle Browser Recall dans Chrome, puis cliquez sur « Associer à l’application de bureau ».",
+    "message": "Ouvrez la fenêtre contextuelle Browser Recall dans votre navigateur, puis cliquez sur « Associer à l’application de bureau ».",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {

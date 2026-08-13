@@ -60,6 +60,7 @@ test('capture reconstructs serialized shadow DOM in the trusted snapshot viewer'
     body: `
       <link rel="icon" href="data:image/png;base64,iVBORw0KGgo=">
       <snapshot-card id="snapshot-card"></snapshot-card>
+      <closed-snapshot-card id="closed-snapshot-card"></closed-snapshot-card>
       <iframe id="nested-shadow-frame" srcdoc="<!doctype html><html><body>
         <nested-snapshot-card id='nested-snapshot-card'></nested-snapshot-card>
         <script>
@@ -81,6 +82,14 @@ test('capture reconstructs serialized shadow DOM in the trusted snapshot viewer'
             root.innerHTML =
               '<style>#shadow-copy { color: rgb(35, 87, 133); }</style>' +
               '<p id="shadow-copy">Captured shadow content</p>';
+          }
+        });
+        customElements.define('closed-snapshot-card', class extends HTMLElement {
+          constructor() {
+            super();
+            const root = this.attachShadow({ mode: 'closed' });
+            root.innerHTML =
+              '<p id="closed-shadow-copy">Captured closed shadow content</p>';
           }
         });
       </script>
@@ -153,6 +162,7 @@ test('capture reconstructs serialized shadow DOM in the trusted snapshot viewer'
       '<template data-savepage-shadowroot="" shadowrootmode="open">',
     );
     expect(snapshotResponse.html).toContain('Captured shadow content');
+    expect(snapshotResponse.html).toContain('Captured closed shadow content');
     expect(snapshotResponse.html).not.toContain('id="savepage-shadowloader"');
 
     viewer = await extContext.newPage();
@@ -180,6 +190,16 @@ test('capture reconstructs serialized shadow DOM in the trusted snapshot viewer'
       'color',
       'rgb(35, 87, 133)',
     );
+    const closedCard = frame.locator('#closed-snapshot-card');
+    await expect
+      .poll(() =>
+        closedCard.evaluate(
+          (element) =>
+            element.shadowRoot?.querySelector('#closed-shadow-copy')
+              ?.textContent ?? null,
+        ),
+      )
+      .toBe('Captured closed shadow content');
     const nestedCard = frame
       .frameLocator('#nested-shadow-frame')
       .locator('#nested-snapshot-card');

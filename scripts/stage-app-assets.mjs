@@ -681,21 +681,34 @@ function ensureMarkdownExtractorContentScript(manifest) {
   contentScript.js.splice(contentIndex, 0, markdownExtractorContentScript);
 }
 
+function ensureBuildTargetBeforeBrowserApi(manifest) {
+  for (const contentScript of manifest.content_scripts || []) {
+    const apiIndex = contentScript.js?.indexOf('browser-api.js') ?? -1;
+    if (apiIndex < 0 || contentScript.js.includes('browser-build-target.js')) {
+      continue;
+    }
+    contentScript.js.splice(apiIndex, 0, 'browser-build-target.js');
+  }
+}
+
+function writeExtensionBuildTarget(outDir, buildTarget) {
+  const source = `(function installBrowserRecallBuildTarget(globalScope) {\n  const buildTarget = '${buildTarget}';\n  const existing = globalScope.browserRecallBuildTarget;\n  if (existing !== undefined && existing !== buildTarget) {\n    throw new Error(\`Conflicting Browser Recall build targets: \${existing} and \${buildTarget}\`);\n  }\n  Object.defineProperty(globalScope, 'browserRecallBuildTarget', {\n    configurable: false,\n    enumerable: false,\n    value: buildTarget,\n    writable: false,\n  });\n})(globalThis);\n`;
+  fs.writeFileSync(path.join(outDir, 'browser-build-target.js'), source);
+}
+
 function writeExtensionManifest(outDir, browser = 'chrome') {
   const manifestPath = path.join(outDir, 'manifest.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   ensurePageIdentityContentScript(manifest);
   ensureHighlightLifecycleContentScript(manifest);
   ensureMarkdownExtractorContentScript(manifest);
+  ensureBuildTargetBeforeBrowserApi(manifest);
   manifest.default_locale = toWebExtensionLocale(DEFAULT_LOCALE);
 
   if (browser === 'firefox') {
-    manifest.action = {
-      ...(manifest.action || {}),
-      default_popup: 'popup.html',
-    };
+    if (manifest.action) delete manifest.action.default_popup;
     manifest.background = {
-      scripts: ['browser-api.js', 'background.js'],
+      scripts: ['background.js'],
       type: 'module',
     };
     manifest.browser_specific_settings = {
@@ -735,6 +748,7 @@ function stageTarget(name, outDir = targets[name].defaultOutDir) {
 
 export function stageExtensionAssets(outDir = targets.extension.defaultOutDir) {
   const staged = stageTarget('extension', outDir);
+  writeExtensionBuildTarget(staged, 'chromium');
   writeExtensionLocales(staged);
   writeExtensionPageIdentityGlobal(staged);
   writeExtensionHighlightLifecycleGlobal(staged);
@@ -747,6 +761,7 @@ export function stageExtensionAssets(outDir = targets.extension.defaultOutDir) {
 
 export function stageFirefoxExtensionAssets(outDir = firefoxExtensionOutDir) {
   const staged = stageTarget('extension', outDir);
+  writeExtensionBuildTarget(staged, 'firefox');
   writeExtensionLocales(staged);
   writeExtensionPageIdentityGlobal(staged);
   writeExtensionHighlightLifecycleGlobal(staged);

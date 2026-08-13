@@ -8,8 +8,12 @@
     "description": "Lowercase product mark used in compact desktop UI."
   },
   "extensionDescription": {
-    "message": "Browser Recall Desktop 的 Chrome 連接器。在瀏覽器中擷取頁面，並在本機開啟完整應用程式。",
+    "message": "Browser Recall Desktop 的瀏覽器連接器。在瀏覽器中擷取頁面，並在本機開啟完整應用程式。",
     "description": "Extension store and browser management description."
+  },
+  "commandOpenPopup": {
+    "message": "開啟 Browser Recall 彈出視窗",
+    "description": "瀏覽器命令說明。"
   },
   "commandHighlightSelection": {
     "message": "反白顯示所選文字",
@@ -404,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "在 Chrome 中開啟 Browser Recall 彈出視窗，然後按一下「與桌面配對」。",
+    "message": "在瀏覽器中開啟 Browser Recall 彈出視窗，然後按一下「與桌面配對」。",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -1086,7 +1090,7 @@
     "description": "Extension popup recording toggle accessibility label."
   },
   "desktopAlreadyPaired": {
-    "message": "Chrome 已與 Browser Recall Desktop 配對",
+    "message": "此瀏覽器已與 Browser Recall Desktop 配對",
     "description": "Localized UI text."
   },
   "desktopApprovePairing": {
@@ -1354,7 +1358,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "在 Chrome 中開啟 Browser Recall 彈出視窗，然後按一下「與桌面配對」。",
+    "message": "在瀏覽器中開啟 Browser Recall 彈出視窗，然後按一下「與桌面配對」。",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {

@@ -8,8 +8,12 @@
     "description": "Lowercase product mark used in compact desktop UI."
   },
   "extensionDescription": {
-    "message": "Browser Recall Desktop के लिए Chrome कनेक्टर। ब्राउज़र में पेज कैप्चर करें और स्थानीय रूप से पूरा ऐप खोलें।",
+    "message": "Browser Recall Desktop के लिए ब्राउज़र कनेक्टर। ब्राउज़र में पेज कैप्चर करें और स्थानीय रूप से पूरा ऐप खोलें।",
     "description": "Extension store and browser management description."
+  },
+  "commandOpenPopup": {
+    "message": "Browser Recall पॉपअप खोलें",
+    "description": "ब्राउज़र कमांड का विवरण।"
   },
   "commandHighlightSelection": {
     "message": "चयनित टेक्स्ट को हाइलाइट करें",
@@ -404,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "Chrome में Browser Recall पॉपअप खोलें और ‘डेस्कटॉप के साथ पेयर करें’ पर क्लिक करें।",
+    "message": "अपने ब्राउज़र में Browser Recall पॉपअप खोलें और ‘डेस्कटॉप के साथ पेयर करें’ पर क्लिक करें।",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -1086,7 +1090,7 @@
     "description": "Extension popup recording toggle accessibility label."
   },
   "desktopAlreadyPaired": {
-    "message": "Chrome पहले से Browser Recall Desktop के साथ पेयर है",
+    "message": "यह ब्राउज़र पहले से Browser Recall Desktop के साथ पेयर है",
     "description": "Localized UI text."
   },
   "desktopApprovePairing": {
@@ -1354,7 +1358,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "Chrome में Browser Recall पॉपअप खोलें और ‘डेस्कटॉप के साथ पेयर करें’ पर क्लिक करें।",
+    "message": "अपने ब्राउज़र में Browser Recall पॉपअप खोलें और ‘डेस्कटॉप के साथ पेयर करें’ पर क्लिक करें।",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {

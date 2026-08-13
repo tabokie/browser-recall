@@ -8,8 +8,12 @@
     "description": "Lowercase product mark used in compact desktop UI."
   },
   "extensionDescription": {
-    "message": "Konektor Chrome untuk Browser Recall Desktop. Tangkap halaman di browser dan buka aplikasi lengkap secara lokal.",
+    "message": "Konektor browser untuk Browser Recall Desktop. Tangkap halaman di browser dan buka aplikasi lengkap secara lokal.",
     "description": "Extension store and browser management description."
+  },
+  "commandOpenPopup": {
+    "message": "Buka popup Browser Recall",
+    "description": "Deskripsi perintah browser."
   },
   "commandHighlightSelection": {
     "message": "Sorot teks yang dipilih",
@@ -404,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "Buka pop-up Browser Recall di Chrome, lalu klik ‘Pasangkan dengan desktop’.",
+    "message": "Buka pop-up Browser Recall di browser Anda, lalu klik ‘Pasangkan dengan desktop’.",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -1086,7 +1090,7 @@
     "description": "Extension popup recording toggle accessibility label."
   },
   "desktopAlreadyPaired": {
-    "message": "Chrome sudah dipasangkan dengan Browser Recall Desktop",
+    "message": "Browser ini sudah dipasangkan dengan Browser Recall Desktop",
     "description": "Localized UI text."
   },
   "desktopApprovePairing": {
@@ -1354,7 +1358,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "Buka pop-up Browser Recall di Chrome, lalu klik ‘Pasangkan dengan desktop’.",
+    "message": "Buka pop-up Browser Recall di browser Anda, lalu klik ‘Pasangkan dengan desktop’.",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {

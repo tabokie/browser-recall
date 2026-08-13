@@ -8,8 +8,12 @@
     "description": "Lowercase product mark used in compact desktop UI."
   },
   "extensionDescription": {
-    "message": "Browser Recall Desktop용 Chrome 커넥터입니다. 브라우저에서 페이지를 캡처하고 전체 앱을 로컬에서 여세요.",
+    "message": "Browser Recall Desktop용 브라우저 커넥터입니다. 브라우저에서 페이지를 캡처하고 전체 앱을 로컬에서 여세요.",
     "description": "Extension store and browser management description."
+  },
+  "commandOpenPopup": {
+    "message": "Browser Recall 팝업 열기",
+    "description": "브라우저 명령 설명."
   },
   "commandHighlightSelection": {
     "message": "선택한 텍스트를 강조 표시하세요.",
@@ -404,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "Chrome에서 Browser Recall 팝업을 열고 ‘데스크톱과 페어링’을 클릭하세요.",
+    "message": "브라우저에서 Browser Recall 팝업을 열고 ‘데스크톱과 페어링’을 클릭하세요.",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -1086,7 +1090,7 @@
     "description": "Extension popup recording toggle accessibility label."
   },
   "desktopAlreadyPaired": {
-    "message": "Chrome은 이미 Browser Recall Desktop과 페어링되어 있습니다",
+    "message": "이 브라우저는 이미 Browser Recall Desktop과 페어링되어 있습니다",
     "description": "Localized UI text."
   },
   "desktopApprovePairing": {
@@ -1354,7 +1358,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "Chrome에서 Browser Recall 팝업을 열고 ‘데스크톱과 페어링’을 클릭하세요.",
+    "message": "브라우저에서 Browser Recall 팝업을 열고 ‘데스크톱과 페어링’을 클릭하세요.",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {

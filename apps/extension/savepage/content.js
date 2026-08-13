@@ -248,7 +248,9 @@ var debugEnable = false;
 /* Initialize on script load — Browser Recall adaptation */
 /* Hardcode options instead of reading from chrome.storage.local */
 
-isFirefox = (typeof browser !== "undefined");
+if (globalThis.browserRecallWebExtension?.buildTarget !== "chromium" && globalThis.browserRecallWebExtension?.buildTarget !== "firefox")
+    throw new Error("Browser Recall snapshot capture requires an explicit WebExtension build target");
+isFirefox = globalThis.browserRecallWebExtension.buildTarget === "firefox";
 platformOS = navigator.platform.startsWith("Win") ? "win" : navigator.platform.startsWith("Linux") ? "linux" : "mac";
 platformArch = "x86-64";
 installType = "normal";
@@ -861,8 +863,7 @@ function findStyleSheets(depth,frame,element)
     {
         /* Handle shadow child elements */
         
-        if (isFirefox) shadowroot = element.shadowRoot || element.openOrClosedShadowRoot;
-        else shadowroot = element.shadowRoot || ((chrome.dom && element instanceof HTMLElement) ? chrome.dom.openOrClosedShadowRoot(element) : null);
+        shadowroot = globalThis.browserRecallWebExtension.getOpenOrClosedShadowRoot(element);
         
         if (shadowroot != null)
         {
@@ -1427,8 +1428,7 @@ function findOtherResources(depth,frame,element,crossframe,nosrcframe,loadedfont
     {
         /* Handle shadow child elements */
         
-        if (isFirefox) shadowroot = element.shadowRoot || element.openOrClosedShadowRoot;
-        else shadowroot = element.shadowRoot || ((chrome.dom && element instanceof HTMLElement) ? chrome.dom.openOrClosedShadowRoot(element) : null);
+        shadowroot = globalThis.browserRecallWebExtension.getOpenOrClosedShadowRoot(element);
         
         if (shadowroot != null)
         {
@@ -3782,8 +3782,7 @@ function extractHTML(depth,frame,element,crossframe,nosrcframe,framekey,parentpr
         {
             /* Handle shadow child nodes */
             
-            if (isFirefox) shadowroot = element.shadowRoot || element.openOrClosedShadowRoot;
-            else shadowroot = element.shadowRoot || ((chrome.dom && element instanceof HTMLElement) ? chrome.dom.openOrClosedShadowRoot(element) : null);
+            shadowroot = globalThis.browserRecallWebExtension.getOpenOrClosedShadowRoot(element);
             
             if (shadowroot != null)
             {

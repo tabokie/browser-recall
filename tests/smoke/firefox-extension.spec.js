@@ -139,8 +139,10 @@ function createFirefoxWebExtensionApi({
 } = {}) {
   const storageChanged = createEvent();
   const runtimeMessage = createEvent();
+  const runtimeConnect = createEvent();
   const runtimeInstalled = createEvent();
   const runtimeStartup = createEvent();
+  const actionClicked = createEvent();
 
   const storage = {
     onChanged: storageChanged,
@@ -154,6 +156,10 @@ function createFirefoxWebExtensionApi({
   const badgeState = {
     global: { text: '', color: '#000000', title: '', icon: null },
     tabs: new Map(),
+  };
+  const actionPopupState = {
+    openCount: 0,
+    popupByTab: new Map(),
   };
   const contextMenuItems = new Map();
 
@@ -204,6 +210,7 @@ function createFirefoxWebExtensionApi({
     badgeState,
     i18n,
     action: {
+      onClicked: actionClicked,
       async setBadgeBackgroundColor(details) {
         assertFirefoxArgs('setBadgeBackgroundColor', arguments, 1);
         badgeTarget(details).color = details.color;
@@ -263,6 +270,7 @@ function createFirefoxWebExtensionApi({
     },
     runtime: {
       id: 'browser-recall@example.invalid',
+      onConnect: runtimeConnect,
       onInstalled: runtimeInstalled,
       onMessage: runtimeMessage,
       onStartup: runtimeStartup,
@@ -312,6 +320,27 @@ function createFirefoxWebExtensionApi({
     },
   };
 
+  Object.defineProperties(browserApi.action, {
+    setPopup: {
+      configurable: true,
+      async value(details) {
+        if (this !== browserApi.action) {
+          throw new TypeError('setPopup requires the Firefox action receiver');
+        }
+        actionPopupState.popupByTab.set(details.tabId, details.popup);
+      },
+    },
+    openPopup: {
+      configurable: true,
+      async value() {
+        if (this !== browserApi.action) {
+          throw new TypeError('openPopup requires the Firefox action receiver');
+        }
+        actionPopupState.openCount += 1;
+      },
+    },
+  });
+
   return {
     browserApi,
     chromeCompat: {
@@ -322,13 +351,16 @@ function createFirefoxWebExtensionApi({
       },
     },
     events: {
+      actionClicked,
       runtimeInstalled,
+      runtimeConnect,
       runtimeMessage,
       runtimeStartup,
       storageChanged,
     },
     storage,
     badgeState,
+    actionPopupState,
     contextMenuItems,
   };
 }
@@ -674,6 +706,169 @@ async function waitFor(predicate, label) {
 }
 
 test.describe('Firefox extension smoke', () => {
+  test('toolbar click opens the same prepared current-page popup as Chromium', async () => {
+    await withStagedFirefoxExtension(async (outDir) => {
+      const manifest = JSON.parse(
+        readFileSync(path.join(outDir, 'manifest.json'), 'utf8'),
+      );
+      expect(manifest.action.default_popup).toBeUndefined();
+
+      const api = createFirefoxWebExtensionApi();
+      const activeTab = {
+        id: 40,
+        url: 'https://example.test/firefox-toolbar-popup',
+        title: 'Firefox Toolbar Popup',
+      };
+      const timers = new Set();
+      const nativeSetTimeout = globalThis.setTimeout;
+      const unrefSetTimeout = (callback, ms, ...args) => {
+        const timer = nativeSetTimeout(callback, ms, ...args);
+        timer.unref?.();
+        timers.add(timer);
+        return timer;
+      };
+
+      await withPatchedGlobals(
+        {
+          browser: api.browserApi,
+          chrome: api.chromeCompat,
+          navigator: navigatorWithUserAgent(
+            globalThis.navigator,
+            FIREFOX_USER_AGENT,
+          ),
+          WebSocket: FailingWebSocket,
+          setTimeout: unrefSetTimeout,
+        },
+        async () => {
+          await import(pathToFileURL(path.join(outDir, 'background.js')).href);
+          await api.events.actionClicked.dispatch(activeTab);
+          await waitFor(
+            () => api.actionPopupState.openCount === 1,
+            'prepared Firefox toolbar popup',
+          );
+
+          expect(api.actionPopupState.popupByTab.get(activeTab.id)).toMatch(
+            /^popup\.html\?bootstrap=/,
+          );
+        },
+      );
+
+      for (const timer of timers) clearTimeout(timer);
+    });
+  });
+
+  test('open-popup command opens the staged Firefox action popup', async () => {
+    await withStagedFirefoxExtension(async (outDir) => {
+      const api = createFirefoxWebExtensionApi();
+      const activeTab = {
+        id: 41,
+        url: 'https://example.test/firefox-popup',
+        title: 'Firefox Popup',
+      };
+      const createdTabs = [];
+      api.browserApi.tabs.query = async () => [activeTab];
+      api.browserApi.tabs.create = async ({ url }) => {
+        createdTabs.push(url);
+        return { id: 99, url };
+      };
+      const timers = new Set();
+      const nativeSetTimeout = globalThis.setTimeout;
+      const unrefSetTimeout = (callback, ms, ...args) => {
+        const timer = nativeSetTimeout(callback, ms, ...args);
+        timer.unref?.();
+        timers.add(timer);
+        return timer;
+      };
+
+      await withPatchedGlobals(
+        {
+          browser: api.browserApi,
+          chrome: api.chromeCompat,
+          navigator: navigatorWithUserAgent(
+            globalThis.navigator,
+            FIREFOX_USER_AGENT,
+          ),
+          WebSocket: FailingWebSocket,
+          setTimeout: unrefSetTimeout,
+        },
+        async () => {
+          await import(pathToFileURL(path.join(outDir, 'background.js')).href);
+          const [result] = await api.browserApi.commands.onCommand.dispatch(
+            'open-popup',
+            activeTab,
+          );
+
+          expect(result).toEqual({ success: true });
+          expect(api.actionPopupState.openCount).toBe(1);
+          expect(api.actionPopupState.popupByTab.get(activeTab.id)).toMatch(
+            /^popup\.html\?bootstrap=/,
+          );
+          expect(createdTabs).toEqual([]);
+        },
+      );
+
+      for (const timer of timers) clearTimeout(timer);
+    });
+  });
+
+  test('open-popup command falls back to a tab when Firefox rejects action.openPopup', async () => {
+    await withStagedFirefoxExtension(async (outDir) => {
+      const api = createFirefoxWebExtensionApi();
+      const activeTab = {
+        id: 42,
+        url: 'https://example.test/firefox-popup-fallback',
+        title: 'Firefox Popup Fallback',
+      };
+      const createdTabs = [];
+      Object.defineProperty(api.browserApi.action, 'openPopup', {
+        configurable: true,
+        async value() {
+          throw new Error('openPopup is unavailable in this Firefox window');
+        },
+      });
+      api.browserApi.tabs.create = async ({ url }) => {
+        createdTabs.push(url);
+        return { id: 100, url };
+      };
+      const timers = new Set();
+      const nativeSetTimeout = globalThis.setTimeout;
+      const unrefSetTimeout = (callback, ms, ...args) => {
+        const timer = nativeSetTimeout(callback, ms, ...args);
+        timer.unref?.();
+        timers.add(timer);
+        return timer;
+      };
+
+      await withPatchedGlobals(
+        {
+          browser: api.browserApi,
+          chrome: api.chromeCompat,
+          navigator: navigatorWithUserAgent(
+            globalThis.navigator,
+            FIREFOX_USER_AGENT,
+          ),
+          WebSocket: FailingWebSocket,
+          setTimeout: unrefSetTimeout,
+        },
+        async () => {
+          await import(pathToFileURL(path.join(outDir, 'background.js')).href);
+          const [result] = await api.browserApi.commands.onCommand.dispatch(
+            'open-popup',
+            activeTab,
+          );
+
+          expect(result).toEqual({ success: true });
+          expect(createdTabs).toHaveLength(1);
+          expect(createdTabs[0]).toMatch(
+            /^moz-extension:\/\/browser-recall\.invalid\/popup\.html\?bootstrap=/,
+          );
+        },
+      );
+
+      for (const timer of timers) clearTimeout(timer);
+    });
+  });
+
   test('staged background boots with Firefox-shaped WebExtension APIs', async () => {
     await withStagedFirefoxExtension(async (outDir) => {
       const api = createFirefoxWebExtensionApi();
@@ -709,7 +904,9 @@ test.describe('Firefox extension smoke', () => {
             'global offline badge text',
           );
 
-          expect(globalThis.browserRecallWebExtension.engine).toBe('firefox');
+          expect(globalThis.browserRecallWebExtension.buildTarget).toBe(
+            'firefox',
+          );
           expect(
             globalThis.chrome.storage.session.setAccessLevel,
           ).toBeUndefined();
@@ -859,12 +1056,18 @@ test.describe('Firefox extension smoke', () => {
 
           await import(pathToFileURL(path.join(outDir, 'popup.js')).href);
 
-          await waitFor(
-            () =>
-              dom.window.document.getElementById('setup-required').style
-                .display === 'block',
-            'popup setup-required state',
-          );
+          await waitFor(() => {
+            const section = dom.window.document.getElementById(
+              'pageDiagnosticSection',
+            );
+            const title = dom.window.document.getElementById(
+              'pageDiagnosticTitle',
+            );
+            return (
+              section.style.display !== 'none' &&
+              /DESKTOP OFFLINE|Desktop Offline/.test(title.textContent)
+            );
+          }, 'popup desktop-offline diagnostic state');
 
           expect(
             dom.window.document.body.textContent.includes(
@@ -872,10 +1075,12 @@ test.describe('Firefox extension smoke', () => {
             ),
           ).toBe(false);
           expect(
-            dom.window.document.getElementById('setupRequiredTitle')
+            dom.window.document.getElementById('pageDiagnosticTitle')
               .textContent,
           ).toMatch(/DESKTOP OFFLINE|Desktop Offline/);
-          expect(globalThis.browserRecallWebExtension.engine).toBe('firefox');
+          expect(globalThis.browserRecallWebExtension.buildTarget).toBe(
+            'firefox',
+          );
           expect(
             globalThis.chrome.storage.session.setAccessLevel,
           ).toBeUndefined();

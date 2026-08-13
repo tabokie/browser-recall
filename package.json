@@ -15,7 +15,7 @@
   "scripts": {
     "ci": "npm run ci:test && npm run ci:install-playwright && npm run ci:test-extension-e2e && npm run ci:test-rust && npm run ci:install-desktop-visual-browsers && npm run ci:test-desktop-visual && npm run ci:cold-scripts && npm run ci:lint-js && npm run ci:lint-rust",
     "ci:test": "npm test",
-    "ci:test-extension-e2e": "playwright test tests/e2e/extension-font-fallback.spec.js tests/e2e/popup-lists.spec.js tests/e2e/snapshot-slug-meta.spec.js",
+    "ci:test-extension-e2e": "playwright test tests/e2e/extension-font-fallback.spec.js tests/e2e/popup-lists.spec.js tests/e2e/snapshot-slug-meta.spec.js tests/e2e/snapshot-resource-timeout.spec.js && npm run test:firefox:smoke",
     "ci:test-windows-extension-font": "playwright test tests/e2e/extension-font-fallback.spec.js",
     "ci:test-windows-artifacts": "vitest run tests/unit/stage-app-assets.test.js",
     "ci:test-rust": "npm run build:desktop-ui && cargo test --workspace",
@@ -38,6 +38,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:firefox:smoke": "playwright test --config playwright.smoke.config.js tests/smoke/firefox-extension.spec.js",
+    "test:firefox:real": "node tests/smoke/firefox-real-content.mjs",
+    "test:shortcut:native": "node tests/smoke/native-extension-shortcut.mjs",
     "test:visual": "npm run build:desktop-ui && npm run test:visual:wkwebview && npm run test:visual:chromium && npm run test:visual:webkit",
     "test:visual:wkwebview": "node tests/smoke/macos-wkwebview-chart-layout.mjs",
     "test:visual:chromium": "playwright test tests/e2e/desktop-visual.spec.js",

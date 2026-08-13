@@ -8,8 +8,12 @@
     "description": "Lowercase product mark used in compact desktop UI."
   },
   "extensionDescription": {
-    "message": "Browser Recall Desktop 用の Chrome コネクタ。ブラウザでページを記録し、完全版アプリをローカルで開けます。",
+    "message": "Browser Recall Desktop 用のブラウザコネクタ。ブラウザでページを記録し、完全版アプリをローカルで開けます。",
     "description": "Extension store and browser management description."
+  },
+  "commandOpenPopup": {
+    "message": "Browser Recall のポップアップを開く",
+    "description": "ブラウザーコマンドの説明。"
   },
   "commandHighlightSelection": {
     "message": "選択したテキストを強調表示します",
@@ -404,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "Chrome で Browser Recall のポップアップを開き、「デスクトップとペアリング」をクリックします。",
+    "message": "ブラウザで Browser Recall のポップアップを開き、「デスクトップとペアリング」をクリックします。",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -1086,7 +1090,7 @@
     "description": "Extension popup recording toggle accessibility label."
   },
   "desktopAlreadyPaired": {
-    "message": "Chrome はすでに Browser Recall Desktop とペアリングされています",
+    "message": "このブラウザはすでに Browser Recall Desktop とペアリングされています",
     "description": "Localized UI text."
   },
   "desktopApprovePairing": {
@@ -1354,7 +1358,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "Chrome で Browser Recall のポップアップを開き、「デスクトップとペアリング」をクリックします。",
+    "message": "ブラウザで Browser Recall のポップアップを開き、「デスクトップとペアリング」をクリックします。",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {

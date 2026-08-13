@@ -8,8 +8,12 @@
     "description": "Lowercase product mark used in compact desktop UI."
   },
   "extensionDescription": {
-    "message": "Коннектор Chrome для Browser Recall Desktop. Сохраняйте страницы в браузере и открывайте полную версию приложения локально.",
+    "message": "Браузерный коннектор для Browser Recall Desktop. Сохраняйте страницы в браузере и открывайте полную версию приложения локально.",
     "description": "Extension store and browser management description."
+  },
+  "commandOpenPopup": {
+    "message": "Открыть всплывающее окно Browser Recall",
+    "description": "Описание команды браузера."
   },
   "commandHighlightSelection": {
     "message": "Выделите выбранный текст",
@@ -404,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "Откройте всплывающее окно Browser Recall в Chrome и нажмите «Сопряжение с рабочим столом».",
+    "message": "Откройте всплывающее окно Browser Recall в браузере и нажмите «Сопряжение с рабочим столом».",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -1086,7 +1090,7 @@
     "description": "Extension popup recording toggle accessibility label."
   },
   "desktopAlreadyPaired": {
-    "message": "Chrome уже сопряжён с Browser Recall Desktop",
+    "message": "Этот браузер уже сопряжён с Browser Recall Desktop",
     "description": "Localized UI text."
   },
   "desktopApprovePairing": {
@@ -1354,7 +1358,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "Откройте Browser Recall всплывающее окно в Chrome и нажмите «Сопряжение с рабочим столом».",
+    "message": "Откройте всплывающее окно Browser Recall в браузере и нажмите «Сопряжение с рабочим столом».",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {

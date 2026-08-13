@@ -8,8 +8,12 @@
     "description": "Lowercase product mark used in compact desktop UI."
   },
   "extensionDescription": {
-    "message": "Chrome connector for Browser Recall Desktop. Capture pages in the browser and open the full app locally.",
+    "message": "Browser connector for Browser Recall Desktop. Capture pages in the browser and open the full app locally.",
     "description": "Extension store and browser management description."
+  },
+  "commandOpenPopup": {
+    "message": "Open the Browser Recall popup",
+    "description": "Browser command description."
   },
   "commandHighlightSelection": {
     "message": "Highlight selected text",
@@ -404,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "Open the Browser Recall popup in Chrome and click Pair with desktop.",
+    "message": "Open the Browser Recall popup in your browser and click Pair with desktop.",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -1114,7 +1118,7 @@
     "description": "Extension popup recording toggle accessibility label."
   },
   "desktopAlreadyPaired": {
-    "message": "Chrome is already paired with Browser Recall Desktop",
+    "message": "This browser is already paired with Browser Recall Desktop",
     "description": "Localized UI text."
   },
   "desktopApprovePairing": {
@@ -1382,7 +1386,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "Open the Browser Recall popup in Chrome and click Pair with desktop.",
+    "message": "Open the Browser Recall popup in your browser and click Pair with desktop.",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {

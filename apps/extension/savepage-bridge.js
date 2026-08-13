@@ -44,7 +44,11 @@ function settleCaptureSession(
 async function injectSavepageScripts(tabId) {
   await chrome.scripting.executeScript({
     target: { tabId, allFrames: true },
-    files: ['savepage/content-frame.js'],
+    files: [
+      'browser-build-target.js',
+      'browser-api.js',
+      'savepage/content-frame.js',
+    ],
   });
   logDebug('[savepage] content-frame.js injected, now injecting content.js');
 

@@ -5,7 +5,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 const source = readFileSync('apps/extension/browser-api.js', 'utf8');
 
-function runShim(context) {
+function runShim(context, buildTarget) {
+  if (buildTarget !== undefined) {
+    context.browserRecallBuildTarget = buildTarget;
+  }
   vm.runInNewContext(source, context, {
     filename: 'apps/extension/browser-api.js',
   });
@@ -72,9 +75,9 @@ describe('browser-api shim', () => {
       },
     };
 
-    runShim(context);
+    runShim(context, 'firefox');
 
-    expect(context.browserRecallWebExtension.engine).toBe('firefox');
+    expect(context.browserRecallWebExtension.buildTarget).toBe('firefox');
     expect(context.chrome.runtime.id).toBe('browser-recall@example.invalid');
     expect(context.chrome.storage.session.setAccessLevel).toBeUndefined();
 
@@ -103,10 +106,10 @@ describe('browser-api shim', () => {
       chrome: nativeChrome,
     };
 
-    runShim(context);
+    runShim(context, 'chromium');
 
     expect(context.chrome).toBe(nativeChrome);
-    expect(context.browserRecallWebExtension.engine).toBe('chromium');
+    expect(context.browserRecallWebExtension.buildTarget).toBe('chromium');
   });
 
   it('uses the Chromium extension API when Chrome exposes an unrelated browser global', () => {
@@ -132,11 +135,11 @@ describe('browser-api shim', () => {
       browser: unrelatedBrowserGlobal,
     };
 
-    runShim(context);
+    runShim(context, 'chromium');
 
     expect(context.chrome).toBe(nativeChrome);
     expect(context.browser).toBe(nativeChrome);
-    expect(context.browserRecallWebExtension.engine).toBe('chromium');
+    expect(context.browserRecallWebExtension.buildTarget).toBe('chromium');
   });
 
   it('classifies extension runtime failures that need user-visible recovery', () => {
@@ -160,7 +163,7 @@ describe('browser-api shim', () => {
       },
     };
 
-    runShim(context);
+    runShim(context, 'firefox');
 
     const isRuntimeFailure = context.browserRecallWebExtension.isRuntimeFailure;
     expect(isRuntimeFailure(new Error('Extension context invalidated.'))).toBe(
@@ -208,34 +211,8 @@ describe('browser-api shim', () => {
       },
     };
 
-    expect(() => runShim(context)).toThrow(
+    expect(() => runShim(context, 'firefox')).toThrow(
       'Browser Recall requires the Firefox WebExtension API',
-    );
-  });
-
-  it('rejects Firefox platforms that expose only the legacy browserAction API', () => {
-    const context = {
-      console,
-      navigator: {
-        userAgent:
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0',
-      },
-      browser: {
-        browserAction: {},
-        contextMenus: {},
-        runtime: {
-          id: 'browser-recall@example.invalid',
-          getURL: (path) => `moz-extension://browser-recall.invalid/${path}`,
-        },
-        storage: {
-          local: promiseStorageArea(),
-          session: promiseStorageArea(),
-        },
-      },
-    };
-
-    expect(() => runShim(context)).toThrow(
-      'Browser Recall requires the Firefox action API',
     );
   });
 
@@ -266,7 +243,7 @@ describe('browser-api shim', () => {
       },
     };
 
-    runShim(context);
+    runShim(context, 'firefox');
 
     const manifest = context.chrome.runtime.getManifest();
     const url = context.chrome.runtime.getURL('popup.html');
@@ -291,7 +268,7 @@ describe('browser-api shim', () => {
             return `safari-web-extension://browser-recall.invalid/${path}`;
           },
           getBrowserInfo(callback) {
-            callback({ name: 'Orion' });
+            callback({ name: 'Safari' });
           },
           sendMessage(message, callback) {
             callback({ success: true, action: message.action });
@@ -307,6 +284,8 @@ describe('browser-api shim', () => {
       },
     };
 
-    expect(() => runShim(context)).toThrow('Unsupported browser user agent');
+    expect(() => runShim(context)).toThrow(
+      'Browser Recall build target is missing or invalid',
+    );
   });
 });

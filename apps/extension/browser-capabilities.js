@@ -1,11 +1,13 @@
 export function getBrowserCapabilities() {
-  const engine = globalThis.browserRecallWebExtension?.engine;
-  if (!['chromium', 'firefox'].includes(engine)) {
-    throw new Error(`Unsupported WebExtension engine: ${String(engine)}`);
+  const buildTarget = globalThis.browserRecallWebExtension?.buildTarget;
+  if (!['chromium', 'firefox'].includes(buildTarget)) {
+    throw new Error(
+      `Unsupported WebExtension build target: ${String(buildTarget)}`,
+    );
   }
   return {
-    engine,
-    supportsPromiseOnMessage: engine !== 'chromium',
+    buildTarget,
+    supportsPromiseOnMessage: buildTarget !== 'chromium',
     supportsSessionAccessLevel:
       typeof chrome.storage.session.setAccessLevel === 'function',
   };
