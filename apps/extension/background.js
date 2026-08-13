@@ -466,9 +466,12 @@ async function enqueueReportCommand(action, request, { flush = false } = {}) {
   observeLogTimestamp(request.timestamp);
   await enqueueCommand(action, request);
   if (flush) {
-    await flushInteractiveWrites();
+    const connector = await flushInteractiveWrites();
+    if (connector?.pendingCommands !== 0) {
+      throw new Error('Desktop command queue did not drain');
+    }
   }
-  return {};
+  return { success: true };
 }
 
 async function buildVisitReport(
@@ -1188,6 +1191,12 @@ async function handleRecordPageActivity(request, sender) {
       };
     }
     const url = request.url;
+    if (
+      request.awaitCommit !== undefined &&
+      typeof request.awaitCommit !== 'boolean'
+    ) {
+      throw new Error('recordPageActivity awaitCommit must be a boolean');
+    }
 
     const recordingState = await getWorkspaceState();
     if (recordingState && recordingState.mode === 'private') {
@@ -1211,7 +1220,9 @@ async function handleRecordPageActivity(request, sender) {
         request.bodyPreview,
         request.bypassBlacklist,
       );
-      const response = await enqueueReportCommand('reportVisit', report);
+      const response = await enqueueReportCommand('reportVisit', report, {
+        flush: request.awaitCommit === true,
+      });
 
       return response;
     } else if (request.isLeaving) {

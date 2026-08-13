@@ -1,0 +1,6 @@
+- I asked you to fix the issue where when I unpause the extension popup, the page data is not immediately refreshed and shown. Your fix was not complete. Now after I unpause, the page title is shown, but other metadata is still empty. And that also means you are using a different code path to render incomplete view. That is not the correct way to fix it.
+- It is using the same code path as normal loading render?
+- Please review my uncommitted changes
+- Fix them
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.6 Sol
+- As code comment somewhere

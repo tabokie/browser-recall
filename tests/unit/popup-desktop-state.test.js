@@ -492,7 +492,7 @@ describe('popup desktop state rendering', () => {
     expect(document.getElementById('pageHeader').style.display).toBe('none');
   });
 
-  it('shows the active page shell immediately while a resumed popup refreshes its data', async () => {
+  it('reveals a resumed popup only after its complete page data is ready', async () => {
     const tab = {
       id: 44,
       url: 'chrome-extension://abcdefghijklmnop/snapshot-viewer.html?slug=saved-page',
@@ -546,12 +546,10 @@ describe('popup desktop state rendering', () => {
     expect(getComputedStyle(document.body).minHeight).toBe('0');
     document.getElementById('recordingToggle').click();
 
-    await waitFor(
-      () =>
-        document.getElementById('dashboardContent')?.style.display === 'block',
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(document.getElementById('dashboardContent').style.display).toBe(
+      'none',
     );
-    expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
-    expect(document.getElementById('pageUrl').textContent).toBe(tab.url);
     expect(
       chrome.runtime.sendMessage.mock.calls.some(
         ([request]) => request.action === 'recordPageActivity',
@@ -578,14 +576,10 @@ describe('popup desktop state rendering', () => {
       title: effectiveTab.title,
       slug: generateSlugFromUrl(effectiveTab.url),
       isInitialLoad: true,
+      awaitCommit: true,
     });
-    expect(document.body.classList.contains('popup-compact')).toBe(false);
     expect(document.getElementById('dashboardContent').style.display).toBe(
-      'block',
-    );
-    expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
-    expect(document.getElementById('pageUrl').textContent).toBe(
-      effectiveTab.url,
+      'none',
     );
 
     pageActivity.resolve({ success: true });
@@ -617,7 +611,12 @@ describe('popup desktop state rendering', () => {
     );
     expect(document.getElementById('dashboardContent')).toBeTruthy();
     expect(document.body.classList.contains('popup-compact')).toBe(false);
-    expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
+    expect(document.getElementById('pageTitle').textContent).toBe(
+      effectiveTab.title,
+    );
+    expect(document.getElementById('pageUrl').textContent).toBe(
+      effectiveTab.url,
+    );
   });
 
   it('keeps the final bootstrap when a concurrent recording toggle fails', async () => {
@@ -731,9 +730,8 @@ describe('popup desktop state rendering', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(document.getElementById('fatalReloadBtn')).toBeNull();
     expect(document.getElementById('dashboardContent').style.display).toBe(
-      'block',
+      'none',
     );
-    expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
   });
 
   it('disables resume while a pause command is still committing', async () => {

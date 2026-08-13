@@ -1261,13 +1261,47 @@ test.describe('Popup list chip behavior', () => {
     setupDir,
     localServer,
   }) => {
+    const now = Date.now();
     void setupDir;
     localServer.addPage('/prepared-private-resume-race', {
       title: 'Prepared Private Resume Race',
       body: '<main>Prepared private resume race</main>',
     });
     const url = localServer.url('/prepared-private-resume-race');
-    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+    const slug = getSlugForUrl(url);
+    await resetAndSeed(extContext, extensionId, [
+      settingsCheckpoint(),
+      {
+        path: 'views/manifest/list-order.json',
+        data: listOrderFixture({
+          deviceTimestamp: now,
+          tree: [{ id: 'list:resume-metadata', children: [] }],
+        }),
+      },
+      {
+        path: 'views/lists/resume-metadata.json',
+        data: listEntityFixture({
+          slug: 'resume-metadata',
+          name: 'Resume metadata',
+          owner: 'test-device',
+          deviceTimestamp: now,
+          pins: [{ id: `page:${slug}`, pinnedAt: now, source: null }],
+        }),
+      },
+      {
+        path: pageCheckpointPath(slug),
+        data: pageEntityFixture({
+          slug,
+          url,
+          title: 'Prepared Private Resume Race',
+          deviceTimestamp: now,
+          parentIds: ['list:resume-metadata'],
+          childIds: [],
+          visitDates: [],
+          likes: 2,
+        }),
+      },
+    ]);
 
     const page = await extContext.newPage();
     await page.goto(url);
@@ -1318,6 +1352,7 @@ test.describe('Popup list chip behavior', () => {
             });
           }
           if (request?.action === 'recordPageActivity') {
+            globalThis.__resumePageActivityRequest = request;
             responseGate = new Promise((resolve) => {
               releasePageActivity = resolve;
               globalThis.__resumePageActivityPending = true;
@@ -1357,16 +1392,10 @@ test.describe('Popup list chip behavior', () => {
         'aria-pressed',
         'false',
       );
-      await expect(popup.locator('#dashboardContent')).toBeVisible();
-      await expect(popup.locator('#pageTitle')).toHaveText(
-        'Prepared Private Resume Race',
-      );
+      await expect(popup.locator('#dashboardContent')).toBeHidden();
 
       await popup.evaluate(() => globalThis.__releasePreparedPrivateHandoff());
-      await expect(popup.locator('#dashboardContent')).toBeVisible();
-      await expect(popup.locator('#pageTitle')).toHaveText(
-        'Prepared Private Resume Race',
-      );
+      await expect(popup.locator('#dashboardContent')).toBeHidden();
 
       await expect
         .poll(() =>
@@ -1376,14 +1405,126 @@ test.describe('Popup list chip behavior', () => {
       expect(
         await popup.evaluate(() => globalThis.__resumeActionOrder.slice(0, 2)),
       ).toEqual(['resolvePopupPageIdentity', 'recordPageActivity']);
+      expect(
+        await popup.evaluate(
+          () => globalThis.__resumePageActivityRequest?.awaitCommit,
+        ),
+      ).toBe(true);
+      await popup.evaluate(() => globalThis.__releaseResumePageActivity());
+
+      await expect(popup.locator('#dashboardContent')).toBeVisible();
       await expect(popup.locator('#pageTitle')).toHaveText(
         'Prepared Private Resume Race',
       );
+      await expect(popup.locator('#pageUrl')).toHaveText(url);
+      await expect(popup.locator('#attentionGrid .attention-item')).toHaveCount(
+        2,
+      );
+      await expect(
+        popup.locator('#attentionGrid .metric-value').last(),
+      ).toHaveText('2');
+      await expect(
+        popup.locator('#listChips .list-chip.selected', {
+          hasText: 'Resume metadata',
+        }),
+      ).toBeVisible();
       await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
       await expect(popup.locator('#recordingToggle')).toHaveAttribute(
         'aria-pressed',
         'false',
       );
+    } finally {
+      await helper.evaluate(() =>
+        chrome.runtime.sendMessage({
+          action: 'setRecordingPaused',
+          paused: false,
+        }),
+      );
+      await popup.close();
+      await helper.close();
+      await page.close();
+    }
+  });
+
+  test('resume visit failure renders a diagnostic instead of a blank popup', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    localServer.addPage('/resume-visit-failure', {
+      title: 'Resume Visit Failure',
+      body: '<main>Resume visit failure</main>',
+    });
+    const url = localServer.url('/resume-visit-failure');
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+    const helper = await openHelperPage(extContext, extensionId);
+    const prepared = await helper.evaluate(async (pageUrl) => {
+      const [tab] = await chrome.tabs.query({ url: pageUrl });
+      if (!tab?.id) return { success: false, error: 'Source tab not found' };
+      const paused = await chrome.runtime.sendMessage({
+        action: 'setRecordingPaused',
+        paused: true,
+      });
+      if (paused?.success !== true) return paused;
+      return chrome.runtime.sendMessage({
+        action: 'beginPopupBootstrapForTest',
+        tabId: tab.id,
+      });
+    }, url);
+    expect(prepared).toMatchObject({ success: true });
+
+    const popup = await extContext.newPage();
+    await popup.addInitScript(() => {
+      const patchRuntime = () => {
+        if (!globalThis.chrome?.runtime?.sendMessage) {
+          setTimeout(patchRuntime, 0);
+          return;
+        }
+        const originalSendMessage = chrome.runtime.sendMessage.bind(
+          chrome.runtime,
+        );
+        chrome.runtime.sendMessage = async (request, ...args) => {
+          if (request?.action === 'recordPageActivity') {
+            return {
+              success: false,
+              error: 'Resume visit commit failed',
+            };
+          }
+          return originalSendMessage(request, ...args);
+        };
+      };
+      patchRuntime();
+    });
+
+    try {
+      await popup.goto(
+        `chrome-extension://${extensionId}/${prepared.popupPath}`,
+      );
+      await expect(popup.locator('#recordingToggle')).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+      await expect(popup.locator('#dashboardContent')).toBeHidden();
+
+      await popup.locator('#recordingToggle').click();
+
+      await expect(popup.locator('#recordingToggle')).toHaveAttribute(
+        'aria-pressed',
+        'false',
+      );
+      await expect(popup.locator('#dashboardContent')).toBeVisible();
+      await expect(popup.locator('#pageDiagnosticSection')).toBeVisible();
+      await expect(popup.locator('#pageDiagnosticMessage')).toHaveText(
+        'Resume visit commit failed',
+      );
+      await expect(popup.locator('#pageHeader')).toBeHidden();
+      await expect(popup.locator('#fatalReloadBtn')).toHaveCount(0);
     } finally {
       await helper.evaluate(() =>
         chrome.runtime.sendMessage({

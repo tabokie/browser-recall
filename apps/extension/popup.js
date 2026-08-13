@@ -1949,13 +1949,6 @@ async function handleRecordingToggleClick() {
     // Resuming recording: record the current page visit and show details.
     if (paused && !nextPaused && currentPage.tab) {
       const resumedTab = currentPage.tab;
-      const hasRenderedPageData = currentPage.summary !== null;
-      if (hasRenderedPageData) restoreDashboardContent();
-      if (hasRenderedPageData) {
-        await recordCurrentPageActivity(resumedTab);
-        await refreshCurrentPageSummary();
-        return;
-      }
       await resumeDashboard(resumedTab, transitionGeneration);
       return;
     }
@@ -2132,8 +2125,58 @@ function validatePopupSummary(summary) {
   }
 }
 
-async function fetchAndRenderPageData(tab, slug, options = {}) {
-  const { resetSections = true, renderSections = true } = options;
+async function renderDashboardSummary(tab, identity, summary, options = {}) {
+  const {
+    generation = currentPage.generation,
+    resetSections = true,
+    renderSections = true,
+    renderLists = false,
+    finish = false,
+  } = options;
+  validatePopupSummary(summary);
+  if (generation !== currentPage.generation) return false;
+  if (summary.access.blacklisted && !summary.access.hasVisitHistory) {
+    currentPage.pageSummaryState = 'succeeded';
+    renderBlacklistDiagnostic(tab, summary.url || identity.url || tab.url);
+    return false;
+  }
+  if (resetSections) resetDashboardSections();
+  else clearPageDiagnosticSection();
+  const page = summary.page || transientPageView(identity.slug, summary);
+  const title = page.user_title ? page.user_title : summary.displayTitle;
+  if (generation !== currentPage.generation) return false;
+  currentPage.summary = { ...summary, page };
+  currentPage.entry = page;
+  currentPage.pageSummaryState = 'succeeded';
+  currentPage.title = title || '';
+  currentPage.url = page.url || identity.url;
+  document.getElementById('pageTitle').textContent = currentPage.title;
+  document.getElementById('pageUrl').textContent = currentPage.url;
+  if (renderSections) {
+    renderVisitsAndLikes(page);
+    renderSnapshots(summary.snapshots);
+    if (summary.notes.length > 0) {
+      await refreshHighlightMarkupState();
+      if (generation !== currentPage.generation) return false;
+    }
+    renderNotes(summary.notes);
+  }
+  if (renderLists) {
+    await renderListChips(summary.lists);
+    if (generation !== currentPage.generation) return false;
+  }
+  if (finish) {
+    await finishDashboardRender(tab, generation);
+    if (generation !== currentPage.generation) return false;
+    schedulePendingLiveListRefresh();
+  }
+  logDebug(
+    `[popup] Loaded ${summary.notes.length} notes, ${summary.snapshots.length} snapshots, ${summary.lists.length} lists`,
+  );
+  return true;
+}
+
+async function fetchAndRenderPageData(tab, identity, options = {}) {
   const generation = currentPage.generation;
   currentPage.entry = null;
   currentPage.pageSummaryState = 'loading';
@@ -2151,41 +2194,10 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
     logDebug('[popup] getPageSummary response:', summary);
 
     if (summary?.success) {
-      validatePopupSummary(summary);
-      if (summary.access.blacklisted && !summary.access.hasVisitHistory) {
-        currentPage.pageSummaryState = 'succeeded';
-        renderBlacklistDiagnostic(
-          tab,
-          summary.url || currentPage.url || tab.url,
-        );
-        return false;
-      }
-      if (resetSections) resetDashboardSections();
-      else clearPageDiagnosticSection();
-      const page = summary.page || transientPageView(slug, summary);
-      const title = page.user_title ? page.user_title : summary.displayTitle;
-      if (generation !== currentPage.generation) return false;
-      currentPage.summary = { ...summary, page };
-      currentPage.entry = page || null;
-      currentPage.pageSummaryState = 'succeeded';
-      currentPage.title = title || '';
-      if (page.url) currentPage.url = page.url;
-      document.getElementById('pageTitle').textContent = currentPage.title;
-      if (currentPage.url) {
-        document.getElementById('pageUrl').textContent = currentPage.url;
-      }
-      if (renderSections) {
-        renderVisitsAndLikes(page);
-        renderSnapshots(summary.snapshots);
-        if (summary.notes.length > 0) {
-          await refreshHighlightMarkupState();
-          if (generation !== currentPage.generation) return false;
-        }
-        renderNotes(summary.notes);
-      }
-      logDebug(
-        `[popup] Loaded ${summary.notes.length} notes, ${summary.snapshots.length} snapshots, ${summary.lists.length} lists`,
-      );
+      return await renderDashboardSummary(tab, identity, summary, {
+        ...options,
+        generation,
+      });
     } else {
       currentPage.pageSummaryState = 'failed';
       logDebug('[popup] getPageSummary returned failure:', summary);
@@ -2235,7 +2247,6 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
     }
     return false;
   }
-  return true;
 }
 
 async function refreshCurrentPageSummary(options = {}) {
@@ -2251,20 +2262,18 @@ async function refreshCurrentPageSummary(options = {}) {
     return;
   }
   const generation = nextCurrentPageGeneration();
-  const updated = await fetchAndRenderPageData(
-    currentPage.tab,
-    currentPage.slug,
-    {
-      resetSections: false,
-      renderSections,
-    },
-  );
+  const identity = {
+    slug: currentPage.slug,
+    url: currentPage.url,
+    title: currentPage.title,
+  };
+  const updated = await fetchAndRenderPageData(currentPage.tab, identity, {
+    resetSections: false,
+    renderSections,
+    renderLists,
+  });
   if (!updated || generation !== currentPage.generation) return;
-  const followUps = [renderRecordingBar()];
-  if (renderLists) {
-    followUps.unshift(renderListChips(currentPage.summary?.lists || []));
-  }
-  await Promise.all(followUps);
+  await renderRecordingBar();
 }
 
 function listMutationTargetsCurrentPage(request) {
@@ -2369,9 +2378,10 @@ async function recordCurrentPageActivity(tab) {
   const response = await chrome.runtime.sendMessage({
     action: 'recordPageActivity',
     url,
-    title: tab.title || null,
+    title: tab._effectiveTitle || tab.title || null,
     slug: generateSlugFromUrl(url),
     isInitialLoad: true,
+    awaitCommit: true,
   });
   requireSuccessfulResponse(response, 'recordPageActivity');
 }
@@ -2394,9 +2404,8 @@ function renderProvisionalDashboardShell(tab) {
 }
 
 async function resumeDashboard(tab, generation) {
-  // Browser-reported tab metadata is presentation-only until background-owned
-  // page identity resolves; never use the provisional URL for semantic work.
-  renderProvisionalDashboardShell(tab);
+  // Keep the paused surface until the visit is committed, then use the normal
+  // showDashboard path so resume never exposes tab-derived partial metadata.
   try {
     await resolveEffectiveUrl(tab);
   } catch (error) {
@@ -2409,10 +2418,20 @@ async function resumeDashboard(tab, generation) {
     return;
   }
   if (generation !== currentPage.generation) return;
-  await showDashboard(tab, {
-    loadingPresentation: DASHBOARD_LOADING_PRESENTATION.SHELL,
-    beforeFetch: () => recordCurrentPageActivity(tab),
-  });
+  try {
+    await recordCurrentPageActivity(tab);
+  } catch (error) {
+    if (generation === currentPage.generation) {
+      showDesktopDataUnavailable(error.message, {
+        reason: 'popup-resume-visit-failed',
+        error: error.message || String(error),
+        url: tab._effectiveUrl || tab.url,
+      });
+    }
+    return;
+  }
+  if (generation !== currentPage.generation) return;
+  await showDashboard(tab);
 }
 
 function validateDashboardLoadingPresentation(presentation) {
@@ -2423,38 +2442,27 @@ function validateDashboardLoadingPresentation(presentation) {
 
 // Show dashboard for a tab: set up state, fetch data, render sections
 async function showDashboard(tab, options = {}) {
-  const {
-    loadingPresentation = DASHBOARD_LOADING_PRESENTATION.PRESERVE,
-    beforeFetch = null,
-  } = options;
+  const { loadingPresentation = DASHBOARD_LOADING_PRESENTATION.PRESERVE } =
+    options;
   validateDashboardLoadingPresentation(loadingPresentation);
-  if (beforeFetch !== null && typeof beforeFetch !== 'function') {
-    throw new Error('Dashboard beforeFetch must be a function or null');
-  }
   replaceConnectorDiagnosticOwner(false);
   const generation = nextCurrentPageGeneration();
   const previousSlug = currentPage.slug;
-  const { slug, url, title } = await resolvePageIdentity(tab);
+  const identity = await resolvePageIdentity(tab);
   if (generation !== currentPage.generation) return;
-  if (slug !== previousSlug) frozenChipOrder = null;
-  resetCurrentPageIdentity({ slug, url, title, tab });
-  document.getElementById('pageTitle').textContent = title;
-  document.getElementById('pageUrl').textContent = url;
+  if (identity.slug !== previousSlug) frozenChipOrder = null;
+  resetCurrentPageIdentity({ ...identity, tab });
+  document.getElementById('pageTitle').textContent = identity.title;
+  document.getElementById('pageUrl').textContent = identity.url;
   resetDashboardSections();
   if (loadingPresentation === DASHBOARD_LOADING_PRESENTATION.SHELL) {
     showDashboardUI();
   }
-  if (beforeFetch) await beforeFetch();
-  if (generation !== currentPage.generation) return;
-
-  const updated = await fetchAndRenderPageData(tab, slug, {
+  await fetchAndRenderPageData(tab, identity, {
     resetSections: false,
+    renderLists: true,
+    finish: true,
   });
-  if (!updated || generation !== currentPage.generation) return;
-  await renderListChips(currentPage.summary.lists);
-  if (generation !== currentPage.generation) return;
-  await finishDashboardRender(tab, generation);
-  schedulePendingLiveListRefresh();
 }
 
 // ─── Init phases ─────────────────────────────────────────────────────
@@ -2689,34 +2697,13 @@ async function renderPreparedDashboard(bootstrap) {
   ) {
     throw new Error('Prepared popup identity is incomplete');
   }
-  validatePopupSummary(summary);
-  const slug = identity.slug;
-  const url = identity.url;
-  const page = summary.page || transientPageView(slug, summary);
-  const title = page.user_title || summary.displayTitle;
-
-  if (slug !== currentPage.slug) frozenChipOrder = null;
-  resetCurrentPageIdentity({ slug, url, title, tab });
-  resetDashboardSections();
-  currentPage.summary = { ...summary, success: true, page };
-  currentPage.entry = page;
-  currentPage.pageSummaryState = 'succeeded';
-  if (page.url) currentPage.url = page.url;
-  currentPage.title = title || '';
-
-  document.getElementById('pageTitle').textContent = currentPage.title;
-  document.getElementById('pageUrl').textContent = currentPage.url;
-  renderVisitsAndLikes(page);
-  renderSnapshots(summary.snapshots);
-  if (summary.notes.length > 0) {
-    await refreshHighlightMarkupState();
-    if (generation !== currentPage.generation) return;
-  }
-  renderNotes(summary.notes);
-  await renderListChips(summary.lists);
-  if (generation !== currentPage.generation) return;
-  await finishDashboardRender(tab, generation);
-  schedulePendingLiveListRefresh();
+  if (identity.slug !== currentPage.slug) frozenChipOrder = null;
+  resetCurrentPageIdentity({ ...identity, tab });
+  await renderDashboardSummary(tab, identity, summary, {
+    generation,
+    renderLists: true,
+    finish: true,
+  });
 }
 
 async function renderPendingPopup(bootstrap) {
