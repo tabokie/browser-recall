@@ -1,13 +1,32 @@
 use crate::storage::Storage;
 use browser_recall_replay::entities::{Entity, NoteEntity, PageEntity, PinEntity, TreeNode};
-use browser_recall_replay::LogEntry;
-use serde::Serialize;
+use browser_recall_replay::{generate_slug_from_url, LogEntry};
+use parking_lot::Mutex;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
+const MAX_HIGHLIGHT_HISTORY_SESSIONS: usize = 4;
 
 #[derive(Debug, Clone)]
 pub struct ReadProjections {
     storage: Storage,
+    highlight_history_sessions: Arc<Mutex<HighlightHistorySessions>>,
+    next_highlight_history_session_id: Arc<AtomicU64>,
+}
+
+#[derive(Debug, Default)]
+struct HighlightHistorySessions {
+    order: VecDeque<u64>,
+    items: BTreeMap<u64, Arc<Vec<HighlightHistoryCandidate>>>,
+}
+
+#[derive(Debug, Clone)]
+struct HighlightHistoryCandidate {
+    created_at: i64,
+    note_slug: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -67,6 +86,20 @@ pub struct HighlightHistoryProjection {
     pub created_at: i64,
     pub page: PageProjection,
     pub note: NoteProjection,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HighlightHistoryCursor {
+    pub session_id: u64,
+    pub offset: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HighlightHistoryPageProjection {
+    pub highlights: Vec<HighlightHistoryProjection>,
+    pub next_cursor: Option<HighlightHistoryCursor>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -182,7 +215,11 @@ pub struct RecycleBinEntryProjection {
 
 impl ReadProjections {
     pub fn new(storage: Storage) -> Self {
-        Self { storage }
+        Self {
+            storage,
+            highlight_history_sessions: Arc::new(Mutex::new(HighlightHistorySessions::default())),
+            next_highlight_history_session_id: Arc::new(AtomicU64::new(1)),
+        }
     }
 
     pub async fn list_display(
@@ -381,6 +418,206 @@ impl ReadProjections {
                 .then_with(|| left.note.slug.cmp(&right.note.slug))
         });
         Ok(highlights)
+    }
+
+    pub async fn highlight_history_page(
+        &self,
+        cursor: Option<&HighlightHistoryCursor>,
+        limit: usize,
+    ) -> Result<HighlightHistoryPageProjection, String> {
+        if !(1..=500).contains(&limit) {
+            return Err("highlight history page limit must be from 1 to 500".to_string());
+        }
+
+        let (session_id, mut offset, candidates) = match cursor {
+            Some(cursor) => {
+                if cursor.session_id == 0 || cursor.offset == 0 {
+                    return Err("highlight history cursor is invalid".to_string());
+                }
+                let candidates = self
+                    .highlight_history_sessions
+                    .lock()
+                    .items
+                    .get(&cursor.session_id)
+                    .cloned()
+                    .ok_or_else(|| "highlight history cursor expired".to_string())?;
+                (cursor.session_id, cursor.offset, candidates)
+            }
+            None => {
+                let candidates = Arc::new(self.highlight_history_candidates().await?);
+                let session_id = self
+                    .next_highlight_history_session_id
+                    .fetch_add(1, Ordering::Relaxed);
+                (session_id, 0, candidates)
+            }
+        };
+
+        if offset >= candidates.len() && !candidates.is_empty() {
+            return Err("highlight history cursor offset is out of range".to_string());
+        }
+        let mut page = Vec::with_capacity(limit);
+        while offset < candidates.len() && page.len() < limit {
+            let candidate = &candidates[offset];
+            offset += 1;
+            if let Some(highlight) = self.project_highlight_candidate(candidate).await? {
+                page.push(highlight);
+            }
+        }
+        let next_cursor =
+            (offset < candidates.len()).then_some(HighlightHistoryCursor { session_id, offset });
+
+        let mut sessions = self.highlight_history_sessions.lock();
+        if next_cursor.is_some() && cursor.is_none() {
+            while sessions.items.len() >= MAX_HIGHLIGHT_HISTORY_SESSIONS {
+                let Some(expired_session_id) = sessions.order.pop_front() else {
+                    break;
+                };
+                sessions.items.remove(&expired_session_id);
+            }
+            sessions.order.push_back(session_id);
+            sessions.items.insert(session_id, candidates);
+        } else if next_cursor.is_none() && cursor.is_some() {
+            sessions.items.remove(&session_id);
+            sessions.order.retain(|candidate| *candidate != session_id);
+        }
+
+        Ok(HighlightHistoryPageProjection {
+            highlights: page,
+            next_cursor,
+        })
+    }
+
+    async fn highlight_history_candidates(&self) -> Result<Vec<HighlightHistoryCandidate>, String> {
+        let log_entries = self
+            .storage
+            .load_highlight_chronology_entries()
+            .await
+            .map_err(|error| error.to_string())?;
+        let mut created_at_by_slug = BTreeMap::new();
+        let mut predecessor_by_slug = BTreeMap::new();
+        let mut slugs_with_successors = BTreeSet::new();
+        let mut known_slugs = BTreeSet::new();
+
+        for entry in log_entries {
+            match entry {
+                LogEntry::CreateNote {
+                    timestamp, path, ..
+                } => {
+                    let slug = note_slug_from_log_path(&path)?;
+                    match created_at_by_slug.get(&slug) {
+                        Some(existing) if *existing != timestamp => {
+                            return Err(format!(
+                                "highlight {slug} has conflicting creation timestamps {existing} and {timestamp}"
+                            ));
+                        }
+                        _ => {
+                            created_at_by_slug.insert(slug.clone(), timestamp);
+                        }
+                    }
+                    known_slugs.insert(slug);
+                }
+                LogEntry::ReplaceNote {
+                    timestamp,
+                    path,
+                    old_path,
+                    ..
+                } => {
+                    let old_slug = note_slug_from_log_path(&old_path)?;
+                    let new_slug = note_slug_from_log_path(&path)?;
+                    match predecessor_by_slug.get(&new_slug) {
+                        Some(existing) if existing != &old_slug => {
+                            return Err(format!(
+                                "highlight replacement {new_slug} at {timestamp} has conflicting predecessors {existing} and {old_slug}"
+                            ));
+                        }
+                        _ => {
+                            predecessor_by_slug.insert(new_slug.clone(), old_slug.clone());
+                        }
+                    }
+                    slugs_with_successors.insert(old_slug.clone());
+                    known_slugs.insert(old_slug);
+                    known_slugs.insert(new_slug);
+                }
+                _ => {}
+            }
+        }
+
+        let mut candidates = known_slugs
+            .into_iter()
+            .filter(|slug| !slugs_with_successors.contains(slug))
+            .map(|note_slug| {
+                Ok(HighlightHistoryCandidate {
+                    created_at: resolve_highlight_created_at(
+                        &note_slug,
+                        &created_at_by_slug,
+                        &predecessor_by_slug,
+                    )?,
+                    note_slug,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        candidates.sort_by(|left, right| {
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| left.note_slug.cmp(&right.note_slug))
+        });
+        Ok(candidates)
+    }
+
+    async fn project_highlight_candidate(
+        &self,
+        candidate: &HighlightHistoryCandidate,
+    ) -> Result<Option<HighlightHistoryProjection>, String> {
+        let mut note_slug = candidate.note_slug.clone();
+        let mut replacement_chain = BTreeSet::new();
+        let note = loop {
+            if !replacement_chain.insert(note_slug.clone()) {
+                return Err(format!(
+                    "highlight replacement chain contains a cycle at {note_slug}"
+                ));
+            }
+            let Some(note) = self
+                .storage
+                .load_note_coordinated(&note_slug)
+                .await
+                .map_err(|error| format!("invalid note checkpoint {note_slug}: {error}"))?
+            else {
+                return Ok(None);
+            };
+            if !note.deleted {
+                break note;
+            }
+            let Some(replaced_by) = note.replaced_by.clone() else {
+                return Ok(None);
+            };
+            note_slug = replaced_by;
+        };
+        let url = note
+            .url
+            .as_deref()
+            .ok_or_else(|| format!("live highlight {} has no page URL", note.slug))?;
+        let page_slug = generate_slug_from_url(url).map_err(|error| error.to_string())?;
+        let Some(page) = self
+            .storage
+            .load_page_coordinated(&page_slug)
+            .await
+            .map_err(|error| error.to_string())?
+        else {
+            return Ok(None);
+        };
+        if !page
+            .child_ids
+            .iter()
+            .any(|child_id| child_id == &format!("note:{}", note.slug))
+        {
+            return Ok(None);
+        }
+        Ok(Some(HighlightHistoryProjection {
+            created_at: candidate.created_at,
+            page: project_page(page),
+            note: project_note(note),
+        }))
     }
 
     pub async fn page_info(&self, slug: &str) -> Result<PageInfoProjection, String> {

@@ -12,7 +12,7 @@ import {
   loadListDisplay,
   loadListTreeProjection,
   loadAllPageContext,
-  loadHighlightHistory,
+  loadHighlightHistoryPage,
   loadDesktopConnectorState,
   loadDesktopShellState,
   loadDirectoryInfo,
@@ -2713,7 +2713,6 @@ async function showCategory(category) {
 
 const HIGHLIGHT_HISTORY_VIEW_TYPE = 'highlights-history';
 const HIGHLIGHT_HISTORY_BATCH_SIZE = 100;
-const HIGHLIGHT_HISTORY_LOAD_AHEAD_PX = 320;
 const HIGHLIGHT_HISTORY_LIST_SELECTOR =
   '#results > .highlight-history-list.detail-notes-section';
 const HIGHLIGHT_HISTORY_TEXT_SELECTOR =
@@ -2722,6 +2721,7 @@ const highlightHistoryState = {
   renderSequence: 0,
   items: [],
   renderedCount: 0,
+  seenNoteSlugs: new Set(),
   justificationControllers: new Map(),
 };
 
@@ -2901,6 +2901,28 @@ function renderHighlightHistoryEmptyState(container) {
   container.innerHTML = `<div class="no-results">${escapeHtml(tr('desktopNoResults', 'No results'))}</div>`;
 }
 
+function acceptHighlightHistoryPage(highlights) {
+  const previous = highlightHistoryState.items.at(-1);
+  let previousCreatedAt = previous?.createdAt ?? Number.POSITIVE_INFINITY;
+  for (const [index, item] of highlights.entries()) {
+    if (
+      highlightHistoryState.seenNoteSlugs.has(item.note.slug) ||
+      item.createdAt > previousCreatedAt
+    ) {
+      throw new Error(
+        `getHighlightHistoryPage response item ${index} breaks cross-page identity or ordering`,
+      );
+    }
+    highlightHistoryState.seenNoteSlugs.add(item.note.slug);
+    previousCreatedAt = item.createdAt;
+  }
+  highlightHistoryState.items.push(...highlights);
+}
+
+function nextPaint() {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
 function renderNextHighlightHistoryBatch(
   batchSize = HIGHLIGHT_HISTORY_BATCH_SIZE,
 ) {
@@ -2975,22 +2997,39 @@ async function showHighlightsHistory({ activate = true } = {}) {
   container.innerHTML = '';
   highlightHistoryState.items = [];
   highlightHistoryState.renderedCount = 0;
+  highlightHistoryState.seenNoteSlugs = new Set();
+  container.innerHTML = `<div class="highlight-history-list detail-notes-section"><div class="highlight-history-loading no-results">${escapeHtml(tr('commonLoading', 'Loading...'))}</div></div>`;
 
   try {
-    const highlights = await loadHighlightHistory();
-    if (!isCurrentHighlightHistoryRender(renderSequence)) return;
-    if (highlights.length === 0) {
+    let cursor = null;
+    do {
+      const page = await loadHighlightHistoryPage(
+        cursor,
+        HIGHLIGHT_HISTORY_BATCH_SIZE,
+      );
+      if (!isCurrentHighlightHistoryRender(renderSequence)) return;
+      document.querySelector('.highlight-history-loading')?.remove();
+      acceptHighlightHistoryPage(page.highlights);
+      renderNextHighlightHistoryBatch(page.highlights.length);
+      cursor = page.nextCursor;
+      if (cursor) await nextPaint();
+    } while (cursor && isCurrentHighlightHistoryRender(renderSequence));
+
+    if (
+      isCurrentHighlightHistoryRender(renderSequence) &&
+      highlightHistoryState.items.length === 0
+    ) {
       renderHighlightHistoryEmptyState(container);
-      return;
     }
-    highlightHistoryState.items = highlights;
-    container.innerHTML =
-      '<div class="highlight-history-list detail-notes-section"></div>';
-    renderNextHighlightHistoryBatch();
   } catch (error) {
     if (!isCurrentHighlightHistoryRender(renderSequence)) return;
     surfaceBackgroundError('Failed to load highlight history', error);
-    container.innerHTML = `<div class="no-results">${escapeHtml(tr('desktopErrorPrefix', `Error: ${error.message}`, [error.message]))}</div>`;
+    const message = `<div class="no-results">${escapeHtml(tr('desktopErrorPrefix', `Error: ${error.message}`, [error.message]))}</div>`;
+    if (highlightHistoryState.items.length === 0) container.innerHTML = message;
+    else
+      document
+        .querySelector(HIGHLIGHT_HISTORY_LIST_SELECTOR)
+        ?.insertAdjacentHTML('beforeend', message);
   }
 }
 
@@ -6001,19 +6040,6 @@ document
       () => showHighlightsHistory({ activate: false }),
     );
   });
-
-document.querySelector('.main').addEventListener('scroll', (event) => {
-  const main = event.currentTarget;
-  const distanceFromBottom =
-    main.scrollHeight - main.scrollTop - main.clientHeight;
-  if (
-    !isHighlightHistoryView() ||
-    distanceFromBottom > HIGHLIGHT_HISTORY_LOAD_AHEAD_PX
-  ) {
-    return;
-  }
-  renderNextHighlightHistoryBatch();
-});
 
 bindSidebarDragAutoScroll();
 

@@ -939,6 +939,10 @@
     "message": "Administrar en Configuración",
     "description": "Popup settings action."
   },
+  "extensionSnapshotFileAccessRequired": {
+    "message": "Browser Recall necesita la opción de Chrome «Permitir acceso a URLs de archivo» para leer esta instantánea guardada.",
+    "description": "Popup diagnostic when Chrome file URL access is disabled."
+  },
   "extensionNoLists": {
     "message": "Sin listas",
     "description": "Popup no lists message."

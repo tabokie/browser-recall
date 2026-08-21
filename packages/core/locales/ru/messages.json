@@ -939,6 +939,10 @@
     "message": "Управление в настройках",
     "description": "Popup settings action."
   },
+  "extensionSnapshotFileAccessRequired": {
+    "message": "Чтобы прочитать этот сохранённый снимок, Browser Recall требуется настройка Chrome «Разрешить доступ к URL файлов».",
+    "description": "Popup diagnostic when Chrome file URL access is disabled."
+  },
   "extensionNoLists": {
     "message": "Нет списков",
     "description": "Popup no lists message."

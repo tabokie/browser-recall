@@ -5,6 +5,18 @@ const extensionSurface = globalThis.browserRecallExtensionSurface;
 const pageIdentity = globalThis.browserRecallPageIdentity;
 const highlightLifecycleModule = globalThis.browserRecallHighlightLifecycle;
 const markdownExtractorModule = globalThis.browserRecallMarkdownExtractor;
+const transientUiHosts = (() => {
+  if (globalThis.__browserRecallTransientUiHosts instanceof WeakSet) {
+    return globalThis.__browserRecallTransientUiHosts;
+  }
+  const hosts = new WeakSet();
+  Object.defineProperty(globalThis, '__browserRecallTransientUiHosts', {
+    value: hosts,
+    writable: false,
+    configurable: false,
+  });
+  return hosts;
+})();
 
 function tr(key, fallback, substitutions) {
   return (
@@ -437,6 +449,7 @@ function initContentScript() {
     tone = 'neutral',
   }) {
     const host = document.createElement('div');
+    transientUiHosts.add(host);
     host.setAttribute('role', 'status');
     host.setAttribute('aria-label', message);
     host.style.cssText =
@@ -492,6 +505,7 @@ function initContentScript() {
   function showCaptureSpinner() {
     hideCaptureSpinner();
     const host = document.createElement('div');
+    transientUiHosts.add(host);
     const shadow = host.attachShadow({ mode: 'closed' });
     shadow.innerHTML = `
     <style>

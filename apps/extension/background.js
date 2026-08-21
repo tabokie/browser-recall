@@ -45,7 +45,10 @@ import {
   LIST_PREFIX,
   pageKey,
 } from './entity-types.js';
-import { prepareSnapshotHtml } from '../../packages/core/snapshot-html.js';
+import {
+  prepareSnapshotHtml,
+  validateSnapshotIdentity,
+} from '../../packages/core/snapshot-html.js';
 
 logDebug('Background script loading...');
 
@@ -1603,6 +1606,68 @@ async function loadingTabPageIdentity(tab) {
   };
 }
 
+async function fileSnapshotPageIdentity(tab) {
+  if (typeof chrome.extension?.isAllowedFileSchemeAccess === 'function') {
+    const allowed = await new Promise((resolve, reject) => {
+      chrome.extension.isAllowedFileSchemeAccess((isAllowed) => {
+        const error = chrome.runtime.lastError;
+        if (error) reject(new Error(error.message));
+        else resolve(isAllowed === true);
+      });
+    });
+    if (!allowed) {
+      const error = new Error(
+        tr(
+          'extensionSnapshotFileAccessRequired',
+          'Browser Recall needs Chrome\'s "Allow access to file URLs" setting to read this saved snapshot.',
+        ),
+      );
+      error.code = 'snapshot-file-access-required';
+      throw error;
+    }
+  }
+  const [execution] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    injectImmediately: true,
+    func: () => {
+      const slugMetadata = document.querySelectorAll(
+        'meta[name="x-browser-recall-slug"]',
+      );
+      const urlMetadata = document.querySelectorAll(
+        'meta[name="x-browser-recall-url"]',
+      );
+      return {
+        documentUrl: window.location.href,
+        slugCount: slugMetadata.length,
+        urlCount: urlMetadata.length,
+        slug: slugMetadata[0]?.content ?? null,
+        url: urlMetadata[0]?.content ?? null,
+      };
+    },
+  });
+  const inspected = execution?.result;
+  const currentTab = await chrome.tabs.get(tab.id);
+  if (currentTab.url !== tab.url || inspected?.documentUrl !== tab.url) {
+    throw new Error('Snapshot file navigated while identity was resolving');
+  }
+  if (
+    inspected.slugCount !== 1 ||
+    inspected.urlCount !== 1 ||
+    typeof inspected.slug !== 'string' ||
+    !inspected.slug ||
+    typeof inspected.url !== 'string' ||
+    !inspected.url
+  ) {
+    throw new Error('Snapshot file does not contain canonical page identity');
+  }
+  return {
+    success: true,
+    embedded: true,
+    slug: inspected.slug,
+    url: inspected.url,
+  };
+}
+
 async function resolveTabPageIdentity(tab, navigationRetries = 0) {
   let effectiveUrl = tab.url;
   let effectiveSlug = null;
@@ -1626,7 +1691,9 @@ async function resolveTabPageIdentity(tab, navigationRetries = 0) {
     if (pageInfo.entry.title) effectiveTitle = pageInfo.entry.title;
   } else if (tab.id != null) {
     let identity;
-    if (tab.status === 'loading') {
+    if (tab.url.startsWith('file:')) {
+      identity = await fileSnapshotPageIdentity(tab);
+    } else if (tab.status === 'loading') {
       const loadingIdentity = await loadingTabPageIdentity(tab);
       if (!loadingIdentity.identity) {
         if (navigationRetries >= POPUP_IDENTITY_NAVIGATION_RETRIES) {
@@ -1712,6 +1779,11 @@ async function preparePopupBootstrapForTab(tab) {
     };
   }
 
+  const workspace = await getWorkspaceState();
+  if (workspace?.mode === 'private') {
+    return { mode: 'private', tab };
+  }
+
   let identity;
   try {
     identity = await resolveTabPageIdentity(tab);
@@ -1724,7 +1796,10 @@ async function preparePopupBootstrapForTab(tab) {
       tab,
       error: userActionErrorMessage(error),
       diagnostic: {
-        reason: 'popup-page-identity-failed',
+        reason:
+          error?.code === 'snapshot-file-access-required'
+            ? error.code
+            : 'popup-page-identity-failed',
         url: tab.url,
         error: identityError,
       },
@@ -1738,11 +1813,6 @@ async function preparePopupBootstrapForTab(tab) {
     _effectiveUrl: identity.url,
     _effectiveTitle: identity.title,
   };
-
-  const workspace = await getWorkspaceState();
-  if (workspace?.mode === 'private') {
-    return { mode: 'private', tab: preparedTab, identity };
-  }
 
   const summary = await handleGetPageSummary({
     url: identity.url,
@@ -2068,9 +2138,17 @@ async function requestSnapshotHtml(request) {
         error: desktopResp.error,
       };
     }
+    const identity = validateSnapshotIdentity(desktopResp.html, {
+      slug: request.slug,
+    });
+    if (generateSlugFromUrl(identity.url) !== request.slug) {
+      throw new Error(
+        'snapshot identity URL does not match the requested page slug',
+      );
+    }
     return {
       success: true,
-      html: prepareSnapshotHtml(desktopResp.html, { slug: request.slug }),
+      html: prepareSnapshotHtml(desktopResp.html),
     };
   } catch (error) {
     return {
@@ -2098,6 +2176,13 @@ async function handleOpenSnapshot(request) {
     `snapshot-viewer.html?slug=${encodeURIComponent(request.slug)}&ts=${request.timestamp}`,
   );
   const tab = await chrome.tabs.create({ url: viewerUrl });
+  return { success: true, tabId: tab.id };
+}
+
+async function handleOpenExtensionFileAccessSettings() {
+  const tab = await chrome.tabs.create({
+    url: `chrome://extensions/?id=${chrome.runtime.id}`,
+  });
   return { success: true, tabId: tab.id };
 }
 
@@ -2369,6 +2454,9 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
         case 'openSnapshot':
           sendResponse(await handleOpenSnapshot(request));
           break;
+        case 'openExtensionFileAccessSettings':
+          sendResponse(await handleOpenExtensionFileAccessSettings());
+          break;
         // Context menu / settings
         case 'contextMenuHighlight':
           sendResponse(await handleContextMenuHighlightMsg(request));
@@ -2417,7 +2505,11 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
       }
     } catch (error) {
       logError('Error handling message:', error);
-      sendResponse({ success: false, error: error.message });
+      sendResponse({
+        success: false,
+        error: error.message,
+        ...(typeof error?.code === 'string' ? { code: error.code } : {}),
+      });
     }
   })();
 

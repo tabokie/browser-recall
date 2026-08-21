@@ -939,6 +939,10 @@
     "message": "Gerenciar nas configurações",
     "description": "Popup settings action."
   },
+  "extensionSnapshotFileAccessRequired": {
+    "message": "O Browser Recall precisa da configuração \"Permitir acesso a URLs de arquivo\" do Chrome para ler este snapshot salvo.",
+    "description": "Popup diagnostic when Chrome file URL access is disabled."
+  },
   "extensionNoLists": {
     "message": "Nenhuma lista",
     "description": "Popup no lists message."

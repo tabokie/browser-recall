@@ -939,6 +939,10 @@
     "message": "सेटिंग्स में प्रबंधित करें",
     "description": "Popup settings action."
   },
+  "extensionSnapshotFileAccessRequired": {
+    "message": "इस सहेजे गए स्नैपशॉट को पढ़ने के लिए Browser Recall को Chrome की \"फ़ाइल URL के ऐक्सेस की अनुमति दें\" सेटिंग चाहिए।",
+    "description": "Popup diagnostic when Chrome file URL access is disabled."
+  },
   "extensionNoLists": {
     "message": "कोई सूची नहीं",
     "description": "Popup no lists message."

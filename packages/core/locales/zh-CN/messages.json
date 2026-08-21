@@ -939,6 +939,10 @@
     "message": "在设置中管理",
     "description": "Popup settings action."
   },
+  "extensionSnapshotFileAccessRequired": {
+    "message": "Browser Recall 需要启用 Chrome 的“允许访问文件网址”设置，才能读取此已保存的快照。",
+    "description": "Popup diagnostic when Chrome file URL access is disabled."
+  },
   "extensionNoLists": {
     "message": "没有列表",
     "description": "Popup no lists message."

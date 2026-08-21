@@ -2430,6 +2430,10 @@ function extractHTML(depth,frame,element,crossframe,nosrcframe,framekey,parentpr
     var voidElements = ["area","base","br","col","command","embed","frame","hr","img","input","keygen","link","menuitem","meta","param","source","track","wbr"];  /* W3C HTML5 2011 4.3 Elements + menuitem */
     var retainElements = ["html","head","body","base","command","link","meta","noscript","script","style","template","title"];
     var hiddenElements = ["area","base","datalist","head","link","meta","param","rp","script","source","style","template","track","title"];  /* W3C HTML5 2014 10.3.1 Hidden Elements */
+
+    /* Browser Recall transient page UI must never become part of a snapshot. */
+
+    if (globalThis.__browserRecallTransientUiHosts instanceof WeakSet && globalThis.__browserRecallTransientUiHosts.has(element)) return;
     
     /* Check for <button> element inside ancestor <button> element - W3C HTML5 2011 4.10.8 The button Element (no interactive content) */
     

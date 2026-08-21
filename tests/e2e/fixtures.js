@@ -147,6 +147,11 @@ export const test = base.extend({
           );
           return;
         }
+        if (typeof page.rawHtml === 'string') {
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end(page.rawHtml);
+          return;
+        }
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         const titleTag =
           page.title != null ? `<title>${page.title}</title>` : '';
@@ -166,6 +171,9 @@ export const test = base.extend({
         port,
         addPage(urlPath, { title, body, endDelayMs = 0 }) {
           pages.set(urlPath, { title, body, endDelayMs });
+        },
+        addRawPage(urlPath, rawHtml) {
+          pages.set(urlPath, { rawHtml });
         },
         url(urlPath) {
           return baseUrl + urlPath;

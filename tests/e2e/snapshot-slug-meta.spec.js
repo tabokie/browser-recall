@@ -2,6 +2,9 @@ import { test, expect } from './fixtures.js';
 import crypto from 'crypto';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { pathToFileURL } from 'url';
+import { migrateSnapshotIdentity } from '../../scripts/migrate-snapshot-identity.mjs';
+import { setSnapshotIdentity } from '../../packages/core/snapshot-html.js';
 import {
   resetAndSeed,
   settingsCheckpoint,
@@ -13,6 +16,26 @@ import {
   longestLeftBorderRun,
 } from './helpers.js';
 
+async function setExtensionFileAccess(extContext, extensionId, fileAccess) {
+  const extensionsPage = await extContext.newPage();
+  await extensionsPage.goto('chrome://extensions/');
+  await extensionsPage.evaluate(
+    ({ id, fileAccess: allowed }) =>
+      new Promise((resolve, reject) => {
+        chrome.developerPrivate.updateExtensionConfiguration(
+          { extensionId: id, fileAccess: allowed },
+          () => {
+            const error = chrome.runtime.lastError;
+            if (error) reject(new Error(error.message));
+            else resolve();
+          },
+        );
+      }),
+    { id: extensionId, fileAccess },
+  );
+  await extensionsPage.close();
+}
+
 function snapshotSidecarPath(slug, timestamp, ext) {
   const stem = `${slug}-${timestamp}`;
   const shard = crypto
@@ -22,6 +45,10 @@ function snapshotSidecarPath(slug, timestamp, ext) {
     .subarray(0, 1)
     .toString('hex');
   return `objects/snapshots/${shard}/${stem}.${ext}`;
+}
+
+function currentSnapshotHtml({ slug, url, html }) {
+  return setSnapshotIdentity(html, { slug, url });
 }
 
 async function openPopupForUrl(extContext, extensionId, { url, title }) {
@@ -78,7 +105,7 @@ async function getActionBadgeForUrl(helper, url) {
 }
 
 test.describe('Snapshot slug meta tag', () => {
-  test('repairs legacy snapshot HTML when it is read for replay', async ({
+  test('prepares current snapshot HTML when it is read for replay', async ({
     extContext,
     extensionId,
     setupDir,
@@ -108,7 +135,10 @@ test.describe('Snapshot slug meta tag', () => {
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'html'),
-        content: `<!doctype html><html><head>
+        content: currentSnapshotHtml({
+          slug,
+          url: originalUrl,
+          html: `<!doctype html><html><head>
           <link rel="stylesheet" href="https://unavailable.example/legacy.css">
           <script id="savepage-shadowloader">savepage_ShadowLoader(5);</script>
         </head><body><p>Legacy snapshot body</p>
@@ -118,6 +148,7 @@ test.describe('Snapshot slug meta tag', () => {
             </template>
           </legacy-outer-card>
         </body></html>`,
+        }),
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'md'),
@@ -215,9 +246,338 @@ test.describe('Snapshot slug meta tag', () => {
         success: true,
         value: { childIds: [expect.stringMatching(/^snapshot:/)] },
       });
+    await helper.close();
+    await page.close();
+  });
+
+  test('capture excludes Browser Recall transient page UI', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/capture-with-transient-ui', {
+      title: 'Capture Without Transient UI',
+      body: '<p>Only source-page content belongs in this snapshot.</p><p data-browser-recall-transient-ui>Site-owned attributes must not remove source content.</p>',
+    });
+    const pageUrl = localServer.url('/capture-with-transient-ui');
+    const slug = getSlugForUrl(pageUrl);
+
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+
+    const page = await extContext.newPage();
+    await page.goto(pageUrl);
+    await page.waitForLoadState('load');
+    const helper = await openHelperPage(extContext, extensionId);
+    await page.bringToFront();
+
+    const spinnerResponse = await helper.evaluate(async (url) => {
+      const tabs = await chrome.tabs.query({ url });
+      if (tabs.length !== 1 || !Number.isFinite(tabs[0].id)) {
+        throw new Error(`Expected one source tab, found ${tabs.length}`);
+      }
+      return chrome.tabs.sendMessage(tabs[0].id, {
+        action: 'showCaptureSpinner',
+      });
+    }, pageUrl);
+    expect(spinnerResponse).toEqual({ success: true });
+    await expect(
+      page.locator('[data-browser-recall-transient-ui]'),
+    ).toHaveCount(1);
+
+    const captureResponse = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'captureCurrentPageFromPopup',
+      }),
+    );
+    expect(captureResponse, JSON.stringify(captureResponse)).toMatchObject({
+      success: true,
+      timestamp: expect.any(Number),
+    });
+
+    const snapshotResponse = await helper.evaluate(
+      ({ pageSlug, timestamp }) =>
+        chrome.runtime.sendMessage({
+          action: 'getSnapshotHtml',
+          slug: pageSlug,
+          timestamp,
+        }),
+      {
+        pageSlug: slug,
+        timestamp: captureResponse.timestamp,
+      },
+    );
+    expect(snapshotResponse.success).toBe(true);
+    expect(snapshotResponse.html).toContain(
+      'Only source-page content belongs in this snapshot.',
+    );
+    expect(snapshotResponse.html).toContain(
+      'Site-owned attributes must not remove source content.',
+    );
+    expect(snapshotResponse.html).not.toContain(
+      '<span class="spinner"></span>',
+    );
 
     await helper.close();
     await page.close();
+  });
+
+  test('snapshot migration rejects a page checkpoint whose URL hashes to a different slug', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
+    const originalUrl = 'https://example.com/mismatched-snapshot-page';
+    const wrongSlug = 'deliberately-wrong-snapshot-slug';
+    const timestamp = Date.now();
+    expect(getSlugForUrl(originalUrl)).not.toBe(wrongSlug);
+
+    await resetAndSeed(extContext, extensionId, [
+      settingsCheckpoint(),
+      {
+        path: pageCheckpointPath(wrongSlug),
+        data: pageEntityFixture({
+          slug: wrongSlug,
+          url: originalUrl,
+          title: 'Mismatched Snapshot Page',
+          parentIds: [],
+          childIds: [`snapshot:${wrongSlug}-${timestamp}`],
+          timestamps: { 'test-device': timestamp },
+        }),
+      },
+      {
+        path: snapshotSidecarPath(wrongSlug, timestamp, 'html'),
+        content: currentSnapshotHtml({
+          slug: wrongSlug,
+          url: originalUrl,
+          html: '<!doctype html><html><head><title>Mismatched Snapshot Page</title></head><body>Snapshot body</body></html>',
+        }),
+      },
+    ]);
+
+    await expect(
+      migrateSnapshotIdentity({ dataDir: setupDir, checkOnly: true }),
+    ).rejects.toThrow('Snapshot page URL does not match');
+  });
+
+  test('toolbar popup explains how to enable snapshot file access', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
+    const originalUrl = 'https://example.com/snapshot-file-access-required';
+    const slug = getSlugForUrl(originalUrl);
+    const timestamp = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      settingsCheckpoint(),
+      {
+        path: pageCheckpointPath(slug),
+        data: pageEntityFixture({
+          slug,
+          url: originalUrl,
+          title: 'Snapshot File Access Required',
+          parentIds: [],
+          childIds: [`snapshot:${slug}-${timestamp}`],
+          timestamps: { 'test-device': timestamp },
+        }),
+      },
+      {
+        path: snapshotSidecarPath(slug, timestamp, 'html'),
+        content: currentSnapshotHtml({
+          slug,
+          url: originalUrl,
+          html: '<!doctype html><html><head><title>Snapshot File Access Required</title></head><body>Snapshot body</body></html>',
+        }),
+      },
+    ]);
+    const snapshotFile = join(
+      setupDir,
+      snapshotSidecarPath(slug, timestamp, 'html'),
+    );
+    const viewer = await extContext.newPage();
+    await viewer.goto(pathToFileURL(snapshotFile).href);
+    const helper = await openHelperPage(extContext, extensionId);
+    expect(
+      await helper.evaluate(() =>
+        chrome.runtime.sendMessage({
+          action: 'setFileSchemeAccessForTest',
+          allowed: false,
+        }),
+      ),
+    ).toEqual({ success: true });
+    const prepared = await helper.evaluate(async (url) => {
+      const tabs = await chrome.tabs.query({ url });
+      return chrome.runtime.sendMessage({
+        action: 'preparePopupBootstrapForTest',
+        tabId: tabs[0]?.id,
+      });
+    }, viewer.url());
+    expect(prepared).toMatchObject({
+      success: true,
+      mode: 'data-unavailable',
+    });
+    const expectedMessage = await helper.evaluate(() =>
+      chrome.i18n.getMessage('extensionSnapshotFileAccessRequired'),
+    );
+
+    const popup = await extContext.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
+    await expect(popup.locator('#pageDiagnosticSection')).toBeVisible();
+    await expect(popup.locator('#pageDiagnosticMessage')).toHaveText(
+      expectedMessage,
+    );
+    const settingsButton = popup.locator('#extensionFileAccessSettingsBtn');
+    await expect(settingsButton).toBeVisible();
+    const settingsPagePromise = extContext.waitForEvent('page');
+    await settingsButton.click();
+    const settingsPage = await settingsPagePromise;
+    await expect
+      .poll(() => settingsPage.url())
+      .toContain('chrome://extensions');
+
+    await popup.close().catch(() => {});
+    await settingsPage.close();
+    await helper.close();
+    await viewer.close();
+  });
+
+  test('toolbar popup on a migrated legacy snapshot uses the original page data', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    const originalUrl = 'https://example.com/legacy-desktop-snapshot-popup';
+    const slug = getSlugForUrl(originalUrl);
+    const timestamp = Date.now();
+
+    await setExtensionFileAccess(extContext, extensionId, true);
+    await resetAndSeed(extContext, extensionId, [
+      settingsCheckpoint(),
+      {
+        path: pageCheckpointPath(slug),
+        data: pageEntityFixture({
+          slug,
+          url: originalUrl,
+          title: 'Legacy Desktop Snapshot Popup',
+          parentIds: [],
+          childIds: [`snapshot:${slug}-${timestamp}`],
+          timestamps: { 'test-device': timestamp },
+        }),
+      },
+      {
+        path: snapshotSidecarPath(slug, timestamp, 'html'),
+        content:
+          '<!doctype html><html><head><meta name="x-browser-recall-slug" content="obsolete-page-slug"><title>Legacy Desktop Snapshot Popup</title></head><body><p>Legacy snapshot with obsolete identity metadata.</p></body></html>',
+      },
+      {
+        path: snapshotSidecarPath(slug, timestamp, 'md'),
+        content: 'Legacy snapshot without embedded Browser Recall identity.',
+      },
+      {
+        path: 'logs/test-device/2026-08-20.jsonl',
+        lines: [
+          {
+            timestamp,
+            action: 'visit_page',
+            url: originalUrl,
+            title: 'Legacy Desktop Snapshot Popup',
+            referrerUrl: null,
+          },
+        ],
+      },
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+    const legacyRead = await helper.evaluate(
+      ({ pageSlug, snapshotTimestamp }) =>
+        chrome.runtime.sendMessage({
+          action: 'getSnapshotHtml',
+          slug: pageSlug,
+          timestamp: snapshotTimestamp,
+        }),
+      { pageSlug: slug, snapshotTimestamp: timestamp },
+    );
+    expect(legacyRead).toMatchObject({ success: false });
+    expect(legacyRead.error).toContain('snapshot identity');
+
+    const migration = await migrateSnapshotIdentity({ dataDir: setupDir });
+    expect(migration).toMatchObject({
+      scanned: 1,
+      current: 0,
+      pending: 1,
+      updated: 1,
+    });
+    await expect(
+      migrateSnapshotIdentity({ dataDir: setupDir, checkOnly: true }),
+    ).resolves.toMatchObject({
+      scanned: 1,
+      current: 1,
+      pending: 0,
+      updated: 0,
+    });
+
+    const snapshotFile = join(
+      setupDir,
+      snapshotSidecarPath(slug, timestamp, 'html'),
+    );
+    const migratedHtml = readFileSync(snapshotFile, 'utf8');
+    expect(migratedHtml).toContain(
+      `<meta name="x-browser-recall-slug" content="${slug}">`,
+    );
+    expect(migratedHtml).toContain(
+      `<meta name="x-browser-recall-url" content="${originalUrl}">`,
+    );
+    expect(migratedHtml).not.toContain('obsolete-page-slug');
+    const viewer = await extContext.newPage();
+    await viewer.goto(pathToFileURL(snapshotFile).href);
+    await viewer.waitForLoadState('load');
+    await viewer.bringToFront();
+    const viewerTabId = await helper.evaluate(async (url) => {
+      const tabs = await chrome.tabs.query({ url });
+      return tabs.length === 1 ? tabs[0].id : null;
+    }, viewer.url());
+    expect(viewerTabId).toEqual(expect.any(Number));
+
+    const openRequest = helper.evaluate((tabId) => {
+      return chrome.runtime.sendMessage({
+        action: 'openPreparedPopupForTest',
+        tabId,
+      });
+    }, viewerTabId);
+    await expect
+      .poll(() =>
+        helper.evaluate(() => {
+          const popup = chrome.extension.getViews({ type: 'popup' })[0];
+          return {
+            title: popup?.document.getElementById('pageTitle')?.textContent,
+            url: popup?.document.getElementById('pageUrl')?.textContent,
+            dashboardVisible: popup
+              ? popup.getComputedStyle(
+                  popup.document.getElementById('dashboardContent'),
+                ).display !== 'none'
+              : false,
+            diagnosticVisible: popup
+              ? popup.getComputedStyle(
+                  popup.document.getElementById('pageDiagnosticSection'),
+                ).display !== 'none'
+              : false,
+          };
+        }),
+      )
+      .toEqual({
+        title: 'Legacy Desktop Snapshot Popup',
+        url: originalUrl,
+        dashboardVisible: true,
+        diagnosticVisible: false,
+      });
+    await expect(openRequest).resolves.toMatchObject({ success: true });
+
+    await helper.evaluate(() => {
+      chrome.extension.getViews({ type: 'popup' })[0]?.close();
+    });
+    await viewer.close();
+    await helper.close();
   });
 
   test('capture reconnects when cached connector state is stale', async ({
@@ -473,7 +833,11 @@ test.describe('Snapshot slug meta tag', () => {
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'html'),
-        content: `<!doctype html><html><head><title>Popup Open Snapshot</title></head><body><p>A saved page with ${highlightText} inside.</p></body></html>`,
+        content: currentSnapshotHtml({
+          slug,
+          url: originalUrl,
+          html: `<!doctype html><html><head><title>Popup Open Snapshot</title></head><body><p>A saved page with ${highlightText} inside.</p></body></html>`,
+        }),
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'md'),
@@ -620,7 +984,11 @@ test.describe('Snapshot slug meta tag', () => {
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'html'),
-        content: `<!doctype html><html><head><title>Snapshot Create Highlight</title></head><body>${repeatedBody}</body></html>`,
+        content: currentSnapshotHtml({
+          slug,
+          url: originalUrl,
+          html: `<!doctype html><html><head><title>Snapshot Create Highlight</title></head><body>${repeatedBody}</body></html>`,
+        }),
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'md'),
@@ -779,13 +1147,17 @@ test.describe('Snapshot slug meta tag', () => {
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'html'),
-        content: `<!doctype html><html><head><title>Snapshot Shadow Highlight</title></head><body>
+        content: currentSnapshotHtml({
+          slug,
+          url: originalUrl,
+          html: `<!doctype html><html><head><title>Snapshot Shadow Highlight</title></head><body>
           <outer-card id="shadow-highlight-outer"><template data-savepage-shadowroot="">
             <inner-card id="shadow-highlight-inner"><template data-savepage-shadowroot="">
               <p id="shadow-highlight-copy">${paragraphText}</p>
             </template></inner-card>
           </template></outer-card>
         </body></html>`,
+        }),
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'md'),
@@ -904,7 +1276,11 @@ test.describe('Snapshot slug meta tag', () => {
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'html'),
-        content: `<!doctype html><html><head><title>Highlight Editor Parity</title></head><body>${pageBody}</body></html>`,
+        content: currentSnapshotHtml({
+          slug,
+          url: originalUrl,
+          html: `<!doctype html><html><head><title>Highlight Editor Parity</title></head><body>${pageBody}</body></html>`,
+        }),
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'md'),
@@ -975,7 +1351,11 @@ test.describe('Snapshot slug meta tag', () => {
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'html'),
-        content: `<!doctype html><html><head><title>Snapshot Scoped Highlight</title></head><body><section><p>${highlightText}</p></section><section><p>${highlightText}</p></section></body></html>`,
+        content: currentSnapshotHtml({
+          slug,
+          url: originalUrl,
+          html: `<!doctype html><html><head><title>Snapshot Scoped Highlight</title></head><body><section><p>${highlightText}</p></section><section><p>${highlightText}</p></section></body></html>`,
+        }),
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'md'),
@@ -1035,7 +1415,11 @@ test.describe('Snapshot slug meta tag', () => {
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'html'),
-        content: `<!doctype html><html><head><title>Snapshot Highlight UI Exclusion</title></head><body><aside id="browser-recall-highlights-panel">${highlightText}</aside><main><p>${highlightText}</p></main></body></html>`,
+        content: currentSnapshotHtml({
+          slug,
+          url: originalUrl,
+          html: `<!doctype html><html><head><title>Snapshot Highlight UI Exclusion</title></head><body><aside id="browser-recall-highlights-panel">${highlightText}</aside><main><p>${highlightText}</p></main></body></html>`,
+        }),
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'md'),

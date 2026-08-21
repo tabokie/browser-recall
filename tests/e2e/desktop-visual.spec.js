@@ -337,7 +337,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       searchSnapshotsResultsByQuery,
       listHistoryFilesDelayMs,
       loadHistoryBatchDelayMs,
-      highlightHistoryDelayMs,
+      highlightHistoryPageDelayMs,
       readDesktopValueDelayMs,
       getSettingsDelayMs,
       resumeServiceDelayMs,
@@ -1125,13 +1125,27 @@ async function installDesktopBridgeMock(page, options = {}) {
               .map((key) => key.slice('page:'.length));
             return { success: true, pages: getPageContext(slugs) };
           }
-          case 'getHighlightHistory':
-            if (highlightHistoryDelayMs > 0) {
+          case 'getHighlightHistoryPage': {
+            if (highlightHistoryPageDelayMs > 0) {
               await new Promise((resolve) =>
-                setTimeout(resolve, highlightHistoryDelayMs),
+                setTimeout(resolve, highlightHistoryPageDelayMs),
               );
             }
-            return { success: true, highlights: getHighlightHistory() };
+            const highlights = getHighlightHistory();
+            const offset = request.cursor?.offset ?? 0;
+            const nextOffset = Math.min(
+              offset + request.limit,
+              highlights.length,
+            );
+            return {
+              success: true,
+              highlights: highlights.slice(offset, nextOffset),
+              nextCursor:
+                nextOffset < highlights.length
+                  ? { sessionId: 1, offset: nextOffset }
+                  : null,
+            };
+          }
           case 'getListTree': {
             const projection = getListTreeProjection();
             return { success: true, ...projection };
@@ -1392,7 +1406,7 @@ async function installDesktopBridgeMock(page, options = {}) {
         options.searchSnapshotsResultsByQuery || null,
       listHistoryFilesDelayMs: options.listHistoryFilesDelayMs || 0,
       loadHistoryBatchDelayMs: options.loadHistoryBatchDelayMs || 0,
-      highlightHistoryDelayMs: options.highlightHistoryDelayMs || 0,
+      highlightHistoryPageDelayMs: options.highlightHistoryPageDelayMs || 0,
       readDesktopValueDelayMs: options.readDesktopValueDelayMs || 0,
       getSettingsDelayMs: options.getSettingsDelayMs || 0,
       resumeServiceDelayMs: options.resumeServiceDelayMs || 0,
@@ -2357,7 +2371,7 @@ test.describe('desktop visual regression', () => {
     });
   });
 
-  test('loading another highlight-history batch preserves existing Justif DOM', async ({
+  test('loading the next async highlight-history page preserves existing Justif DOM', async ({
     page,
   }) => {
     const fixtures = denseHighlightHistoryFixtures(Date.now(), 101);
@@ -2373,6 +2387,7 @@ test.describe('desktop visual regression', () => {
       await openDesktopUi(page, desktopUrl, {
         setupComplete: true,
         ...fixtures,
+        highlightHistoryPageDelayMs: 150,
       });
       await page.locator('#highlightsHistoryBtn').click();
 
@@ -2386,8 +2401,6 @@ test.describe('desktop visual regression', () => {
           document.querySelector(
             '.highlight-history-entry .detail-note-excerpt .justif-seg',
           );
-        const main = document.querySelector('.main');
-        main.scrollTop = main.scrollHeight;
       });
 
       await expect(entries).toHaveCount(101);
@@ -2403,6 +2416,51 @@ test.describe('desktop visual regression', () => {
           );
         }),
       ).toBe(true);
+    });
+  });
+
+  test('book paints immediately and loads every highlight-history page without scrolling', async ({
+    page,
+  }) => {
+    const fixtures = denseHighlightHistoryFixtures(Date.now(), 205);
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        ...fixtures,
+        highlightHistoryPageDelayMs: 80,
+      });
+
+      await page.locator('#highlightsHistoryBtn').click();
+
+      await expect(
+        page.locator('#results > .highlight-history-list'),
+      ).toBeVisible({ timeout: 500 });
+      const entries = page.locator('#results .highlight-history-entry');
+      await expect(entries).toHaveCount(100);
+      await expect(entries).toHaveCount(205);
+
+      const requests = await page.evaluate(() =>
+        window.__desktopVisualHarness
+          .bridgeActionInvocations()
+          .filter((request) => request.action === 'getHighlightHistoryPage'),
+      );
+      expect(requests).toEqual([
+        { action: 'getHighlightHistoryPage', cursor: null, limit: 100 },
+        {
+          action: 'getHighlightHistoryPage',
+          cursor: { sessionId: 1, offset: 100 },
+          limit: 100,
+        },
+        {
+          action: 'getHighlightHistoryPage',
+          cursor: { sessionId: 1, offset: 200 },
+          limit: 100,
+        },
+      ]);
+      expect(
+        await page.locator('.main').evaluate((main) => main.scrollTop),
+      ).toBe(0);
     });
   });
 
@@ -2761,7 +2819,7 @@ test.describe('desktop visual regression', () => {
         setupComplete: true,
         colorScheme: 'amber',
         includeDetailListMembership: true,
-        highlightHistoryDelayMs: 150,
+        highlightHistoryPageDelayMs: 150,
         historyEntries: [
           {
             action: 'create_note',
@@ -3896,7 +3954,7 @@ test.describe('desktop visual regression', () => {
     });
   });
 
-  test('highlight history renders large collections in bounded batches', async ({
+  test('highlight history renders large collections in bounded async pages', async ({
     page,
   }) => {
     const fixtures = denseHighlightHistoryFixtures(Date.now(), 240);
@@ -3906,17 +3964,14 @@ test.describe('desktop visual regression', () => {
         colorScheme: 'amber',
         historyEntries: fixtures.historyEntries,
         extraSession: fixtures.extraSession,
+        highlightHistoryPageDelayMs: 150,
       });
       await page.setViewportSize({ width: 1280, height: 500 });
       await page.locator('#highlightsHistoryBtn').click();
 
       const entries = page.locator('.highlight-history-entry');
       await expect(entries).toHaveCount(100);
-
-      await page.locator('.main').evaluate((main) => {
-        main.scrollTop = main.scrollHeight;
-      });
-      await expect(entries).toHaveCount(200);
+      await expect(entries).toHaveCount(240);
     });
   });
 

@@ -939,6 +939,10 @@
     "message": "設定で管理",
     "description": "Popup settings action."
   },
+  "extensionSnapshotFileAccessRequired": {
+    "message": "Browser Recall でこの保存済みスナップショットを読み取るには、Chrome の「ファイルの URL へのアクセスを許可する」設定が必要です。",
+    "description": "Popup diagnostic when Chrome file URL access is disabled."
+  },
   "extensionNoLists": {
     "message": "リストなし",
     "description": "Popup no lists message."

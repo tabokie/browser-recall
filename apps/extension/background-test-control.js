@@ -11,6 +11,16 @@ import { BACKGROUND_TEST_ACTIONS } from './background-test-actions.js';
 import { getBrowserCapabilities } from './browser-capabilities.js';
 import { logDebug } from './logger.js';
 
+const originalIsAllowedFileSchemeAccess =
+  chrome.extension?.isAllowedFileSchemeAccess?.bind(chrome.extension) ?? null;
+
+function restoreFileSchemeAccessForTest() {
+  if (originalIsAllowedFileSchemeAccess) {
+    chrome.extension.isAllowedFileSchemeAccess =
+      originalIsAllowedFileSchemeAccess;
+  }
+}
+
 function testControl() {
   const control = globalThis.browserRecallBackgroundTestControl;
   if (!control) {
@@ -20,6 +30,7 @@ function testControl() {
 }
 
 async function handleResetForTest() {
+  restoreFileSchemeAccessForTest();
   const resetResp = await requestDesktopTestReset();
   if (!resetResp?.success) return resetResp;
   const control = testControl();
@@ -143,6 +154,22 @@ async function handleOpenPreparedPopupForTest(request) {
   return control.open(request);
 }
 
+function handleSetFileSchemeAccessForTest(request) {
+  if (request.allowed === null) {
+    restoreFileSchemeAccessForTest();
+    return { success: true };
+  }
+  if (typeof request.allowed !== 'boolean') {
+    throw new Error(
+      'setFileSchemeAccessForTest requires boolean allowed or null',
+    );
+  }
+  chrome.extension.isAllowedFileSchemeAccess = (callback) => {
+    callback(request.allowed);
+  };
+  return { success: true };
+}
+
 async function handleBeginPopupBootstrapForTest(request) {
   const control = globalThis.browserRecallPreparedPopupForTest;
   if (!control) {
@@ -228,6 +255,7 @@ const testMessageHandlers = new Map([
   ['preparePopupBootstrapForTest', handlePreparePopupBootstrapForTest],
   ['beginPopupBootstrapForTest', handleBeginPopupBootstrapForTest],
   ['openPreparedPopupForTest', handleOpenPreparedPopupForTest],
+  ['setFileSchemeAccessForTest', handleSetFileSchemeAccessForTest],
   ['releasePopupPreparationForTest', handleReleasePopupPreparationForTest],
   ['failNextTabMessageForTest', handleFailNextTabMessageForTest],
   [

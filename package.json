@@ -30,6 +30,7 @@
     "build:desktop-ui": "node scripts/stage-app-assets.mjs desktop-ui",
     "generate:icons": "node scripts/generate-icons.mjs",
     "locales:check": "node scripts/stage-app-assets.mjs locales",
+    "migrate:snapshot-identity": "node scripts/migrate-snapshot-identity.mjs",
     "watch": "node -e \"console.log('No root watch step is required for the extension')\"",
     "dev": "npm run build:extension && node -e \"console.log('Load dist/extension/chrome in Chrome, or run npm run dev:desktop for the Tauri shell')\"",
     "dev:desktop": "npm run dev --workspace @browser-recall/desktop",

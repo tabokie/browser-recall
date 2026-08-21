@@ -967,6 +967,10 @@
     "message": "Manage in Settings",
     "description": "Popup settings action."
   },
+  "extensionSnapshotFileAccessRequired": {
+    "message": "Browser Recall needs Chrome's \"Allow access to file URLs\" setting to read this saved snapshot.",
+    "description": "Popup diagnostic when Chrome file URL access is disabled."
+  },
   "extensionNoLists": {
     "message": "No lists",
     "description": "Popup no lists message."

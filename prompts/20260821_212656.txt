@@ -1,0 +1,18 @@
+- While the extension is paused, I open the popup and it shows "recordPageActivity failed". Why is that? I thought pausing the extension will avoid any attempt to record activity?
+- The book loads a little slow, I guess it will be worse as notes are growing. Can we make it load progressively? I don't mean to render only when scrolled, I mean it can load data asynchronously to avoid blocking the initial render.
+- After I reload the extension, and refresh a previously opened page, then open the popup, there's always a brief flicker before the data view is rendered. But we have spent time before to make sure the popup UI loads as one step, no intermediate incomplete view or error. Is this behavior something we should fix? Or is it only occurring when I reload the extension to a new binary version?
+- Fix it
+- Extension's own "Capturing" notification window is being captured into the snapshot as well. Don't do that.
+- Continue
+- Why when I open popup on a captured snapshot, it no longer display information for the original page, but says "page data unavailable"? This is a basic functionality and should be covered by extensible testing, I don't understand why there's such a vulnerability in our testing.
+- Actually, I noticed the popup only fails for older snapshot, not for snapshot captured after the update.
+- I don't want compatibility layer, it's unnecessary. Either update all history snapshots or make the implementation not breaking change.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them
+- Please review my uncommitted changes
+- Fix them
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.6 Sol
+- Sure
+- I don't understand this lesson, elaborate on the actual case
+- Sure
+- Sure

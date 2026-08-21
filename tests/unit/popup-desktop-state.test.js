@@ -648,9 +648,12 @@ describe('popup desktop state rendering', () => {
     });
 
     await import('../../apps/extension/popup.js');
-    await waitFor(
-      () => document.getElementById('pageTitle').textContent === tab.title,
+    await waitFor(() =>
+      chrome.runtime.sendMessage.mock.calls.some(
+        ([request]) => request.action === 'awaitPopupBootstrap',
+      ),
     );
+    expect(document.documentElement.dataset.popupHidden).toBe('true');
     document.getElementById('recordingToggle').click();
     await waitFor(() =>
       chrome.runtime.sendMessage.mock.calls.some(
@@ -1505,7 +1508,7 @@ describe('popup desktop state rendering', () => {
     );
   });
 
-  it('keeps the standard diagnostic panel visible while desktop state probing is still pending', async () => {
+  it('keeps the popup unrevealed while desktop state probing is still pending', async () => {
     const tab = {
       id: 45,
       url: 'https://example.com/offline-pending',
@@ -1523,13 +1526,13 @@ describe('popup desktop state rendering', () => {
     await import('../../apps/extension/popup.js');
 
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(document.documentElement.style.opacity).not.toBe('0');
-    expect(document.documentElement.dataset.popupHidden).toBeUndefined();
+    expect(document.documentElement.style.opacity).toBe('0');
+    expect(document.documentElement.dataset.popupHidden).toBe('true');
     expect(getComputedStyle(document.documentElement).backgroundColor).toBe(
       'rgb(247, 244, 234)',
     );
     expect(getComputedStyle(document.body).width).toBe('296px');
-    expect(getComputedStyle(document.body).minHeight).toBe('0');
+    expect(getComputedStyle(document.body).minHeight).toBe('320px');
     expect(document.getElementById('loading').style.display).toBe('none');
     expect(document.getElementById('setup-required')).toBeNull();
     expect(getComputedStyle(document.getElementById('dashboard')).display).toBe(
@@ -1565,7 +1568,7 @@ describe('popup desktop state rendering', () => {
     expect(document.documentElement.dataset.popupHidden).toBeUndefined();
   });
 
-  it('keeps the connected dashboard shell visible while page details are still loading', async () => {
+  it('keeps the connected popup unrevealed while page details are still loading', async () => {
     const tab = {
       id: 44,
       url: 'https://example.com/slow-popup-summary',
@@ -1600,15 +1603,17 @@ describe('popup desktop state rendering', () => {
       ),
     );
 
-    expect(document.documentElement.style.opacity).not.toBe('0');
-    expect(document.documentElement.dataset.popupHidden).toBeUndefined();
+    expect(document.documentElement.style.opacity).toBe('0');
+    expect(document.documentElement.dataset.popupHidden).toBe('true');
     expect(getComputedStyle(document.documentElement).backgroundColor).toBe(
       'rgb(247, 244, 234)',
     );
     expect(getComputedStyle(document.body).width).toBe('296px');
     expect(getComputedStyle(document.body).minHeight).toBe('320px');
     expect(document.getElementById('loading').style.display).toBe('none');
-    expect(document.getElementById('dashboard').style.display).toBe('flex');
+    expect(getComputedStyle(document.getElementById('dashboard')).display).toBe(
+      'flex',
+    );
     expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
     expect(document.getElementById('pageUrl').textContent).toBe(tab.url);
     expect(document.getElementById('listSection').style.display).toBe('none');

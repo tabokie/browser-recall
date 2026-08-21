@@ -19,6 +19,14 @@ const TEST_URL = 'https://example.com/';
 const TEST_SLUG = getSlugForUrl(TEST_URL);
 const POPUP_MUTATION_SEED = 'popup-live-mutation-20260505-a';
 
+async function expectPopupRevealed(popup) {
+  await expect
+    .poll(() =>
+      popup.evaluate(() => document.documentElement.dataset.popupHidden),
+    )
+    .toBeUndefined();
+}
+
 async function openPopupForUrl(
   extContext,
   extensionId,
@@ -58,6 +66,7 @@ async function openPopupForUrl(
     );
   }
   await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
+  await expectPopupRevealed(popup);
   await expect(popup.locator('#dashboard')).toBeVisible();
   await expect(popup.locator('#pageTitle')).toHaveText(expectedTitle);
   return popup;
@@ -85,6 +94,7 @@ async function openPreparedPopupForPage(extContext, extensionId, page, title) {
 
   const popup = await extContext.newPage();
   await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
+  await expectPopupRevealed(popup);
   await expect(popup.locator('#dashboard')).toBeVisible();
   await expect(popup.locator('#pageTitle')).toHaveText(title);
   return popup;
@@ -180,6 +190,7 @@ test('popup shows identity failure detail when the receiver is stale', async ({
   });
   const popup = await extContext.newPage();
   await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
+  await expectPopupRevealed(popup);
   await expect(popup.locator('#pageDiagnosticMessage')).toHaveText(
     reloadMessage,
   );
@@ -531,7 +542,7 @@ test.describe('Popup list chip behavior', () => {
 
     const page = await extContext.newPage();
     await page.goto(url);
-    await helper.evaluate(async (pageUrl) => {
+    const prepared = await helper.evaluate(async (pageUrl) => {
       const [tab] = await chrome.tabs.query({ url: pageUrl });
       if (!tab?.id) throw new Error('Paused page tab not found');
       try {
@@ -545,23 +556,29 @@ test.describe('Popup list chip behavior', () => {
         }
       }
 
-      const response = await chrome.runtime.sendMessage({
-        action: 'setRecordingPaused',
-        paused: false,
+      return chrome.runtime.sendMessage({
+        action: 'preparePopupBootstrapForTest',
+        tabId: tab.id,
       });
-      if (response?.success !== true) {
-        throw new Error(response?.error || 'Could not resume recording');
-      }
     }, url);
-    await helper.close();
+    expect(prepared).toMatchObject({ success: true, mode: 'private' });
 
-    const popup = await openPopupForUrl(extContext, extensionId, {
-      url,
-      title: 'Resume Paused Tab',
-    });
+    const popup = await extContext.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
+    await expectPopupRevealed(popup);
+    await expect(popup.locator('#dashboardContent')).toBeHidden();
+    await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
+    await expect(popup.locator('#recordingToggle')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    await popup.locator('#recordingToggle').click();
+    await expect(popup.locator('#pageTitle')).toHaveText('Resume Paused Tab');
     await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
 
     await popup.close();
+    await helper.close();
     await page.close();
   });
 
@@ -711,7 +728,7 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
-  test('startup keeps one dashboard shell while its diagnostic becomes page data', async ({
+  test('direct startup stays unrevealed until complete page data is ready', async ({
     extContext,
     extensionId,
     setupDir,
@@ -729,7 +746,6 @@ test.describe('Popup list chip behavior', () => {
     const popup = await extContext.newPage();
     await popup.addInitScript(
       ({ url }) => {
-        const visibleShells = [];
         let releaseConnectorState;
         let releasePageSummary;
         globalThis.__popupStartupReleaseConnectorState = () => {
@@ -738,19 +754,6 @@ test.describe('Popup list chip behavior', () => {
         globalThis.__popupStartupReleasePageSummary = () => {
           releasePageSummary?.();
         };
-        globalThis.__popupStartupVisibleShells = visibleShells;
-
-        const recordVisibleShells = () => {
-          for (const id of ['loading', 'dashboard']) {
-            const element = document.getElementById(id);
-            if (!element || element.style.display === 'none') continue;
-            if (getComputedStyle(element).display === 'none') continue;
-            if (visibleShells[visibleShells.length - 1] !== id) {
-              visibleShells.push(id);
-            }
-          }
-        };
-
         const patchApis = () => {
           if (!globalThis.chrome?.runtime?.sendMessage || !chrome.tabs?.query) {
             setTimeout(patchApis, 0);
@@ -790,6 +793,16 @@ test.describe('Popup list chip behavior', () => {
           );
           let delayed = false;
           chrome.runtime.sendMessage = async (request, ...rest) => {
+            if (request?.action === 'resolvePopupPageIdentity') {
+              return {
+                success: true,
+                identity: {
+                  slug: 'popup-startup-stability',
+                  url,
+                  title: 'Popup Startup Stability',
+                },
+              };
+            }
             if (request?.action === 'getDesktopConnectorState' && !delayed) {
               delayed = true;
               await new Promise((resolve) => {
@@ -806,21 +819,6 @@ test.describe('Popup list chip behavior', () => {
         };
 
         patchApis();
-        const observer = new MutationObserver(recordVisibleShells);
-        const observe = () => {
-          if (!document.body) {
-            setTimeout(observe, 0);
-            return;
-          }
-          observer.observe(document.body, {
-            attributes: true,
-            childList: true,
-            subtree: true,
-            attributeFilter: ['style', 'class'],
-          });
-          recordVisibleShells();
-        };
-        observe();
       },
       { url },
     );
@@ -831,7 +829,14 @@ test.describe('Popup list chip behavior', () => {
       .poll(() =>
         popup.evaluate(() => document.documentElement.dataset.popupHidden),
       )
-      .toBeUndefined();
+      .toBe('true');
+    await expect
+      .poll(() =>
+        popup.evaluate(
+          () => getComputedStyle(document.documentElement).opacity,
+        ),
+      )
+      .toBe('0');
     await expect
       .poll(() =>
         popup.evaluate(
@@ -844,17 +849,7 @@ test.describe('Popup list chip behavior', () => {
         popup.evaluate(() => document.body.getBoundingClientRect().width),
       )
       .toBe(296);
-    await expect(popup.locator('#dashboard')).toBeVisible();
-    await expect(popup.locator('#loading')).toBeHidden();
-    await expect(popup.locator('#pageDiagnosticSection')).toBeVisible();
-    await expect(popup.locator('#pageDiagnosticTitle')).toHaveAttribute(
-      'data-i18n',
-      'extensionLookingForDesktop',
-    );
     await expect(popup.locator('#setup-required')).toHaveCount(0);
-    expect(
-      await popup.evaluate(() => globalThis.__popupStartupVisibleShells),
-    ).toEqual(['dashboard']);
 
     await popup.evaluate(() =>
       globalThis.__popupStartupReleaseConnectorState(),
@@ -864,20 +859,23 @@ test.describe('Popup list chip behavior', () => {
       .poll(() =>
         popup.evaluate(() => document.documentElement.dataset.popupHidden),
       )
-      .toBeUndefined();
-    expect(
-      await popup.evaluate(() => globalThis.__popupStartupVisibleShells),
-    ).toEqual(['dashboard']);
+      .toBe('true');
 
     await popup.evaluate(() => globalThis.__popupStartupReleasePageSummary());
+    await expect
+      .poll(() =>
+        popup.evaluate(() => document.documentElement.dataset.popupHidden),
+      )
+      .toBeUndefined();
     await expect(popup.locator('#dashboard')).toBeVisible();
-    expect(
-      await popup.evaluate(() => globalThis.__popupStartupVisibleShells),
-    ).toEqual(['dashboard']);
+    await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
+    await expect(popup.locator('#pageTitle')).toHaveText(
+      'Popup Startup Stability',
+    );
     await popup.close();
   });
 
-  test('pending toolbar bootstrap renders daemon data without a transient diagnostic or popup fetches', async ({
+  test('pending toolbar bootstrap reveals only the complete daemon data view', async ({
     extContext,
     extensionId,
     setupDir,
@@ -983,9 +981,14 @@ test.describe('Popup list chip behavior', () => {
           popup.evaluate(() => document.documentElement.dataset.popupHidden),
         { timeout: 1000 },
       )
-      .toBeUndefined();
-    await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
-    await expect(popup.locator('#pageHeader')).toBeVisible();
+      .toBe('true');
+    await expect
+      .poll(() =>
+        popup.evaluate(
+          () => getComputedStyle(document.documentElement).opacity,
+        ),
+      )
+      .toBe('0');
     const releaseResult = await popup.evaluate(() =>
       chrome.runtime.sendMessage({
         action: 'releasePopupPreparationForTest',
@@ -997,6 +1000,11 @@ test.describe('Popup list chip behavior', () => {
     await expect(popup.locator('#pageTitle')).toHaveText(
       'Show HN: Browser Recall',
     );
+    await expect
+      .poll(() =>
+        popup.evaluate(() => document.documentElement.dataset.popupHidden),
+      )
+      .toBeUndefined();
     await expect(
       popup.locator('#listChips .list-chip.selected', { hasText: 'AI' }),
     ).toBeVisible();
@@ -1013,7 +1021,7 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
-  test('disconnected toolbar popup opens promptly with a neutral shell and then displays its diagnostic', async ({
+  test('disconnected toolbar popup opens promptly but reveals only its terminal diagnostic', async ({
     extContext,
     extensionId,
     setupDir,
@@ -1068,9 +1076,7 @@ test.describe('Popup list chip behavior', () => {
               const popup = chrome.extension.getViews({ type: 'popup' })[0];
               return Boolean(
                 popup &&
-                !popup.document.documentElement.hasAttribute(
-                  'data-popup-hidden',
-                ),
+                popup.document.documentElement.dataset.popupHidden === 'true',
               );
             }),
           { timeout: 700, intervals: [25, 50, 100] },
@@ -1080,35 +1086,19 @@ test.describe('Popup list chip behavior', () => {
 
       const firstPaint = await helper.evaluate(() => {
         const popup = chrome.extension.getViews({ type: 'popup' })[0];
-        const dashboard = popup.document.getElementById('dashboard');
-        const diagnostic = popup.document.getElementById(
-          'pageDiagnosticSection',
-        );
         return {
+          popupHidden:
+            popup.document.documentElement.dataset.popupHidden === 'true',
+          opacity: popup.getComputedStyle(popup.document.documentElement)
+            .opacity,
           width: popup.document.body.getBoundingClientRect().width,
           height: popup.document.body.getBoundingClientRect().height,
-          hasSetupSurface: Boolean(
-            popup.document.getElementById('setup-required'),
-          ),
-          dashboardVisible:
-            dashboard && popup.getComputedStyle(dashboard).display !== 'none',
-          diagnosticVisible:
-            diagnostic && popup.getComputedStyle(diagnostic).display !== 'none',
-          pageTitle: popup.document
-            .getElementById('pageTitle')
-            .textContent.trim(),
-          diagnosticActionCount: diagnostic?.querySelectorAll(
-            '#pageDiagnosticActions > *',
-          ).length,
         };
       });
       expect(firstPaint).toMatchObject({
+        popupHidden: true,
+        opacity: '0',
         width: 296,
-        hasSetupSurface: false,
-        dashboardVisible: true,
-        diagnosticVisible: false,
-        diagnosticActionCount: 0,
-        pageTitle: 'Disconnected Popup Latency',
       });
       expect(firstPaint.height).toBeGreaterThan(0);
 
@@ -1135,6 +1125,14 @@ test.describe('Popup list chip behavior', () => {
           }),
         )
         .toEqual({ title: offlineTitle, fatal: '' });
+      await expect
+        .poll(() =>
+          helper.evaluate(() => {
+            const popup = chrome.extension.getViews({ type: 'popup' })[0];
+            return popup?.document.documentElement.dataset.popupHidden;
+          }),
+        )
+        .toBeUndefined();
       const terminalMessage = await helper.evaluate(() => {
         const popup = chrome.extension.getViews({ type: 'popup' })[0];
         return popup?.document
@@ -2099,7 +2097,7 @@ test.describe('Popup list chip behavior', () => {
       .poll(() =>
         popup.evaluate(() => document.documentElement.dataset.popupHidden),
       )
-      .toBeUndefined();
+      .toBe('true');
     await expect
       .poll(() =>
         popup.evaluate(
@@ -2133,6 +2131,11 @@ test.describe('Popup list chip behavior', () => {
     await expect(
       popup.locator('#listChips .list-chip', { hasText: 'Fast List' }),
     ).toBeVisible();
+    await expect
+      .poll(() =>
+        popup.evaluate(() => document.documentElement.dataset.popupHidden),
+      )
+      .toBeUndefined();
     await expect(popup.locator('#pageTitle')).toHaveText('Popup Fast Lists');
     expect(
       await popup.evaluate(() =>
@@ -2448,6 +2451,7 @@ test.describe('Popup list chip behavior', () => {
     );
     expect(createResp.success).toBe(true);
 
+    await expect(popup.locator('#listChips')).toContainText('Live Added');
     await popup.locator('#listAddBtn').click();
     await expect(popup.locator('#listPickerList')).toContainText('Existing');
     await expect(popup.locator('#listPickerList')).toContainText('Live Added');

@@ -104,7 +104,8 @@ the executable and app bundle are re-embedded after regeneration.
 2. Enable "Developer mode" (toggle in top right)
 3. Click "Load unpacked"
 4. Select the `dist/extension/chrome/` directory
-5. The extension appears in your toolbar
+5. Open the extension details and enable **Allow access to file URLs** so snapshots opened from Browser Recall Desktop can expose their embedded identity to the connector. If the setting is disabled, the snapshot popup explains the requirement and opens the extension details page.
+6. The extension appears in your toolbar
 
 For Firefox development, open `about:debugging#/runtime/this-firefox`, click "Load Temporary Add-on", and select `dist/extension/firefox/manifest.json`.
 
@@ -336,6 +337,22 @@ cargo run -q -p browser-recall-replay --bin replay-verify --                    
 cargo run -q -p browser-recall-replay --bin replay-verify -- --write /tmp/my-replay  # custom output dir
 cargo run -q -p browser-recall-replay --bin replay-verify -- --verbose               # show all diffs (not just 5 per category)
 ```
+
+## Snapshot Identity Migration
+
+Snapshot HTML must contain both `x-browser-recall-slug` and
+`x-browser-recall-url`. Before running a build that requires this identity,
+migrate the persistent snapshot corpus using the authoritative page
+checkpoints:
+
+```bash
+npm run migrate:snapshot-identity -- --data-dir /absolute/path/to/browser-data --check
+npm run migrate:snapshot-identity -- --data-dir /absolute/path/to/browser-data
+```
+
+The migration validates snapshot/page identities and shards, corrects obsolete
+metadata, adds missing metadata, and replaces each changed HTML file atomically.
+The `--check` form is read-only and exits nonzero while files remain pending.
 
 ## Project Structure
 

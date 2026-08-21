@@ -939,6 +939,10 @@
     "message": "Kelola di Pengaturan",
     "description": "Popup settings action."
   },
+  "extensionSnapshotFileAccessRequired": {
+    "message": "Browser Recall memerlukan setelan Chrome \"Izinkan akses ke URL file\" untuk membaca snapshot tersimpan ini.",
+    "description": "Popup diagnostic when Chrome file URL access is disabled."
+  },
   "extensionNoLists": {
     "message": "Tidak ada daftar",
     "description": "Popup no lists message."

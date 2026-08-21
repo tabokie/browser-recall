@@ -939,6 +939,10 @@
     "message": "설정에서 관리",
     "description": "Popup settings action."
   },
+  "extensionSnapshotFileAccessRequired": {
+    "message": "이 저장된 스냅샷을 읽으려면 Chrome에서 Browser Recall의 '파일 URL에 대한 액세스 허용' 설정을 켜야 합니다.",
+    "description": "Popup diagnostic when Chrome file URL access is disabled."
+  },
   "extensionNoLists": {
     "message": "목록 없음",
     "description": "Popup no lists message."

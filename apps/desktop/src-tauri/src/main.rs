@@ -27,7 +27,7 @@ use browser_recall_daemon::pairing::{
     ApprovalFuture, PairingApprover, PairingDecision, PairingRequest,
 };
 use browser_recall_daemon::protocol::{MutationPayload, RuleBatchEntry, RulePayload};
-use browser_recall_daemon::read_projections::ReadProjections;
+use browser_recall_daemon::read_projections::{HighlightHistoryCursor, ReadProjections};
 use browser_recall_daemon::search::{
     search_history_parallel_in_data_dir, search_notes_in_storage, search_snapshots_in_data_dir,
     NoteSearchHit, SnapshotSearchHit,
@@ -927,6 +927,12 @@ fn server_storage_for_app(app: &AppHandle) -> Option<Storage> {
     }
 }
 
+fn server_read_projections_for_app(app: &AppHandle) -> Option<ReadProjections> {
+    let state = app.state::<DesktopState>();
+    let server = state.server.lock();
+    server.as_ref().map(ServerHandle::read_projections)
+}
+
 fn storage_for_app(app: &AppHandle) -> Result<Storage, String> {
     require_running_storage(server_storage_for_app(app))
 }
@@ -1385,6 +1391,8 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
     }
     let server_storage = server_storage_for_app(&app);
     let storage = || require_running_storage(server_storage.as_ref());
+    let server_read_projections = server_read_projections_for_app(&app);
+    let read_projections = || require_running_storage(server_read_projections.as_ref());
     let snapshot = shell_snapshot(&app);
     let device_id = shell_device_id(&app);
     let setup_complete = shell_setup_complete(&app);
@@ -1527,9 +1535,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .get("listId")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "getListDisplay missing listId".to_string())?;
-            let list = ReadProjections::new(storage()?.clone())
-                .list_display(list_id)
-                .await?;
+            let list = read_projections()?.list_display(list_id).await?;
             json!({
                 "success": true,
                 "list": list,
@@ -1548,25 +1554,39 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                         .ok_or_else(|| "getPageContext slugs must be strings".to_string())
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let pages = ReadProjections::new(storage()?.clone())
-                .page_context(&slugs)
-                .await?;
+            let pages = read_projections()?.page_context(&slugs).await?;
             json!({ "success": true, "pages": pages })
         }
         "getAllPageContext" => {
-            let pages = ReadProjections::new(storage()?.clone())
-                .all_page_context()
-                .await?;
+            let pages = read_projections()?.all_page_context().await?;
             json!({ "success": true, "pages": pages })
         }
-        "getHighlightHistory" => {
-            let highlights = ReadProjections::new(storage()?.clone())
-                .highlight_history()
+        "getHighlightHistoryPage" => {
+            let cursor = match request.get("cursor") {
+                Some(Value::Null) => None,
+                Some(value) => Some(
+                    serde_json::from_value::<HighlightHistoryCursor>(value.clone()).map_err(
+                        |error| format!("getHighlightHistoryPage cursor is invalid: {error}"),
+                    )?,
+                ),
+                None => return Err("getHighlightHistoryPage missing cursor".to_string()),
+            };
+            let limit = request
+                .get("limit")
+                .and_then(Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .ok_or_else(|| "getHighlightHistoryPage missing valid limit".to_string())?;
+            let page = read_projections()?
+                .highlight_history_page(cursor.as_ref(), limit)
                 .await?;
-            json!({ "success": true, "highlights": highlights })
+            json!({
+                "success": true,
+                "highlights": page.highlights,
+                "nextCursor": page.next_cursor,
+            })
         }
         "getListTree" => {
-            let projection = ReadProjections::new(storage()?.clone()).list_tree().await?;
+            let projection = read_projections()?.list_tree().await?;
             json!({
                 "success": true,
                 "tree": projection.tree,
@@ -1574,13 +1594,11 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             })
         }
         "getRecycleBin" => {
-            let entries = ReadProjections::new(storage()?.clone())
-                .recycle_bin()
-                .await?;
+            let entries = read_projections()?.recycle_bin().await?;
             json!({ "success": true, "entries": entries })
         }
         "getSettings" => {
-            let settings = ReadProjections::new(storage()?.clone()).settings().await?;
+            let settings = read_projections()?.settings().await?;
             json!({ "success": true, "settings": settings })
         }
         "listHistoryFiles" => {
@@ -1649,9 +1667,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .get("slug")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "loadPageNotes missing slug".to_string())?;
-            let page = ReadProjections::new(storage()?.clone())
-                .page_info(slug)
-                .await?;
+            let page = read_projections()?.page_info(slug).await?;
             json!({ "success": true, "notes": page.notes })
         }
         "listSnapshots" => {
@@ -1659,9 +1675,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .get("slug")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "listSnapshots missing slug".to_string())?;
-            let page = ReadProjections::new(storage()?.clone())
-                .page_info(slug)
-                .await?;
+            let page = read_projections()?.page_info(slug).await?;
             json!({ "success": true, "snapshots": page.snapshots })
         }
         "getSnapshotHtml" => {
@@ -1859,6 +1873,7 @@ fn validate_desktop_bridge_fields(
         "revokePairedBrowser" => &["browserId", "extensionId"],
         "getListDisplay" => &["listId"],
         "getPageContext" => &["slugs"],
+        "getHighlightHistoryPage" => &["cursor", "limit"],
         "listHistoryFiles" => &["includeSizes"],
         "loadHistoryBatch" => &["files"],
         "searchNotes" | "searchSnapshots" => &["query"],
@@ -1879,7 +1894,6 @@ fn validate_desktop_bridge_fields(
         | "getDirectoryInfo"
         | "getDirectorySize"
         | "getAllPageContext"
-        | "getHighlightHistory"
         | "getListTree"
         | "getRecycleBin"
         | "getSettings"

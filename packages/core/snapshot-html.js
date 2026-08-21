@@ -86,34 +86,31 @@ function findHtmlTagEnd(html, start) {
   return -1;
 }
 
-function activateShadowRootStartTag(tag) {
-  const name = tag.match(/^<\s*([a-z][^\s/>]*)/i)?.[1]?.toLowerCase();
-  if (
-    name !== 'template' ||
-    !/\sdata-savepage-shadowroot(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?/i.test(
-      tag,
-    ) ||
-    /\sshadowrootmode(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?/i.test(tag)
-  ) {
-    return { name, tag };
-  }
-  const insertionIndex = /\/\s*>$/.test(tag) ? tag.lastIndexOf('/') : -1;
-  if (insertionIndex >= 0) {
-    const prefix = tag.slice(0, insertionIndex);
-    return {
-      name,
-      tag: `${prefix}${/\s$/.test(prefix) ? '' : ' '}shadowrootmode="open" ${tag.slice(insertionIndex)}`,
-    };
-  }
-  return {
-    name,
-    tag: `${tag.slice(0, -1)} shadowrootmode="open">`,
-  };
+function htmlTagName(tag) {
+  return tag.match(/^<\s*\/?\s*([a-z][^\s/>]*)/i)?.[1]?.toLowerCase() || null;
 }
 
-function activateDeclarativeShadowRoots(html) {
-  // Scan HTML structure instead of rewriting the whole archive with a regex:
-  // srcdoc attributes and raw-text elements may contain markup-looking text.
+function htmlAttributeValue(tag, name) {
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = tag.match(
+    new RegExp(
+      `(?:^|\\s)${escapedName}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>]+))`,
+      'i',
+    ),
+  );
+  return match ? (match[1] ?? match[2] ?? match[3]) : undefined;
+}
+
+function decodeHtmlAttribute(value) {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+function transformHtmlStructure(html, transformTag) {
   let cursor = 0;
   let output = '';
   let rawTextElement = null;
@@ -143,7 +140,6 @@ function activateDeclarativeShadowRoots(html) {
       break;
     }
     output += html.slice(cursor, tagStart);
-
     if (html.startsWith('<!--', tagStart)) {
       const commentEnd = html.indexOf('-->', tagStart + 4);
       if (commentEnd < 0) {
@@ -170,42 +166,156 @@ function activateDeclarativeShadowRoots(html) {
       output += html.slice(tagStart);
       break;
     }
-    const originalTag = html.slice(tagStart, tagEnd + 1);
-    const activated = activateShadowRootStartTag(originalTag);
-    output += activated.tag;
+    const tag = html.slice(tagStart, tagEnd + 1);
+    const name = htmlTagName(tag);
+    output += transformTag(tag, name);
     cursor = tagEnd + 1;
     if (
-      activated.name &&
-      htmlRawTextElements.has(activated.name) &&
-      !/\/\s*>$/.test(originalTag)
+      name &&
+      !/^<\s*\//.test(tag) &&
+      htmlRawTextElements.has(name) &&
+      !/\/\s*>$/.test(tag)
     ) {
-      rawTextElement = activated.name;
+      rawTextElement = name;
     }
   }
-
   return output;
 }
 
-function injectSnapshotIdentity(html, slug, url) {
-  if (!slug || /<meta\s+name=(["'])x-browser-recall-slug\1/i.test(html)) {
-    return html;
+function activateShadowRootStartTag(tag) {
+  const name = tag.match(/^<\s*([a-z][^\s/>]*)/i)?.[1]?.toLowerCase();
+  if (
+    name !== 'template' ||
+    !/\sdata-savepage-shadowroot(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?/i.test(
+      tag,
+    ) ||
+    /\sshadowrootmode(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?/i.test(tag)
+  ) {
+    return { name, tag };
   }
-  const metadata = [
-    `<meta name="x-browser-recall-slug" content="${escapeHtmlAttribute(slug)}">`,
-    url
-      ? `<meta name="x-browser-recall-url" content="${escapeHtmlAttribute(url)}">`
-      : '',
-  ].join('');
-  if (/<head\b[^>]*>/i.test(html)) {
-    return html.replace(/<head\b[^>]*>/i, (match) => `${match}${metadata}`);
+  const insertionIndex = /\/\s*>$/.test(tag) ? tag.lastIndexOf('/') : -1;
+  if (insertionIndex >= 0) {
+    const prefix = tag.slice(0, insertionIndex);
+    return {
+      name,
+      tag: `${prefix}${/\s$/.test(prefix) ? '' : ' '}shadowrootmode="open" ${tag.slice(insertionIndex)}`,
+    };
   }
-  if (/<html\b[^>]*>/i.test(html)) {
-    return html.replace(
-      /<html\b[^>]*>/i,
-      (match) => `${match}<head>${metadata}</head>`,
+  return {
+    name,
+    tag: `${tag.slice(0, -1)} shadowrootmode="open">`,
+  };
+}
+
+function activateDeclarativeShadowRoots(html) {
+  // Scan HTML structure instead of rewriting the whole archive with a regex:
+  // srcdoc attributes and raw-text elements may contain markup-looking text.
+  return transformHtmlStructure(
+    html,
+    (tag) => activateShadowRootStartTag(tag).tag,
+  );
+}
+
+function snapshotIdentityMetadataName(tag, name) {
+  if (name !== 'meta' || /^<\s*\//.test(tag)) return null;
+  const metadataName = htmlAttributeValue(tag, 'name')?.toLowerCase();
+  return metadataName === 'x-browser-recall-slug' ||
+    metadataName === 'x-browser-recall-url'
+    ? metadataName
+    : null;
+}
+
+export function setSnapshotIdentity(html, { slug = null, url = null } = {}) {
+  if (!html) return html;
+  const replacedNames = new Set();
+  const metadata = [];
+  if (slug) {
+    replacedNames.add('x-browser-recall-slug');
+    metadata.push(
+      `<meta name="x-browser-recall-slug" content="${escapeHtmlAttribute(slug)}">`,
     );
   }
-  return `${metadata}${html}`;
+  if (url) {
+    replacedNames.add('x-browser-recall-url');
+    metadata.push(
+      `<meta name="x-browser-recall-url" content="${escapeHtmlAttribute(url)}">`,
+    );
+  }
+  if (metadata.length === 0) return html;
+  const metadataHtml = metadata.join('');
+  const withoutIdentity = transformHtmlStructure(html, (tag, name) =>
+    replacedNames.has(snapshotIdentityMetadataName(tag, name)) ? '' : tag,
+  );
+  let inserted = false;
+  const withHeadIdentity = transformHtmlStructure(
+    withoutIdentity,
+    (tag, name) => {
+      if (!inserted && name === 'head' && !/^<\s*\//.test(tag)) {
+        inserted = true;
+        return `${tag}${metadataHtml}`;
+      }
+      return tag;
+    },
+  );
+  if (inserted) return withHeadIdentity;
+  const withSyntheticHead = transformHtmlStructure(
+    withoutIdentity,
+    (tag, name) => {
+      if (!inserted && name === 'html' && !/^<\s*\//.test(tag)) {
+        inserted = true;
+        return `${tag}<head>${metadataHtml}</head>`;
+      }
+      return tag;
+    },
+  );
+  return inserted ? withSyntheticHead : `${metadataHtml}${withoutIdentity}`;
+}
+
+export function validateSnapshotIdentity(html, { slug, url = null } = {}) {
+  if (typeof html !== 'string' || !html) {
+    throw new Error('snapshot identity requires non-empty HTML');
+  }
+  const values = {
+    'x-browser-recall-slug': [],
+    'x-browser-recall-url': [],
+  };
+  transformHtmlStructure(html, (tag, name) => {
+    const metadataName = snapshotIdentityMetadataName(tag, name);
+    if (!metadataName) return tag;
+    const content = htmlAttributeValue(tag, 'content');
+    if (content === undefined) {
+      throw new Error(`snapshot identity ${metadataName} is missing content`);
+    }
+    values[metadataName].push(decodeHtmlAttribute(content));
+    return tag;
+  });
+  for (const name of Object.keys(values)) {
+    if (values[name].length !== 1) {
+      throw new Error(`snapshot identity requires exactly one ${name}`);
+    }
+  }
+  const identity = {
+    slug: values['x-browser-recall-slug'][0],
+    url: values['x-browser-recall-url'][0],
+  };
+  if (typeof slug === 'string' && identity.slug !== slug) {
+    throw new Error('snapshot identity slug does not match the requested slug');
+  }
+  if (typeof url === 'string' && identity.url !== url) {
+    throw new Error(
+      'snapshot identity URL does not match the authoritative URL',
+    );
+  }
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(identity.url);
+  } catch {
+    throw new Error('snapshot identity URL is invalid');
+  }
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    throw new Error('snapshot identity URL must use HTTP or HTTPS');
+  }
+  return identity;
 }
 
 /**
@@ -218,5 +328,5 @@ export function prepareSnapshotHtml(html, { slug, url = null } = {}) {
   const safeHtml = removeInactiveShadowLoader(selfContainedHtml);
   const shadowReadyHtml = activateDeclarativeShadowRoots(safeHtml);
   const cleanHtml = removeBrowserRecallHighlightMarkup(shadowReadyHtml);
-  return injectSnapshotIdentity(cleanHtml, slug, url);
+  return setSnapshotIdentity(cleanHtml, { slug, url });
 }

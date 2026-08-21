@@ -218,6 +218,10 @@ function frameScript()
 
         if (sourceNode.nodeType != 1) return sourceNode.cloneNode(true);
 
+        /* Browser Recall transient page UI must never become part of a snapshot. */
+
+        if (globalThis.__browserRecallTransientUiHosts instanceof WeakSet && globalThis.__browserRecallTransientUiHosts.has(sourceNode)) return document.createDocumentFragment();
+
         clone = sourceNode.cloneNode(false);
 
         if (sourceNode.localName == "template")

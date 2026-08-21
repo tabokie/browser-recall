@@ -374,12 +374,38 @@ export async function loadAllPageContext() {
   );
 }
 
-export async function loadHighlightHistory() {
-  const resp = await sendAction({ action: 'getHighlightHistory' });
+function validateHighlightHistoryCursor(cursor, context) {
+  if (cursor === null) return null;
+  if (
+    !cursor ||
+    typeof cursor !== 'object' ||
+    Array.isArray(cursor) ||
+    !Number.isSafeInteger(cursor.sessionId) ||
+    cursor.sessionId <= 0 ||
+    !Number.isSafeInteger(cursor.offset) ||
+    cursor.offset <= 0
+  ) {
+    throw new Error(`${context} cursor is invalid`);
+  }
+  return cursor;
+}
+
+export async function loadHighlightHistoryPage(cursor, limit) {
+  validateHighlightHistoryCursor(cursor, 'getHighlightHistoryPage request');
+  if (!Number.isSafeInteger(limit) || limit <= 0 || limit > 500) {
+    throw new Error(
+      'getHighlightHistoryPage request limit must be from 1 to 500',
+    );
+  }
+  const resp = await sendAction({
+    action: 'getHighlightHistoryPage',
+    cursor,
+    limit,
+  });
   const highlights = requireArrayField(
     resp,
     'highlights',
-    'getHighlightHistory',
+    'getHighlightHistoryPage',
   );
   const seenNoteSlugs = new Set();
   let previousCreatedAt = Number.POSITIVE_INFINITY;
@@ -412,20 +438,28 @@ export async function loadHighlightHistory() {
       item.note.cssPath.length !== item.note.excerpt.length ||
       !item.note.cssPath.every((path) => typeof path === 'string')
     ) {
-      throw new Error(`getHighlightHistory response item ${index} is invalid`);
+      throw new Error(
+        `getHighlightHistoryPage response item ${index} is invalid`,
+      );
     }
     if (
       seenNoteSlugs.has(item.note.slug) ||
       item.createdAt > previousCreatedAt
     ) {
       throw new Error(
-        `getHighlightHistory response item ${index} has invalid identity or ordering`,
+        `getHighlightHistoryPage response item ${index} has invalid identity or ordering`,
       );
     }
     seenNoteSlugs.add(item.note.slug);
     previousCreatedAt = item.createdAt;
   }
-  return highlights;
+  return {
+    highlights,
+    nextCursor: validateHighlightHistoryCursor(
+      resp.nextCursor,
+      'getHighlightHistoryPage response',
+    ),
+  };
 }
 
 export async function loadListTreeProjection() {

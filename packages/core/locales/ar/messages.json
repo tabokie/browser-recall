@@ -939,6 +939,10 @@
     "message": "إدارة في الإعدادات",
     "description": "Popup settings action."
   },
+  "extensionSnapshotFileAccessRequired": {
+    "message": "يحتاج Browser Recall إلى إعداد \"السماح بالوصول إلى عناوين URL للملفات\" في Chrome لقراءة هذه اللقطة المحفوظة.",
+    "description": "Popup diagnostic when Chrome file URL access is disabled."
+  },
   "extensionNoLists": {
     "message": "لا توجد قوائم",
     "description": "Popup no lists message."

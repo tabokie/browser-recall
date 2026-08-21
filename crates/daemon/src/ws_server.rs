@@ -167,6 +167,7 @@ struct SharedState {
     config_store: ConfigStore,
     config: Arc<Mutex<crate::config::DaemonConfig>>,
     storage: Storage,
+    read_projections: crate::read_projections::ReadProjections,
     approver: PairingApprover,
     pair_timeout: Duration,
     test_control_enabled: bool,
@@ -210,6 +211,10 @@ impl ServerHandle {
 
     pub fn storage(&self) -> Storage {
         self.shared.storage.clone()
+    }
+
+    pub fn read_projections(&self) -> crate::read_projections::ReadProjections {
+        self.shared.read_projections.clone()
     }
 
     pub fn control_handle(&self) -> ServerControlHandle {
@@ -310,6 +315,7 @@ pub async fn start_server(options: ServerStartOptions) -> Result<ServerHandle, W
     let (snapshot_tx, _) = watch::channel(snapshot.clone());
     let (change_message_tx, _) = broadcast::channel(128);
     let (revoke_tx, _) = broadcast::channel(128);
+    let read_projections = crate::read_projections::ReadProjections::new(storage.clone());
     let shared = SharedState {
         snapshot: Arc::new(RwLock::new(snapshot)),
         snapshot_tx,
@@ -318,6 +324,7 @@ pub async fn start_server(options: ServerStartOptions) -> Result<ServerHandle, W
         config_store: options.config_store.clone(),
         config: Arc::new(Mutex::new(config)),
         storage,
+        read_projections,
         approver: options.approver,
         pair_timeout: options.pair_timeout,
         test_control_enabled: options.test_control_enabled,

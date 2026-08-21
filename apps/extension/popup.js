@@ -52,10 +52,6 @@ const recordingUiState = {
   hydrated: false,
   paused: false,
 };
-const DASHBOARD_LOADING_PRESENTATION = Object.freeze({
-  PRESERVE: 'preserve',
-  SHELL: 'shell',
-});
 const popupShellState = {
   surface: 'diagnostic',
 };
@@ -561,6 +557,36 @@ function showDesktopDataUnavailable(
   ),
   diagnostic = null,
 ) {
+  const actions =
+    diagnostic?.reason === 'snapshot-file-access-required'
+      ? [
+          {
+            id: 'extensionFileAccessSettingsBtn',
+            label: tr(
+              'extensionManageSettings',
+              'Manage in Settings',
+              undefined,
+            ),
+            onClick: (event) => {
+              const button = event.currentTarget;
+              button.disabled = true;
+              void chrome.runtime
+                .sendMessage({ action: 'openExtensionFileAccessSettings' })
+                .then((response) => {
+                  requireSuccessfulResponse(
+                    response,
+                    'openExtensionFileAccessSettings',
+                  );
+                  window.close();
+                })
+                .catch((error) => {
+                  button.disabled = false;
+                  showErrorBubble(error.message, { appendReloadHint: false });
+                });
+            },
+          },
+        ]
+      : [];
   renderPageDiagnostic({
     title: tr(
       'extensionPageDataUnavailable',
@@ -569,6 +595,7 @@ function showDesktopDataUnavailable(
     ),
     message,
     detail: diagnostic,
+    actions,
   });
 }
 
@@ -681,7 +708,11 @@ async function refreshDesktopConnectorState() {
 }
 
 function connectorDiagnosticVisible() {
-  return connectorDiagnosticActive && popupShellState.surface === 'diagnostic';
+  return (
+    !document.documentElement.hasAttribute('data-popup-hidden') &&
+    connectorDiagnosticActive &&
+    popupShellState.surface === 'diagnostic'
+  );
 }
 
 async function loadDashboardIfConnected(connector) {
@@ -2386,23 +2417,6 @@ async function recordCurrentPageActivity(tab) {
   requireSuccessfulResponse(response, 'recordPageActivity');
 }
 
-function renderProvisionalDashboardShell(tab) {
-  if (
-    !tab ||
-    typeof tab !== 'object' ||
-    typeof tab.url !== 'string' ||
-    !tab.url
-  ) {
-    throw new Error('Provisional dashboard shell requires a browser tab URL');
-  }
-  const title = typeof tab.title === 'string' ? tab.title : '';
-  resetCurrentPageIdentity({ slug: '', url: tab.url, title, tab });
-  document.getElementById('pageTitle').textContent = title;
-  document.getElementById('pageUrl').textContent = tab.url;
-  resetDashboardSections();
-  renderPageDashboardShell();
-}
-
 async function resumeDashboard(tab, generation) {
   // Keep the paused surface until the visit is committed, then use the normal
   // showDashboard path so resume never exposes tab-derived partial metadata.
@@ -2434,17 +2448,8 @@ async function resumeDashboard(tab, generation) {
   await showDashboard(tab);
 }
 
-function validateDashboardLoadingPresentation(presentation) {
-  if (!Object.values(DASHBOARD_LOADING_PRESENTATION).includes(presentation)) {
-    throw new Error(`Unknown dashboard loading presentation: ${presentation}`);
-  }
-}
-
 // Show dashboard for a tab: set up state, fetch data, render sections
-async function showDashboard(tab, options = {}) {
-  const { loadingPresentation = DASHBOARD_LOADING_PRESENTATION.PRESERVE } =
-    options;
-  validateDashboardLoadingPresentation(loadingPresentation);
+async function showDashboard(tab) {
   replaceConnectorDiagnosticOwner(false);
   const generation = nextCurrentPageGeneration();
   const previousSlug = currentPage.slug;
@@ -2455,9 +2460,6 @@ async function showDashboard(tab, options = {}) {
   document.getElementById('pageTitle').textContent = identity.title;
   document.getElementById('pageUrl').textContent = identity.url;
   resetDashboardSections();
-  if (loadingPresentation === DASHBOARD_LOADING_PRESENTATION.SHELL) {
-    showDashboardUI();
-  }
   await fetchAndRenderPageData(tab, identity, {
     resetSections: false,
     renderLists: true,
@@ -2513,9 +2515,11 @@ async function resolveEffectiveUrl(tab) {
     !identity.url ||
     typeof identity.title !== 'string'
   ) {
-    throw new Error(
+    const error = new Error(
       response?.error || 'Popup page identity response is invalid',
     );
+    if (typeof response?.code === 'string') error.code = response.code;
+    throw error;
   }
   tab._effectiveSlug = identity.slug;
   tab._effectiveUrl = identity.url;
@@ -2724,7 +2728,6 @@ async function renderPendingPopup(bootstrap) {
     return generation;
   }
 
-  renderProvisionalDashboardShell(bootstrap.tab);
   return generation;
 }
 
@@ -2786,9 +2789,7 @@ async function renderPreparedPopup(bootstrap) {
     if (!bootstrap.tab || typeof bootstrap.tab !== 'object') {
       throw new Error('Private popup model is missing its tab');
     }
-    await showDashboard(bootstrap.tab, {
-      loadingPresentation: DASHBOARD_LOADING_PRESENTATION.SHELL,
-    });
+    await showDashboard(bootstrap.tab);
     return;
   }
 
@@ -2834,11 +2835,21 @@ async function loadConnectedDashboard(connector) {
 
   const tab = await resolveActiveTab();
   if (!tab) return;
-  await resolveEffectiveUrl(tab);
   if (await handlePrivateMode(tab)) return;
-  await showDashboard(tab, {
-    loadingPresentation: DASHBOARD_LOADING_PRESENTATION.SHELL,
-  });
+  try {
+    await resolveEffectiveUrl(tab);
+  } catch (error) {
+    showDesktopDataUnavailable(error.message, {
+      reason:
+        error?.code === 'snapshot-file-access-required'
+          ? error.code
+          : 'popup-page-identity-failed',
+      url: tab.url,
+      error: error.message || String(error),
+    });
+    return;
+  }
+  await showDashboard(tab);
 }
 
 async function initPopup() {
@@ -2858,7 +2869,10 @@ async function initPopup() {
     }
   }
 
-  const connector = await refreshDesktopConnectorState();
+  // Startup has no painted connector diagnostic to refresh. Read the terminal
+  // state without rendering its transient `starting`/`connected` projections;
+  // the branch below or the completed dashboard owns the first reveal.
+  const connector = await requestConnectorState();
   if (connector.state !== 'connected' || !connector.deviceId) {
     renderConnectorDiagnostic(connector);
     return;

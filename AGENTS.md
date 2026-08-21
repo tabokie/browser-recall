@@ -64,6 +64,8 @@ Optional references may be omitted only when they are valid non-page URLs; malfo
 - Incremental mutation payloads must be lossless for every action they replace: distinguish observations from metadata, include semantic payloads in deduplication identity, and test batched same-entity updates.
 - After bulk renames, grep for the old term, alternate casing, comments, string literals, tests, and docs.
 - Format changes require non-empty test data for every consumer. When changing a structure's shape, grep for all readers and verify each has coverage with non-empty data.
+- Snapshot migrations must use the same canonical URL-to-slug function as runtime validation; migration checks must reject any data the runtime would reject.
+- Highlight history must allow two devices to replace the same original note independently; after synchronization, both replacement notes remain valid and must appear in the Book.
 - Multi-line objects evade single-line transforms; verify multi-line schema and payload construction separately.
 - Avoid compatibility paths after an intentional schema migration. Migrate the data, then remove fallback readers/writers so drift is visible.
 - When a verifier validates production behavior, keep the verifier on the production implementation rather than porting policy into another language.
@@ -104,6 +106,7 @@ Optional references may be omitted only when they are valid non-page URLs; malfo
 - When CI cannot inject native webview input, split coverage across Playwright for UI command wiring, Rust for the real host/daemon boundary, and native smoke tests for window/tray lifecycle; never treat a mocked bridge as host-boundary coverage.
 - For site-specific highlight bugs, verify the live/source DOM and saved note/page identity data before attributing the failure to CSS path drift, hydration, or text matching.
 - E2E tests for notification fallbacks should force the exact delivery channel to fail, not only assert the final visible notification.
+- Permission-dependent E2E tests must force the relevant browser permission off before asserting the failure experience; enabling the permission during setup can hide the production-default path.
 - Desktop visual E2E uses `npm run test:visual`; in sandboxed agent runs, request browser-launch permissions for that command if Chromium aborts before test code runs. A launch-only failure where every visual test fails at `0ms` with `browserType.launch`, `SIGABRT`, or `kill EPERM` is a sandbox execution issue, not a product regression.
 - Browser-specific visual snapshots must be exercised by the canonical visual CI path, including installation and invocation of that browser.
 - Rust daemon integration tests are acceptable for daemon authority behavior that is impractical or too indirect to assert through browser E2E; keep those tests at the daemon/WebSocket boundary rather than adding inline unit tests.

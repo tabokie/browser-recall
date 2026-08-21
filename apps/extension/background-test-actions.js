@@ -12,6 +12,7 @@ export const BACKGROUND_TEST_ACTIONS = [
   'triggerCommandForTest',
   'restartConnectorRuntimeForTest',
   'setConnectorPortsForTest',
+  'setFileSchemeAccessForTest',
   'readDesktopValue',
 ];
 

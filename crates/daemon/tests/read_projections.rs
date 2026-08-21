@@ -221,7 +221,8 @@ async fn highlight_history_returns_each_live_highlight_by_original_creation_time
     .await
     .expect("second highlight");
 
-    let highlights = ReadProjections::new(storage)
+    let projections = ReadProjections::new(storage.clone());
+    let highlights = projections
         .highlight_history()
         .await
         .expect("highlight history");
@@ -236,6 +237,91 @@ async fn highlight_history_returns_each_live_highlight_by_original_creation_time
         highlights[1].note.note.as_deref(),
         Some("Edited annotation")
     );
+
+    let first_page = projections
+        .highlight_history_page(None, 1)
+        .await
+        .expect("first highlight history page");
+    assert_eq!(first_page.highlights[0].note.slug, "second");
+    let cursor = first_page.next_cursor.expect("second page cursor");
+
+    replay_entry(
+        &storage,
+        "device-a",
+        LogEntry::CreateNote {
+            timestamp: 400,
+            url: "https://example.com/a".to_string(),
+            path: "objects/notes/third.json".to_string(),
+            title: Some("Page A".to_string()),
+            excerpt: Some(serde_json::json!(["Third excerpt"])),
+            note: None,
+            css_path: Some(serde_json::json!(["main > p + p + p"])),
+        },
+    )
+    .await
+    .expect("third highlight after pagination started");
+
+    let second_page = projections
+        .highlight_history_page(Some(&cursor), 1)
+        .await
+        .expect("stable second highlight history page");
+    assert_eq!(second_page.highlights[0].note.slug, "first-edited");
+    assert!(second_page.next_cursor.is_none());
+    assert_eq!(
+        projections
+            .highlight_history_page(Some(&cursor), 1)
+            .await
+            .expect_err("completed cursor must expire"),
+        "highlight history cursor expired"
+    );
+}
+
+#[tokio::test]
+async fn highlight_history_first_page_does_not_read_later_note_entities() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage.ensure_layout("device-a").await.expect("layout");
+
+    for (timestamp, slug) in [(100, "older"), (200, "newer")] {
+        replay_entry(
+            &storage,
+            "device-a",
+            LogEntry::CreateNote {
+                timestamp,
+                url: "https://example.com/lazy-history".to_string(),
+                path: format!("objects/notes/{slug}.json"),
+                title: Some("Lazy history".to_string()),
+                excerpt: Some(serde_json::json!([format!("{slug} excerpt")])),
+                note: None,
+                css_path: Some(serde_json::json!(["main > p"])),
+            },
+        )
+        .await
+        .expect("highlight");
+    }
+    storage
+        .flush_checkpoints()
+        .await
+        .expect("flush checkpoints");
+    tokio::fs::write(
+        dir.path().join("objects/notes/older.json"),
+        b"not valid JSON",
+    )
+    .await
+    .expect("corrupt later note");
+
+    let projections = ReadProjections::new(Storage::new(dir.path()));
+    let first_page = projections
+        .highlight_history_page(None, 1)
+        .await
+        .expect("first page must not read later note entities");
+    assert_eq!(first_page.highlights[0].note.slug, "newer");
+    let cursor = first_page.next_cursor.expect("later page cursor");
+    assert!(projections
+        .highlight_history_page(Some(&cursor), 1)
+        .await
+        .expect_err("later malformed note must remain explicit")
+        .contains("invalid note checkpoint"));
 }
 
 #[tokio::test]
@@ -283,6 +369,61 @@ async fn highlight_history_resolves_replacements_independently_of_timestamp_orde
     assert_eq!(highlights.len(), 1);
     assert_eq!(highlights[0].note.slug, "clock-skew-edited");
     assert_eq!(highlights[0].created_at, 200);
+}
+
+#[tokio::test]
+async fn highlight_history_preserves_concurrent_replacement_branches() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage.ensure_layout("device-a").await.expect("layout");
+
+    replay_entry(
+        &storage,
+        "device-a",
+        LogEntry::CreateNote {
+            timestamp: 100,
+            url: "https://example.com/concurrent-edits".to_string(),
+            path: "objects/notes/original.json".to_string(),
+            title: Some("Concurrent edits".to_string()),
+            excerpt: Some(serde_json::json!(["Shared highlight"])),
+            note: Some("Original annotation".to_string()),
+            css_path: Some(serde_json::json!(["main > p"])),
+        },
+    )
+    .await
+    .expect("original highlight");
+    for (device_id, timestamp, slug, annotation) in [
+        ("device-a", 200, "replacement-a", "Edited on device A"),
+        ("device-b", 300, "replacement-b", "Edited on device B"),
+    ] {
+        replay_entry(
+            &storage,
+            device_id,
+            LogEntry::ReplaceNote {
+                timestamp,
+                url: Some("https://example.com/concurrent-edits".to_string()),
+                path: format!("objects/notes/{slug}.json"),
+                old_path: "objects/notes/original.json".to_string(),
+                excerpt: Some(serde_json::json!(["Shared highlight"])),
+                note: Some(annotation.to_string()),
+                css_path: Some(serde_json::json!(["main > p"])),
+            },
+        )
+        .await
+        .expect("concurrent replacement");
+    }
+
+    let page = ReadProjections::new(storage)
+        .highlight_history_page(None, 10)
+        .await
+        .expect("concurrent replacement history");
+
+    assert!(page.next_cursor.is_none());
+    assert_eq!(page.highlights.len(), 2);
+    assert_eq!(page.highlights[0].note.slug, "replacement-a");
+    assert_eq!(page.highlights[0].created_at, 100);
+    assert_eq!(page.highlights[1].note.slug, "replacement-b");
+    assert_eq!(page.highlights[1].created_at, 100);
 }
 
 #[tokio::test]

@@ -310,7 +310,8 @@ describe('extension staged assets', () => {
     expect(popupHtml).toContain('--bg-base: #f7f4ea');
     expect(popupHtml).toContain('--text-primary: #171713');
     expect(popupHtml).not.toContain('href="shared.css"');
-    expect(popupHtml).not.toContain('data-popup-hidden="true"');
+    expect(popupHtml).toContain('data-popup-hidden="true"');
+    expect(popupHtml).toContain('opacity: 0');
     expect(popupHtml).toContain('width: 296px');
     expect(popupHtml).toContain('min-height: 320px');
     expect(popupHtml).toContain('body.popup-compact');
