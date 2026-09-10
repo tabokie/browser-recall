@@ -105,8 +105,22 @@ function createPopupPreparationGateForTest(holdPreparation) {
 // tabId → URL from the content script's initial recordPageActivity.
 // Used by popup to avoid slug mismatch when tab.url drifts (SPA pushState, etc.).
 const tabReportedUrls = new Map();
+const pendingNavigations = new Map();
+
+function requireNavigationDelivery(tabId, url) {
+  const pending = pendingNavigations.get(tabId);
+  if (pending?.url === url && pending.error) {
+    throw Object.assign(
+      new Error(
+        `Page navigation capture is delayed; retrying automatically. ${pending.error}`,
+      ),
+      { code: 'navigation-delivery-failed' },
+    );
+  }
+}
 
 async function badgeIdentityUrlForTab(tabId, url) {
+  requireNavigationDelivery(tabId, url);
   if (snapshotViewerSlugFromUrl(url)) {
     const tab = await chrome.tabs.get(tabId);
     return (await resolveTabPageIdentity(tab)).url;
@@ -554,6 +568,7 @@ const getReferrer = (() => {
 
   chrome.webNavigation.onCommitted.addListener((details) => {
     if (details.frameId !== 0) return;
+    pendingNavigations.delete(details.tabId);
     const previousUrl = tabUrls.get(details.tabId);
     const referrer =
       details.transitionType === 'link' && previousUrl ? previousUrl : null;
@@ -613,6 +628,69 @@ const getReferrer = (() => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabReportedUrls.delete(tabId);
+  pendingNavigations.delete(tabId);
+});
+
+async function forwardSameDocumentNavigation(details) {
+  const pending = { ...details, error: null };
+  pendingNavigations.set(details.tabId, pending);
+  // Keep the latest unresolved observation recoverable after the quick retries.
+  // These browser API calls also keep the worker alive while delivery is pending.
+  for (let attempt = 0; ; attempt += 1) {
+    const delay = [0, 100, 500][attempt] ?? 5000;
+    if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+    if (pendingNavigations.get(details.tabId) !== pending) return;
+    try {
+      const tab = await chrome.tabs.get(details.tabId);
+      if (pendingNavigations.get(details.tabId) !== pending) return;
+      if (tab.url !== details.url) {
+        pendingNavigations.delete(details.tabId);
+        await badgeController.updateBadgeForTab(details.tabId, tab.url);
+        return;
+      }
+      const response = await chrome.tabs.sendMessage(
+        details.tabId,
+        {
+          action: 'sameDocumentNavigation',
+          url: details.url,
+        },
+        { frameId: 0 },
+      );
+      if (response?.success !== true) {
+        throw new Error(
+          response?.error || 'Navigation receiver did not acknowledge delivery',
+        );
+      }
+      if (pendingNavigations.get(details.tabId) !== pending) return;
+      pendingNavigations.delete(details.tabId);
+      await badgeController.updateBadgeForTab(details.tabId, details.url);
+      return;
+    } catch (error) {
+      if (pendingNavigations.get(details.tabId) !== pending) return;
+      if (attempt >= 2) {
+        pending.error = error.message;
+        if (attempt === 2) {
+          logError(
+            '[navigation] history update delivery delayed; continuing retries:',
+            error,
+          );
+        }
+        await badgeController.updateBadgeForTab(details.tabId, details.url);
+      } else {
+        logDebug(
+          '[navigation] retrying history update delivery:',
+          error.message,
+        );
+      }
+    }
+  }
+}
+
+chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
+  if (details.frameId !== 0) return;
+  void forwardSameDocumentNavigation(details).catch((error) => {
+    logError('[navigation] history update forwarding failed:', error);
+  });
 });
 
 // ─── Initialization ───────────────────────────────────────────────────
@@ -1669,6 +1747,7 @@ async function fileSnapshotPageIdentity(tab) {
 }
 
 async function resolveTabPageIdentity(tab, navigationRetries = 0) {
+  requireNavigationDelivery(tab.id, tab.url);
   let effectiveUrl = tab.url;
   let effectiveSlug = null;
   let effectiveTitle = typeof tab.title === 'string' ? tab.title : '';
@@ -1796,10 +1875,12 @@ async function preparePopupBootstrapForTab(tab) {
       tab,
       error: userActionErrorMessage(error),
       diagnostic: {
-        reason:
-          error?.code === 'snapshot-file-access-required'
-            ? error.code
-            : 'popup-page-identity-failed',
+        reason: [
+          'snapshot-file-access-required',
+          'navigation-delivery-failed',
+        ].includes(error?.code)
+          ? error.code
+          : 'popup-page-identity-failed',
         url: tab.url,
         error: identityError,
       },
@@ -2320,6 +2401,7 @@ async function handleDeleteSnapshot(request) {
 
 async function resetEphemeralConnectorStateForTest() {
   tabReportedUrls.clear();
+  pendingNavigations.clear();
   clearLocalFailure();
 }
 

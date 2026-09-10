@@ -337,8 +337,11 @@ function initContentScript() {
   // Track latest title locally; included in leave_page report.
   let latestTitle = document.title;
   let activePageUrl = window.location.href;
+  let hasReportedVisit = false;
+  const spaNavigationBridge = globalThis.__browserRecallSpaNavigationBridge;
 
   function onLeavePage(url = activePageUrl) {
+    if (!hasReportedVisit) return;
     if (lastActiveTime === null) return; // already reported, skip no-op
     const timeOnPage = Math.min(Date.now() - lastActiveTime, 3600000); // cap at 1h
     lastActiveTime = null; // prevent double-counting on subsequent fires
@@ -372,6 +375,7 @@ function initContentScript() {
   }
 
   function reportInitialVisit(url = window.location.href, referrerUrl) {
+    hasReportedVisit = true;
     currentHistoryId = url;
     activePageUrl = url;
     latestTitle = document.title;
@@ -379,14 +383,28 @@ function initContentScript() {
   }
 
   // Initial visit report
-  reportInitialVisit(activePageUrl);
+  if (!spaNavigationBridge?.isNavigating()) reportInitialVisit(activePageUrl);
 
   function handleSameDocumentNavigation(nextUrl = window.location.href) {
-    if (nextUrl === activePageUrl) return;
-    if (pageIdentity.isSameDocumentPageUrl(activePageUrl, nextUrl)) return;
+    // Browser messages and queued page-world events may arrive after another
+    // route has already replaced the document. Never attach live DOM to them.
+    if (nextUrl !== window.location.href) return;
+    if (spaNavigationBridge?.isNavigating()) {
+      if (hasReportedVisit) onLeavePage();
+      return;
+    }
+    if (
+      hasReportedVisit &&
+      pageIdentity.isSameDocumentPageUrl(activePageUrl, nextUrl)
+    ) {
+      if (lastActiveTime === null && document.visibilityState === 'visible') {
+        lastActiveTime = Date.now();
+      }
+      return;
+    }
 
-    const previousUrl = activePageUrl;
-    onLeavePage(previousUrl);
+    const previousUrl = hasReportedVisit ? activePageUrl : undefined;
+    if (hasReportedVisit) onLeavePage(previousUrl);
     maxScrollDepth = 0;
     lastActiveTime = Date.now();
     reportInitialVisit(nextUrl, previousUrl);
@@ -394,18 +412,28 @@ function initContentScript() {
     reapplyHighlights({ clearExisting: true });
   }
 
-  const spaNavigationBridge = globalThis.__browserRecallSpaNavigationBridge;
   if (spaNavigationBridge?.addListener) {
     spaNavigationBridge.addListener((url) => {
-      queueMicrotask(() => handleSameDocumentNavigation(url));
+      handleSameDocumentNavigation(url);
     });
   }
 
   // Title changes: cache locally so leave_page includes the latest title.
-  function observeTitle(el) {
-    new MutationObserver(() => {
+  function cacheCurrentPageTitle() {
+    if (
+      !spaNavigationBridge?.isNavigating() &&
+      pageIdentity.isSameDocumentPageUrl(activePageUrl, window.location.href)
+    ) {
       latestTitle = document.title;
-    }).observe(el, { childList: true, characterData: true, subtree: true });
+    }
+  }
+
+  function observeTitle(el) {
+    new MutationObserver(cacheCurrentPageTitle).observe(el, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
   }
   const titleEl = document.querySelector('title');
   if (titleEl) {
@@ -416,7 +444,7 @@ function initContentScript() {
       const added = document.querySelector('title');
       if (added) {
         headObs.disconnect();
-        latestTitle = document.title;
+        cacheCurrentPageTitle();
         observeTitle(added);
       }
     });
@@ -782,13 +810,10 @@ function initContentScript() {
               const oldSlug = noteSlug;
               noteSlug = response.noteSlug;
               note.slug = response.noteSlug;
-              document
-                .querySelectorAll(
-                  `mark.browser-recall-highlight[data-note-slug="${cssEscape(oldSlug)}"]`,
-                )
-                .forEach((mark) => {
-                  mark.dataset.noteSlug = response.noteSlug;
-                });
+              item.dataset.noteSlug = response.noteSlug;
+              // Keep panel and composed-tree mark identities on the same shared
+              // replacement path as the live-page editor after the daemon commits.
+              highlightLifecycle.replaceNote(oldSlug, response.noteSlug);
             },
             onError(error) {
               showErrorNotification(error.message);
@@ -844,7 +869,18 @@ function initContentScript() {
       const markdown = extractMarkdown();
       sendResponse({ success: true, markdown });
     } else if (request.action === 'getPageIdentity') {
+      handleSameDocumentNavigation(window.location.href);
       sendResponse({ success: true, ...getPageIdentity() });
+    } else if (request.action === 'sameDocumentNavigation') {
+      if (typeof request.url !== 'string' || !request.url) {
+        sendResponse({
+          success: false,
+          error: 'Same-document navigation URL is missing',
+        });
+      } else {
+        handleSameDocumentNavigation(request.url);
+        sendResponse({ success: true });
+      }
     } else if (request.action === 'getStructuredSelectionText') {
       try {
         const payload = getStructuredSelectionPayload();
@@ -899,6 +935,7 @@ function initContentScript() {
                 action: 'createNote',
                 pageSlug: slug,
                 url: window.location.href,
+                title: document.title,
                 excerpt: preparedSelection.excerpt,
                 note: '',
                 cssPath: preparedSelection.cssPath,

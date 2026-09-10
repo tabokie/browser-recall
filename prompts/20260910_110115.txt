@@ -1,0 +1,15 @@
+- I just highlight a sentence, but in the "Book" this entry shows the raw web URL but not page title, even though in timeline the page has correct title. Why is this? [$bugfix](/Users/xyt/.agents/skills/bugfix/SKILL.md)
+- What do you mean by "after a daemon restart"?
+- But I didn'
+- But I didn't restart while the browser tab remained open. And I don't understand how restart could change data consistency. The original model was, we get the latest and correct version of a data by reading checkpoint and replaying logs. If the durable checkpoint is lagging, the logs should patch it up to latest.
+- I see. Is it fixed properly now?
+- I think that is fine. It was a deliberate choice to omit details for infrequent page accesses.
+- I navigated to a video in YouTube search page, but the extension didn't recognize the jump and still display information for the old YouTube homepage.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them all
+- Continue
+- Continue
+- Please review my uncommitted changes
+- Fix it
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) signoff model name="GPT-5.6 Sol, GPT-6 Astra"
+- Yes

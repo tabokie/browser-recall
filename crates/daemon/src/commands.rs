@@ -747,7 +747,27 @@ pub async fn create_note(
             .and_then(|value| value.url.clone())
             .or(input.url)
             .ok_or_else(|| "Cannot determine page URL for note".to_string())?;
-        let page_title = page.and_then(|value| value.title).or(input.title);
+        let page_title = match page.and_then(|value| value.title) {
+            Some(title) => Some(title),
+            None => {
+                let settings = storage
+                    .load_entity("manifest:settings")
+                    .await
+                    .map_err(|error| error.to_string())?;
+                input
+                    .title
+                    .as_deref()
+                    .map(|title| {
+                        crate::capture_policy::trim_title_from_settings(
+                            settings.as_ref(),
+                            title,
+                            &page_url,
+                        )
+                    })
+                    .transpose()?
+                    .filter(|title| !title.is_empty())
+            }
+        };
 
         replay_entries_in_transaction(
             transaction,

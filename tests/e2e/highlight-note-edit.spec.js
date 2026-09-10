@@ -11,6 +11,102 @@ import {
 } from './helpers.js';
 
 test.describe('Highlight note edit', () => {
+  test('highlight preserves the live page title when only Timeline retains the earlier visit', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/highlight-without-page-projection', {
+      title: 'Transient Page Highlight | Example Site',
+      body: '<p>The durable highlight must retain this page title.</p>',
+    });
+    const pageUrl = localServer.url('/highlight-without-page-projection');
+    const visitedAt = Date.now();
+    const visitDate = new Date(visitedAt);
+    const logDate = `${visitDate.getFullYear()}-${String(visitDate.getMonth() + 1).padStart(2, '0')}-${String(visitDate.getDate()).padStart(2, '0')}`;
+    const settings = settingsCheckpoint({
+      titleCleanupEnabled: true,
+      titleTrimRules: [
+        { urlPrefix: localServer.baseUrl, action: 'remove_after_pipe' },
+      ],
+    });
+
+    await resetAndSeed(extContext, extensionId, [settings]);
+    const page = await extContext.newPage();
+    await page.goto(pageUrl);
+    await page.waitForLoadState('domcontentloaded');
+
+    // Construct a missing transient page projection deterministically. Timeline
+    // retains the acknowledged visit, but selective checkpoints omit this page.
+    await resetAndSeed(extContext, extensionId, [
+      settings,
+      {
+        path: `logs/test-device/${logDate}.jsonl`,
+        lines: [
+          {
+            timestamp: visitedAt,
+            action: 'visit_page',
+            url: pageUrl,
+            title: 'Transient Page Highlight',
+            referrerUrl: null,
+          },
+        ],
+      },
+      {
+        path: 'views/manifest/replay-progress.json',
+        data: { 'test-device': visitedAt },
+      },
+    ]);
+
+    await page.locator('p').selectText();
+    const helper = await openHelperPage(extContext, extensionId);
+    // Apply the test policy after recovery has replayed any reset-setting logs.
+    for (const key of ['titleCleanupEnabled', 'titleTrimRules']) {
+      const saved = await helper.evaluate(
+        ({ key, value }) =>
+          chrome.runtime.sendMessage({
+            action: 'saveSettingsKey',
+            key,
+            value,
+          }),
+        { key, value: settings.data[key] },
+      );
+      expect(saved.success).toBe(true);
+    }
+    const seededSettings = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'readDesktopValue',
+        key: 'manifest:settings',
+      }),
+    );
+    expect(seededSettings.value).toMatchObject({ titleCleanupEnabled: true });
+    const missingPage = await helper.evaluate(
+      (slug) =>
+        chrome.runtime.sendMessage({
+          action: 'readDesktopValue',
+          key: `page:${slug}`,
+        }),
+      getSlugForUrl(pageUrl),
+    );
+    expect(missingPage.value).toBeNull();
+    const createResponse = await helper.evaluate(async (url) => {
+      const [tab] = await chrome.tabs.query({ url });
+      return chrome.tabs.sendMessage(tab.id, { action: 'highlightSelection' });
+    }, pageUrl);
+    expect(createResponse.success).toBe(true);
+
+    const pageInfo = await helper.evaluate(
+      (slug) => chrome.runtime.sendMessage({ action: 'getPageInfo', slug }),
+      getSlugForUrl(pageUrl),
+    );
+    expect(pageInfo.success).toBe(true);
+    expect(pageInfo.entry.title).toBe('Transient Page Highlight');
+
+    await helper.close();
+    await page.close();
+  });
+
   test('live-page note editor stays private and does not reach page input handlers', async ({
     extContext,
     extensionId,
@@ -690,7 +786,9 @@ test.describe('Highlight note edit', () => {
                 return new Promise((resolve, reject) => {
                   globalThis.__releaseBrowserRecallPdfNoteUpdate = () => {
                     delete globalThis.__releaseBrowserRecallPdfNoteUpdate;
-                    sendMessage(request, ...args).then(resolve, reject);
+                    const response = sendMessage(request, ...args);
+                    response.then(resolve, reject);
+                    return response;
                   };
                 });
               }
@@ -755,18 +853,21 @@ test.describe('Highlight note edit', () => {
       const [result] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         world: 'ISOLATED',
-        func: () => {
+        func: async () => {
           const release = globalThis.__releaseBrowserRecallPdfNoteUpdate;
           if (typeof release !== 'function') {
             return { success: false, error: 'delayed update is not pending' };
           }
-          release();
-          return { success: true };
+          return await release();
         },
       });
       return result.result;
     }, pageUrl);
-    expect(releasedUpdate).toEqual({ success: true });
+    expect(releasedUpdate).toMatchObject({ success: true });
+    await expect(editedItem).toHaveAttribute(
+      'data-note-slug',
+      releasedUpdate.noteSlug,
+    );
     await expect(
       highlightsPanelHost
         .locator('.highlight-item .highlight-note-text')

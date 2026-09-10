@@ -15,6 +15,9 @@ async fn note_command_returns_committed_response_and_mutation_together() {
         .ensure_layout("device-a")
         .await
         .expect("storage layout");
+    commands::ensure_default_settings(&storage, "device-a")
+        .await
+        .expect("settings initialized by daemon startup");
     let authority = CommandAuthority::new(storage.clone(), "device-a".to_string());
     let page_slug =
         generate_slug_from_url("https://example.com/authority-note").expect("page slug");
@@ -316,6 +319,9 @@ async fn note_pin_toggle_does_not_require_a_page_url() {
         .ensure_layout("device-a")
         .await
         .expect("storage layout");
+    commands::ensure_default_settings(&storage, "device-a")
+        .await
+        .expect("settings initialized by daemon startup");
     let authority = CommandAuthority::new(storage, "device-a".to_string());
     let created = authority
         .execute(

@@ -174,10 +174,13 @@ Config: `playwright.config.js`. Tests: `tests/e2e/*.spec.js`. Runs use one worke
 
 Hosted CI also runs `npm run ci:test-extension-e2e`, covering the popup,
 snapshot-highlight, snapshot resource/shadow-DOM, and actual platform-font
-regression suites with pinned Chromium, followed by the staged Firefox
-compatibility smoke suite. The Windows job separately runs the Win32-only
-locked-artifact replacement test before building and launching the native smoke
-executable.
+regression suites with pinned Chromium. Navigation regressions include delayed
+YouTube metadata and failed delivery recovery; the full highlight-note editing
+suite covers daemon title cleanup when only Timeline retains the earlier visit,
+and PDF panel save/retry behavior through the real daemon. The staged
+Firefox compatibility smoke suite follows those capture checks. The Windows
+job separately runs the Win32-only locked-artifact replacement test before
+building and launching the native smoke executable.
 
 Two opt-in local smokes cross native browser boundaries that headless
 Playwright cannot: `npm run test:shortcut:native` launches a disposable headed

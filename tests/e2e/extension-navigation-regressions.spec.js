@@ -9,6 +9,7 @@ import {
   pageEntityFixture,
   noteEntityFixture,
   waitForVisitRecorded,
+  seededRandom,
 } from './helpers.js';
 
 async function readPageEntity(helper, url) {
@@ -118,6 +119,362 @@ async function countReloadWarnings(page, reloadMessage) {
 }
 
 test.describe('extension navigation regressions', () => {
+  test('reconciles navigation before content capture is ready without replaying superseded DOM', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addRawPage(
+      '/early-navigation',
+      `<!doctype html>
+      <title>Early Navigation</title><main>Initial document</main>
+      <script src="/hold-navigation-parser.js"></script>`,
+    );
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+    const helper = await openHelperPage(extContext, extensionId);
+    const page = await extContext.newPage();
+    let releaseParser;
+    let resolveParserBlocked;
+    const parserBlocked = new Promise((resolve) => {
+      resolveParserBlocked = resolve;
+    });
+    await page.route('**/hold-navigation-parser.js', (route) => {
+      releaseParser = () =>
+        route.fulfill({ contentType: 'text/javascript', body: '' });
+      resolveParserBlocked();
+    });
+    await page.goto(localServer.url('/early-navigation'), {
+      waitUntil: 'commit',
+    });
+    await parserBlocked;
+    try {
+      await page.waitForFunction(
+        () => window.__browserRecallSpaNavigationObserverInstalled,
+      );
+      await page.evaluate(() =>
+        history.pushState({}, '', '/early-intermediate'),
+      );
+      await page.evaluate(() => {
+        History.prototype.pushState.call(history, {}, '', '/early-final');
+        document.title = 'Final Early Destination';
+      });
+    } finally {
+      await releaseParser();
+    }
+    await page.waitForLoadState('load');
+    const destinationUrl = localServer.url('/early-final');
+    await expect
+      .poll(() => readPageEntity(helper, destinationUrl))
+      .toMatchObject({
+        title: 'Final Early Destination',
+      });
+    const intermediate = await readPageEntity(
+      helper,
+      localServer.url('/early-intermediate'),
+    );
+    expect(intermediate).toBeNull();
+    await page.close();
+    await helper.close();
+  });
+
+  // Exhaust quick retries without a popup identity read rescuing capture. Cover
+  // diagnostic cleanup on ordinary pages and pages with saved-note markers.
+  for (const [deliveryFailures, recovery] of [
+    [1, 'retry'],
+    [3, 'retry'],
+    [3, 'new navigation'],
+  ]) {
+    test(`recovers browser navigation after ${deliveryFailures} failed deliveries via ${recovery}`, async ({
+      extContext,
+      extensionId,
+      setupDir,
+      localServer,
+    }) => {
+      localServer.addPage('/navigation-delivery', {
+        title: 'Navigation Delivery',
+        body: '<main>Navigation delivery recovery</main>',
+      });
+      const markedUrl = localServer.url('/superseding-destination');
+      const markedSlug = getSlugForUrl(markedUrl);
+      await resetAndSeed(extContext, extensionId, [
+        settingsCheckpoint(),
+        ...(recovery === 'new navigation'
+          ? [
+              {
+                path: pageCheckpointPath(markedSlug),
+                data: pageEntityFixture({
+                  slug: markedSlug,
+                  url: markedUrl,
+                  title: 'Recovered Destination',
+                  childIds: ['note:navigation-recovery-note'],
+                }),
+              },
+              {
+                path: 'objects/notes/navigation-recovery-note.json',
+                data: noteEntityFixture({
+                  slug: 'navigation-recovery-note',
+                  url: markedUrl,
+                  excerpt: ['Navigation delivery recovery'],
+                  cssPath: ['main'],
+                  note: '',
+                }),
+              },
+            ]
+          : []),
+      ]);
+      const helper = await openHelperPage(extContext, extensionId);
+      const page = await extContext.newPage();
+      const sourceUrl = localServer.url('/navigation-delivery');
+      const destinationUrl = localServer.url('/delivery-recovered');
+      let recoveredUrl = destinationUrl;
+      await page.goto(sourceUrl);
+      await waitForContentScript(helper, page, sourceUrl);
+      await expect.poll(() => readPageEntity(helper, sourceUrl)).not.toBeNull();
+      const worker = extContext.serviceWorkers()[0];
+      await worker.evaluate(
+        ({ url, deliveryFailures }) => {
+          const original = chrome.tabs.sendMessage;
+          globalThis.navigationDeliveryAttempts = 0;
+          globalThis.navigationDeliveryBlocked = deliveryFailures === 3;
+          globalThis.restoreNavigationDelivery = () => {
+            chrome.tabs.sendMessage = original;
+          };
+          chrome.tabs.sendMessage = function (tabId, message, ...args) {
+            if (
+              message.action === 'sameDocumentNavigation' &&
+              message.url === url
+            ) {
+              globalThis.navigationDeliveryAttempts += 1;
+              if (
+                globalThis.navigationDeliveryBlocked ||
+                globalThis.navigationDeliveryAttempts <= deliveryFailures
+              ) {
+                return Promise.reject(
+                  new Error('Forced missing navigation receiver'),
+                );
+              }
+            }
+            return original.call(this, tabId, message, ...args);
+          };
+        },
+        { url: destinationUrl, deliveryFailures },
+      );
+      try {
+        await page.evaluate((url) => {
+          History.prototype.pushState.call(history, {}, '', url);
+          document.title = 'Recovered Destination';
+        }, destinationUrl);
+        if (deliveryFailures === 3) {
+          await expect
+            .poll(() =>
+              worker.evaluate(() => globalThis.navigationDeliveryAttempts),
+            )
+            .toBeGreaterThanOrEqual(3);
+          await expect
+            .poll(() => getBadgeForUrl(helper, destinationUrl))
+            .toMatchObject({ text: '!' });
+          const title = await helper.evaluate(async (url) => {
+            const [tab] = await chrome.tabs.query({ url });
+            return chrome.action.getTitle({ tabId: tab.id });
+          }, destinationUrl);
+          expect(title).toContain('Forced missing navigation receiver');
+          if (recovery === 'retry') {
+            // Recover without opening the popup or sending another navigation.
+            await worker.evaluate(() => {
+              globalThis.navigationDeliveryBlocked = false;
+            });
+          } else {
+            const prepared = await helper.evaluate(async (url) => {
+              const [tab] = await chrome.tabs.query({ url });
+              return chrome.runtime.sendMessage({
+                action: 'preparePopupBootstrapForTest',
+                tabId: tab.id,
+              });
+            }, destinationUrl);
+            expect(prepared.success).toBe(true);
+            const popup = await extContext.newPage();
+            try {
+              await popup.goto(
+                `chrome-extension://${extensionId}/${prepared.popupPath}`,
+              );
+              await expect(
+                popup.locator('#pageDiagnosticMessage'),
+              ).toContainText('Page navigation capture is delayed');
+              await expect(
+                popup.locator('#pageDiagnosticDetail'),
+              ).toContainText('navigation-delivery-failed');
+            } finally {
+              await popup.close();
+            }
+            const connector = await helper.evaluate(() =>
+              chrome.runtime.sendMessage({
+                action: 'getDesktopConnectorState',
+              }),
+            );
+            expect(connector.state).toBe('connected');
+            // A newer URL must replace the failed observation even while the old
+            // receiver remains blocked, and must clear the old tab diagnostic.
+            recoveredUrl = localServer.url('/superseding-destination');
+            await page.evaluate((url) => {
+              History.prototype.pushState.call(history, {}, '', url);
+              document.title = 'Recovered Destination';
+            }, recoveredUrl);
+          }
+        }
+        await expect
+          .poll(() => readPageEntity(helper, recoveredUrl), {
+            timeout: 10000,
+          })
+          .toMatchObject({
+            title: 'Recovered Destination',
+          });
+        const sourceLeave = await waitForHistoryEntry(
+          helper,
+          (entry) => entry.url === sourceUrl && entry.action === 'leave_page',
+        );
+        expect(sourceLeave.title).toBe('Navigation Delivery');
+        const attempts = await worker.evaluate(
+          () => globalThis.navigationDeliveryAttempts,
+        );
+        if (deliveryFailures === 1) expect(attempts).toBe(2);
+        else
+          expect(attempts).toBeGreaterThanOrEqual(recovery === 'retry' ? 4 : 3);
+        await expect
+          .poll(() => getBadgeForUrl(helper, recoveredUrl))
+          .toMatchObject({ text: '' });
+        const recoveredTitle = await helper.evaluate(async (url) => {
+          const [tab] = await chrome.tabs.query({ url });
+          return chrome.action.getTitle({ tabId: tab.id });
+        }, recoveredUrl);
+        expect(recoveredTitle).not.toContain(
+          'Forced missing navigation receiver',
+        );
+      } finally {
+        await worker.evaluate(() => globalThis.restoreNavigationDelivery());
+        await page.close();
+        await helper.close();
+      }
+    });
+  }
+
+  test('records a YouTube-style navigation that bypasses injected history wrappers', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    const navigationSeed = 'youtube-navigation-20260908';
+    const random = seededRandom(navigationSeed);
+    const videoPath = `/watch?v=${Math.floor(random() * 0xffffffff).toString(36)}`;
+    console.log(`[navigation seed] ${navigationSeed}`);
+    localServer.addRawPage(
+      '/youtube-results',
+      `<!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <title>YouTube Search Results</title>
+          <script>
+            window.addEventListener('DOMContentLoaded', () => {
+              document.getElementById('open-video').addEventListener('click', () => {
+                document.dispatchEvent(new CustomEvent('yt-navigate-start'));
+                History.prototype.pushState.call(
+                  history,
+                  {},
+                  '',
+                  '${videoPath}',
+                );
+              });
+            });
+          </script>
+        </head>
+        <body><button id="open-video">Open video</button></body>
+      </html>`,
+    );
+
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+
+    const searchUrl = localServer.url('/youtube-results');
+    const videoUrl = localServer.url(videoPath);
+    const helper = await openHelperPage(extContext, extensionId);
+    const page = await extContext.newPage();
+    await page.goto(searchUrl);
+    await waitForContentScript(helper, page, searchUrl);
+    await expect.poll(() => readPageEntity(helper, searchUrl)).not.toBeNull();
+
+    const worker = extContext.serviceWorkers()[0];
+    await worker.evaluate((url) => {
+      const original = chrome.tabs.sendMessage;
+      globalThis.navigationDelivered = false;
+      chrome.tabs.sendMessage = async function (tabId, message, ...args) {
+        const response = await original.call(this, tabId, message, ...args);
+        if (
+          message.action === 'sameDocumentNavigation' &&
+          message.url === url
+        ) {
+          globalThis.navigationDelivered = true;
+          chrome.tabs.sendMessage = original;
+        }
+        return response;
+      };
+    }, videoUrl);
+    await page.click('#open-video');
+    await expect(page).toHaveURL(videoUrl);
+    // Hold the destination DOM until the real browser event has crossed into
+    // the isolated content script. A synchronous title change hides this race.
+    await expect
+      .poll(() => worker.evaluate(() => globalThis.navigationDelivered))
+      .toBe(true);
+    await page.evaluate(() => {
+      document.title = 'Browser Recall Video - YouTube';
+      document.body.innerHTML = '<main>Browser Recall Video content</main>';
+      document.dispatchEvent(new CustomEvent('yt-navigate-finish'));
+    });
+    await expect
+      .poll(async () => {
+        const tabs = await helper.evaluate(() => chrome.tabs.query({}));
+        const tab = tabs.find((candidate) => candidate.url === videoUrl);
+        if (!tab?.id) return null;
+        const response = await helper.evaluate(
+          (tabId) =>
+            chrome.runtime.sendMessage({ action: 'getReportedUrl', tabId }),
+          tab.id,
+        );
+        return response.url;
+      })
+      .toBe(videoUrl);
+
+    const videoVisit = await waitForHistoryEntry(
+      helper,
+      (entry) => entry.url === videoUrl && entry.action === 'visit_page',
+    );
+    expect(videoVisit).toMatchObject({
+      title: 'Browser Recall Video - YouTube',
+      referrerUrl: searchUrl,
+    });
+
+    const prepared = await helper.evaluate(async (url) => {
+      const [tab] = await chrome.tabs.query({ url });
+      return chrome.runtime.sendMessage({
+        action: 'preparePopupBootstrapForTest',
+        tabId: tab.id,
+      });
+    }, videoUrl);
+    expect(prepared.success).toBe(true);
+    const popup = await extContext.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
+    await expect(popup.locator('#dashboard')).toBeVisible();
+    await expect(popup.locator('#pageTitle')).toHaveText(
+      'Browser Recall Video - YouTube',
+    );
+    await expect(popup.locator('#pageUrl')).toHaveText(videoUrl);
+
+    await popup.close();
+    await page.close();
+    await helper.close();
+  });
+
   test('records a new page visit after same-tab history navigation', async ({
     extContext,
     extensionId,

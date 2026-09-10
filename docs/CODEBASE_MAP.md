@@ -44,14 +44,15 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `apps/desktop/src-tauri/src/shell_contract.rs` | Typed nullable desktop-shell command response plus the route-only state injected into the warm webview |
 | `apps/desktop/src-tauri/capabilities/main.json` | Main webview permission for runtime and storage event subscriptions |
 | `apps/desktop/src-tauri/src/search.rs` | Desktop-side search adapters/helpers |
-| `apps/extension/background.js` | Thin connector runtime: immediate hidden toolbar/`Alt+R` popup launch, asynchronous authoritative bootstrap handoff, popup RPC, buffering, pairing, snapshot/capture forwarding |
+| `apps/extension/background.js` | Thin connector runtime: browser-level same-document navigation forwarding with quick then ongoing delivery retries and tab-scoped failure diagnostics, immediate hidden toolbar/`Alt+R` popup launch, asynchronous authoritative bootstrap handoff, popup RPC, buffering, pairing, snapshot/capture forwarding |
 | `apps/extension/browser-build-target.js` | Staging-generated immutable Chromium/Firefox build target loaded before adapter entry points |
 | `apps/extension/browser-api.js` | Context-safe WebExtension adapter driven by the staged build target; exposes execution context and centralized shadow-root capabilities; Orion's Chrome-extension mode intentionally follows the Chromium path |
 | `apps/extension/browser-privileged-api.js` | Background-only validation boundary for privileged WebExtension namespaces omitted from Firefox content contexts |
 | `apps/extension/browser-identity.js` | Product identity detection for pairing, kept separate from the artifact build target; recognizes Orion's Kagi marker before Chrome-compatible user-agent text |
 | `apps/extension/icon-paths.js` | Packaged default, stop-recording, and special-state toolbar icon paths |
 | `apps/extension/background-test-control.js` | Test-only background RPC handlers staged by `tests/fixtures/test-extension.mjs` |
-| `apps/extension/content.js` | Visit/attention capture and browser-message adapter for shared highlight and Markdown extraction modules |
+| `apps/extension/content.js` | Visit/attention capture, live-URL reconciliation and idempotent same-document navigation handling, and browser-message adapter for shared highlight and Markdown extraction modules |
+| `apps/extension/spa-navigation-bridge.js` | Document-start page-world navigation adapter and YouTube navigation start/finish lifecycle; queues observations until content capture initializes |
 | `packages/core/highlight-lifecycle.js` | Shared prepared-selection interface with strict versioned light-DOM and composed shadow-root selector-plus-block-offset anchors in aligned `cssPath` strings, explicit legacy selector anchors, owned-mark intersection rejection, exact-offset reapply, missing-mark hydration repair, and disposal for live pages and snapshots |
 | `packages/core/markdown-extractor.js` | Shared complete DOM-to-Markdown conversion plus the generated classic content-script bridge used for searchable snapshot sidecars |
 | `packages/core/snapshot-html.js` | Pure snapshot preparation with authoritative identity replacement, strict identity validation, Browser Recall highlight cleanup, and unavailable external stylesheet deactivation |
@@ -66,7 +67,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `apps/extension/connector/command-buffer.js` | Sole owner of the short-lived outbound queue and its persisted count/byte snapshot |
 | `apps/extension/options-stub.html` | Stub page that points users to the desktop app |
 | `crates/daemon/src/command_authority.rs` | Shared Tauri/WebSocket semantic mutation classification, strict response validation, typed execution results, and committed mutation meaning |
-| `crates/daemon/src/commands.rs` | Replay-backed command and read implementations used behind daemon interfaces |
+| `crates/daemon/src/commands.rs` | Replay-backed command and read implementations used behind daemon interfaces, including daemon title cleanup for live note capture without an existing page title |
 | `crates/replay/src/settings.rs` | Replay-owned persistent settings keys, light-theme default, enum domains (including amber and mono color schemes), collection shapes, and numeric bounds shared by every log/command/sync ingress |
 | `crates/daemon/src/settings.rs` | Thin re-export of the replay-owned settings contract for daemon commands, reads, capture policy, startup, and sync |
 | `crates/daemon/src/config.rs` | Daemon configuration persistence and explicit unconfigured → folder-selected → setup-complete transitions; no default data path |
@@ -188,7 +189,8 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `tests/integration/snapshot-resource-limits.test.js` | Streamed per-resource byte limits with missing or oversized `Content-Length`, including the generated classic-script interface |
 | `tests/e2e/seeded-combination-workflows.spec.js` | Seeded randomized extension workflow combining visits, notes, list pins, and popup reads |
 | `tests/e2e/manual-seed-workflow.spec.js` | Real daemon/connector regression coverage for the manual seeded-data helper, including valid current settings and post-seed queue flush |
-| `tests/e2e/extension-navigation-regressions.spec.js` | Browser navigation coverage for same-document transitions, new-tab referrer relationships, page summaries, and highlight lifecycle behavior |
+| `tests/e2e/extension-navigation-regressions.spec.js` | Browser navigation coverage for ordinary and History-wrapper-bypassing transitions, failed delivery recovery, delayed YouTube metadata through the popup, new-tab referrers, page summaries, and highlight lifecycle behavior |
+| `tests/e2e/highlight-note-edit.spec.js` | Canonical extension CI coverage for live highlight titles, editing and reapply, plus PDF panel failure/retry and committed replacement identity |
 | `tests/e2e/desktop-locale-setting.spec.js` | Registry-complete desktop locale workflow through the real connector, daemon, settings checkpoints, UI reloads, invalid-override reporting, and RTL verification |
 | `tests/e2e/extension-localization.spec.js` | Browser-native WebExtension catalog selection using the packaged extension and the browser-reported UI locale |
 | `tests/smoke/macos-wkwebview-chart-layout.{mjs,swift}` | Native WKWebView regression probe for the first-selection chart-to-list spacing shift that Playwright WebKit does not reproduce |

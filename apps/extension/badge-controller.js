@@ -264,6 +264,11 @@ export function createBadgeController({
       return;
     }
     if (servicePaused) return;
+    // Restoring a saved-note marker must clear the failure tooltip as well as '!'.
+    await api.action.setTitle({
+      title: tr('extensionName', 'Browser Recall'),
+      tabId,
+    });
     await api.action.setBadgeText({ text: '', tabId });
     await api.action.setIcon({ path: iconPaths, tabId });
   }

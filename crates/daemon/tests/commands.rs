@@ -1721,6 +1721,9 @@ async fn command_error_and_normalization_paths_are_explicit() {
         .expect_err("non-string css path array member fails"),
         "cssPath array must contain strings only"
     );
+    commands::ensure_default_settings(&storage, "device-a")
+        .await
+        .expect("settings initialized by daemon startup");
     let note_response = create_note(
         &storage,
         "device-a",

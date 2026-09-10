@@ -317,6 +317,7 @@ function createFirefoxWebExtensionApi({
     webNavigation: {
       onCommitted: createEvent(),
       onCreatedNavigationTarget: createEvent(),
+      onHistoryStateUpdated: createEvent(),
     },
   };
 
