@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { waitForWebviewPainted } from '../smoke/desktop-startup-paint.mjs';
 import { expect, test } from '@playwright/test';
 import fs from 'fs';
 import http from 'http';
@@ -964,12 +966,16 @@ async function installDesktopBridgeMock(page, options = {}) {
           case 'getDesktopConnectorState':
             return {
               success: true,
-              state: setupComplete ? 'connected' : 'setup_required',
+              state: seed.session.serviceError
+                ? 'paused'
+                : setupComplete
+                  ? 'connected'
+                  : 'setup_required',
               port: setupComplete ? 28471 : null,
               deviceId: setupComplete ? 'visual-device' : null,
               hasToken: setupComplete,
-              lastError: null,
-              lastErrorCode: null,
+              lastError: seed.session.serviceError?.message ?? null,
+              lastErrorCode: seed.session.serviceError?.code ?? null,
               dataFolder: setupComplete ? '/tmp/browser-recall-visual' : null,
             };
           case 'getDesktopShellState':
@@ -1438,6 +1444,44 @@ async function openDesktopUi(page, desktopUrl, options = {}) {
   }
   await page.waitForFunction(() => document.body.dataset.ready === 'true');
   await page.evaluate(() => document.fonts?.ready);
+}
+
+async function configureDesktopVisualAssets(
+  page,
+  gutter,
+  isolateBookFont = false,
+) {
+  await page.route(/\.(css|html)$/, async (route) => {
+    const response = await route.fetch();
+    let body = await response.text();
+    // Alias the family so installed fonts cannot supply missing bundled faces.
+    // Exercise every weight/style used by the captured UI: a locally installed
+    // bold italic face previously hid the missing asset from WebKit tests.
+    if (isolateBookFont) {
+      body = body.replaceAll(
+        'Gentium Book Plus',
+        'Browser Recall Test Gentium Book Plus',
+      );
+    }
+    if (gutter !== undefined && route.request().url().endsWith('/shared.css')) {
+      // Force both Chromium geometries independently of macOS preferences.
+      body +=
+        gutter === 0
+          ? '\n.main { scrollbar-width: none !important; }'
+          : '\n.main { scrollbar-width: auto !important; scrollbar-color: auto !important; } .main::-webkit-scrollbar { width: 11px; }';
+    }
+    await route.fulfill({ response, body });
+  });
+}
+
+async function desktopScreenshotName(page, name) {
+  if (page.context().browser().browserType().name() !== 'chromium') return name;
+  // Chromium follows macOS scrollbar preferences. A reserved gutter also
+  // changes centered-sheet subpixel alignment; keep exact baselines for both.
+  const gutter = await page
+    .locator('.main')
+    .evaluate((element) => element.offsetWidth - element.clientWidth);
+  return name.replace('.png', `-gutter-${gutter}px.png`);
 }
 
 async function commitDesktopSearch(page, query) {
@@ -2059,6 +2103,76 @@ test.describe('desktop visual regression', () => {
         `Error: ${projectionError}`,
       );
       await expect(page.locator('#relatedResults')).not.toContainText('$1');
+    });
+  });
+
+  test('native startup paint check waits for delayed paused webview and rejects a blank window @webkit', async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      process.platform !== 'darwin',
+      'Uses the native smoke BMP conversion',
+    );
+    await page.setViewportSize({ width: 980, height: 680 });
+    await serveDesktopUi(async (desktopUrl) => {
+      await installDesktopBridgeMock(page, {
+        setupComplete: true,
+        extraSession: {
+          serviceError: {
+            code: 'daemon_start_failed',
+            message:
+              'Failed to start Browser Recall daemon: missing field referrerUrl',
+          },
+        },
+      });
+      await page.goto('about:blank');
+      await page.addStyleTag({ content: 'html { background: white; }' });
+      let captures = 0;
+      let blankBitmap;
+      let navigation;
+      const capture = async () => {
+        const png = testInfo.outputPath('startup.png');
+        const bmp = testInfo.outputPath('startup.bmp');
+        await page.screenshot({ path: png, omitBackground: true });
+        execFileSync('/usr/bin/sips', [
+          '-s',
+          'format',
+          'bmp',
+          png,
+          '--out',
+          bmp,
+        ]);
+        const bitmap = fs.readFileSync(bmp);
+        if (++captures === 1) {
+          blankBitmap = bitmap;
+          navigation = page.goto(desktopUrl);
+        }
+        return bitmap;
+      };
+      try {
+        await waitForWebviewPainted(capture);
+        expect(captures).toBeGreaterThan(1);
+        await expect(page.locator('#serviceErrorBanner')).toBeVisible();
+        await expect(page.locator('#serviceErrorMessage')).toContainText(
+          'missing field referrerUrl',
+        );
+        await expect(page.locator('#serviceErrorResumeBtn')).toBeVisible();
+        const actions = await page.evaluate(() =>
+          window.__desktopVisualHarness
+            .bridgeActionInvocations()
+            .map((request) => request.action),
+        );
+        expect(actions).not.toContain('getSettings');
+        expect(actions).not.toContain('listHistoryFiles');
+        await expect(
+          waitForWebviewPainted(() => blankBitmap, {
+            timeoutMs: 50,
+            pollIntervalMs: 10,
+          }),
+        ).rejects.toThrow('Desktop webview remained blank after startup');
+      } finally {
+        await navigation;
+      }
     });
   });
 
@@ -2802,9 +2916,9 @@ test.describe('desktop visual regression', () => {
     });
   });
 
-  test('highlight history lays out date-grouped highlights on a paper sheet @webkit', async ({
-    page,
-  }) => {
+  async function checkHighlightHistoryPaper(page, gutter) {
+    test.setTimeout(60_000); // Six independent screenshot diagnostics may each time out.
+    await configureDesktopVisualAssets(page, gutter, true);
     const newerDay = Date.UTC(2026, 6, 30, 12);
     const olderDay = newerDay - 24 * 60 * 60 * 1000;
     const secondUrl = 'https://example.com/second-highlight-page';
@@ -2901,6 +3015,14 @@ test.describe('desktop visual regression', () => {
         },
       });
 
+      if (gutter !== undefined) {
+        expect(
+          await page
+            .locator('.main')
+            .evaluate((main) => main.offsetWidth - main.clientWidth),
+        ).toBe(gutter);
+      }
+
       await page.locator('#highlightsHistoryBtn').click();
 
       expect(await page.locator('#results .spinner').count()).toBe(0);
@@ -2994,6 +3116,9 @@ test.describe('desktop visual regression', () => {
         note: compactNote,
       });
 
+      // Keep later visual states reachable after a pixel mismatch so one run
+      // reports every affected Book snapshot. Soft assertions still fail the test.
+      const paperSheet = page.locator('#results .highlight-history-list');
       const managedSelectionState = await entries.first().evaluate((entry) => {
         const excerpt = entry.querySelector('.detail-note-excerpt');
         const note = entry.querySelector('.detail-note-content');
@@ -3038,16 +3163,19 @@ test.describe('desktop visual regression', () => {
         managedTextUsesVisibleGrayscaleSelectionFill: true,
         managedTextPreservesBaseInk: true,
       });
-      await expect(
-        page.locator('#results .highlight-history-list'),
-      ).toHaveScreenshot(
-        process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'webkit'
-          ? 'desktop-highlight-history-selection-webkit.png'
-          : 'desktop-highlight-history-selection-amber.png',
-        {
-          animations: 'disabled',
-        },
-      );
+      await expect
+        .soft(paperSheet)
+        .toHaveScreenshot(
+          await desktopScreenshotName(
+            page,
+            process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'webkit'
+              ? 'desktop-highlight-history-selection-webkit.png'
+              : 'desktop-highlight-history-selection-amber.png',
+          ),
+          {
+            animations: 'disabled',
+          },
+        );
       await page.evaluate(() => window.getSelection()?.removeAllRanges());
 
       const darkSelectionState = await entries.first().evaluate((entry) => {
@@ -3180,16 +3308,19 @@ test.describe('desktop visual regression', () => {
       expect(pointerTitleSelection.text.length).toBeGreaterThan(5);
       expect('Second highlight page').toContain(pointerTitleSelection.text);
       expect(pointerTitleSelection.openedUrls).not.toContain(secondUrl);
-      await expect(
-        page.locator('#results .highlight-history-list'),
-      ).toHaveScreenshot(
-        process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'webkit'
-          ? 'desktop-highlight-history-title-selection-webkit.png'
-          : 'desktop-highlight-history-title-selection-amber.png',
-        {
-          animations: 'disabled',
-        },
-      );
+      await expect
+        .soft(paperSheet)
+        .toHaveScreenshot(
+          await desktopScreenshotName(
+            page,
+            process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'webkit'
+              ? 'desktop-highlight-history-title-selection-webkit.png'
+              : 'desktop-highlight-history-title-selection-amber.png',
+          ),
+          {
+            animations: 'disabled',
+          },
+        );
       await page.evaluate(() => window.getSelection()?.removeAllRanges());
 
       const noteDragBehavior = await entries
@@ -3361,7 +3492,9 @@ test.describe('desktop visual regression', () => {
           const unnotedDeleteRect = unnotedDelete.getBoundingClientRect();
           const unnotedEditRect = unnotedEdit.getBoundingClientRect();
           const gentiumBookPlusFaces = [...document.fonts].filter(
-            (face) => face.family.replaceAll('"', '') === 'Gentium Book Plus',
+            (face) =>
+              face.family.replaceAll('"', '') ===
+              'Browser Recall Test Gentium Book Plus',
           );
           return {
             dateLabels: days.map(
@@ -3480,6 +3613,12 @@ test.describe('desktop visual regression', () => {
             gentiumBookPlusLoaded: gentiumBookPlusFaces.some(
               (face) => face.style === 'normal' && face.status === 'loaded',
             ),
+            gentiumBookPlusBoldItalicLoaded: gentiumBookPlusFaces.some(
+              (face) =>
+                face.style === 'italic' &&
+                face.weight === '700' &&
+                face.status === 'loaded',
+            ),
             allInkAndRulesAreGrayscale: [
               sheetStyle.borderColor,
               excerptStyle.color,
@@ -3528,6 +3667,7 @@ test.describe('desktop visual regression', () => {
         titleUsesPointerCursor: true,
         sheetBackground: 'rgb(255, 253, 244)',
         gentiumBookPlusLoaded: true,
+        gentiumBookPlusBoldItalicLoaded: true,
         allInkAndRulesAreGrayscale: true,
         actionButtonOpacity: ['0', '0'],
         actionButtonPointerEvents: ['none', 'none'],
@@ -3557,16 +3697,19 @@ test.describe('desktop visual regression', () => {
       expect(paperLayout.dateFontStyle).toBe('italic');
       expect(paperLayout.dateFontWeight).toBeGreaterThanOrEqual(700);
       expect(paperLayout.dateLetterSpacing).toBe('normal');
-      await expect(
-        page.locator('#results .highlight-history-list'),
-      ).toHaveScreenshot(
-        process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'webkit'
-          ? 'desktop-highlight-history-webkit.png'
-          : 'desktop-highlight-history-amber.png',
-        {
-          animations: 'disabled',
-        },
-      );
+      await expect
+        .soft(paperSheet)
+        .toHaveScreenshot(
+          await desktopScreenshotName(
+            page,
+            process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'webkit'
+              ? 'desktop-highlight-history-webkit.png'
+              : 'desktop-highlight-history-amber.png',
+          ),
+          {
+            animations: 'disabled',
+          },
+        );
 
       const unnotedEntry = entries.nth(1);
       const unnotedEdit = unnotedEntry.locator('.detail-note-action-btn.edit');
@@ -3584,16 +3727,19 @@ test.describe('desktop visual regression', () => {
       await expect(unnotedEdit).toHaveCSS('opacity', '1');
       await unnotedEntry.locator('.highlight-history-content').hover();
       await expect(unnotedEdit).toHaveCSS('opacity', '1');
-      await expect(
-        page.locator('#results .highlight-history-list'),
-      ).toHaveScreenshot(
-        process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'webkit'
-          ? 'desktop-highlight-history-unnoted-hover-webkit.png'
-          : 'desktop-highlight-history-unnoted-hover-amber.png',
-        {
-          animations: 'disabled',
-        },
-      );
+      await expect
+        .soft(paperSheet)
+        .toHaveScreenshot(
+          await desktopScreenshotName(
+            page,
+            process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'webkit'
+              ? 'desktop-highlight-history-unnoted-hover-webkit.png'
+              : 'desktop-highlight-history-unnoted-hover-amber.png',
+          ),
+          {
+            animations: 'disabled',
+          },
+        );
       await unnotedEdit.click();
       const newNoteEditor = unnotedEntry.locator('.detail-note-editor');
       await expect(newNoteEditor).toBeFocused();
@@ -3620,16 +3766,19 @@ test.describe('desktop visual regression', () => {
         editorIsRightOfHighlight: true,
         selectionInsideEditor: true,
       });
-      await expect(
-        page.locator('#results .highlight-history-list'),
-      ).toHaveScreenshot(
-        process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'webkit'
-          ? 'desktop-highlight-history-unnoted-editor-webkit.png'
-          : 'desktop-highlight-history-unnoted-editor-amber.png',
-        {
-          animations: 'disabled',
-        },
-      );
+      await expect
+        .soft(paperSheet)
+        .toHaveScreenshot(
+          await desktopScreenshotName(
+            page,
+            process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'webkit'
+              ? 'desktop-highlight-history-unnoted-editor-webkit.png'
+              : 'desktop-highlight-history-unnoted-editor-amber.png',
+          ),
+          {
+            animations: 'disabled',
+          },
+        );
       await newNoteEditor.press('Escape');
 
       const firstPageTitle = pageGroups
@@ -3692,16 +3841,19 @@ test.describe('desktop visual regression', () => {
         renderedNoteGeometry.textWidth,
         1,
       );
-      await expect(
-        page.locator('#results .highlight-history-list'),
-      ).toHaveScreenshot(
-        process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'webkit'
-          ? 'desktop-highlight-history-noted-editor-webkit.png'
-          : 'desktop-highlight-history-noted-editor-amber.png',
-        {
-          animations: 'disabled',
-        },
-      );
+      await expect
+        .soft(paperSheet)
+        .toHaveScreenshot(
+          await desktopScreenshotName(
+            page,
+            process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'webkit'
+              ? 'desktop-highlight-history-noted-editor-webkit.png'
+              : 'desktop-highlight-history-noted-editor-amber.png',
+          ),
+          {
+            animations: 'disabled',
+          },
+        );
       await expect(firstEntry.locator('textarea, input')).toHaveCount(0);
       const editorChrome = await editor.evaluate((element) => {
         const style = getComputedStyle(element);
@@ -3757,6 +3909,22 @@ test.describe('desktop visual regression', () => {
       await page.locator('#exploreBtn').click();
       await expect(page.locator('#results [data-justif]')).toHaveCount(0);
     });
+  }
+
+  test('highlight history lays out date-grouped highlights on a paper sheet @webkit', async ({
+    page,
+  }) => {
+    await checkHighlightHistoryPaper(
+      page,
+      page.context().browser().browserType().name() === 'chromium'
+        ? 0
+        : undefined,
+    );
+  });
+  test('highlight history lays out date-grouped highlights with a reserved scrollbar', async ({
+    page,
+  }) => {
+    await checkHighlightHistoryPaper(page, 11);
   });
 
   test('deleting a scrolled highlight keeps the neighboring content anchored', async ({
@@ -5054,9 +5222,8 @@ test.describe('desktop visual regression', () => {
     });
   });
 
-  test('history search keeps loaded results interactive and merges live visits without restarting @webkit', async ({
-    page,
-  }) => {
+  async function checkLiveSearch(page, gutter) {
+    await configureDesktopVisualAssets(page, gutter);
     const now = Date.now();
     const loadedUrl = 'https://example.com/steady-loaded';
     const streamedUrl = 'https://example.com/steady-streamed';
@@ -5090,6 +5257,13 @@ test.describe('desktop visual regression', () => {
         },
       });
 
+      if (gutter !== undefined) {
+        expect(
+          await page
+            .locator('.main')
+            .evaluate((element) => element.offsetWidth - element.clientWidth),
+        ).toBe(gutter);
+      }
       await commitDesktopSearch(page, 'steady');
       const loadedRow = page.locator(`.result-row[data-url="${loadedUrl}"]`);
       await expect(loadedRow).toBeVisible();
@@ -5188,7 +5362,7 @@ test.describe('desktop visual regression', () => {
         }
       });
       await expect(page.locator('#listQueryBuilder')).toHaveScreenshot(
-        'desktop-search-tracer-amber.png',
+        await desktopScreenshotName(page, 'desktop-search-tracer-amber.png'),
         {
           animations: 'allow',
           maxDiffPixelRatio: 0.01,
@@ -5200,7 +5374,7 @@ test.describe('desktop visual regression', () => {
       await expect(searchProgress).toHaveCSS('filter', 'none');
       await expect(tracePath).toHaveCSS('stroke-width', '1.25px');
       await expect(page.locator('#listQueryBuilder')).toHaveScreenshot(
-        'desktop-search-tracer-mono.png',
+        await desktopScreenshotName(page, 'desktop-search-tracer-mono.png'),
         {
           animations: 'allow',
           maxDiffPixelRatio: 0.01,
@@ -5259,6 +5433,22 @@ test.describe('desktop visual regression', () => {
       ).toBe(1);
       await expect(page.locator('#contentSearchSpinner')).toBeHidden();
     });
+  }
+
+  test('history search keeps loaded results interactive and merges live visits without restarting @webkit', async ({
+    page,
+  }) => {
+    await checkLiveSearch(
+      page,
+      page.context().browser().browserType().name() === 'chromium'
+        ? 0
+        : undefined,
+    );
+  });
+  test('history search keeps loaded results interactive with a reserved scrollbar', async ({
+    page,
+  }) => {
+    await checkLiveSearch(page, 11);
   });
 
   test('filtered history search consumes precise live visits without rereading the day log', async ({

@@ -80,6 +80,26 @@ test('extension CJK text uses the host system UI font fallback', async ({
       node.getBoundingClientRect();
     }
   }, CJK_SAMPLE);
+  // Glyph counts include missing-glyph boxes. Require actual distinct CJK
+  // glyphs before comparing which platform font supplied them.
+  const distinctSystemGlyphs = await popup.evaluate((sample) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 48;
+    canvas.height = 48;
+    const context = canvas.getContext('2d');
+    context.font = '24px system-ui';
+    return new Set(
+      [...sample].map((glyph) => {
+        context.clearRect(0, 0, 48, 48);
+        context.fillText(glyph, 0, 32);
+        return canvas.toDataURL();
+      }),
+    ).size;
+  }, CJK_SAMPLE);
+  expect(
+    distinctSystemGlyphs,
+    'CJK system glyphs are missing; run npm run ci:install-playwright to install browser system dependencies',
+  ).toBe(CJK_SAMPLE.length);
   const popupConfigured = await platformFontsForProbe(
     extContext,
     popup,

@@ -147,6 +147,25 @@ require their platform-specific environments described below and are not part
 of `npm run ci`. Run the complete local chain before committing and the relevant
 native smoke on its required platform when those paths change.
 
+`npm run build:test-daemon` is the explicit prerequisite for daemon-backed
+Playwright runs. The extension CI, Windows font CI, and cold-script commands
+run that build before Playwright starts. Compiling inside a 30-second fixture
+can fail only on a fresh runner; a prior local test run hides the problem by
+warming Cargo's cache. For a focused direct `npx playwright test` invocation,
+run `npm run build:test-daemon` first.
+
+To verify the same boundary locally with an empty build cache on macOS/Linux:
+
+```bash
+CARGO_TARGET_DIR="$(mktemp -d /tmp/browser-recall-ci-cold.XXXXXX)" npm run ci:test-windows-extension-font
+```
+
+The font scenario is cross-platform despite the CI job name. The temporary
+Cargo directory isolates the cold build from the normal cache; remove that
+specific temporary directory after inspection. This command exercises build,
+daemon launch, connector pairing, and the browser assertion without spending
+a GitHub Actions run.
+
 ### Unit Tests (Vitest)
 
 ~600 tests covering pure logic: search helpers, rule engine, utilities, sync, caching.
@@ -220,6 +239,28 @@ production CSS and verifies that highlighting a chart bar cannot move the page
 list; it skips on non-macOS hosts. Install both browsers with
 `npm run ci:install-desktop-visual-browsers`.
 
+Chromium element snapshots for highlight history and the search tracer include
+the measured main-panel scrollbar gutter in their filenames. macOS can use
+an overlay scrollbar (0 px gutter) or a reserved scrollbar (11 px), changing
+both available width and centered-sheet pixel alignment. Both Book and search
+tracer scenarios explicitly set and assert each gutter, independent of system
+preferences. Keep both baselines;
+an unrecognized gutter produces a missing-baseline failure rather than reusing
+another layout. Desktop visual CI runs on macOS 26, matching the macOS major
+version used to capture the committed baselines. Run baseline generation and
+verification on macOS 26 with the locked Playwright browsers. WebKit highlight
+history snapshots use exact pixel matching; do not compensate for a different
+macOS rendering environment by loosening one screenshot assertion at a time.
+
+The visual suite also runs the native startup paint-check helper against a
+browser that first produces a blank frame and then loads the paused desktop
+surface. The same test requires a persistently blank frame to fail. The native
+lifecycle smoke waits up to 15 seconds for a painted frame instead of assuming
+that a native window title means the webview has loaded. On failure the native
+smoke retains its screenshot, bitmap, isolated app logs, and error under
+`test-results/native-lifecycle/` before cleaning up its temporary app. These
+files are retained locally; the workflow does not upload them automatically.
+
 The native macOS lifecycle test registers a real status item and must never run in a persistent personal login session. Run it only in an ephemeral macOS user or disposable CI runner:
 
 ```bash
@@ -265,6 +306,92 @@ Playwright needs a Chromium binary. Install it if you haven't:
 ```bash
 npm run ci:install-playwright
 ```
+
+Both browser-install commands use `--with-deps`. On Linux this installs
+Playwright's system libraries and fonts, including CJK fonts; downloading only
+the browser leaves font fallback dependent on the runner image. The CJK font
+scenario checks distinct rendered glyphs before comparing platform font names,
+so identical missing-glyph boxes cannot masquerade as successful rendering.
+Linux dependency installation may require administrator privileges.
+
+### Reproducing CI Environment Differences
+
+- The Book date headings require the bundled Gentium Book Plus **bold italic**
+  face. Regular and italic faces alone allowed WebKit to use an installed bold
+  italic font on the developer machine while synthesizing the weight on CI.
+  The Book visual scenario aliases the CSS family in served HTML/CSS so installed
+  fonts cannot fill missing weights, and verifies the bold italic face loaded.
+  Removing that face reproduces the original 282-pixel WebKit mismatch locally.
+  Chromium runs the Book and search tracer scenarios with explicit 0- and
+  11-pixel gutters so both snapshot variants are checked on every run.
+  The three WOFF2 assets come from the official
+  [SIL Gentium Plus 6.200 release](https://software.sil.org/gentium/download/previous-versions/)
+  and use the existing `apps/desktop/ui/fonts/OFL.txt` license.
+- Windows native smoke cleanup must terminate the process tree while the desktop
+  parent is still alive. Killing the parent first can leave WebView2 descendants
+  holding the disposable profile open. `npm run ci:test-windows-cleanup`
+  includes a real Windows descendant with an exclusive file lock to exercise
+  the shared teardown helper; that case is explicitly skipped on other hosts.
+  Windows CI runs cleanup tests immediately after `npm ci`, before compiling
+  the desktop. Executable-artifact tests still run after the build.
+  The same suite checks an already-signalled process and nested read-only files
+  on every host. Windows releases its test lock only after the cleanup helper
+  reports an actual failed removal, then asserts that a retry occurred.
+  This handshake avoids relying on a fixed sleep to overlap removal and release.
+  Profile removal uses awaited `node:fs/promises.rm`: Node 24.20.0's native
+  `rmSync` maps Windows permission-denied errors to `EPERM` without retrying
+  them and lacks the asynchronous implementation's read-only-file handling.
+  The helper owns the bounded retry loop so failed attempts can be observed.
+  Persistent errors still fail and identify the child path that cannot be removed.
+  Teardown attempts every process stop and profile removal even after an error;
+  multiple errors are retained in an `AggregateError`, with the original smoke
+  failure first and as the cause.
+- macOS Rust tests and Clippy do not compile `#[cfg(target_os = "windows")]`
+  branches. Before changing Windows host code, run the real Windows target
+  check locally. On macOS, install the MinGW compiler and Windows Rust standard
+  library once, then use:
+
+  ```bash
+  brew install mingw-w64
+  rustup target add x86_64-pc-windows-gnu
+  npm run check:desktop:windows
+  ```
+
+  This command stages the UI and checks every desktop target, including the
+  login-item integration test, against the locked Windows dependencies. It was
+  verified with Rust 1.97.0 and Homebrew MinGW-w64 14.0.0_3. It catches Windows
+  type errors such as calling `into_owned()` on `winreg::RegValue.bytes`, which
+  is already a `Vec<u8>`. It does not execute Windows code or validate MSVC
+  linking, WebView2, registry access, or single-instance delivery; the native
+  Windows job remains required. That job builds before installing browsers so
+  compile errors fail early. The cross-check is an additional platform check,
+  not part of the host-only `npm run ci` chain.
+- `.gitattributes` keeps text checkouts LF even when Windows Git enables
+  `core.autocrlf`. The pinned Vite transform mishandles a CRLF shebang in an
+  imported `.mjs` script, causing Vitest to report a syntax error at the importing
+  test. A disposable checkout with `core.autocrlf=true` followed by
+  `npm run ci:test-windows-artifacts` exercises this import boundary on macOS too;
+  the native locked-executable scenario still requires Windows. Existing Windows
+  checkouts need their working files checked out again to apply the LF policy.
+- The stale-receiver popup scenario forces a state revision after preparing
+  the popup, keeps `getPageIdentity` delivery failing across every reread, and
+  verifies recovery after the test fault is cleared. A one-shot fault allowed
+  slower CI navigation to recover before the assertion and left the test reading
+  hidden diagnostic markup. Run it with
+  `npx playwright test tests/e2e/popup-lists.spec.js -g "receiver is stale"`.
+- macOS 15 and macOS 26 are different visual baseline environments even with
+  the same Playwright version. Keep the visual job and baseline host aligned;
+  the workflow invariant test guards the macOS 26 runner and browser dependency
+  installation commands. Matching the major version is not sufficient evidence
+  that raster output matches: inspect actual and diff images before attributing
+  a mismatch to the operating system or updating a baseline. The Book scenario
+  uses strict soft screenshot assertions to report all six visual states in
+  one failed run; its longer timeout allows those diagnostics to complete.
+  Failed visual jobs retain synthetic expected, actual, and diff PNGs in the
+  `desktop-visual-failure-screenshots` GitHub Actions artifact for seven days.
+  Download that artifact from the failed run before considering another run.
+  Linux font fallback and Windows native behavior still need their actual
+  operating systems for complete verification.
 
 ### Coverage Monitor
 

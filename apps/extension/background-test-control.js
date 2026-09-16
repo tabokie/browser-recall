@@ -38,6 +38,7 @@ async function handleResetForTest() {
   await control.resetEphemeralConnectorState();
   await globalThis.browserRecallPreparedPopupForTest?.reset?.();
   globalThis.browserRecallImmediateScriptNavigationsForTest.length = 0;
+  globalThis.browserRecallTabMessageFailuresForTest.length = 0;
   return { success: true };
 }
 
@@ -195,6 +196,7 @@ async function handleFailNextTabMessageForTest(request) {
       typeof request.messageAction === 'string' ? request.messageAction : null,
     tabId: Number.isFinite(request.tabId) ? request.tabId : null,
     error: request.error || 'Injected tab message failure',
+    repeat: request.repeat === true,
   });
   return { success: true };
 }

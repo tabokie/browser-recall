@@ -173,8 +173,11 @@ to the highlight block's first line. Starting a note from that control
 immediately establishes the two-column layout and focuses the right-side editor.
 Rendered note text and its contenteditable replacement share one fixed text
 measure so edit mode cannot narrow the note column or text box.
-The desktop bundle ships regular and italic Gentium Book Plus 6.200 webfonts
-under the SIL Open Font License for deterministic offline typography.
+The desktop bundle ships regular, italic, and bold italic Gentium Book Plus
+6.200 webfonts under the SIL Open Font License for deterministic offline
+typography. The bold italic face supplies the Book date headings explicitly;
+visual tests alias the family to prevent installed fonts from masking an
+unbundled weight.
 Rendered excerpts and notes use the self-hosted Justif 0.6.5 browser runtime
 for whole-paragraph line breaking, English hyphenation, hanging punctuation,
 and width-aware reflow, with compact native CSS justification as its explicit
@@ -474,3 +477,53 @@ E2E is the preferred product safety net for desktop and extension behavior. New 
 The CI cold-script job runs the complete JS/Rust coverage workflow and a daemon-backed Playwright check that manual seed generation preserves the daemon's current settings checkpoint and uses the same connector flush boundary as automated seeding. This keeps operational scripts from drifting after their primary workflows change.
 
 The desktop smoke / GUI parity suite remains the notable intentionally-skipped gap.
+
+
+## CI Execution Boundaries
+
+Daemon-backed extension CI builds the daemon before starting Playwright, so
+cold Rust compilation cannot consume the browser fixture's startup deadline.
+The same package scripts run locally and in GitHub Actions, with an optional
+fresh `CARGO_TARGET_DIR` for reproducing cold-runner conditions locally.
+
+Host-native Rust tests do not type-check another operating system's gated
+code. `npm run check:desktop:windows` stages the UI and checks all desktop
+targets against the locked Windows GNU dependencies using MinGW. This catches
+Windows API type errors locally; native MSVC builds and Windows lifecycle
+tests still validate linking and runtime behavior. The Windows CI job runs
+standalone cleanup tests before compiling, then checks executable artifacts
+before browser installation and E2E setup.
+
+Native macOS window creation and webview first paint are separate events.
+The isolated lifecycle smoke polls the shared bitmap paint check with a
+bounded deadline; Playwright covers delayed first paint, a permanently blank
+window, and the paused connector state without registering a native tray item.
+The native smoke preserves local failure evidence before temporary-app cleanup.
+The Windows smoke terminates the desktop process tree before deleting its
+profile so WebView2 descendants cannot be orphaned by killing the parent first.
+Profile deletion awaits asynchronous removal to handle read-only files and
+retry transient Windows locks; persistent failures remain errors. Integration
+scenarios exercise read-only files and, on Windows, both process-tree termination
+and deletion while an exclusive descendant file lock is being released. Lock
+release follows an observed failed removal rather than a timer. Teardown attempts
+every cleanup and preserves original and cleanup failures together.
+Chromium's scrollbar-dependent element snapshots retain separate baselines
+for measured gutter widths; Book and search-tracer scenarios explicitly exercise
+both 0- and 11-pixel gutters. WebKit highlight-history snapshots remain exact;
+the Book scenario reports all six screenshot mismatches before failing instead
+of stopping at the first image. Failed visual jobs retain only synthetic
+expected, actual, and diff PNGs as a seven-day GitHub Actions artifact.
+Visual CI and the committed baseline host both
+use macOS 26, but that major-version match alone does not establish raster
+parity. Browser installs
+include Playwright's Linux system dependencies and CJK fonts, and font E2E
+requires distinct glyphs before comparing platform font families. Repository
+text uses LF checkouts on every host to keep imported script shebangs valid
+through the pinned Vite/Vitest transform.
+
+Popup error tests must preserve receiver unavailability across authoritative
+bootstrap rereads. The stale-receiver E2E forces a mutation revision between
+preparation and consumption, repeats the injected delivery fault until test
+reset, asserts the diagnostic is visible, then verifies actual receiver
+recovery. Test reset clears message faults; production artifacts exclude the
+fault-injection modules.

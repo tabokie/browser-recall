@@ -1,3 +1,4 @@
+import { waitForWebviewPainted } from './desktop-startup-paint.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
   cpSync,
@@ -90,33 +91,6 @@ function waitForProcessExit(processId) {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
   }
   throw new Error('Desktop lifecycle test app did not exit');
-}
-
-function assertWebviewPainted(bitmapPath) {
-  const bitmap = readFileSync(bitmapPath);
-  const pixelOffset = bitmap.readUInt32LE(10);
-  const width = bitmap.readInt32LE(18);
-  const signedHeight = bitmap.readInt32LE(22);
-  const height = Math.abs(signedHeight);
-  if (bitmap.readUInt16LE(28) !== 32 || width <= 0 || height <= 0) {
-    throw new Error('Desktop screenshot is not a 32-bit bitmap');
-  }
-  let paintedPixels = 0;
-  let sampledPixels = 0;
-  for (let y = 120; y < height - 20; y += 4) {
-    const sourceY = signedHeight < 0 ? y : height - 1 - y;
-    for (let x = 20; x < width - 20; x += 4) {
-      const offset = pixelOffset + (sourceY * width + x) * 4;
-      const blue = bitmap[offset];
-      const green = bitmap[offset + 1];
-      const red = bitmap[offset + 2];
-      sampledPixels += 1;
-      if (red < 245 || green < 245 || blue < 245) paintedPixels += 1;
-    }
-  }
-  if (paintedPixels / sampledPixels < 0.01) {
-    throw new Error('Desktop webview remained blank after startup');
-  }
 }
 
 try {
@@ -251,19 +225,20 @@ print("\\(bounds.origin.x),\\(bounds.origin.y),\\(bounds.width),\\(bounds.height
         delay 0.05
       end repeat
       if name of window 1 of targetProcess is not "Browser Recall - Error" then error "daemon startup failure was not reported"
-      delay 1
     end tell
   `);
-  run(captureExecutable, [String(pid), pausedStartupScreenshot]);
-  run('/usr/bin/sips', [
-    '-s',
-    'format',
-    'bmp',
-    pausedStartupScreenshot,
-    '--out',
-    pausedStartupBitmap,
-  ]);
-  assertWebviewPainted(pausedStartupBitmap);
+  await waitForWebviewPainted(() => {
+    run(captureExecutable, [String(pid), pausedStartupScreenshot]);
+    run('/usr/bin/sips', [
+      '-s',
+      'format',
+      'bmp',
+      pausedStartupScreenshot,
+      '--out',
+      pausedStartupBitmap,
+    ]);
+    return readFileSync(pausedStartupBitmap);
+  });
 
   // Playwright covers the visible Resume command wiring, while the desktop
   // Rust test starts the real absent daemon after repairing this same startup
@@ -379,6 +354,26 @@ print("\\(bounds.origin.x),\\(bounds.origin.y),\\(bounds.width),\\(bounds.height
     );
   }
   console.log(result);
+} catch (error) {
+  const artifacts = path.join(
+    root,
+    'test-results/native-lifecycle',
+    path.basename(workDir),
+  );
+  mkdirSync(artifacts, { recursive: true });
+  for (const screenshot of [pausedStartupScreenshot, pausedStartupBitmap]) {
+    if (existsSync(screenshot))
+      cpSync(screenshot, path.join(artifacts, path.basename(screenshot)));
+  }
+  const logDir = path.join(testHome, 'Library/Logs/browser-recall');
+  if (existsSync(logDir))
+    cpSync(logDir, path.join(artifacts, 'logs'), { recursive: true });
+  writeFileSync(
+    path.join(artifacts, 'failure.txt'),
+    String(error.stack || error),
+  );
+  console.error(`Native lifecycle diagnostics saved to ${artifacts}`);
+  throw error;
 } finally {
   if (pid) {
     try {

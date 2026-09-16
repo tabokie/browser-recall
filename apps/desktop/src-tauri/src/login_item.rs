@@ -411,7 +411,7 @@ fn windows_registry_value_snapshot(
     match key.get_raw_value(name) {
         Ok(value) => Ok(Some(WindowsRegistryValueSnapshot {
             value_type: value.vtype,
-            bytes: value.bytes.into_owned(),
+            bytes: value.bytes,
         })),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
@@ -448,7 +448,7 @@ fn restore_windows_registry_value(
             name,
             &RegValue {
                 vtype: snapshot.value_type.clone(),
-                bytes: snapshot.bytes.clone().into(),
+                bytes: snapshot.bytes.clone(),
             },
         );
     }

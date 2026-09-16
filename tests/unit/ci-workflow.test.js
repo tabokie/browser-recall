@@ -63,13 +63,13 @@ describe('GitHub CI prerequisites', () => {
       'npm run ci:test && npm run ci:install-playwright && npm run ci:test-extension-e2e && npm run ci:test-rust && npm run ci:install-desktop-visual-browsers && npm run ci:test-desktop-visual && npm run ci:cold-scripts && npm run ci:lint-js && npm run ci:lint-rust',
     );
     expect(packageJson.scripts['ci:install-playwright']).toBe(
-      'playwright install --no-shell chromium',
+      'playwright install --with-deps --no-shell chromium',
     );
     expect(packageJson.scripts['ci:install-desktop-visual-browsers']).toBe(
-      'playwright install --no-shell chromium webkit',
+      'playwright install --with-deps --no-shell chromium webkit',
     );
     expect(packageJson.scripts['ci:test-extension-e2e']).toBe(
-      'playwright test tests/e2e/extension-font-fallback.spec.js tests/e2e/popup-lists.spec.js tests/e2e/snapshot-slug-meta.spec.js tests/e2e/snapshot-resource-timeout.spec.js tests/e2e/extension-navigation-regressions.spec.js tests/e2e/url-tracking.spec.js && playwright test tests/e2e/highlight-note-edit.spec.js && npm run test:firefox:smoke',
+      'npm run build:test-daemon && playwright test tests/e2e/extension-font-fallback.spec.js tests/e2e/popup-lists.spec.js tests/e2e/snapshot-slug-meta.spec.js tests/e2e/snapshot-resource-timeout.spec.js tests/e2e/extension-navigation-regressions.spec.js tests/e2e/url-tracking.spec.js && playwright test tests/e2e/highlight-note-edit.spec.js && npm run test:firefox:smoke',
     );
     expect(packageJson.scripts['test:visual']).toBe(
       'npm run build:desktop-ui && npm run test:visual:wkwebview && npm run test:visual:chromium && npm run test:visual:webkit',
@@ -83,6 +83,12 @@ describe('GitHub CI prerequisites', () => {
     expect(packageJson.scripts['test:visual:webkit']).toBe(
       'playwright test --config playwright.webkit.config.js tests/e2e/desktop-visual.spec.js --browser=webkit --grep @webkit',
     );
+    const visualJob = jobBody('test-desktop-visual', 'cold-scripts');
+    expect(visualJob).toContain('runs-on: macos-26');
+    expect(visualJob).toContain('if: failure()');
+    for (const kind of ['expected', 'actual', 'diff']) {
+      expect(visualJob).toContain(`test-results/**/*-${kind}.png`);
+    }
     const nativeJob = jobBody('test-desktop-native-bundle', 'lint-js');
     expect(nativeJob).toContain(
       'npm run build --workspace @browser-recall/desktop',
@@ -94,8 +100,11 @@ describe('GitHub CI prerequisites', () => {
   });
 
   test('cold Rust commands prepare generated build inputs', () => {
+    expect(packageJson.scripts['build:test-daemon']).toBe(
+      'cargo build --locked -p browser-recall-daemon',
+    );
     expect(packageJson.scripts['test:cold-scripts']).toBe(
-      'cargo build --quiet -p browser-recall-daemon && playwright test tests/e2e/manual-seed-workflow.spec.js',
+      'npm run build:test-daemon && playwright test tests/e2e/manual-seed-workflow.spec.js',
     );
     expect(packageJson.scripts['coverage:rust']).toBe(
       'npm run build:desktop-ui && node scripts/rust-coverage.mjs',
@@ -143,15 +152,22 @@ describe('GitHub CI prerequisites', () => {
   });
 
   test('Windows CI exercises locked artifact replacement before native smoke', () => {
+    expect(
+      fs.readFileSync(path.join(repoRoot, '.gitattributes'), 'utf8'),
+    ).toContain('* text=auto eol=lf');
     const windowsJob = jobBody('test-desktop-single-instance', 'lint-js');
+    expect(windowsJob).toMatch(
+      /npm ci[\s\S]+ci:test-windows-cleanup[\s\S]+npm run build --workspace[\s\S]+ci:test-windows-artifacts[\s\S]+ci:install-playwright/,
+    );
     expect(windowsJob).toContain('npm run ci:install-playwright');
     expect(windowsJob).toContain('npm run ci:test-windows-extension-font');
-    expect(packageJson.scripts['ci:test-windows-extension-font']).toBe(
-      'playwright test tests/e2e/extension-font-fallback.spec.js',
-    );
-    expect(windowsJob).toContain('npm run ci:test-windows-artifacts');
-    expect(packageJson.scripts['ci:test-windows-artifacts']).toBe(
-      'vitest run tests/unit/stage-app-assets.test.js',
-    );
+    expect(packageJson.scripts).toMatchObject({
+      'ci:test-windows-extension-font':
+        'npm run build:test-daemon && playwright test tests/e2e/extension-font-fallback.spec.js',
+      'ci:test-windows-artifacts':
+        'vitest run tests/unit/stage-app-assets.test.js',
+      'ci:test-windows-cleanup':
+        'vitest run tests/integration/windows-desktop-cleanup.test.js',
+    });
   });
 });

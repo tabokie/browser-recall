@@ -56,7 +56,8 @@ if (
         (!failure.tabId || failure.tabId === tabId),
     );
     if (index >= 0) {
-      const [failure] = failures.splice(index, 1);
+      const failure = failures[index];
+      if (!failure.repeat) failures.splice(index, 1);
       throw new Error(failure.error || 'Injected tab message failure');
     }
     return originalTabsSendMessage(tabId, message, ...rest);

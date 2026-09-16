@@ -173,6 +173,7 @@ test('popup shows identity failure detail when the receiver is stale', async ({
     const injected = await chrome.runtime.sendMessage({
       action: 'failNextTabMessageForTest',
       messageAction: 'getPageIdentity',
+      repeat: true,
       tabId: tab.id,
       error: 'Could not establish connection. Receiving end does not exist.',
     });
@@ -188,9 +189,15 @@ test('popup shows identity failure detail when the receiver is stale', async ({
     mode: 'data-unavailable',
     error: reloadMessage,
   });
+  // Force a revision between preparation and consumption, as a late visit
+  // notification does on CI. A stale receiver must remain stale on that read.
+  await helper.evaluate(() =>
+    chrome.runtime.sendMessage({ action: 'setRecordingPaused', paused: false }),
+  );
   const popup = await extContext.newPage();
   await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
   await expectPopupRevealed(popup);
+  await expect(popup.locator('#pageDiagnosticSection')).toBeVisible();
   await expect(popup.locator('#pageDiagnosticMessage')).toHaveText(
     reloadMessage,
   );
@@ -202,6 +209,18 @@ test('popup shows identity failure detail when the receiver is stale', async ({
   );
 
   await popup.close();
+  // Clearing test faults represents the receiver becoming available again.
+  // The next popup must query the real content script and recover.
+  await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+  await waitForContentScript(helper, page, url);
+  const recovered = await openPreparedPopupForPage(
+    extContext,
+    extensionId,
+    page,
+    'Stale Popup Page Identity',
+  );
+  await expect(recovered.locator('#pageDiagnosticSection')).toBeHidden();
+  await recovered.close();
   await helper.close();
   await page.close();
 });

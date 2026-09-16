@@ -26,6 +26,9 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `packages/core/` | Shared JS helpers, theme, CSS, runtime utilities |
 | `icons/` | Root SVG sources for desktop and extension runtime icons |
 | `tests/` | Unit, integration, and e2e coverage |
+| `.gitattributes` | Cross-platform LF text checkout policy, including importable JavaScript shebangs |
+| `.github/workflows/ci.yml` | Hosted jobs delegate to canonical local scripts; macOS 26 visual baseline host and platform-specific native smokes; Windows compiles before browser setup |
+| `package.json` | Local verification commands, including `check:desktop:windows` for all-target Windows GNU cross-checks from macOS with MinGW |
 | `plans/` | Phase plans 29–34 for the desktop split |
 
 ## Core Runtime Files
@@ -33,6 +36,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | File | Role |
 |------|------|
 | `apps/desktop/ui/index.html` | Main desktop UI document and CSS, including highlight-history navigation/presentation |
+| `apps/desktop/ui/shared.css`, `apps/desktop/ui/fonts/` | Bundled desktop font faces, including Gentium Book Plus 6.200 regular, italic, and bold italic for Book date headings |
 | `apps/desktop/ui/index.js` | Main UI logic: Explore/history, per-highlight history, lists, search, settings, and recycle bin |
 | `apps/desktop/ui/desktop-bridge.js` | Direct Tauri invoke helpers plus strict shell, device, directory, connector, and product-response DTO validation, including explicit-null browser profiles |
 | `apps/desktop/ui/desktop-platform.js` | Strict Tauri host adapter for UI storage, runtime messages/reload, external URL opens, and platform readiness |
@@ -179,12 +183,12 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `tests/integration/event-flow.test.js` | Connector event flow into the daemon |
 | `tests/integration/page-identity-parity.test.js` | Deterministic cross-language property coverage for JavaScript canonical identity, Rust replay identity, and optional non-page referrer filtering |
 | `crates/daemon/tests/read_projections.rs` | Daemon list/page/highlight-history projection coverage, including original creation order across replacement and cross-device clock skew, non-empty page/note pins, deleted visibility, explicit missing targets, and cache-miss-to-disk reads |
-| `tests/e2e/popup-lists.spec.js` | Popup list interactions in the shipped connector, including the `Alt+R` popup command, pre-existing membership, and toolbar icon state for query-bearing HN-shaped URLs |
+| `tests/e2e/popup-lists.spec.js` | Popup list interactions in the shipped connector, including persistent stale-receiver delivery faults across bootstrap refresh and recovery, the `Alt+R` popup command, pre-existing membership, and toolbar icon state for query-bearing HN-shaped URLs |
 | `tests/smoke/native-extension-shortcut.mjs` | Opt-in macOS headed-Chromium smoke that sends native Option+R and observes the real action popup |
 | `tests/smoke/firefox-real-content.mjs` | Opt-in real-Firefox smoke that loads the staged add-on and verifies its content-context adapter contract |
 | `tests/e2e/badge.spec.js` | Popup/badge behavior in the shipped connector |
 | `tests/e2e/extension-error-popouts.spec.js` | Browser-level extension popup and snapshot error popout styling |
-| `tests/e2e/extension-font-fallback.spec.js` | Chromium platform-font verification that popup and shadow-overlay CJK glyphs actually render with the same host font as a `system-ui` control; the Windows CI job requires this behavior rather than skipping it |
+| `tests/e2e/extension-font-fallback.spec.js` | Distinct-glyph prerequisite and Chromium platform-font verification that popup and shadow-overlay CJK glyphs actually render with the same host font as a `system-ui` control; the Windows CI job requires this behavior rather than skipping it |
 | `tests/e2e/snapshot-resource-timeout.spec.js` | Snapshot open/closed shadow-root capture and replay, resource body timeouts, host-permission-backed nested cross-origin CSS recovery, persisted viewer paint, partial-capture warnings, and deactivation of timed-out stylesheet links through the real connector/daemon path |
 | `tests/integration/snapshot-resource-limits.test.js` | Streamed per-resource byte limits with missing or oversized `Content-Length`, including the generated classic-script interface |
 | `tests/e2e/seeded-combination-workflows.spec.js` | Seeded randomized extension workflow combining visits, notes, list pins, and popup reads |
@@ -195,7 +199,10 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `tests/e2e/extension-localization.spec.js` | Browser-native WebExtension catalog selection using the packaged extension and the browser-reported UI locale |
 | `tests/smoke/macos-wkwebview-chart-layout.{mjs,swift}` | Native WKWebView regression probe for the first-selection chart-to-list spacing shift that Playwright WebKit does not reproduce |
 | `tests/smoke/macos-desktop-window-lifecycle.mjs` | Ephemeral-session signed-app smoke test proving startup errors remain painted, repaired storage survives a native relaunch, and an accessible tray menu survives repeated close/reopen, focus, and frame preservation; CI runs it on a disposable macOS 26 runner |
+| `tests/smoke/desktop-startup-paint.mjs` | Shared bounded bitmap paint check used by the isolated native lifecycle smoke and delayed/blank-frame Playwright regression; native failure evidence survives temporary-app cleanup |
 | `tests/smoke/windows-desktop-single-instance.mjs` | Disposable-profile native Windows smoke test proving every generated ICO representation is embedded pixel-for-pixel, the live HWND exposes DPI-sized small and taskbar icons, and a second executable/deep-link activation exits and forwards the settings route into the original desktop process without changing product data or OS registrations |
+| `tests/smoke/windows-desktop-process.mjs` | Complete teardown with aggregated errors, process-tree termination, exit observation, and asynchronous profile removal with observable bounded lock retries |
+| `tests/integration/windows-desktop-cleanup.test.js` | Teardown failure preservation, real child-process exit and read-only-file cleanup; Windows-only descendant termination and exclusive-lock release after an observed failed removal |
 | `scripts/test-coverage-monitor.mjs` | Test-suite LoC mix and JS/Rust uncovered production line reporting |
 | `crates/daemon/tests/commands.rs` | Desktop command-surface coverage |
 | `crates/daemon/tests/command_authority.rs` | Shared semantic command response, validation, committed state, and mutation outcome coverage |

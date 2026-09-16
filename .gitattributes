@@ -1,0 +1,2 @@
+# Keep executable JavaScript shebangs valid through Vite/Vitest on Windows.
+* text=auto eol=lf

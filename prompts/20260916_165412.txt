@@ -1,0 +1,15 @@
+- I want you to fix GitHub CI failures for me. The pipeline was not from the latest commit but I believe the latest will fail the same way. Use my browser to see the failure details. Do not retry using GitHub too often, the repo has a strict CI limit. In addition to fixing the current failures, I want you to think why the failures aren't detected locally, and think of ways to make them detectable. The latest pipeline URL is [https://github.com/tabokie/browser-recall/actions/runs/34227116600/job/102063830854](https://github.com/tabokie/browser-recall/actions/runs/34227116600/job/102063830854)
+- I want you to fix GitHub CI failures for me. The pipeline was not from the latest commit but I believe the latest will fail the same way. Use my browser to see the failure details. Do not retry using GitHub too often, the repo has a strict CI limit. In addition to fixing the current failures, I want you to think why the failures aren't detected locally, and think of ways to make them detectable. The latest pipeline URL is [https://github.com/tabokie/browser-recall/actions/runs/34227116600/job/102063830854](https://github.com/tabokie/browser-recall/actions/runs/34227116600/job/102063830854)
+- Continue
+- Did you fix all failures shown in the CI pipeline? There're four jobs that failed.
+- Still three jobs that failed: [https://github.com/tabokie/browser-recall/actions/runs/34916738370/job/104215889510](https://github.com/tabokie/browser-recall/actions/runs/34916738370/job/104215889510)
+- Two jobs are still failing: [https://github.com/tabokie/browser-recall/actions/runs/34926030535/job/104244176266](https://github.com/tabokie/browser-recall/actions/runs/34926030535/job/104244176266)
+- Continue
+- Two jobs are failing: [https://github.com/tabokie/browser-recall/actions/runs/35044617858/job/104631662798](https://github.com/tabokie/browser-recall/actions/runs/35044617858/job/104631662798)
+- Continue
+- One job is still failing: [https://github.com/tabokie/browser-recall/actions/runs/35069007068/job/104705838423](https://github.com/tabokie/browser-recall/actions/runs/35069007068/job/104705838423)
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them all
+- Please review my uncommitted changes
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-6 Astra
+- Continue

@@ -83,7 +83,7 @@ jobs:
 
   test-desktop-visual:
     name: Desktop Visual Regression
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v6
 
@@ -99,6 +99,18 @@ jobs:
         run: npm run ci:install-desktop-visual-browsers
 
       - run: npm run ci:test-desktop-visual
+
+      - name: Preserve synthetic visual failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-visual-failure-screenshots
+          path: |
+            test-results/**/*-expected.png
+            test-results/**/*-actual.png
+            test-results/**/*-diff.png
+          if-no-files-found: ignore
+          retention-days: 7
 
   cold-scripts:
     name: Cold Script Smoke
@@ -183,15 +195,17 @@ jobs:
 
       - run: npm ci
 
+      - run: npm run ci:test-windows-cleanup
+
+      - run: npm run build --workspace @browser-recall/desktop
+
+      - run: npm run ci:test-windows-artifacts
+
       - name: Install Playwright Chromium
         run: npm run ci:install-playwright
 
       - name: Verify Windows extension system-font fallback
         run: npm run ci:test-windows-extension-font
-
-      - run: npm run ci:test-windows-artifacts
-
-      - run: npm run build --workspace @browser-recall/desktop
 
       - name: Exercise native single-instance deep-link forwarding
         run: npm run test:desktop-single-instance

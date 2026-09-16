@@ -13,6 +13,13 @@ import path from 'node:path';
 import process from 'node:process';
 
 import {
+  waitForExit,
+  stopTestProcess,
+  removeTestProfile,
+  withCleanup,
+} from './windows-desktop-process.mjs';
+
+import {
   isolatedDesktopEnvironment,
   isolatedDesktopLogDir,
 } from './windows-desktop-test-profile.mjs';
@@ -323,29 +330,6 @@ async function waitFor(predicate, timeoutMs, failureMessage) {
   throw new Error(failureMessage);
 }
 
-function waitForExit(child, timeoutMs) {
-  if (child.exitCode !== null) {
-    return Promise.resolve({ code: child.exitCode, signal: child.signalCode });
-  }
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(
-        new Error(`Process ${child.pid} did not exit within ${timeoutMs}ms`),
-      );
-    }, timeoutMs);
-    const onExit = (code, signal) => {
-      cleanup();
-      resolve({ code, signal });
-    };
-    const cleanup = () => {
-      clearTimeout(timer);
-      child.off('exit', onExit);
-    };
-    child.on('exit', onExit);
-  });
-}
-
 function readNewLogs() {
   if (!existsSync(logDir)) return '';
   let result = '';
@@ -357,21 +341,9 @@ function readNewLogs() {
   return result;
 }
 
-async function stopTestProcess(child) {
-  if (!child || child.exitCode !== null) return;
-  child.kill();
-  try {
-    await waitForExit(child, 5000);
-  } catch {
-    execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
-      windowsHide: true,
-    });
-  }
-}
-
 let first;
 let second;
-try {
+await withCleanup(async () => {
   first = spawn(executable, [], {
     stdio: 'ignore',
     windowsHide: true,
@@ -413,8 +385,8 @@ try {
   console.log(
     `Second launch exited cleanly; process ${first.pid} received browser-recall://settings; runtime icons are ${iconSizes.small}px and ${iconSizes.big}px at ${iconSizes.dpi} DPI`,
   );
-} finally {
-  await stopTestProcess(second);
-  await stopTestProcess(first);
-  rmSync(workDir, { recursive: true, force: true });
-}
+}, [
+  () => stopTestProcess(second),
+  () => stopTestProcess(first),
+  () => removeTestProfile(workDir),
+]);
