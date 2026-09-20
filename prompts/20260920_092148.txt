@@ -1,0 +1,26 @@
+- Let's rework the user-facing documentation. I want the overall style to be concise, elegant, modern, on-point. Meanwhile it should remain intimate, indie, no corporate marketing smell. As for the content, I want the document to use screenshots of the actual app to demonstrate features. The screenshots are taken programmatically using the real app and some pre-generated data.
+- Continue
+- (1) Render mono style side by side with the default style. (2) Make the timeline data more natural, don't tag every single page, tagging or notes should be relatively rare. (3) Make the note data more natural, I want the highlights to span multiple days, and have both long and short paragraphs. The notes should be relatively rare, I want exactly two notes to appear on the render: long highlight with short note, and short highlight with long note.
+- Couldn't see images
+- The README.md couldn't render the images.
+- Oh but the image size is too big. Let's use HTML back to control the size.
+- Add more highlight content without adding more days. Make the paper fill the viewport.
+- Continue
+- Is it possible to build screenshots of the web part of the app? i.e. the popup for a page, the highlight and note-taking UI.
+- Can we take the screenshot of the popup in the context of a browser window? It isn't very clear from the UI alone how it is used.
+- (1) Use English locale, (2) Break it into two screenshots, one demonstrating popup with no highlights, another demonstrating the note-taking UI.
+- Continue
+- I don't like the idea of a "GUIDE.md". The app should be intuitive to use, instructions if needed should be part of the app journey, not a separate document. The screenshots in the GUIDE.md should be part of the README.md to demonstrate key functionalities.
+- While we are at this, I want the app to ship a document for agent as well. It should be AGENTS.md under the user data directory. In the document, we explain the content of each piece of data inside user directory (sub-dirs, and data format, etc), and we also explain how the agent can modify the user data safely (by appending new logs). For the second part, I'm not sure of the easiest idiomatic way to append logs while the app is running, maybe we need to make sure the agent is adding logs from a new virtual device (thus not modifying the current device's file)? But even so, the app might not read the latest content immediately, do we recommend the user to restart app after agent modifications? Please consider the solution based on how the app is designed. If needed we can adjust the app behavior to better support agent integration.
+- I think that's over complicated. I want the agent support to be a side effect of how we design the app. I don't want anything designed for that sole use case.
+- What's the problem with my idea? which is appending to a virtual device's logs, without needing the app to quit before edits.
+- Finally, I want a bit more explanation (in the app UI) for mouse-free operating the browser extension. More specifically, Alt-R to open the popup and punch in the list name to select a list and finally use arrow keys and Enter to add to a list. This sequence of key inputs is a bit hard to explain naturally in the app, but I don't want user to accidentally discover the convenience either. What's your suggestion?
+- I think "Just start typing" is still a bit confusing.
+- A small line at the bottom of the list section in popup UI that says "Type to search".
+- When the list search menu is called out, Esc will not close the popup, it will only exit the search menu.
+- Continue
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them
+- Please review my uncommitted changes
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-6 Astra
+- Continue

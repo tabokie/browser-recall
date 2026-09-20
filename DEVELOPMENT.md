@@ -422,6 +422,93 @@ Closing the browser prints a data diff showing everything that changed during th
 
 Seed cases live in `seeds/` (gitignored). Each `.mjs` file exports a function returning `{ events, entities, deviceId, settings }`. The seed builder (`scripts/lib/seed-builder.mjs`) is shared by manual tooling and the daemon-backed cold-script E2E workflow.
 
+### Documentation Screenshots
+
+The README uses native macOS screenshots from the
+real Tauri app, backed by the real daemon and a fictional reading collection.
+
+```bash
+npm run docs:screenshots
+```
+
+Run from a logged-in macOS desktop with Xcode Command Line Tools, the normal
+build prerequisites, and Accessibility and Screen Recording permission for the
+terminal or agent hosting the command. The command builds the desktop UI,
+daemon, and a separate **Browser Recall Documentation** application. The
+documentation window briefly comes to the foreground; leave the window alone
+until capture finishes.
+
+`scripts/lib/documentation-seed.mjs` owns the fixed reading data: 40 distinct
+pages, six pinned pages, and nine highlights from three pages across three days.
+Only two highlights have notes: a long highlight with a short note, and a short
+highlight with a long note. Native capture checks that both notes and the last
+highlight fit within the window. The capture command starts a temporary daemon
+to obtain complete current settings, applies
+the seed through the production Rust replay tool, and opens the native app with
+an isolated profile. The separate compiled application identifier also isolates
+Tauri's single-instance socket; a distinct executable name isolates native
+keyboard targeting. Login-item and URL-handler registration are disabled for the
+temporary app.
+
+`scripts/lib/documentation-window.swift` uses macOS Accessibility to navigate
+real controls and Core Graphics to capture only the app window. The capture
+command uses System Events to submit the search query. Each screen must contain
+the expected reading material and reach a stable rendered state before
+capture succeeds. No application HTML, CSS, bridge responses, or screenshot
+pixels are replaced for documentation.
+
+The complete image set and `docs/images/capture.json` are updated only after
+Timeline, Lists, Search, and Book pass in both Amber and Mono. The capture
+command selects Mono through the real Settings control and verifies persistence.
+The README presents each pair side by side. The capture manifest records
+the source commit, seed hash, image hashes, dimensions, and capture time. Data and
+requested window size are fixed; macOS may constrain the window to the display.
+Relative-time labels, display scale, and OS rendering can vary between runs.
+Inspect all eight PNGs before committing. On a navigation or
+capture failure, inspect `test-results/documentation/`.
+
+The command closes the temporary application and removes the temporary profile
+after completion or a capture error. Existing browsing data and the regular
+`dist/desktop/` app are not used for capture. `npm run test:cold-scripts` checks the
+documentation seed at the real daemon/connector boundary in canonical CI; native capture is a separate macOS
+maintainer command.
+
+Capture the browser extension separately with:
+
+```bash
+npm run docs:screenshots:browser
+```
+
+The browser workflow requires a logged-in macOS desktop and the same native
+capture permissions as desktop screenshots. The browser workflow uses an isolated
+headed Chromium profile, the production extension with test-control hooks, and a
+temporary real daemon. Install the repository's
+Playwright Chromium build first with `npm run ci:install-playwright`.
+`tests/e2e/documentation-browser.spec.js` serves a fictional article, seeds the
+shared reading collection through Rust replay, and starts the example article
+without highlights. The first screenshot shows the real toolbar popup over the
+unmarked article. The second shows the live note editor after creating a single
+highlight through the extension. Core Graphics captures the named browser window,
+including the separate popup window. Capture includes only the isolated Chromium
+process's window IDs, so overlapping applications cannot appear in exported
+images. The helper tab stays in a minimized window
+outside the captured browser window. Extension markup, styles, and daemon
+responses are unmodified. The scenario saves the new note and checks daemon
+persistence before exporting images.
+
+The documentation scenario requests English through the browser fixture. On
+macOS, a disposable launcher passes `-AppleLanguages '(en)'` to headed Chromium;
+the override applies only to that process. The capture checks actual English
+popup labels before exporting, and the manifest records the locale.
+
+`scripts/capture-browser-documentation.mjs` exports both images and
+`docs/images/browser-capture.json` after the scenario passes. A normal Playwright
+run uses headless Chromium, keeps two content images in test artifacts, and
+leaves documentation assets untouched. Inspect both browser images after
+regeneration. Run native desktop capture
+and browser capture separately so browser windows cannot take focus during
+native input.
+
 ## Debugging
 
 - **Desktop app**: run `npm run dev:desktop` and watch the Tauri / Rust logs in that terminal

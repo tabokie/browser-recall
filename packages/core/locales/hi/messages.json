@@ -1065,6 +1065,10 @@
     "message": "अनुमोदन की प्रतीक्षा है",
     "description": "Connector approval pending button."
   },
+  "extensionTypeToSearch": {
+    "message": "खोजने के लिए टाइप करें",
+    "description": "Hint below the popup list section for keyboard list search."
+  },
   "extensionSearchOrCreate": {
     "message": "खोजें या बनाएं...",
     "description": "List picker search placeholder."

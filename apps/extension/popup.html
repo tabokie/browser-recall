@@ -606,6 +606,11 @@
         position: relative;
       }
 
+      .list-search-hint {
+        color: var(--text-muted);
+        font-size: 11px;
+      }
+
       .list-search-capture {
         position: fixed;
         left: -10000px;
@@ -1025,6 +1030,9 @@
           <div class="list-chips-wrap">
             <div class="list-chips" id="listChips"></div>
           </div>
+          <p class="list-search-hint" data-i18n="extensionTypeToSearch">
+            Type to search
+          </p>
         </div>
 
         <div class="section" id="notesSection" style="display: none">

@@ -1065,6 +1065,10 @@
     "message": "En attente d'approbation",
     "description": "Connector approval pending button."
   },
+  "extensionTypeToSearch": {
+    "message": "Tapez pour rechercher",
+    "description": "Hint below the popup list section for keyboard list search."
+  },
   "extensionSearchOrCreate": {
     "message": "Rechercher ou créer...",
     "description": "List picker search placeholder."

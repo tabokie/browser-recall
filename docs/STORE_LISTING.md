@@ -1,55 +1,44 @@
-# browser-recall — Chrome Web Store Listing
+# Browser Recall — Chrome Web Store copy
 
-## Short description (132 chars max)
+## Short description
 
-Chrome connector for Browser Recall Desktop. Capture pages in Chrome and open the full app for search, notes, and history.
+Keep your browsing history, highlights, and saved pages on your computer. Requires the Browser Recall desktop app.
 
 ## Detailed description
 
-browser-recall is the Chrome connector for Browser Recall Desktop.
+For the things you meant to come back to.
 
-Install the extension to capture page visits, snapshots, highlights, and popup actions from Chrome. Open Browser Recall Desktop for the full timeline, search, lists, recycle bin, settings, and sync UI.
+Browser Recall keeps a personal collection of what you read online. The Chrome extension works with the Browser Recall desktop app, where your history, highlights, lists, and saved pages live.
 
-**Desktop-first**
-The main Browser Recall interface runs in the desktop app, not inside a browser tab. The extension pairs with the local desktop app over `localhost` and forwards browser activity to it.
+Find a page again.
+Browse your Timeline or search recorded titles and URLs, highlights, notes, and text from saved snapshots.
 
-**Local-first storage**
-Browser Recall Desktop stores your data locally as readable JSON and JSONL files. Your data stays on your machine unless you explicitly enable sync to your own GitHub repository.
+Keep the line that matters.
+Select a passage and press Alt+H. Read your highlights together in Book, with your own notes alongside them.
 
-**Automatic history tracking**
-Every page you visit is recorded with its URL, title, and visit time. Revisits are detected automatically, so you can see how many times you've been to a page and when.
+Make a little collection.
+Pin pages to lists from the extension popup. Add a keyword rule to collect pages with matching words in their titles.
 
-**Full-text search**
-Search across recorded pages, notes, and snapshots in the desktop app with local native indexing.
+Save a copy.
+Press Alt+S to capture a local snapshot. Reopen saved pages from the desktop app when you need them, including offline.
 
-**Notes and highlights**
-Attach notes to any page. Highlight text on any page and it's saved for later. Your annotations travel with you — visible whenever you revisit the page.
+Keep your data close.
+Browser Recall stores your collection in a folder on your computer. No Browser Recall account, analytics, or telemetry. Optional sync uses a GitHub repository you control.
 
-**Page snapshots**
-Capture a full offline copy of any page with one click or a keyboard shortcut (Alt+S). View saved snapshots anytime, even without an internet connection.
+The desktop app is required and must stay running while you browse. After installing the extension, open the popup and approve the connection in Browser Recall.
 
-**Lists and organization**
-Create custom lists, pin important pages, and review them from the desktop app. The popup also lets you pin the current page without leaving Chrome.
+Default shortcuts:
 
-**Smart rules**
-Set up automatic rules to categorize pages based on URL patterns or keywords. Pages matching your rules are tagged and organized without manual effort.
-
-**Optional GitHub sync**
-If you want multi-device sync, connect Browser Recall Desktop to a GitHub repository you control.
-
-**Keyboard shortcuts**
-- Alt+R — Open the Browser Recall popup
-- Alt+S — Capture snapshot
+- Alt+R — Open the extension popup
 - Alt+H — Highlight selected text
-- Alt+L — Like current page
+- Alt+S — Capture a snapshot
+- Alt+L — Like the current page
 
-**Privacy by design**
-No analytics. No tracking. No accounts. No Browser Recall cloud. Data stays local unless you explicitly configure your own GitHub sync destination.
+On macOS, use Option in place of Alt. Shortcuts can be changed in Chrome's extension settings.
 
-## Category
+## Listing details
 
-Productivity
-
-## Language
-
-English
+- Category: Productivity
+- Language: English
+- Privacy policy: [PRIVACY.md](PRIVACY.md)
+- Desktop screenshots: [images/](images/) — demonstrate the companion app, not Chrome popup screens.

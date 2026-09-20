@@ -78,6 +78,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `crates/daemon/src/read_projections.rs` | Workflow-shaped semantic page, list, per-highlight history, search-enrichment, recycle-bin, popup, and settings DTOs with coordinated joins, child-reference classification, and visibility policy |
 | `crates/daemon/src/runtime.rs` | Authoritative replay transactions: serialized overlay evolution, canonical local log append, projection publication, replay progress, ordered checkpoint submission, downloaded sync-file installation, recovery, and destructive flush coordination |
 | `crates/daemon/src/storage.rs` | Data-root storage, sharded object/view paths, coordinated cache reads and namespace enumeration overlays, current projection cache, log append, and flushable ordered checkpoint worker |
+| `crates/daemon/src/data_directory_docs.rs`, `crates/daemon/resources/data-AGENTS.md` | Ship and refresh the data-root `AGENTS.md`: storage format reference, current-device offline edits, and virtual-device atomic publication with deferred replay; preserve personal text and report refresh failures without blocking storage |
 | `crates/daemon/src/search.rs` | Daemon search queries over history/notes and canonical sharded Markdown snapshot sidecars |
 | `crates/daemon/src/sync.rs` | GitHub sync controller, token handling, pause persistence |
 | `crates/daemon/src/ws_server.rs` | Browser pairing, authenticated websocket adapter, strict rule command DTOs, browser observations, streaming, and change broadcasts |
@@ -172,6 +173,26 @@ This map intentionally excludes removed extension-only storage/sync internals.
 - `crates/daemon/src/sync.rs` owns GitHub sync orchestration, auth/token handling, persisted sync pause state, typed GitHub branch/tree response decoding, and strict downloaded JSONL parsing before runtime installation.
 - `apps/desktop/ui/index.js` edits sync settings and renders sync status.
 - Connector websocket RPCs do not expose sync file or manifest operations.
+
+## User Documentation
+
+- `README.md` introduces Browser Recall through feature demonstrations and real
+  screenshots; `docs/STORE_LISTING.md` contains the Chrome Web Store copy.
+- `scripts/capture-documentation.mjs` builds and captures an isolated native
+  macOS app. `scripts/lib/documentation-seed.mjs` owns fictional reading data;
+  `scripts/lib/documentation-window.swift` navigates native accessible controls
+  and captures the actual window. `docs/images/` holds eight native screenshots (four views in Amber and Mono) and
+  their capture manifest.
+- `tests/e2e/manual-seed-workflow.spec.js` checks the documentation collection's
+  lists, highlights, and complete settings through the real daemon and connector.
+- `scripts/capture-browser-documentation.mjs` runs
+  `tests/e2e/documentation-browser.spec.js` to capture the production extension's
+  popup and live note editor against the real daemon. Documentation export
+  captures two native browser-window images in English: the toolbar popup over
+  an unmarked article, then the note editor beneath a newly created highlight.
+  The scenario verifies English labels, the clean popup state, and note
+  persistence before exporting images and `docs/images/browser-capture.json`.
+  Ordinary E2E runs keep the two content captures headless.
 
 ## Current Test Coverage
 

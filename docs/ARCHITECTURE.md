@@ -58,6 +58,7 @@ only hides the application.
 
 ```text
 <root>/
+  AGENTS.md
   logs/
     <device>/<YYYY-MM-DD>.jsonl
   objects/
@@ -75,6 +76,7 @@ only hides the application.
       replay-progress.json
 ```
 
+- `AGENTS.md` is embedded with the daemon and installed by storage layout initialization, including startup and data reset. The managed section documents the data formats and existing offline append contract, includes the local device ID, and refreshes on startup while preserving personal text outside its markers. Refresh failures preserve the existing document and emit a daemon warning without blocking library startup. It is not synced.
 - `logs/*` is the append-only event log and source of truth.
 - `views/lists` and `views/manifest` are replay-derived checkpoints. `views/pages` is a selective replay-derived checkpoint set: only pages with durable user state are persisted there.
 - `objects/notes` and `objects/snapshots` are durable user artifacts referenced by replay state.
@@ -84,6 +86,8 @@ only hides the application.
 - Page relationship arrays retain every durable list, note, and snapshot reference. The replay layer caps only transient page-to-page referrer references, so high-traffic hub pages cannot lose the list membership that makes their selective page checkpoint durable.
 
 `crates/daemon/src/runtime.rs` owns replay transactions. Local transactions serialize the semantic read/modify/write operation, evolve one replay overlay, reserve checkpoint-worker capacity, append canonical logs before changing the daemon projection cache, advance replay progress, and submit checkpoint work in accepted order. Connector auto-pin and rule policy can inspect the transaction's evolving effects, but cannot perform the durable commit sequence itself. Sync strictly parses every non-empty downloaded JSONL line and evaluates every typed replay effect before any downloaded file is installed. The runtime then flushes prior checkpoint work, writes the validated files once, and publishes the resulting projection/checkpoint work without re-appending remote entries.
+
+External writers must stop Browser Recall and any standalone daemon before appending to the current device's log, preserve existing records, and use timestamps strictly newer than existing logs and replay watermarks. A separate virtual device avoids sharing the daemon's log writer and can publish complete dated files while the app runs: write to a same-directory `.tmp` file and atomically rename it, preserving the existing log prefix. Direct appends to a visible file can expose incomplete JSONL to strict readers. Neither publication method triggers live replay; reopening invokes ordinary startup recovery, and history reads can observe external records before cached projections are reconciled. General live log reconciliation remains unimplemented; there is no filesystem watcher, inbox, or agent-specific mutation API. The current device's GitHub sync only uploads its own recent logs, so virtual-device logs are not automatically published by that branch. The shipped data-root document distinguishes write ownership, replay visibility, and sync coverage.
 
 Checkpoint files may lag briefly; current reads use the daemon projection cache and only fall through to disk on coordinated cache misses. Shutdown and destructive data clearing flush accepted checkpoint work before returning.
 
@@ -480,6 +484,35 @@ The desktop smoke / GUI parity suite remains the notable intentionally-skipped g
 
 
 ## CI Execution Boundaries
+
+User-documentation screenshots use `npm run docs:screenshots`, a macOS-only
+native capture workflow. A temporary daemon supplies complete settings before
+fictional events are materialized through the production Rust replay tool. A
+separate compiled Tauri identifier, executable name, and isolated profile keep native capture
+apart from the user's running app, single-instance socket, and data. macOS
+Accessibility drives the real controls; Core Graphics captures the window after
+content assertions and stable-pixel checks. Each view is captured in Amber and
+Mono using the real Settings control, and the Book verifies both note pairings
+remain inside the window. The shared seed keeps pins and annotations sparse
+among everyday visits and spreads highlights across three days. The workflow does not mock the
+desktop bridge or replace rendered content. Seed acceptance runs in the existing
+daemon-backed cold-script E2E suite; native capture remains an explicit
+maintainer command. `docs/images/capture.json` records screenshot provenance.
+
+Browser documentation uses `npm run docs:screenshots:browser` with the existing
+isolated Chromium/daemon E2E fixtures. Only the fictional source article is served
+by a route fixture; extension UI and persistence use production implementations.
+The popup document receives a real prepared source-tab model. On macOS,
+documentation export launches headed Chromium with a process-local English
+language override, pins the extension, and captures two browser-window states:
+the actual toolbar popup over an article without highlights, then the live note
+editor beneath a newly created highlight. Core Graphics captures the named
+browser window from only that Chromium process's native window IDs, preserving
+popup-window stacking while excluding overlapping applications.
+English popup labels, the empty highlight state, and note persistence must pass
+before two images and `docs/images/browser-capture.json` are exported. Ordinary
+test runs remain headless and attach two content screenshots to test results
+without updating documentation.
 
 Daemon-backed extension CI builds the daemon before starting Playwright, so
 cold Rust compilation cannot consume the browser fixture's startup deadline.

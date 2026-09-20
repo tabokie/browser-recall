@@ -527,7 +527,10 @@ async fn sync_file_roundtrip_collects_expected_files_and_refreshes_reads() {
             .directory_size()
             .await
             .expect("directory size after clear"),
-        0
+        tokio::fs::metadata(storage.root().join("AGENTS.md"))
+            .await
+            .expect("data instructions are recreated after clear")
+            .len()
     );
     let clear_missing_error = missing_storage
         .clear_all_data("device-a")

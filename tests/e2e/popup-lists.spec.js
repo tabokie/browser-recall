@@ -3067,7 +3067,7 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
-  test('closing a type-opened list picker does not throw', async ({
+  test('Escape exits list search without dismissing the popup', async ({
     extContext,
     extensionId,
     setupDir,
@@ -3122,15 +3122,38 @@ test.describe('Popup list chip behavior', () => {
     });
     const pageErrors = [];
     popup.on('pageerror', (error) => pageErrors.push(error.message));
+    await popup.evaluate(() => {
+      window.__escapeEvents = [];
+      window.addEventListener(
+        'keydown',
+        (event) => {
+          if (event.key === 'Escape') window.__escapeEvents.push(event);
+        },
+        true,
+      );
+    });
     await popup.keyboard.type('r');
     await expect(popup.locator('#listPickerHost.list-picker')).toBeVisible();
     await popup.keyboard.press('Escape');
     await expect(popup.locator('#listPickerHost.list-picker')).toHaveCount(0);
-    await popup.waitForTimeout(100);
+    expect(
+      await popup.evaluate(() => window.__escapeEvents[0].defaultPrevented),
+    ).toBe(true);
 
     expect(pageErrors).toEqual([]);
     await expect(popup.locator('#errorBubble')).toHaveCount(0);
     await expect(popup.locator('#listSearchInput')).toBeFocused();
+    await popup.keyboard.type('re');
+    await expect(popup.locator('#listSearchInput')).toHaveValue('re');
+    await expect(popup.locator('#listPickerHost.list-picker')).toBeVisible();
+    await popup.keyboard.press('Escape');
+    await expect(popup.locator('#listPickerHost.list-picker')).toHaveCount(0);
+    await popup.keyboard.press('Escape');
+    expect(
+      await popup.evaluate(() =>
+        window.__escapeEvents.map((event) => event.defaultPrevented),
+      ),
+    ).toEqual([true, true, false]);
 
     await popup.close();
     await page.close();

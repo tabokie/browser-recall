@@ -1093,6 +1093,10 @@
     "message": "Waiting for Approval",
     "description": "Connector approval pending button."
   },
+  "extensionTypeToSearch": {
+    "message": "Type to search",
+    "description": "Hint below the popup list section for keyboard list search."
+  },
   "extensionSearchOrCreate": {
     "message": "Search or create...",
     "description": "List picker search placeholder."

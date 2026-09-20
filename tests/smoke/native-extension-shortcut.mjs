@@ -4,7 +4,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 
-import { chromium } from '@playwright/test';
+import { chromium, expect } from '@playwright/test';
 
 import {
   cleanupTestExtensionDir,
@@ -75,6 +75,16 @@ function pressNativeAltR(pid) {
   ]);
 }
 
+function pressNativeKey(pid, code) {
+  execFileSync('/usr/bin/osascript', [
+    '-e',
+    `tell application "System Events"
+      set frontmost of first process whose unix id is ${pid} to true
+      key code ${code}
+    end tell`,
+  ]);
+}
+
 async function waitForPopup(helper) {
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
@@ -83,12 +93,14 @@ async function waitForPopup(helper) {
       return popup
         ? {
             href: popup.location.href,
+            ready:
+              popup.document.documentElement.dataset.popupHidden === undefined,
             title:
               popup.document.getElementById('pageTitle')?.textContent || '',
           }
         : null;
     });
-    if (result) return result;
+    if (result?.ready) return result;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error('Alt+R did not open an extension action popup');
@@ -139,7 +151,8 @@ try {
   }
   await target.bringToFront();
 
-  pressNativeAltR(browserProcessId(userDataDir));
+  const browserPid = browserProcessId(userDataDir);
+  pressNativeAltR(browserPid);
   const popup = await waitForPopup(helper);
   if (!popup.href.includes('popup.html?bootstrap=')) {
     throw new Error(`Alt+R opened the wrong extension surface: ${popup.href}`);
@@ -148,6 +161,29 @@ try {
     throw new Error(`Alt+R popup targeted the wrong page: ${popup.title}`);
   }
   console.log(`Native Alt+R opened ${popup.href}`);
+  const popupState = () =>
+    helper.evaluate(() => {
+      const popup = chrome.extension.getViews({ type: 'popup' })[0];
+      return popup
+        ? {
+            searchOpen: Boolean(
+              popup.document.querySelector('#listPickerHost.list-picker'),
+            ),
+            query: popup.document.getElementById('listSearchInput')?.value,
+          }
+        : null;
+    });
+  pressNativeKey(browserPid, 15); // R opens list search in the already focused toolbar popup.
+  await expect.poll(popupState).toEqual({ searchOpen: true, query: 'r' });
+  pressNativeKey(browserPid, 53); // Escape exits search; the native popup must survive.
+  await expect.poll(popupState).toEqual({ searchOpen: false, query: '' });
+  pressNativeKey(browserPid, 15);
+  await expect.poll(popupState).toEqual({ searchOpen: true, query: 'r' });
+  pressNativeKey(browserPid, 53);
+  await expect.poll(popupState).toEqual({ searchOpen: false, query: '' });
+  pressNativeKey(browserPid, 53); // With no search menu open, Chromium still owns Escape.
+  await expect.poll(popupState).toBeNull();
+  console.log('Native Escape exits list search first, then closes the popup.');
 } finally {
   await context?.close().catch(() => {});
   await daemon?.stop().catch(() => {});

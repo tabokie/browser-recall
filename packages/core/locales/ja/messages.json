@@ -1065,6 +1065,10 @@
     "message": "承認待ち",
     "description": "Connector approval pending button."
   },
+  "extensionTypeToSearch": {
+    "message": "入力して検索",
+    "description": "Hint below the popup list section for keyboard list search."
+  },
   "extensionSearchOrCreate": {
     "message": "検索または作成...",
     "description": "List picker search placeholder."

@@ -167,6 +167,10 @@ impl Storage {
         fs::create_dir_all(self.root().join("objects").join("notes")).await?;
         fs::create_dir_all(self.root().join("objects").join("snapshots")).await?;
         fs::create_dir_all(self.root().join("logs").join(device_id)).await?;
+        if let Err(error) = crate::data_directory_docs::install(self.root(), device_id).await {
+            warn!(path = %self.root().join("AGENTS.md").display(), %error,
+                "data-directory instructions could not be refreshed; library storage is available");
+        }
         Ok(())
     }
 
@@ -1536,10 +1540,14 @@ async fn save_json<T>(path: PathBuf, value: &T) -> io::Result<()>
 where
     T: serde::Serialize,
 {
+    let payload = serde_json::to_vec_pretty(value).map_err(invalid_data)?;
+    write_atomic(path, &payload).await
+}
+
+pub(crate) async fn write_atomic(path: PathBuf, payload: &[u8]) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).await?;
     }
-    let payload = serde_json::to_vec_pretty(value).map_err(invalid_data)?;
     let filename = path
         .file_name()
         .and_then(|value| value.to_str())

@@ -1,0 +1,51 @@
+{
+  "command": "npm run docs:screenshots",
+  "platform": "macOS / native Tauri WKWebView",
+  "capturedAt": "2026-09-17T14:15:11.281Z",
+  "sourceCommit": "e33919216675dd5c948381ca50ada70dc879e8df",
+  "seedSha256": "ddd7bb3ff23bc7adf0ed5347d0db5d2dbe2d5736c491f248f7cbc4814e949bbc",
+  "colorSchemes": ["amber", "mono"],
+  "requestedWindow": { "width": 1160, "height": 900 },
+  "screenshots": {
+    "timeline.png": {
+      "sha256": "3197aa03c3276da2977b5cc55e56534ed6de4f414ebd00f01a1e0e7ad3f1a9e8",
+      "width": 2320,
+      "height": 1764
+    },
+    "lists.png": {
+      "sha256": "2388d06acb5efc83a2f5b4e10ab4a0f56557d120ea9adf806206aa75a2485f64",
+      "width": 2320,
+      "height": 1764
+    },
+    "search.png": {
+      "sha256": "a2e0deeca0618ac1a4d5b0420ed3945e5d138f495182b18f602b71fb6edf1b93",
+      "width": 2320,
+      "height": 1764
+    },
+    "book.png": {
+      "sha256": "cf8d239684a9e52d3598a4a9969a986ae666c49b9d9fd643bbef9ec16daa4cbf",
+      "width": 2320,
+      "height": 1764
+    },
+    "timeline-mono.png": {
+      "sha256": "f33068916ff63d1fb84267d19d86aa336958a8e1fd7878a0454869362ac2547f",
+      "width": 2320,
+      "height": 1764
+    },
+    "lists-mono.png": {
+      "sha256": "c19d76ffd581dfbd2a934ecc5d62fb2f91045ee38db196624413269cbf704458",
+      "width": 2320,
+      "height": 1764
+    },
+    "search-mono.png": {
+      "sha256": "8562dc3076bafce137217200a2f66cee05eee294708f07d94dd952c250327b9d",
+      "width": 2320,
+      "height": 1764
+    },
+    "book-mono.png": {
+      "sha256": "015633c7d94c2f823513a75e3368f82bae8c58dbd64808d15636291d57435b1d",
+      "width": 2320,
+      "height": 1764
+    }
+  }
+}

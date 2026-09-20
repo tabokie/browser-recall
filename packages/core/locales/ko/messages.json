@@ -1065,6 +1065,10 @@
     "message": "승인을 기다리는 중",
     "description": "Connector approval pending button."
   },
+  "extensionTypeToSearch": {
+    "message": "입력하여 검색",
+    "description": "Hint below the popup list section for keyboard list search."
+  },
   "extensionSearchOrCreate": {
     "message": "검색하거나 생성하세요...",
     "description": "List picker search placeholder."

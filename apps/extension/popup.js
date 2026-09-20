@@ -1703,6 +1703,8 @@ function openListPicker(lists, options = {}) {
         }
       });
     } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
       closeListPicker();
     }
   }

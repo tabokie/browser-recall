@@ -1065,6 +1065,10 @@
     "message": "Aguardando aprovação",
     "description": "Connector approval pending button."
   },
+  "extensionTypeToSearch": {
+    "message": "Digite para buscar",
+    "description": "Hint below the popup list section for keyboard list search."
+  },
   "extensionSearchOrCreate": {
     "message": "Pesquise ou crie...",
     "description": "List picker search placeholder."

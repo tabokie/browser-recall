@@ -20,6 +20,8 @@ function timer(label) {
 }
 
 export const test = base.extend({
+  extensionHeadless: [true, { option: true, scope: 'worker' }],
+  extensionEnglish: [false, { option: true, scope: 'worker' }],
   daemon: [
     async ({}, use) => {
       const done = timer('daemon startup');
@@ -37,7 +39,7 @@ export const test = base.extend({
   ],
 
   extContext: [
-    async ({ daemon }, use) => {
+    async ({ daemon, extensionHeadless, extensionEnglish }, use) => {
       void daemon;
       const extPath = createTestExtensionDir('browser-recall-test-extension-');
       const userDataDirs = [];
@@ -48,15 +50,31 @@ export const test = base.extend({
           path.join(os.tmpdir(), 'browser-recall-test-'),
         );
         userDataDirs.push(userDataDir);
+        let executablePath;
+        if (extensionEnglish && process.platform === 'darwin') {
+          if (extensionHeadless)
+            throw new Error('macOS English capture requires headed Chromium');
+          const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
+          executablePath = path.join(userDataDir, 'chromium-english.sh');
+          fs.writeFileSync(
+            executablePath,
+            `#!/bin/sh\nexec ${quote(chromium.executablePath())} -AppleLanguages '(en)' "$@"\n`,
+            { mode: 0o700 },
+          );
+        }
         const ctx = await chromium.launchPersistentContext(userDataDir, {
+          executablePath,
           channel:
             process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'chrome' ||
             process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'msedge'
               ? process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE
               : undefined,
           headless: false,
+          locale: extensionEnglish ? 'en-US' : undefined,
+          ignoreDefaultArgs: extensionHeadless ? [] : ['--enable-automation'],
           args: [
-            '--headless=new',
+            ...(extensionHeadless ? ['--headless=new'] : []),
+            ...(extensionEnglish ? ['--lang=en-US'] : []),
             `--disable-extensions-except=${extPath}`,
             `--load-extension=${extPath}`,
           ],

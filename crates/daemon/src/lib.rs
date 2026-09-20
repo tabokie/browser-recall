@@ -13,6 +13,7 @@ pub mod command_authority;
 pub mod commands;
 pub mod config;
 pub mod connectors;
+mod data_directory_docs;
 pub mod mutations;
 pub mod pairing;
 pub mod protocol;

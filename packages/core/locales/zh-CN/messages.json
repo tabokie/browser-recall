@@ -1065,6 +1065,10 @@
     "message": "等待批准",
     "description": "Connector approval pending button."
   },
+  "extensionTypeToSearch": {
+    "message": "输入以搜索",
+    "description": "Hint below the popup list section for keyboard list search."
+  },
   "extensionSearchOrCreate": {
     "message": "搜索或创建...",
     "description": "List picker search placeholder."

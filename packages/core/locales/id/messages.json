@@ -1065,6 +1065,10 @@
     "message": "Menunggu Persetujuan",
     "description": "Connector approval pending button."
   },
+  "extensionTypeToSearch": {
+    "message": "Ketik untuk mencari",
+    "description": "Hint below the popup list section for keyboard list search."
+  },
   "extensionSearchOrCreate": {
     "message": "Telusuri atau buat...",
     "description": "List picker search placeholder."

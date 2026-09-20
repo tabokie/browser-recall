@@ -1065,6 +1065,10 @@
     "message": "في انتظار الموافقة",
     "description": "Connector approval pending button."
   },
+  "extensionTypeToSearch": {
+    "message": "اكتب للبحث",
+    "description": "Hint below the popup list section for keyboard list search."
+  },
   "extensionSearchOrCreate": {
     "message": "بحث أو إنشاء...",
     "description": "List picker search placeholder."
