@@ -13,7 +13,7 @@
     "packages/*"
   ],
   "scripts": {
-    "ci": "npm run ci:test && npm run ci:install-playwright && npm run ci:test-extension-e2e && npm run ci:test-rust && npm run ci:install-desktop-visual-browsers && npm run ci:test-desktop-visual && npm run ci:cold-scripts && npm run ci:lint-js && npm run ci:lint-rust",
+    "ci": "npm run ci:check-docs && npm run ci:test && npm run ci:install-playwright && npm run ci:test-extension-e2e && npm run ci:test-rust && npm run ci:install-desktop-visual-browsers && npm run ci:test-desktop-visual && npm run ci:cold-scripts && npm run ci:lint-js && npm run ci:lint-rust",
     "ci:test": "npm test",
     "ci:test-extension-e2e": "npm run build:test-daemon && playwright test tests/e2e/extension-font-fallback.spec.js tests/e2e/popup-lists.spec.js tests/e2e/snapshot-slug-meta.spec.js tests/e2e/snapshot-resource-timeout.spec.js tests/e2e/extension-navigation-regressions.spec.js tests/e2e/url-tracking.spec.js && playwright test tests/e2e/highlight-note-edit.spec.js && npm run test:firefox:smoke",
     "ci:test-windows-extension-font": "npm run build:test-daemon && playwright test tests/e2e/extension-font-fallback.spec.js",
@@ -63,7 +63,9 @@
     "lint:duplicates": "jscpd apps/extension/ --min-lines 5 --min-tokens 50",
     "build:test-daemon": "cargo build --locked -p browser-recall-daemon",
     "docs:screenshots": "node scripts/capture-documentation.mjs",
-    "docs:screenshots:browser": "npm run build:test-daemon && node scripts/capture-browser-documentation.mjs"
+    "docs:screenshots:browser": "npm run build:test-daemon && node scripts/capture-browser-documentation.mjs",
+    "ci:generate-docs": "npm run docs:screenshots && npm run docs:screenshots:browser && npm run ci:check-docs",
+    "ci:check-docs": "node scripts/check-documentation-screenshots.mjs"
   },
   "keywords": [
     "chrome-extension",

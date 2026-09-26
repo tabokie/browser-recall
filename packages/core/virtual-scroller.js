@@ -102,9 +102,10 @@ export class VirtualScroller {
 
   updateData(items, renderRowFn, options = {}) {
     const anchor = options.preserveScroll ? this._captureScrollAnchor() : null;
-    // Save nodes with meaningful state (selected/expanded) before destroying
+    // Keep the old layout until the replacement render. Removing rows here
+    // collapses the scroll range before _render reads the viewport position.
     for (const item of this.containerEl.querySelectorAll('.result-item')) {
-      this._saveOrDiscard(item);
+      this._rememberStatefulNode(item);
     }
     this._fullData = items;
     this.data = items;

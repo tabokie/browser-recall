@@ -6,7 +6,7 @@ const STORAGE_KEYS = {
   browserId: 'connectorBrowserId',
 };
 
-export const CONNECTOR_PROTOCOL_VERSION = 3;
+export const CONNECTOR_PROTOCOL_VERSION = 4;
 
 async function ensureBrowserInstallId() {
   const stored = await chrome.storage.local.get([STORAGE_KEYS.browserId]);

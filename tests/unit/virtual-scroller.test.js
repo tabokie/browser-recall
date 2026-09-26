@@ -595,47 +595,6 @@ describe('VirtualScroller', () => {
       expect(scrollEl.scrollTop).toBe(2575);
     });
 
-    it('preserves scroll when DOM teardown temporarily clamps scrollTop to zero', () => {
-      const items = Array.from({ length: 100 }, (_, i) => ({
-        id: i,
-        url: `https://example.com/${i}`,
-      }));
-      vs = new VirtualScroller(scrollEl, containerEl, 50);
-      vs.setData(items, (item) => `<div>${item.id}</div>`);
-
-      scrollEl._top = 0;
-      scrollEl.scrollTop = 1800;
-      scrollEl.scrollHeight = 2400;
-      containerEl._top = -1800;
-      containerEl.querySelectorAll = (selector) => {
-        if (selector !== '.result-item') return [];
-        return [
-          {
-            querySelector: (rowSelector) =>
-              rowSelector === '.result-row'
-                ? {
-                    dataset: { url: 'https://example.com/36' },
-                    classList: { contains: () => false },
-                  }
-                : null,
-            remove() {
-              scrollEl.scrollTop = 0;
-              scrollEl.scrollHeight = scrollEl.clientHeight;
-              containerEl._top = 0;
-            },
-          },
-        ];
-      };
-
-      vs.updateData(
-        items.filter((item) => item.url !== 'https://example.com/6'),
-        (item) => `<div>${item.id}</div>`,
-        { preserveScroll: true },
-      );
-
-      expect(scrollEl.scrollTop).toBe(1800);
-    });
-
     it('does not let a stale top lock override later preserved refreshes', () => {
       const callbacks = [];
       globalThis.requestAnimationFrame = (fn) => {

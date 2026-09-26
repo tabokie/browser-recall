@@ -1,0 +1,45 @@
+- CI is failing on E2E Regression job: [https://github.com/tabokie/browser-recall/actions/runs/35554348789/job/106194953058](https://github.com/tabokie/browser-recall/actions/runs/35554348789/job/106194953058)
+- Use my browser, it's a private repo
+- &#x20;1\) tests/e2e/extension-navigation-regressions.spec.js:1001:3 › extension navigation regressions › records query-only same-tab history updates as new visits while keeping hash anchors attached &#x20;
+&#x20;   Error: expect(received).toMatchObject(expected)&#x20;
+&#x20;   \- Expected  - 1&#x20;
+&#x20;   \+ Received  + 1&#x20;
+&#x20;     Object {&#x20;
+&#x20;       "success": true,&#x20;
+&#x20;   \-   "url": "[http://127.0.0.1:33481/query-spa?extra=1&pp=abc](http://127.0.0.1:33481/query-spa?extra=1\&pp=abc)",&#x20;
+&#x20;   \+   "url": "[http://127.0.0.1:33481/query-spa](http://127.0.0.1:33481/query-spa)",&#x20;
+&#x20;     }&#x20;
+&#x20;     1071 |       });&#x20;
+&#x20;     1072 |     }, tabId);&#x20;
+&#x20;   \> 1073 |     expect(reportedResp).toMatchObject({ success: true, url: updatedUrl });&#x20;
+&#x20;          \|                          ^&#x20;
+&#x20;     1074 |     await helper.evaluate(() =>&#x20;
+&#x20;     1075 |       chrome.runtime.sendMessage({ action: 'flushDesktopQueue' }),&#x20;
+&#x20;     1076 |     );&#x20;
+&#x20;       at /home/runner/work/browser-recall/browser-recall/tests/e2e/extension-navigation-regressions.spec.js:1073:26&#x20;
+&#x20;   Error Context: test-results/extension-navigation-regre-89729-eping-hash-anchors-attached/error-context.md&#x20;
+&#x20; 1 failed&#x20;
+&#x20;   tests/e2e/extension-navigation-regressions.spec.js:1001:3 › extension navigation regressions › records query-only same-tab history updates as new visits while keeping hash anchors attached &#x20;
+&#x20; 78 passed (2.5m)
+- Update the readme: (1) The last few screenshots for timeline and collection are redundant, remove them. (2) Only the first screenshot to show the app needs to demonstrate two styles, and the way we do it is not two images side by side, but merge the two styles in one image, use a slash to split them. The generation must be done programmatically. (3) Reduce the size of the browser a little more, so that the extension icon is bigger proportionally. (4) Reduce the height of book screenshot so it occupies less space.
+- The screenshot generation is part of the CI? To make sure they don't become outdated.
+- Do it. And make the window in every screenshot smaller, I want the idea to be clear without occupying too much space.
+- Continue
+- Continue
+- Make the browser and timeline screenshot height shorter by 30%, in timeline, the pages with special labels should be moved earlier to appear in the screenshot.
+- Make the timeline height slightly larger, it looks a bit crammed.
+- Update the browser highlight edit UI to remove the duplicate rendering of highlighted text.
+- Actually forget that. I think it's necessary in order to distinguish "delete highlight" and "edit note".
+- I notice a bug: From the desktop app timeline, open a page (in browser), then come back, the scroll position is reset to the beginning
+- Continue
+- Another issue, I saw a browser appears in "Browsers active today" when its last activity was a week ago.
+- Actually, the browser is a Orion browser recognized as Chrome, and it is active, the entry saying "the browser was last seen a week ago" is wrong.
+- Continue. And don't forget the previous hypothetical issue "a WebSocket error can bypass the daemon’s disconnect cleanup". Fix it if it can happen realistically.
+- In list checkpoint files, there're a lot of "source: null" fields. Is it necessary? Can we omit it to save space?
+- Go ahead. No need to consider compatibility. Migrate existing data at \~/browser-data directly.
+- Continue
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) 
+- Fix them all
+- Continue
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-6 Astra
+- Continue

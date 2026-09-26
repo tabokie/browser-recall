@@ -5360,6 +5360,13 @@ async function applyPendingShellRoute() {
 window.__renderBrowserRecall = () => {
   pendingShellRoute = window.__BR_STATE__?.route || null;
   void applyPendingShellRoute();
+  if (document.getElementById('settingsModal').classList.contains('open')) {
+    void loadDesktopShellState()
+      .then((shell) => renderPairedBrowsers(shell.pairedBrowsers))
+      .catch((error) =>
+        surfaceBackgroundError('Could not refresh paired browsers', error),
+      );
+  }
 };
 
 function bindPinClicks(container, listId) {
@@ -7923,7 +7930,12 @@ chrome.runtime.onMessage.addListener((request) => {
         if (activeView.type === 'explore') {
           const mergedIntoSearch =
             await mergeHistoryMutationsIntoActiveSearch(changedEntries);
-          if (!mergedIntoSearch) runSearchFilterPipeline();
+          if (!mergedIntoSearch) {
+            // Opening a Timeline page reports a new visit while the window is
+            // inactive. Refresh its data without losing the reading position.
+            preserveRelatedScrollOnNextRender = true;
+            runSearchFilterPipeline();
+          }
         } else if (activeView.type === 'list') {
           runSearchFilterPipeline();
         } else {

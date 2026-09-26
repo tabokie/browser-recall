@@ -109,7 +109,7 @@ async fn pairing_rejects_a_client_without_a_protocol_version() {
     let response: DaemonMessage = serde_json::from_str(&response).expect("error json");
     assert!(matches!(
         response,
-        DaemonMessage::Error { ref code, .. } if code == "invalid_message"
+        DaemonMessage::Error { ref code, .. } if code == "incompatible_protocol"
     ));
     assert!(config_store
         .load_or_create()
@@ -172,6 +172,102 @@ async fn firefox_extension_origin_can_pair() {
 }
 
 #[tokio::test]
+async fn browser_activity_refreshes_last_seen_without_reconnecting() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+    let mut socket = connect_pair_socket(handle.port(), "Firefox").await;
+    let paired_at = config_store.load_or_create().unwrap().connectors[0]
+        .last_seen_at
+        .expect("pairing timestamp");
+    let snapshots = handle.subscribe();
+
+    // Config timestamps have second precision. Cross that boundary before
+    // sending activity on the same socket, without depending on scheduling.
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            <= paired_at
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("clock advances past pairing");
+    socket
+        .send(Message::Text(
+            serde_json::to_string(&ConnectorMessage::GetStatus).unwrap(),
+        ))
+        .await
+        .expect("send activity on the existing connection");
+    let response: DaemonMessage =
+        serde_json::from_str(&next_text_message(&mut socket).await).unwrap();
+    assert!(matches!(response, DaemonMessage::Status { .. }));
+    let browsers = browser_recall_daemon::commands::list_paired_browsers(&config_store)
+        .expect("read desktop browser records");
+    assert!(browsers[0].last_seen.unwrap() > (paired_at * 1000) as i64);
+    assert!(snapshots.has_changed().expect("snapshot channel is open"));
+    assert_eq!(handle.snapshot().await.connected_connectors.len(), 1);
+    socket.close(None).await.expect("close browser");
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn orion_browser_identity_is_accepted() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+    let mut socket = connect_pair_socket(handle.port(), "Orion").await;
+    let browsers = browser_recall_daemon::commands::list_paired_browsers(&config_store)
+        .expect("read desktop browser records");
+    assert_eq!(browsers[0].browser_name, "Orion");
+    assert_eq!(
+        handle.snapshot().await.connected_connectors[0].browser_name,
+        "Orion"
+    );
+    socket.close(None).await.expect("close Orion");
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn abrupt_browser_disconnect_clears_connected_state() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+
+    let socket = connect_pair_socket(handle.port(), "Firefox").await;
+    assert_eq!(handle.snapshot().await.connected_connectors.len(), 1);
+    // A browser crash closes TCP without sending the WebSocket close frame.
+    // Tungstenite reports this as an error rather than a normal disconnect.
+    drop(socket);
+    let mut snapshots = handle.subscribe();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        snapshots.wait_for(|snapshot| snapshot.connected_connectors.is_empty()),
+    )
+    .await
+    .expect("abrupt disconnect must not leave a browser marked connected")
+    .expect("snapshot channel remains open");
+
+    assert_eq!(config_store.load_or_create().unwrap().connectors.len(), 1);
+    let mut reconnected = connect_pair_socket(handle.port(), "Firefox").await;
+    assert_eq!(handle.snapshot().await.connected_connectors.len(), 1);
+    reconnected
+        .close(None)
+        .await
+        .expect("close reconnected browser");
+    handle.shutdown().await;
+}
+
+#[tokio::test]
 async fn fresh_pair_replaces_same_connector_active_socket() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());
@@ -226,10 +322,10 @@ async fn connect_pair_socket(port: u16, browser_name: &str) -> support::TestSock
         .await
         .expect("send pair request");
     let pending = next_text_message(&mut socket).await;
-    let approved = next_text_message(&mut socket).await;
     let pending: DaemonMessage = serde_json::from_str(&pending).expect("pending json");
+    assert!(matches!(pending, DaemonMessage::PairPending), "{pending:?}");
+    let approved = next_text_message(&mut socket).await;
     let approved: DaemonMessage = serde_json::from_str(&approved).expect("approved json");
-    assert!(matches!(pending, DaemonMessage::PairPending));
     assert!(matches!(approved, DaemonMessage::PairApproved { .. }));
     socket
 }
@@ -271,7 +367,7 @@ async fn untrusted_origin_gets_protocol_error_after_websocket_upgrade() {
 }
 
 #[tokio::test]
-async fn auth_with_cached_token_succeeds() {
+async fn auth_with_cached_token_refreshes_browser_identity() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());
     let handle = start_server(test_server_options(config_store.clone()))
@@ -288,11 +384,12 @@ async fn auth_with_cached_token_succeeds() {
     );
     let (mut socket, _) = connect_async(request).await.expect("ws connect");
 
-    let auth_message = serde_json::to_string(&ConnectorMessage::Auth {
-        protocol_version: Some(CONNECTOR_PROTOCOL_VERSION),
-        token,
+    let before = config_store.load_or_create().unwrap().connectors[0].clone();
+    let auth_message = serde_json::json!({
+        "type": "auth", "protocolVersion": CONNECTOR_PROTOCOL_VERSION,
+        "token": token, "browserName": "Orion"
     })
-    .expect("auth");
+    .to_string();
     socket
         .send(Message::Text(auth_message))
         .await
@@ -306,6 +403,15 @@ async fn auth_with_cached_token_succeeds() {
         }
     ));
 
+    let after = config_store.load_or_create().unwrap().connectors[0].clone();
+    assert_eq!(after.browser_name, "Orion");
+    assert_eq!(after.token, before.token);
+    assert_eq!(after.browser_id, before.browser_id);
+    assert_eq!(after.approved_at, before.approved_at);
+    assert_eq!(
+        handle.snapshot().await.connected_connectors[0].browser_name,
+        "Orion"
+    );
     handle.shutdown().await;
 }
 
@@ -328,10 +434,9 @@ async fn auth_rejects_a_mismatched_protocol_version() {
     let (mut socket, _) = connect_async(request).await.expect("ws connect");
     socket
         .send(Message::Text(
-            serde_json::to_string(&ConnectorMessage::Auth {
-                protocol_version: Some(1),
-                token,
-            })
+            serde_json::to_string(&serde_json::json!({
+                "type": "auth", "protocolVersion": 3, "token": token
+            }))
             .expect("auth json"),
         ))
         .await
@@ -345,4 +450,50 @@ async fn auth_rejects_a_mismatched_protocol_version() {
     ));
 
     handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn activity_preserves_desktop_config_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = ConfigStore::new(dir.path());
+    let server = start_server(test_server_options(store.clone()))
+        .await
+        .unwrap();
+    let (mut socket, _, _) = support::paired_socket(server.port(), &store).await;
+    let config = store.load_or_create().unwrap();
+    let last_seen = config.connectors[0].last_seen_at.unwrap();
+    // Independently constructed stores share the desktop/daemon writer lock.
+    ConfigStore::new(dir.path())
+        .update(|current| {
+            current.log_level = "debug".into();
+            current.launch_at_login = !config.launch_at_login;
+            current.sync_paused_devices = vec!["another-device".into()];
+            Ok(())
+        })
+        .unwrap();
+    while std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        <= last_seen
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    socket
+        .send(Message::Text(
+            serde_json::to_string(&ConnectorMessage::GetStatus).unwrap(),
+        ))
+        .await
+        .unwrap();
+    let response: DaemonMessage =
+        serde_json::from_str(&support::next_text_message(&mut socket).await).unwrap();
+    assert!(matches!(response, DaemonMessage::Status { .. }));
+    let saved = store.load_or_create().unwrap();
+    server.shutdown().await;
+    assert_eq!(
+        saved.log_level, "debug",
+        "browser activity must preserve the desktop's persisted debug setting"
+    );
+    assert_eq!(saved.launch_at_login, !config.launch_at_login);
+    assert_eq!(saved.sync_paused_devices, ["another-device"]);
 }

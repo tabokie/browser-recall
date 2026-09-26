@@ -1054,6 +1054,46 @@ test.describe('extension navigation regressions', () => {
     }, originalUrl);
     expect(tabId).toBeTruthy();
 
+    await expect
+      .poll(() =>
+        helper.evaluate(
+          (id) =>
+            chrome.runtime.sendMessage({ action: 'getReportedUrl', tabId: id }),
+          tabId,
+        ),
+      )
+      .toMatchObject({ success: true, url: originalUrl });
+    // The browser URL and empty badge can settle before the visit report.
+    // Hold that report until the first read to exercise this ordering on every host.
+    await helper.evaluate(
+      ({ tabId, updatedUrl }) =>
+        chrome.scripting.executeScript({
+          target: { tabId },
+          world: 'ISOLATED',
+          args: [updatedUrl],
+          func: (url) => {
+            const sendMessage = chrome.runtime.sendMessage.bind(chrome.runtime);
+            const ready = new Promise((resolve) => {
+              globalThis.releaseQueryVisitForTest = () => {
+                chrome.runtime.sendMessage = sendMessage;
+                resolve();
+              };
+            });
+            chrome.runtime.sendMessage = (message, ...args) => {
+              if (
+                message.action === 'recordPageActivity' &&
+                message.isInitialLoad &&
+                message.url === url
+              ) {
+                return ready.then(() => sendMessage(message, ...args));
+              }
+              return sendMessage(message, ...args);
+            };
+          },
+        }),
+      { tabId, updatedUrl },
+    );
+
     await page.click('#go');
     await expect(page).toHaveURL(updatedUrl);
 
@@ -1064,13 +1104,22 @@ test.describe('extension navigation regressions', () => {
         text: '',
       });
 
-    const reportedResp = await helper.evaluate((id) => {
-      return chrome.runtime.sendMessage({
-        action: 'getReportedUrl',
-        tabId: id,
-      });
-    }, tabId);
-    expect(reportedResp).toMatchObject({ success: true, url: updatedUrl });
+    await expect
+      .poll(() =>
+        helper.evaluate(async (id) => {
+          const response = await chrome.runtime.sendMessage({
+            action: 'getReportedUrl',
+            tabId: id,
+          });
+          await chrome.scripting.executeScript({
+            target: { tabId: id },
+            world: 'ISOLATED',
+            func: () => globalThis.releaseQueryVisitForTest(),
+          });
+          return response;
+        }, tabId),
+      )
+      .toMatchObject({ success: true, url: updatedUrl });
     await helper.evaluate(() =>
       chrome.runtime.sendMessage({ action: 'flushDesktopQueue' }),
     );

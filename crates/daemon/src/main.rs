@@ -10,7 +10,7 @@
 
 use browser_recall_daemon::pairing::{static_approver, PairingDecision};
 use browser_recall_daemon::ws_server::{start_server, ServerStartOptions};
-use browser_recall_daemon::{ConfigStore, DaemonConfig};
+use browser_recall_daemon::ConfigStore;
 use std::env;
 use std::error::Error;
 use std::path::PathBuf;
@@ -115,49 +115,32 @@ fn configure_data_directory(
     config_store: &ConfigStore,
     data_dir: Option<PathBuf>,
 ) -> Result<(), String> {
-    match (config_store.exists(), data_dir) {
-        (false, None) => {
-            return Err("--data-dir is required when creating daemon configuration".to_string());
-        }
-        (false, Some(data_dir)) => {
-            let config =
-                DaemonConfig::new_configured(data_dir).map_err(|error| error.to_string())?;
-            config_store
-                .save(&config)
-                .map_err(|error| format!("failed to create daemon configuration: {error}"))?;
-        }
-        (true, Some(data_dir)) => {
-            let mut config = config_store
-                .load_or_create()
-                .map_err(|error| format!("failed to load daemon configuration: {error}"))?;
-            if !config.data_dir.as_os_str().is_empty() && config.data_dir != data_dir {
-                return Err(format!(
-                    "daemon is already configured to use {}",
-                    config.data_dir.display()
+    if data_dir.is_none() && !config_store.exists() {
+        return Err("--data-dir is required when creating daemon configuration".to_string());
+    }
+    config_store
+        .update(|config| {
+            if let Some(data_dir) = data_dir {
+                if !config.data_dir.as_os_str().is_empty() && config.data_dir != data_dir {
+                    return Err(std::io::Error::other(format!(
+                        "daemon is already configured to use {}",
+                        config.data_dir.display()
+                    )));
+                }
+                if !config.is_configured() {
+                    config
+                        .select_data_directory(data_dir)
+                        .map_err(std::io::Error::other)?;
+                    config.complete_setup().map_err(std::io::Error::other)?;
+                }
+            } else if !config.is_configured() {
+                return Err(std::io::Error::other(
+                    "--data-dir is required when daemon configuration is incomplete",
                 ));
             }
-            if config.is_configured() {
-                return Ok(());
-            }
-            config
-                .select_data_directory(data_dir)
-                .map_err(str::to_string)?;
-            config.complete_setup().map_err(str::to_string)?;
-            config_store
-                .save(&config)
-                .map_err(|error| format!("failed to update daemon configuration: {error}"))?;
-        }
-        (true, None) => {
-            let config = config_store
-                .load_or_create()
-                .map_err(|error| format!("failed to load daemon configuration: {error}"))?;
-            if !config.is_configured() {
-                return Err(
-                    "--data-dir is required when daemon configuration is incomplete".to_string(),
-                );
-            }
-        }
-    }
+            Ok(())
+        })
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 

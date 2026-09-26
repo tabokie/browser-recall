@@ -1368,25 +1368,17 @@ pub fn pair_browser_revoke(
     browser_id: &str,
     extension_id: &str,
 ) -> Result<bool, String> {
-    let mut config = config_store
-        .load_or_create()
-        .map_err(|error| error.to_string())?;
-    let before = config.connectors.len();
-    config.connectors.retain(|connector| {
-        !(connector.browser_id == browser_id && connector.extension_id == extension_id)
-    });
-    prune_inactive_connectors(
-        &mut config.connectors,
-        &HashSet::new(),
-        current_local_day_start_unix()?,
-    );
-    if config.connectors.len() != before {
-        config_store
-            .save(&config)
-            .map_err(|error| error.to_string())?;
-        return Ok(true);
-    }
-    Ok(false)
+    let day_start = current_local_day_start_unix()?;
+    config_store
+        .update(|config| {
+            let before = config.connectors.len();
+            config.connectors.retain(|connector| {
+                !(connector.browser_id == browser_id && connector.extension_id == extension_id)
+            });
+            prune_inactive_connectors(&mut config.connectors, &HashSet::new(), day_start);
+            Ok(config.connectors.len() != before)
+        })
+        .map_err(|error| error.to_string())
 }
 
 pub fn preview_rule_payload(

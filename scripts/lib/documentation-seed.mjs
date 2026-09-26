@@ -130,8 +130,8 @@ export function documentationSeed() {
         source: 'manual',
       });
   }
-  // The latest screen has two saved pages, only one with highlights, among ordinary visits.
-  const recent = [12, 29, 19, 24, 8, 11, 14, 0, 16, 30, 10, 37];
+  // Descending Timeline order puts both saved pages first in the compact capture.
+  const recent = [12, 29, 19, 24, 11, 14, 16, 30, 10, 37, 8, 0];
   const minutes = [8, 14, 39, 51, 87, 126, 132, 171, 184, 225, 247, 281];
   recent.forEach((pageIndex, index) =>
     visit(

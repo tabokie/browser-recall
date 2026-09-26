@@ -33,7 +33,12 @@ function jobBody(jobName, nextJobName) {
 
 describe('GitHub CI prerequisites', () => {
   test.each([
-    ['test', 'test-extension-e2e', 'ci:test'],
+    ['test', 'documentation-screenshots', 'ci:check-docs ci:test'],
+    [
+      'documentation-screenshots',
+      'test-extension-e2e',
+      'ci:install-playwright ci:generate-docs',
+    ],
     [
       'test-extension-e2e',
       'test-rust',
@@ -60,7 +65,7 @@ describe('GitHub CI prerequisites', () => {
 
   test('local CI composes every locally safe GitHub CI job', () => {
     expect(packageJson.scripts.ci).toBe(
-      'npm run ci:test && npm run ci:install-playwright && npm run ci:test-extension-e2e && npm run ci:test-rust && npm run ci:install-desktop-visual-browsers && npm run ci:test-desktop-visual && npm run ci:cold-scripts && npm run ci:lint-js && npm run ci:lint-rust',
+      'npm run ci:check-docs && npm run ci:test && npm run ci:install-playwright && npm run ci:test-extension-e2e && npm run ci:test-rust && npm run ci:install-desktop-visual-browsers && npm run ci:test-desktop-visual && npm run ci:cold-scripts && npm run ci:lint-js && npm run ci:lint-rust',
     );
     expect(packageJson.scripts['ci:install-playwright']).toBe(
       'playwright install --with-deps --no-shell chromium',
@@ -116,7 +121,7 @@ describe('GitHub CI prerequisites', () => {
     expect(rustToolchain).toContain('channel = "1.97.0"');
     expect(rustToolchain).toContain('"llvm-tools-preview"');
     expect(ciWorkflow.match(/dtolnay\/rust-toolchain@1\.97\.0/g)).toHaveLength(
-      7,
+      8,
     );
     expect(ciWorkflow).not.toContain('dtolnay/rust-toolchain@stable');
   });

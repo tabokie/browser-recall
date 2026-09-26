@@ -3,7 +3,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-pub const CONNECTOR_PROTOCOL_VERSION: u32 = 3;
+pub const CONNECTOR_PROTOCOL_VERSION: u32 = 4;
 
 fn deserialize_required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where
@@ -223,6 +223,8 @@ pub enum ConnectorMessage {
         )]
         protocol_version: Option<u32>,
         token: String,
+        #[serde(rename = "browserName")]
+        browser_name: String,
     },
     GetStatus,
     GetPageInfo {
@@ -507,21 +509,21 @@ mod tests {
     }
 
     #[test]
-    fn connector_v3_accepts_additive_message_fields() {
-        assert_eq!(CONNECTOR_PROTOCOL_VERSION, 3);
+    fn connector_v4_accepts_additive_message_fields() {
+        assert_eq!(CONNECTOR_PROTOCOL_VERSION, 4);
 
         let message = json!({
             "type": "run_command",
             "action": "createList",
             "request": { "name": "Reading" },
-            "futureTracingContext": { "spanId": "additive-v3-field" }
+            "futureTracingContext": { "spanId": "additive-v4-field" }
         });
 
         assert!(serde_json::from_value::<ConnectorMessage>(message).is_ok());
     }
 
     #[test]
-    fn connector_v3_still_requires_current_fields() {
+    fn connector_v4_still_requires_current_fields() {
         let missing_request = json!({
             "type": "run_command",
             "action": "createList"
@@ -531,7 +533,7 @@ mod tests {
     }
 
     #[test]
-    fn connector_v3_rejects_missing_nullable_snapshot_fields_even_with_additions() {
+    fn connector_v4_rejects_missing_nullable_snapshot_fields_even_with_additions() {
         let misspelled_markdown = json!({
             "type": "snapshot",
             "slug": "snapshot-page",
@@ -540,7 +542,7 @@ mod tests {
             "title": null,
             "markdonw": null,
             "html": "<html></html>",
-            "futureTracingContext": { "spanId": "additive-v3-field" }
+            "futureTracingContext": { "spanId": "additive-v4-field" }
         });
 
         assert!(serde_json::from_value::<ConnectorMessage>(misspelled_markdown).is_err());

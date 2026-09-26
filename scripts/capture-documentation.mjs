@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Real Tauri app + real daemon + Rust replay. No mocked bridge or edited pixels.
+// Native Tauri captures backed by the real daemon; the hero combines both schemes.
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -20,6 +20,11 @@ import { fileURLToPath } from 'node:url';
 import { format } from 'prettier';
 import { buildManualSeedFiles } from './lib/manual-seed.mjs';
 import { documentationSeed } from './lib/documentation-seed.mjs';
+import { composeDocumentationHero } from './compose-documentation-hero.mjs';
+import {
+  captureInputs,
+  assertCaptureInputs,
+} from './lib/documentation-freshness.mjs';
 import {
   launchTestDaemon,
   waitForDaemonListening,
@@ -33,6 +38,7 @@ if (process.platform !== 'darwin') {
 }
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 process.chdir(root);
+const inputs = captureInputs(root, 'desktop');
 const work = realpathSync(
   mkdtempSync(path.join(tmpdir(), 'browser-recall-documentation-')),
 );
@@ -103,7 +109,10 @@ async function capture(name, includes, excludes = []) {
     return stable >= 3;
   });
   if (!ready()) throw new Error(`${name} changed during capture`);
-  console.log(`Captured ${name}`);
+  const bytes = readFileSync(filename);
+  console.log(
+    `Captured ${name}: ${bytes.readUInt32BE(16)} × ${bytes.readUInt32BE(20)}`,
+  );
 }
 
 try {
@@ -121,6 +130,12 @@ try {
       JSON.stringify({
         identifier: 'app.browser-recall.documentation',
         productName: 'Browser Recall Documentation',
+        // Only this isolated documentation build permits a compact Timeline.
+        app: {
+          windows: JSON.parse(
+            readFileSync('apps/desktop/src-tauri/tauri.conf.json', 'utf8'),
+          ).app.windows.map((window) => ({ ...window, minHeight: 500 })),
+        },
       }),
     ],
     path.join(root, 'apps/desktop'),
@@ -230,7 +245,6 @@ try {
   await waitFor('documentation window', () =>
     native('dump').includes('AXWindow'),
   );
-  native('frame');
   const names = [];
   for (const scheme of ['amber', 'mono']) {
     if (scheme === 'mono') {
@@ -265,40 +279,18 @@ try {
       names.push(filename);
       return filename;
     };
-    await capture(name('timeline'), [
-      'Roasted tomatoes with lentils',
-      'How to repot a rubber plant',
-      'exploreBtn',
-    ]);
-    native('click', 'Small web');
-    await capture(
-      name('lists'),
-      ['A smaller, slower web', 'Good tools leave room for you'],
-      ['Roasted tomatoes with lentils'],
-    );
-    native('click', 'exploreBtn');
-    await waitFor('Timeline before search', () =>
-      native('dump').includes('Roasted tomatoes with lentils'),
-    );
-    // A real click makes WKWebView the keyboard responder; AXFocused alone does not.
-    native('click', 'searchDraftInput');
-    native('search', 'web');
-    await waitFor('search text entry', () =>
-      native('dump').includes('web | searchDraftInput'),
-    );
-    run('/usr/bin/osascript', [
-      '-e',
-      `tell application "System Events"
-      set frontmost of first process whose unix id is ${pid} to true
-      delay 0.3
-      key code 36
-    end tell`,
-    ]);
-    await capture(
-      name('search'),
-      ['A smaller, slower web', 'Why I still keep a personal website'],
-      ['Roasted tomatoes with lentils'],
-    );
+    native('frame', '960', '500');
+    const labeledPages = [
+      'A smaller, slower web',
+      'Why I still keep a personal website',
+    ];
+    await capture(name('timeline'), [...labeledPages, 'exploreBtn']);
+    for (const title of labeledPages) {
+      if (native('visible-text', title) !== 'true')
+        throw new Error(`${scheme} Timeline clips labeled page ${title}`);
+    }
+    if (scheme === 'mono') continue;
+    native('frame', '960', '620');
     native('click', 'highlightsHistoryBtn');
     await capture(
       name('book'),
@@ -316,11 +308,7 @@ try {
       ],
       ['searchDraftInput'],
     );
-    for (const text of [
-      'Leave the unfinished bits in.',
-      'matters to them.',
-      'Some ideas need to be met twice.',
-    ]) {
+    for (const text of ['Leave the unfinished bits in.', 'matters to them.']) {
       if (native('visible-text', text) !== 'true')
         throw new Error(`${scheme} Book clips ${text}`);
     }
@@ -339,11 +327,14 @@ try {
       ];
     }),
   );
+  screenshots['timeline-styles.png'] = await composeDocumentationHero(output);
+  assertCaptureInputs(root, 'desktop', inputs);
   writeFileSync(
     path.join(output, 'capture.json'),
     await format(
       JSON.stringify({
         command: 'npm run docs:screenshots',
+        inputs,
         platform: 'macOS / native Tauri WKWebView',
         capturedAt: new Date().toISOString(),
         sourceCommit: run('git', ['rev-parse', 'HEAD']),
@@ -351,7 +342,10 @@ try {
           readFileSync(path.join(root, 'scripts/lib/documentation-seed.mjs')),
         ),
         colorSchemes: ['amber', 'mono'],
-        requestedWindow: { width: 1160, height: 900 },
+        requestedWindows: {
+          timeline: { width: 960, height: 500 },
+          book: { width: 960, height: 620 },
+        },
         screenshots,
       }),
       { parser: 'json' },

@@ -536,7 +536,7 @@ test.describe('Extension badge', () => {
           slug: 'delete-badge-list',
           name: 'Delete Badge List',
           owner: 'test-device',
-          pins: [{ id: `page:${slug}`, pinnedAt: Date.now(), source: null }],
+          pins: [{ id: `page:${slug}`, pinnedAt: Date.now() }],
           rules: [],
           timestamps: {},
           deleted: false,

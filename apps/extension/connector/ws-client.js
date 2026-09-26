@@ -1,4 +1,8 @@
-import { buildPairRequest, CONNECTOR_PROTOCOL_VERSION } from './pairing.js';
+import {
+  buildPairRequest,
+  CONNECTOR_PROTOCOL_VERSION,
+  detectBrowserName,
+} from './pairing.js';
 import {
   bufferStats,
   clearBufferedMessages,
@@ -779,6 +783,7 @@ async function connect(options = {}) {
           socket.send(
             JSON.stringify({
               type: 'auth',
+              browserName: await detectBrowserName(),
               protocolVersion: CONNECTOR_PROTOCOL_VERSION,
               token: stored[STORAGE_KEYS.token],
             }),

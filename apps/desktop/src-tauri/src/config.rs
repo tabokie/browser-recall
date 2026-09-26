@@ -22,8 +22,10 @@ pub fn bootstrap<R: Runtime>(app: &AppHandle<R>) -> Result<DesktopBootstrap, Box
     let login_item = login_item::SystemLoginItem::new(app);
 
     if !login_item.supported() && config.launch_at_login {
-        config.launch_at_login = false;
-        config_store.save(&config)?;
+        config = config_store.update(|config| {
+            config.launch_at_login = false;
+            Ok(config.clone())
+        })?;
     }
 
     let login_item_error = if config.is_configured() {

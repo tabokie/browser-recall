@@ -408,7 +408,7 @@ test.describe('Popup list chip behavior', () => {
             name: scenario.listName,
             owner: 'test-device',
             deviceTimestamp: now,
-            pins: [{ id: `page:${slug}`, pinnedAt: now, source: null }],
+            pins: [{ id: `page:${slug}`, pinnedAt: now }],
           }),
         },
         {
@@ -925,7 +925,7 @@ test.describe('Popup list chip behavior', () => {
           name: 'AI',
           owner: 'test-device',
           deviceTimestamp: now,
-          pins: [{ id: `page:${slug}`, pinnedAt: now, source: null }],
+          pins: [{ id: `page:${slug}`, pinnedAt: now }],
         }),
       },
       {
@@ -1302,7 +1302,7 @@ test.describe('Popup list chip behavior', () => {
           name: 'Resume metadata',
           owner: 'test-device',
           deviceTimestamp: now,
-          pins: [{ id: `page:${slug}`, pinnedAt: now, source: null }],
+          pins: [{ id: `page:${slug}`, pinnedAt: now }],
         }),
       },
       {
@@ -2035,7 +2035,7 @@ test.describe('Popup list chip behavior', () => {
           name: 'Fast List',
           owner: 'test-device',
           deviceTimestamp: now,
-          pins: [{ id: `page:${slug}`, pinnedAt: now, source: null }],
+          pins: [{ id: `page:${slug}`, pinnedAt: now }],
         }),
       },
       {
@@ -2194,9 +2194,7 @@ test.describe('Popup list chip behavior', () => {
           name: 'Alpha',
           owner: 'test-device',
           deviceTimestamp: now,
-          pins: [
-            { id: `page:${TEST_SLUG}`, pinnedAt: now - 3000, source: null },
-          ],
+          pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now - 3000 }],
         }),
       },
       {
@@ -2206,9 +2204,7 @@ test.describe('Popup list chip behavior', () => {
           name: 'Beta',
           owner: 'test-device',
           deviceTimestamp: now,
-          pins: [
-            { id: `page:${TEST_SLUG}`, pinnedAt: now - 2000, source: null },
-          ],
+          pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now - 2000 }],
         }),
       },
       {
@@ -2218,9 +2214,7 @@ test.describe('Popup list chip behavior', () => {
           name: 'Gamma',
           owner: 'test-device',
           deviceTimestamp: now,
-          pins: [
-            { id: `page:${TEST_SLUG}`, pinnedAt: now - 1000, source: null },
-          ],
+          pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now - 1000 }],
         }),
       },
       {

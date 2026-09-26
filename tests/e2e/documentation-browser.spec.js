@@ -8,6 +8,11 @@ import { openHelperPage, getSlugForUrl } from './helpers.js';
 import { documentationSeed } from '../../scripts/lib/documentation-seed.mjs';
 import { seedManualData } from '../../scripts/lib/manual-seed.mjs';
 
+import {
+  captureInputs,
+  assertCaptureInputs,
+} from '../../scripts/lib/documentation-freshness.mjs';
+
 const nativeCapture = process.env.BROWSER_RECALL_DOCUMENTATION_NATIVE === '1';
 test.use({
   extensionHeadless: !nativeCapture,
@@ -20,6 +25,7 @@ test('browser documentation separates the clean popup from note taking', async (
   extensionId,
 }, testInfo) => {
   void setupDir;
+  const inputs = captureInputs(process.cwd(), 'browser');
   const helper = await openHelperPage(extContext, extensionId);
   const sendMessage = (payload) =>
     helper.evaluate((message) => chrome.runtime.sendMessage(message), payload);
@@ -42,9 +48,15 @@ test('browser documentation separates the clean popup from note taking', async (
           (event) => event.path === `objects/notes/reading-note-${index}.json`,
         ).excerpt[0],
     );
+    // Two lists keep the real popup compact without changing extension styles.
     // Start this article without highlights; create a highlight after popup capture.
     seed.events = seed.events.filter(
-      (event) => !(event.action === 'create_note' && event.url === url),
+      (event) =>
+        !(event.action === 'create_note' && event.url === url) &&
+        !(
+          ['create_list', 'pin_to_list'].includes(event.action) &&
+          event.name === 'Design details'
+        ),
     );
     await seedManualData({
       ...seed,
@@ -69,12 +81,19 @@ test('browser documentation separates the clean popup from note taking', async (
   .intro { color: #777369; font-size: 19px; line-height: 1.5; margin-bottom: 30px; }
   article p { font-size: 18px; line-height: 1.75; margin: 0 0 22px; }
   footer { border-top: 1px solid #dedcd5; padding-top: 16px; margin-top: 30px; color: #858178; font: 12px system-ui, sans-serif; }
+  @media (max-width: 820px) {
+    header { padding: 10px 0 8px; }
+    main { margin: 12px auto; }
+    h1 { font-size: 30px; margin: 8px 0 12px; }
+    .intro { font-size: 15px; margin-bottom: 12px; }
+    article p { font-size: 17px; line-height: 1.6; margin-bottom: 16px; }
+  }
 </style></head><body>
 <header>FIELDNOTES <span>A few things worth keeping</span></header>
 <main><div class="eyebrow">On making things · September 16, 2026</div>
 <h1>A smaller, slower web</h1>
 <div class="intro">A corner of the internet that feels like someone lives there.</div>
-<article><p>${escape(excerpts[0])}</p><p>${escape(excerpts[1])}</p>
+<article><p>${escape(excerpts[1])}</p><p>${escape(excerpts[0])}</p>
 <p>The pages I return to rarely try to hold my attention. They offer something particular, then let me go: a recipe with a handwritten correction, a photograph of the same tree in another season.</p>
 <p>Perhaps that is enough: a place to put what you notice, and a door left open for the next person who wanders by.</p></article>
 <footer>Fieldnotes · An occasional notebook</footer></main></body></html>`;
@@ -82,7 +101,7 @@ test('browser documentation separates the clean popup from note taking', async (
     await page.route(url, (route) =>
       route.fulfill({ contentType: 'text/html; charset=utf-8', body: article }),
     );
-    await page.setViewportSize({ width: 960, height: 760 });
+    await page.setViewportSize({ width: 800, height: 348 });
     await page.goto(url);
     const marks = page.locator('mark.browser-recall-highlight');
     await expect(marks).toHaveCount(0);
@@ -179,7 +198,7 @@ test('browser documentation separates the clean popup from note taking', async (
         execFileSync(nativeHelper, [String(pid), ...args], {
           encoding: 'utf8',
         });
-      native('frame-browser', 'A smaller, slower web');
+      native('frame-browser', 'A smaller, slower web', '800', '434');
       pageSession = await extContext.newCDPSession(page);
       await pageSession.send('Emulation.clearDeviceMetricsOverride');
       // Open the real toolbar popup for the real source tab.
@@ -216,6 +235,25 @@ test('browser documentation separates the clean popup from note taking', async (
         ),
       ).toBe('');
       await expect(marks).toHaveCount(0);
+      const browserBounds = await page.evaluate(() => ({
+        left: screenX,
+        top: screenY,
+        right: screenX + outerWidth,
+        bottom: screenY + outerHeight,
+      }));
+      await expect
+        .poll(() =>
+          helper.evaluate((bounds) => {
+            const view = chrome.extension.getViews({ type: 'popup' })[0];
+            return (
+              view.screenX >= bounds.left &&
+              view.screenY >= bounds.top &&
+              view.screenX + view.outerWidth <= bounds.right &&
+              view.screenY + view.outerHeight <= bounds.bottom
+            );
+          }, browserBounds),
+        )
+        .toBe(true);
       captureWindow = async (name) => {
         const filename = testInfo.outputPath(name);
         let previous;
@@ -249,7 +287,7 @@ test('browser documentation separates the clean popup from note taking', async (
     }
 
     await page.bringToFront();
-    await page.locator('article p').nth(1).selectText();
+    await page.getByText(excerpts[1], { exact: true }).selectText();
     const highlighted = await helper.evaluate(async (pageUrl) => {
       const [tab] = await chrome.tabs.query({ url: pageUrl });
       return chrome.tabs.sendMessage(tab.id, { action: 'highlightSelection' });
@@ -269,6 +307,23 @@ test('browser documentation separates the clean popup from note taking', async (
     // a blinking caret in the native screenshot.
     await page.keyboard.press('Tab');
     await page.mouse.move(20, 20);
+    await expect
+      .poll(() =>
+        page
+          .locator('#browser-recall-highlight-overlay')
+          .evaluate((overlay) => {
+            const rect = overlay.getBoundingClientRect();
+            return (
+              rect.width > 0 &&
+              rect.height > 0 &&
+              rect.left >= 0 &&
+              rect.top >= 0 &&
+              rect.right <= innerWidth &&
+              rect.bottom <= innerHeight
+            );
+          }),
+      )
+      .toBe(true);
     if (nativeCapture) await captureWindow('browser-note-window.png');
     else await capture('browser-note.png', page);
     await page.keyboard.press('Enter');
@@ -291,11 +346,14 @@ test('browser documentation separates the clean popup from note taking', async (
 
     const output = process.env.BROWSER_RECALL_DOCUMENTATION_OUTPUT;
     if (output) {
+      assertCaptureInputs(process.cwd(), 'browser', inputs);
       const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
       const manifest = {
         command: 'npm run docs:screenshots:browser',
+        inputs,
         platform: `Chromium ${extContext.browser().version()} / production extension`,
         locale,
+        requestedWindow: { width: 800, height: 434 },
         capturedAt: new Date().toISOString(),
         sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], {
           encoding: 'utf8',

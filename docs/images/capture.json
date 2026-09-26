@@ -1,51 +1,134 @@
 {
   "command": "npm run docs:screenshots",
+  "inputs": {
+    "package.json": "99c0b94e62518d8d16dc0c498b895b05175f19b6d426f2e164b976e983bf44c3",
+    "package-lock.json": "90950dd6e3d95d1fdf490584466846dc4f642eff2f0f957af3c34130c70bae3c",
+    "packages/core/.DS_Store": "e6f4de1fe738e0f18627d40350e76513c5dcef9023d94b98d5a860ab0f8e5003",
+    "packages/core/attention-utils.js": "4f38498b8ae86274db4a9df56a90136c149357a0ed94d1933b95ffd8d25fa1be",
+    "packages/core/bounded-response.js": "4ddb18491943ee4b29073767480858af99cf93a2b647e69f51fcec0dfe79732f",
+    "packages/core/color-scheme-map.js": "6b75dd973825177aca6f88d24e8d254dd4edfa9dc8a1866033c038507f508311",
+    "packages/core/color-schemes.css": "6c94a5f50836461d226ca4bacb0204c2047ef9bb9bbc27d514c968cf513792ca",
+    "packages/core/connector-diagnostics.js": "1df1c881ad11f073cce1c0166290a0d222013b92684edf2d603675eee9022bcf",
+    "packages/core/dark-theme.css": "0d2c5efba45e74cff6d751574cb64a344f11abb19b16ad44ccf62e6f43fe2b83",
+    "packages/core/entity-types.js": "26b6407b20dbc0e4e7f15d151b748103b553b10992b847f6f308e1b542c75af3",
+    "packages/core/fonts/fraunces-italic.woff2": "d05e6d913302c9b7749b6f9954a1716d018154ab2c26dafb3100ce95b56fca8a",
+    "packages/core/fonts/fraunces-regular.woff2": "533efccd81345ccb4da3e483661855964c575fda7e21205e494075e88fe052d6",
+    "packages/core/fonts/nunito.woff2": "f85212b2392aff6c178df5c0c6176fe341785ba641e6ec4ab0c80fb10dc38e0c",
+    "packages/core/highlight-format.js": "710f2313423198b50df60be5105e6783f158ea760720ebdfd44dc05a58f9505f",
+    "packages/core/highlight-lifecycle.js": "bfed16628cce668246e402c1a1446db4b8ace72333fcdd200dfbd86c02f3bdec",
+    "packages/core/i18n.js": "ea06eeb88f0c68af6d26f96d6147dbf68867cad2b3c9aa794eab7083c897b27d",
+    "packages/core/index.js": "ec9f8dabd019b0c6343e8fb68a599d7b16fbcdc8698e5125e6bef876f6962e18",
+    "packages/core/locales/ar/messages.json": "69a469052c038117bd14ca9fc854531d0cac79f07cab531771ec3fea6399bcc2",
+    "packages/core/locales/de/messages.json": "2ac9d44798044a1bd056fe5118fcee3fea97fc13c4f8b979964b8565b23752a8",
+    "packages/core/locales/en/messages.json": "dc1aba5c49ad5c61e8e11216dcbfde62911deec7d10a0d6415bfe8b255dfc1fa",
+    "packages/core/locales/es/messages.json": "2cfc28fc07f15007dbc0e92822cf7b2c1e07e44ac0864ceb50751709b585916f",
+    "packages/core/locales/fr/messages.json": "9e11c425dfe7ac1eb6b4b99c5bb6cce54b60f2d959ee62ee70c1c3f58f291dd0",
+    "packages/core/locales/hi/messages.json": "d5666a9a43923e13643e84d46d63c30d9828fb33e4e3813dd204dd81d0d74b4c",
+    "packages/core/locales/id/messages.json": "c503b3d7b8c48ad84e9327c6315670766f097159d736ac5ac17ab1dcfbaef380",
+    "packages/core/locales/it/messages.json": "db16e31f729ff48b5237677a14a8ab6b786194d8c2a74a15b10ff781f52b7b37",
+    "packages/core/locales/ja/messages.json": "80cd1e1418d2c369a4ca3d4e09438fec1b530dcfd46b2920589f7eaa7a3caab8",
+    "packages/core/locales/ko/messages.json": "80de44b8bb51dc0d210d9671821644f08666b124033ea653b475cd68b3e9f72a",
+    "packages/core/locales/pt-BR/messages.json": "b7b139eab2fa59006c11f15ece9fdc9ae3a021c4582672c24feba6a270fda80d",
+    "packages/core/locales/pt-PT/messages.json": "197c63b3485200657b0ed64cd8e780db90f5eca0506e610c7d6b577a10449ad7",
+    "packages/core/locales/ru/messages.json": "65aced6b8fe2fda1f9bbce6b92b41dcdbf2bf6485975fdda3544304be227d358",
+    "packages/core/locales/zh-CN/messages.json": "8c78b6c82e31594621733cda9a5bc3c563ad52ff8e68ed01fd8b29efe0aaca2c",
+    "packages/core/locales/zh-TW/messages.json": "e8119f39feb8b1906d49a4fb9f4c6fc9e1885a1f986e7859dd589954ade5b07b",
+    "packages/core/logger.js": "cda2bf5c8fc8b9dc30d4d269cbc8944dac5908e1b7e6d31f90fd43713665755f",
+    "packages/core/markdown-extractor.js": "7bb4f45a8ee96a348f6cb5bcd3edb79899c4e2b6ad54e69c643dc825e8ca9c81",
+    "packages/core/package.json": "76bbe935fbfc3e14bf367eac111c5e920a7bec597c7d2f5f76ccaa7927ab7e9f",
+    "packages/core/page-identity.js": "44b126a0851f884d4b99864a0d3233cabcd2e83341e704bb13bd25f0e25fac52",
+    "packages/core/search-runtime.d.ts": "891bc265edd8b3e8df3bf98200c2d2e3b73a42895f2ea402ce234b1e02f13c30",
+    "packages/core/search-runtime.js": "acb1ddae71d85697003b2a853d42a226767138d0a0e09d2b681fa7375a7ff428",
+    "packages/core/shared.css": "c809402e9630d519748c678e1512546a91bac79b15f19741a2aaffbcb605c22d",
+    "packages/core/snapshot-capture-budget.js": "0ee9832417523e443a5a1c82384f293b6f6605e2c5a2e5051e6b3f86c7dc71b7",
+    "packages/core/snapshot-html.js": "b5e7870c35323c736d88087987184054b92e054f6d663fe65bcdb50a47fdf802",
+    "packages/core/snapshot-html.test.js": "bbb7d28dd92431ffa44da9f000295013f0fe2d3bddcb059085d49415962778b6",
+    "packages/core/theme.js": "cc1686ccad1b4ccbe34b4e059534b4ed5efc3971373d79ac929d9d87b70e8d01",
+    "packages/core/time-chart.js": "6f4405568ae9d417eb3dfdd91089455c7f244bd71bd6ed43ba318aa794fb1db0",
+    "packages/core/utils.js": "05a75ef6204ae1fb1a8cfc0524be0c45ff793d2f87243c927a7083d471153c79",
+    "packages/core/virtual-scroller.js": "4498103f7f7b18fa6d5a4b246a701c026811fb65cea085e98cdd410a6efde216",
+    "apps/extension/utils.js": "eea5cc2425981454fde629445ca28c0f4eb3aa42f9b39a4f9de9ce4ba17e4ad0",
+    "scripts/stage-app-assets.mjs": "4964ea5b7d48a596719d7a61a6b47b39dad29f7ba8773198ad42d7589a1e3cd2",
+    "scripts/lib/documentation-seed.mjs": "a78c1e44ea5192a5b4fc86f9d6f420722c806d10ae4e7a88f7093bd74585b52f",
+    "scripts/lib/documentation-window.swift": "b4a4458380924a90d7b3e732ce6b6a8ee35dbb238795ff136a8db2aff89a1279",
+    "scripts/lib/documentation-freshness.mjs": "0b34e766636c5aed2dffd59224690fe1a876fd500048de48f0bddb93ef116b35",
+    "scripts/lib/manual-seed.mjs": "2495a12d302cbacaf866d71ea89ae20afd1269d4ab767e1139226642604a9e97",
+    "scripts/lib/seed-builder.mjs": "d7ab1c2e8b939ed65ee7f6fd1223ab8a12f20d384bb4ac013cdda75016655e64",
+    "scripts/lib/replay-store.mjs": "4d6cb0c15dc4d9cb45b59de44a115acb222b5e09bfc2a4e04b7d91d05f96d82b",
+    "tests/integration/daemon-test-harness.js": "f2352beb37f585b384ba65b9af75d224a61f73655c30648cdcd47c7c3d53113a",
+    "apps/desktop/ui/.DS_Store": "aff2c626e8071c8fcab820cc890949f547623bc321dd987a06d218d14532f53e",
+    "apps/desktop/ui/attention-utils.js": "c913974a4940df7d9ab83871ae240821d846ae7d2f597f1e989bc58229d9ce41",
+    "apps/desktop/ui/bookmark-parser.js": "0cecc7e3d228ad48595d09f43555afe34d6304abff361091dc9caeeaf8d99208",
+    "apps/desktop/ui/color-schemes.css": "23bc18429474f074f71222b9719046a95f6c088725610e4e5b8fc8ac6f343f64",
+    "apps/desktop/ui/dark-theme.css": "2b69c31842088ed0c119321937d66b93918199db3bf069460c74629360ec04e1",
+    "apps/desktop/ui/desktop-bridge.js": "9882ce6417fd125f03fb954a0d94f92324790026334c58a2c5e21a4e04312cd5",
+    "apps/desktop/ui/desktop-platform.js": "b2541feccd3050aa905e2272bd6b4319334f1f5368bdacec0bea477058833e38",
+    "apps/desktop/ui/entity-types.js": "ada225d44416ae47b65658eec9ff6af28662a39c22d341ff594da69d623994bf",
+    "apps/desktop/ui/fonts/GentiumBookPlus-BoldItalic.woff2": "7717c32d7e32b8af047375228b4435e63a4b331b5f2b727834af43be3ccdbd5a",
+    "apps/desktop/ui/fonts/GentiumBookPlus-Italic.woff2": "ee06a26cfe0956e72d9565b9a5ade35e4c82332284813f8324dc886f87ee60ad",
+    "apps/desktop/ui/fonts/GentiumBookPlus-Regular.woff2": "27303baf88530a326814714bf43d1ad0b367fabf9d52231d8d5cf2c5a4e316f8",
+    "apps/desktop/ui/fonts/OFL.txt": "37a0fa42e8f16f5209db3a5cdee3c78d7b44ebeec4760a67d377d027c05fa271",
+    "apps/desktop/ui/fonts/fraunces-italic.woff2": "d05e6d913302c9b7749b6f9954a1716d018154ab2c26dafb3100ce95b56fca8a",
+    "apps/desktop/ui/fonts/fraunces-regular.woff2": "533efccd81345ccb4da3e483661855964c575fda7e21205e494075e88fe052d6",
+    "apps/desktop/ui/fonts/nunito.woff2": "f85212b2392aff6c178df5c0c6176fe341785ba641e6ec4ab0c80fb10dc38e0c",
+    "apps/desktop/ui/highlight-format.js": "9e5be7cc41e99dbfa9f5262aebacfe77da0cbca58416e6e53536cb01abd6f00d",
+    "apps/desktop/ui/index.html": "bd421b96b343f184bd28465d06498752e2d821679094d5bfdc77a31b2e90f1a4",
+    "apps/desktop/ui/index.js": "8645189e0bf91dcade1fd5aa0417b80271e51aa8e11c5e8e314af64191525b58",
+    "apps/desktop/ui/logger.js": "73939f96285999acfd96bf693d081955a6be4cb6929f17b2aeea59774b632f8c",
+    "apps/desktop/ui/search-runtime.d.ts": "4c41e73480a780bc85d7e8f8279c87ba00e8b0753a52ca82375aca32baa1d797",
+    "apps/desktop/ui/search-runtime.js": "68b8a6cd99b5b64628df2c8f86224a80a5eca025dd3c77cdab1e315f409dadf7",
+    "apps/desktop/ui/shared.css": "7a1f0a695b89f29349af111d134a169bb309b15d8b904741fc88616a9d80eb38",
+    "apps/desktop/ui/theme.js": "1b00783e53576694e49414c5e7862db7cce928e59f39a72f918a5f27f4a0d488",
+    "apps/desktop/ui/time-chart.js": "c3951dc6485faa02d9a43b19625eac0b86cc973709e3cddd0bfa0813467646bf",
+    "apps/desktop/ui/utils.js": "849e90e145e6bfad9af7d3751b34b966b39603bea57863dfce4e055ccca47100",
+    "apps/desktop/ui/virtual-scroller.js": "dd6dc0601e86bec3e503451dd0cf37330dafb73d6994aafcc76f9acd85292407",
+    "apps/desktop/package.json": "1643db18b0bd6e0cce510e3bab61e4889bc4a7beb37a1ec4eb679f7cef7a0612",
+    "apps/desktop/src-tauri/icons/.DS_Store": "bcacd4ea2fa3ce06fd6e574860a688d2ac332ee625b62b491b28859b9397a495",
+    "apps/desktop/src-tauri/icons/icon.icns": "27af23b25f93f42712fb5aaad2bd7edb437a0c5a056c4164b9d30ef524c493d6",
+    "apps/desktop/src-tauri/icons/icon.ico": "a6544e3bee5cfd371bf321ae3df7f335859544c4cf1540950b8748095f84b9e0",
+    "apps/desktop/src-tauri/icons/icon.png": "3a146dacc860f8de268cf6bb8615a0dca0232485a396d2c5ccba815522db10be",
+    "apps/desktop/src-tauri/icons/tray-icon.png": "047da4fdb0b2cfdbf0511decfdea7cfe316f4ea2d2badc0149879ed0ba10c732",
+    "apps/desktop/src-tauri/tauri.conf.json": "fb1e61058b7d989b461e6b117ca2205ab674c44b6ab551922815fac1dcdf3306",
+    "scripts/capture-documentation.mjs": "cab73f15fd8a03610a6e611e78ac814d3328e63b1f81214e3d8d698541f0a1d3",
+    "scripts/compose-documentation-hero.mjs": "3168eee474aea25567292c33043f9b18b1fd1a877e6c09d52d7a87018f392cdb"
+  },
   "platform": "macOS / native Tauri WKWebView",
-  "capturedAt": "2026-09-17T14:15:11.281Z",
-  "sourceCommit": "e33919216675dd5c948381ca50ada70dc879e8df",
-  "seedSha256": "ddd7bb3ff23bc7adf0ed5347d0db5d2dbe2d5736c491f248f7cbc4814e949bbc",
+  "capturedAt": "2026-09-26T01:18:53.456Z",
+  "sourceCommit": "3566af2372c88885474fbd33bd16c6166dbdb3ee",
+  "seedSha256": "a78c1e44ea5192a5b4fc86f9d6f420722c806d10ae4e7a88f7093bd74585b52f",
   "colorSchemes": ["amber", "mono"],
-  "requestedWindow": { "width": 1160, "height": 900 },
+  "requestedWindows": {
+    "timeline": { "width": 960, "height": 500 },
+    "book": { "width": 960, "height": 620 }
+  },
   "screenshots": {
     "timeline.png": {
-      "sha256": "3197aa03c3276da2977b5cc55e56534ed6de4f414ebd00f01a1e0e7ad3f1a9e8",
-      "width": 2320,
-      "height": 1764
-    },
-    "lists.png": {
-      "sha256": "2388d06acb5efc83a2f5b4e10ab4a0f56557d120ea9adf806206aa75a2485f64",
-      "width": 2320,
-      "height": 1764
-    },
-    "search.png": {
-      "sha256": "a2e0deeca0618ac1a4d5b0420ed3945e5d138f495182b18f602b71fb6edf1b93",
-      "width": 2320,
-      "height": 1764
+      "sha256": "8398659125e098e6e68029ffdbd51cf736e2f39a5a062e9c8a59b3f05244891f",
+      "width": 1920,
+      "height": 1000
     },
     "book.png": {
-      "sha256": "cf8d239684a9e52d3598a4a9969a986ae666c49b9d9fd643bbef9ec16daa4cbf",
-      "width": 2320,
-      "height": 1764
+      "sha256": "d904de0e606b61fc702c0d8a4982ec3e00314b6f9a360cdea4b1bcce3a5ca65b",
+      "width": 1920,
+      "height": 1240
     },
     "timeline-mono.png": {
-      "sha256": "f33068916ff63d1fb84267d19d86aa336958a8e1fd7878a0454869362ac2547f",
-      "width": 2320,
-      "height": 1764
+      "sha256": "49e51a99973ed1c86dcbb0f4a2191de5b3925a37090b94f29d0dd09378a872a9",
+      "width": 1920,
+      "height": 1000
     },
-    "lists-mono.png": {
-      "sha256": "c19d76ffd581dfbd2a934ecc5d62fb2f91045ee38db196624413269cbf704458",
-      "width": 2320,
-      "height": 1764
-    },
-    "search-mono.png": {
-      "sha256": "8562dc3076bafce137217200a2f66cee05eee294708f07d94dd952c250327b9d",
-      "width": 2320,
-      "height": 1764
-    },
-    "book-mono.png": {
-      "sha256": "015633c7d94c2f823513a75e3368f82bae8c58dbd64808d15636291d57435b1d",
-      "width": 2320,
-      "height": 1764
+    "timeline-styles.png": {
+      "sha256": "383f62e1cfdfee8011395ebb2df3ab8f3c160ea9151f6fb127906e26dabf152f",
+      "width": 1920,
+      "height": 1000,
+      "composition": {
+        "sources": ["timeline.png", "timeline-mono.png"],
+        "sourceSha256": [
+          "8398659125e098e6e68029ffdbd51cf736e2f39a5a062e9c8a59b3f05244891f",
+          "49e51a99973ed1c86dcbb0f4a2191de5b3925a37090b94f29d0dd09378a872a9"
+        ],
+        "split": { "top": 0.62, "bottom": 0.38 }
+      }
     }
   }
 }

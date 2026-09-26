@@ -114,7 +114,7 @@ Key consequences:
 - Extension-side URL identity for page slugs ignores underscore-prefixed query params, so analytics parameters such as `_spm_id` or `_i` do not split one page into multiple replay entities when data arrives through the extension connector. Rust replay hashes the URL it is given; non-extension producers must send canonical page URLs if they want the same identity behavior.
 - Replay branches must stay idempotent.
 
-Checkpoint JSON is also one strict current schema, not a family of historical shapes. Page, note, list, pin, tree, settings, name-map, list-order, and orphaned fields are all serialized explicitly, including empty collections, `false`, and `null`. Readers deny unknown fields and reject missing fields. Schema upgrades must migrate `~/browser-data` before the upgraded daemon starts.
+Checkpoint JSON is also one current schema, not a family of historical shapes. Page, note, list, tree, settings, name-map, list-order, and orphaned fields are serialized explicitly, including empty collections, `false`, and nullable values. List pins omit `source` when no provenance is recorded; non-null sources such as `manual` and `auto` remain explicit. Omitted pin `source` means no recorded provenance, not an inferred manual pin. Readers deny unknown fields and enforce required fields. This checkpoint omission does not change the required nullable `source` in `pin_to_list` log records. Schema upgrades must migrate `~/browser-data` before the upgraded daemon starts.
 - List `slug`, `name`, and `owner` fields are required non-empty strings. Replay rejects empty explicit list or parent IDs and never assigns a missing owner from the current device.
 - Desktop UI, extension popup, and sync ingestion all converge on the same replay model.
 
@@ -127,6 +127,11 @@ Checkpoint JSON is also one strict current schema, not a family of historical sh
 Shell, device-identity, directory, and connector reads are strict DTOs. Required booleans, nullable identities, counters, paired-browser fields, and connector states are validated before rendering; configured identity must agree across `setupComplete`, device ID, data folder, token, and port fields. The UI does not translate malformed or failed platform reads into “offline,” “unknown,” “default,” or checked preference state.
 
 The desktop shell scrolls the main results pane and sidebar independently. Results containers keep a bottom gutter aligned to the sidebar bottom edge, and the virtual scroller preserves that gutter as part of its base padding. Fullscreen toggles capture both scroll containers before the native window transition and restore them through its resize sequence, preventing the webview's transient zero-height/clamped state from replacing either position.
+
+Timeline preserves its visible row when live history mutations or visibility
+refreshes merge a browser visit. Virtual-scroller updates retain the old rows
+until the replacement render, so removing rows cannot collapse the scroll range
+before the viewport and its anchor are restored.
 
 The sidebar's primary Timeline and Book destinations form a calm one-column
 navigation stack above Lists. Each destination is a 36 px, left-aligned pill
@@ -285,11 +290,27 @@ nullable `browserProfile`. The desktop validates a non-empty string or `null`;
 when the browser cannot report a profile, settings render the browser identity
 without inventing or displaying a profile label.
 
+The daemon records `last_seen_at` for authenticated connector messages as well
+as pairing and authentication, persisting at most once per timestamp second
+and notifying the desktop so Settings reflects activity on long-lived sockets.
+Connection registrations belong to individual socket tasks; normal closure,
+transport errors, and caught panics all remove the registration without
+removing a newer connection for the same browser. Pairing accepts the Orion
+product identity reported by the extension's browser detector.
+
 If a configured daemon cannot start because an owned data file is invalid or another explicit startup error occurs, the Tauri shell remains alive with a paused snapshot and visible `daemon_start_failed` diagnostic. After the cause is corrected, Resume starts the absent daemon without restarting the shell. Daemon startup is guarded across the complete asynchronous start operation, so concurrent Resume/setup requests converge on one server and one watcher set. While that server is absent, shell/setup diagnostics remain available but storage-backed reads and sync return `Browser Recall daemon is not running`; the Tauri layer never constructs a second `Storage` authority or checkpoint worker.
 
 Production Rust targets deny `expect`, `unwrap`, `panic!`, and `unreachable!`. Storage, projection, sync, rule, serialization, and startup failures return through their existing error boundaries; shared synchronous state uses non-poisoning locks so one failed task cannot turn later reads into secondary panics.
 
 ### Daemon Commands
+
+Daemon configuration mutations use `ConfigStore::update`: acquire the shared
+file lock, read the latest configuration, edit only the caller-owned fields,
+validate, and atomically replace `config.json`. Independently constructed stores
+and processes use the same lock. Desktop preferences, connector activity and
+identity, and sync credentials/state cannot overwrite one another through stale
+whole-configuration snapshots. WebSocket handling holds no duplicate mutable
+configuration cache; runtime device identity comes from the server snapshot.
 
 `crates/daemon/src/command_authority.rs` is the transport-neutral semantic mutation seam shared by the Tauri and authenticated WebSocket adapters. Its `execute(action, request)` interface deserializes each request once into a closed, internally tagged command enum. That enum is the single definition of allowed fields, required fields, and field types; note and list command implementations receive typed inputs rather than reparsing raw JSON. The authority returns one validated successful response together with replay-derived mutation notifications, including every affected URL needed by connector consumers. Missing, malformed, and unknown fields fail the command instead of becoming null/default mutation payloads. Notifications are returned only after the delegated replay transaction commits. `main.rs` asks this module whether an action is shared instead of maintaining a second write-command allowlist; `ws_server.rs` retains authentication, encoding, socket lifecycle, browser observations, and notification broadcast. Extension command handlers do not synthesize mutation notifications or refresh product badges directly; badges and open popups consume the committed daemon notification stream.
 
@@ -450,13 +471,14 @@ Rules remain part of the main desktop UI product surface.
 - shared styling/theme modules
 - logger, rule helpers, entity helpers, and search-runtime glue
 
-The connector websocket protocol is represented by the Rust message enums in `crates/daemon/src/protocol.rs`. There is one supported format, protocol version 3. Pairing and authentication requests and responses include that required version: the daemon validates the request before approving or authenticating, and the JS connector validates the response before storing credentials or reporting readiness. Missing or different versions are rejected; there are no version-specific parsing branches. Browser install identity and detected browser family are required; `browserProfile` is always present and is explicitly `null` when the platform cannot report a real profile, so the connector never invents “Default profile.” Other nullable request members, including popup title, rule-preview context, search limit, and snapshot title/Markdown, are likewise present explicitly. This makes a misspelled nullable semantic field a missing-field error instead of silently dropping data. Successful summary and page-info responses always serialize their required arrays and explicit nulls; failed summaries omit access/display projections instead of returning fabricated `false`, zero, empty, or unknown values. Status contains only the device identity, exact maximum WebSocket message size, and authoritative daemon state. Snapshot capture and upload wait for that authenticated per-session status round trip before reading the limit, then the connector measures the UTF-8 snapshot envelope and rejects an oversized capture before sending it. Command and snapshot messages do not report connector queue telemetry; acknowledgements mean durable acceptance and carry no unused timestamps or depths. Pairing-pending and pairing-approved responses omit daemon-internal request identity and device identity respectively; the mandatory status exchange is the single device-identity source. Connector mutation notifications contain only `type`, `url`, and `urls`, the fields extension consumers use. Directory inspection and ping/pong are not connector operations; native directory workflows remain Tauri-owned and status is the liveness probe. Required fields and their types are validated, while unknown websocket envelope and response fields are ignored so an additive transport field remains compatible with version 3. A change to required fields, field meaning, or semantic command inputs is breaking and requires replacing the single supported protocol version rather than adding compatibility parsing. The JS connector constructs the subset it sends in `apps/extension/connector/ws-client.js`; daemon-side parsing and authority stay Rust-owned.
+The connector websocket protocol is represented by the Rust message enums in `crates/daemon/src/protocol.rs`. There is one supported format, protocol version 4. Token authentication includes a freshly detected `browserName`, so an existing approved Orion installation previously labeled Chrome corrects its display identity without replacing its token or browser install ID. Pairing and authentication requests and responses include that required version: the daemon validates the request before approving or authenticating, and the JS connector validates the response before storing credentials or reporting readiness. Missing or different versions are rejected; there are no version-specific parsing branches. Browser install identity and detected browser family are required; `browserProfile` is always present and is explicitly `null` when the platform cannot report a real profile, so the connector never invents “Default profile.” Other nullable request members, including popup title, rule-preview context, search limit, and snapshot title/Markdown, are likewise present explicitly. This makes a misspelled nullable semantic field a missing-field error instead of silently dropping data. Successful summary and page-info responses always serialize their required arrays and explicit nulls; failed summaries omit access/display projections instead of returning fabricated `false`, zero, empty, or unknown values. Status contains only the device identity, exact maximum WebSocket message size, and authoritative daemon state. Snapshot capture and upload wait for that authenticated per-session status round trip before reading the limit, then the connector measures the UTF-8 snapshot envelope and rejects an oversized capture before sending it. Command and snapshot messages do not report connector queue telemetry; acknowledgements mean durable acceptance and carry no unused timestamps or depths. Pairing-pending and pairing-approved responses omit daemon-internal request identity and device identity respectively; the mandatory status exchange is the single device-identity source. Connector mutation notifications contain only `type`, `url`, and `urls`, the fields extension consumers use. Directory inspection and ping/pong are not connector operations; native directory workflows remain Tauri-owned and status is the liveness probe. Required fields and their types are validated, while unknown websocket envelope and response fields are ignored so an additive transport field remains compatible with version 4. A change to required fields, field meaning, or semantic command inputs is breaking and requires replacing the single supported protocol version rather than adding compatibility parsing. The JS connector constructs the subset it sends in `apps/extension/connector/ws-client.js`; daemon-side parsing and authority stay Rust-owned.
 
 ## Testing Model
 
 GitHub jobs and local verification share the `ci:*` package-script entrypoints.
-The composed `npm run ci` command runs every hosted test and lint group before
-a change is committed.
+The composed `npm run ci` command runs the locally safe test and lint groups.
+Native lifecycle smoke tests and automatic documentation capture also run in
+dedicated hosted macOS jobs.
 
 Current automated coverage is split across three layers:
 
@@ -480,8 +502,8 @@ E2E is the preferred product safety net for desktop and extension behavior. New 
 
 The CI cold-script job runs the complete JS/Rust coverage workflow and a daemon-backed Playwright check that manual seed generation preserves the daemon's current settings checkpoint and uses the same connector flush boundary as automated seeding. This keeps operational scripts from drifting after their primary workflows change.
 
-The desktop smoke / GUI parity suite remains the notable intentionally-skipped gap.
-
+The full desktop GUI parity suite remains intentionally absent; focused native
+lifecycle checks run in the hosted platform jobs.
 
 ## CI Execution Boundaries
 
@@ -491,25 +513,47 @@ fictional events are materialized through the production Rust replay tool. A
 separate compiled Tauri identifier, executable name, and isolated profile keep native capture
 apart from the user's running app, single-instance socket, and data. macOS
 Accessibility drives the real controls; Core Graphics captures the window after
-content assertions and stable-pixel checks. Each view is captured in Amber and
-Mono using the real Settings control, and the Book verifies both note pairings
-remain inside the window. The shared seed keeps pins and annotations sparse
+content assertions and stable-pixel checks. Timeline is captured at 960 × 500
+points in Amber and Mono using the real Settings control. Only the isolated
+documentation build lowers the minimum window height. The two labeled sample
+pages have the newest visits, and capture verifies both titles fit in the window.
+A deterministic Canvas compositor merges
+the aligned captures with a diagonal slash; the manifest records the source
+image hashes and split positions. Book is captured only in Amber at 960 × 620
+points and verifies both note pairings remain inside the shorter window. The shared seed keeps pins and annotations sparse
 among everyday visits and spreads highlights across three days. The workflow does not mock the
 desktop bridge or replace rendered content. Seed acceptance runs in the existing
-daemon-backed cold-script E2E suite; native capture remains an explicit
-maintainer command. `docs/images/capture.json` records screenshot provenance.
+daemon-backed cold-script E2E suite; native capture runs in the macOS CI
+documentation job and is also available as a maintainer command. `docs/images/capture.json` records screenshot provenance.
+
+Both capture manifests store source-file hashes from the shared desktop/browser
+scope policy. Capture rejects source changes before publishing its output.
+`npm run ci:generate-docs` captures both applications and runs the full
+`ci:check-docs` verification on hosted macOS. Pull requests expose generated
+images as artifacts; main pushes publish only `docs/images/` through a bot
+commit, with ordinary fast-forward and repository permission checks. Linux unit
+CI verifies committed image integrity independently of source freshness. Local
+CI starts with the full freshness check. The checker validates PNG hashes,
+dimensions, composition provenance, and the README's four image references.
+Fingerprints cover UI/assets/locales, JavaScript dependency locks, seed/capture
+code, and native window configuration; backend-only and documentation-only
+edits do not force manual recapture. Hosted capture still uses the current
+backend on every run. This complements visual regression tests without
+comparing date labels or host-specific rasterization.
 
 Browser documentation uses `npm run docs:screenshots:browser` with the existing
 isolated Chromium/daemon E2E fixtures. Only the fictional source article is served
 by a route fixture; extension UI and persistence use production implementations.
-The popup document receives a real prepared source-tab model. On macOS,
+The browser sample uses two lists to keep the unmodified popup compact. The popup
+document receives a real prepared source-tab model. On macOS,
 documentation export launches headed Chromium with a process-local English
-language override, pins the extension, and captures two browser-window states:
+language override, pins the extension, and sizes the browser to 800 × 434
+points before capturing two browser-window states:
 the actual toolbar popup over an article without highlights, then the live note
 editor beneath a newly created highlight. Core Graphics captures the named
 browser window from only that Chromium process's native window IDs, preserving
 popup-window stacking while excluding overlapping applications.
-English popup labels, the empty highlight state, and note persistence must pass
+English popup labels, the empty highlight state, popup and editor bounds, and note persistence must pass
 before two images and `docs/images/browser-capture.json` are exported. Ordinary
 test runs remain headless and attach two content screenshots to test results
 without updating documentation.

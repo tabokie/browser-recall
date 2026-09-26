@@ -3,7 +3,11 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static CONFIG_WRITE_ID: AtomicU64 = AtomicU64::new(0);
 
 const DEVICE_ID_MAX_LEN: usize = 48;
 const DEVICE_ID_MACHINE_SUFFIX_LEN: usize = 12;
@@ -190,21 +194,73 @@ impl ConfigStore {
         Ok(Some(config))
     }
 
-    pub fn load_or_create(&self) -> std::io::Result<DaemonConfig> {
-        if let Some(config) = self.load()? {
-            Ok(config)
-        } else {
-            let config = DaemonConfig::new_unconfigured()?;
-            self.save(&config)?;
-            Ok(config)
-        }
+    fn lock_writer(&self) -> std::io::Result<fs::File> {
+        fs::create_dir_all(&self.root_dir)?;
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(self.root_dir.join("config.lock"))?;
+        lock.lock()?;
+        Ok(lock)
     }
 
+    pub fn load_or_create(&self) -> std::io::Result<DaemonConfig> {
+        self.update(|config| Ok(config.clone()))
+    }
+
+    /// Serialize a mutation against the latest persisted configuration. The
+    /// file lock also coordinates independently constructed stores/processes.
+    pub fn update<T>(
+        &self,
+        edit: impl FnOnce(&mut DaemonConfig) -> std::io::Result<T>,
+    ) -> std::io::Result<T> {
+        let _writer = self.lock_writer()?;
+        let existing = self.load()?;
+        let mut config = match &existing {
+            Some(config) => config.clone(),
+            None => DaemonConfig::new_unconfigured()?,
+        };
+        let result = edit(&mut config)?;
+        if existing.as_ref() != Some(&config) {
+            self.write_atomic(&config)?;
+        }
+        Ok(result)
+    }
+
+    /// Replace a complete configuration during initialization/test seeding.
+    /// Runtime callers must use `update` to preserve other owners' fields.
     pub fn save(&self, config: &DaemonConfig) -> std::io::Result<()> {
+        let _writer = self.lock_writer()?;
+        self.write_atomic(config)
+    }
+
+    fn write_atomic(&self, config: &DaemonConfig) -> std::io::Result<()> {
         config.validate().map_err(invalid_data)?;
-        fs::create_dir_all(&self.root_dir)?;
-        let payload = serde_json::to_string_pretty(config).map_err(invalid_data)?;
-        fs::write(self.config_path(), payload)
+        let payload = serde_json::to_vec_pretty(config).map_err(invalid_data)?;
+        let id = CONFIG_WRITE_ID.fetch_add(1, Ordering::Relaxed);
+        let temporary = self
+            .root_dir
+            .join(format!(".config.{}.{id}.tmp", std::process::id()));
+        let result = (|| {
+            let mut options = fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = options.open(&temporary)?;
+            file.write_all(&payload)?;
+            file.sync_all()?;
+            drop(file);
+            fs::rename(&temporary, self.config_path())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        result
     }
 }
 

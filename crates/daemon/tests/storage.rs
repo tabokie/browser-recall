@@ -61,11 +61,23 @@ async fn round_trips_all_entity_types_and_snapshot_artifacts() {
         slug: "reading".into(),
         name: "Reading".into(),
         owner: "device-a".into(),
-        pins: vec![PinEntity {
-            id: "page:page-a".into(),
-            pinned_at: 20,
-            source: Some("manual".into()),
-        }],
+        pins: vec![
+            PinEntity {
+                id: "page:page-a".into(),
+                pinned_at: 20,
+                source: Some("manual".into()),
+            },
+            PinEntity {
+                id: "note:note-a".into(),
+                pinned_at: 21,
+                source: None,
+            },
+            PinEntity {
+                id: "snapshot:page-a-1710000000000".into(),
+                pinned_at: 22,
+                source: Some("auto".into()),
+            },
+        ],
         rules: Vec::new(),
         timestamps: HashMap::from([(String::from("pins"), 20)]),
         deleted: false,
@@ -75,6 +87,22 @@ async fn round_trips_all_entity_types_and_snapshot_artifacts() {
         .save_list("reading", &list)
         .await
         .expect("list saved");
+    let checkpoint: serde_json::Value = serde_json::from_slice(
+        &tokio::fs::read(temp_dir.path().join("views/lists/reading.json"))
+            .await
+            .expect("read list checkpoint"),
+    )
+    .expect("checkpoint JSON");
+    assert_eq!(checkpoint["pins"][0]["source"], "manual");
+    assert!(checkpoint["pins"][1].get("source").is_none());
+    assert_eq!(checkpoint["pins"][2]["source"], "auto");
+    assert_eq!(
+        Storage::new(temp_dir.path())
+            .load_entity("list:reading")
+            .await
+            .expect("reload compact checkpoint from disk"),
+        Some(Entity::List(list.clone()))
+    );
 
     let settings = SettingsEntity {
         timestamps: HashMap::from([(String::from("theme"), 30)]),

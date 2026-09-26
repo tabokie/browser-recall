@@ -109,6 +109,7 @@ async fn authenticated_socket(port: u16, token: &str) -> TestSocket {
     socket
         .send(Message::Text(
             serde_json::to_string(&ConnectorMessage::Auth {
+                browser_name: "Chrome".into(),
                 protocol_version: Some(CONNECTOR_PROTOCOL_VERSION),
                 token: token.into(),
             })
@@ -859,6 +860,7 @@ async fn websocket_auth_control_and_error_matrix_keeps_connections_predictable()
     send_connector(
         &mut bad_auth,
         ConnectorMessage::Auth {
+            browser_name: "Chrome".into(),
             protocol_version: Some(CONNECTOR_PROTOCOL_VERSION),
             token: "missing-token".to_string(),
         },

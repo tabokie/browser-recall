@@ -37,7 +37,7 @@ func label(_ element: AXUIElement) -> String {
 }
 
 let appWindows = (attribute(app, "AXWindows") as? [AXUIElement]) ?? []
-let selectedWindow = args[2] == "frame-browser" && args.count == 4
+let selectedWindow = args[2] == "frame-browser" && args.count == 6
     ? appWindows.first(where: { label($0).contains(args[3]) })
     : appWindows.first
 guard let window = selectedWindow else {
@@ -76,8 +76,12 @@ switch args[2] {
 case "dump":
     print(descendants(window).map(label).joined(separator: "\n"))
 case "frame", "frame-browser":
+    let dimensionIndex = args[2] == "frame-browser" ? 4 : 3
+    guard args.count == dimensionIndex + 2,
+          let width = Double(args[dimensionIndex]), let height = Double(args[dimensionIndex + 1]),
+          width > 0, height > 0 else { fail("Expected positive window width and height") }
     var position = CGPoint(x: 80, y: 50)
-    var size = CGSize(width: 1160, height: 900)
+    var size = CGSize(width: width, height: height)
     guard AXUIElementSetAttributeValue(window, "AXPosition" as CFString, AXValueCreate(.cgPoint, &position)!) == .success,
           AXUIElementSetAttributeValue(window, "AXSize" as CFString, AXValueCreate(.cgSize, &size)!) == .success else {
         fail("Cannot position documentation window")

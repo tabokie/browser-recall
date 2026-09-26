@@ -877,6 +877,11 @@ async function installDesktopBridgeMock(page, options = {}) {
       }
 
       window.__desktopVisualHarness = {
+        updatePairedBrowsers(browsers) {
+          pairedBrowsers = clone(browsers);
+          window.__BR_STATE__ = { route: null };
+          window.__renderBrowserRecall();
+        },
         appendHistoryEntry(entry) {
           const date = new Date(entry.timestamp).toISOString().slice(0, 10);
           const key = `log:${date}`;
@@ -4526,6 +4531,56 @@ test.describe('desktop visual regression', () => {
     });
   });
 
+  test('open settings refreshes browser activity and disconnect status from shell updates', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const browser = {
+      browserId: 'long-running-orion',
+      browserName: 'Orion',
+      browserProfile: null,
+      extensionId: 'abcdefghijklmnop',
+      approvedAt: now - 14 * 86400000,
+      lastSeen: now - 7 * 86400000,
+      connected: true,
+    };
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        pairedBrowsers: [browser],
+      });
+      await page.locator('#settingsBtn').click();
+      await expect(page.locator('.paired-browser-name')).toHaveText('Orion');
+      await expect(page.locator('.paired-browser-status')).toContainText(
+        'Connected',
+      );
+      const staleTimestamp = await page
+        .locator('.paired-browser-profile')
+        .textContent();
+      await page.evaluate(() => {
+        document.getElementById('launchAtLoginToggle').checked = false;
+      });
+
+      browser.lastSeen = now;
+      await page.evaluate((updated) => {
+        window.__desktopVisualHarness.updatePairedBrowsers([updated]);
+      }, browser);
+      await expect(page.locator('.paired-browser-profile')).not.toHaveText(
+        staleTimestamp,
+      );
+      await expect(page.locator('#launchAtLoginToggle')).not.toBeChecked();
+
+      browser.connected = false;
+      await page.evaluate((updated) => {
+        window.__desktopVisualHarness.updatePairedBrowsers([updated]);
+      }, browser);
+      await expect(page.locator('.paired-browser-status')).toContainText(
+        'Disconnected',
+      );
+      await expect(page.locator('#settingsModal')).toHaveClass(/open/);
+    });
+  });
+
   test('settings renders a nonfatal launch-at-login diagnostic next to its toggle', async ({
     page,
   }) => {
@@ -6373,6 +6428,149 @@ test.describe('desktop visual regression', () => {
       expect(spread).toBeLessThanOrEqual(1);
     });
   });
+
+  for (const [delivery, entryCount] of [
+    ['mutation', 80],
+    ['mutation', VIRTUALIZED_ENTRY_COUNT],
+    ['visibility', 80],
+    ['visibility', VIRTUALIZED_ENTRY_COUNT],
+  ]) {
+    test(`returning from an opened Timeline page preserves scroll after ${delivery} refresh with ${entryCount} entries @webkit`, async ({
+      page,
+    }) => {
+      const now = Date.now();
+      const historyEntries = Array.from({ length: entryCount }, (_, i) => ({
+        action: 'visit_page',
+        url: `https://example.com/return-to-timeline-${i}`,
+        title: `Return to Timeline ${i}`,
+        timestamp: now - 1000 - i * 1000,
+        deviceId: 'device-a',
+      }));
+      await serveDesktopUi(async (desktopUrl) => {
+        await openDesktopUi(page, desktopUrl, {
+          setupComplete: true,
+          historyEntries,
+        });
+        await page.waitForFunction((count) => {
+          const scroller =
+            document.getElementById('relatedResults')._virtualScroller;
+          return (
+            scroller?.data.length === count && scroller._topLockFrames === 0
+          );
+        }, historyEntries.length);
+        await page.locator('.main').evaluate(async (main, count) => {
+          main.scrollTop = count > 80 ? 32000 : 1600;
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+        }, entryCount);
+        const before = await page.evaluate(() => {
+          const main = document.querySelector('.main');
+          const top = main.getBoundingClientRect().top;
+          const rows = [
+            ...document.querySelectorAll('#relatedResults .result-row'),
+          ].filter((row) => {
+            const rect = row.getBoundingClientRect();
+            return (
+              rect.top >= top &&
+              rect.bottom <= main.getBoundingClientRect().bottom
+            );
+          });
+          return {
+            scrollTop: main.scrollTop,
+            anchorUrl: rows[1].dataset.url,
+            anchorTop: rows[1].getBoundingClientRect().top,
+            openedUrl: rows[2].dataset.url,
+          };
+        });
+        expect(before.scrollTop).toBeGreaterThan(1000);
+        await page
+          .locator(
+            `#relatedResults .result-row[data-url="${before.openedUrl}"]`,
+          )
+          .dblclick();
+        await expect
+          .poll(() =>
+            page.evaluate(() =>
+              window.__desktopVisualHarness.openedExternalUrls(),
+            ),
+          )
+          .toContain(before.openedUrl);
+        await page.evaluate(
+          ({ url, timestamp, delivery }) => {
+            Object.defineProperty(document, 'visibilityState', {
+              configurable: true,
+              value: 'hidden',
+            });
+            document.dispatchEvent(new Event('visibilitychange'));
+            const harness = window.__desktopVisualHarness;
+            harness.appendHistoryEntry({
+              action: 'visit_page',
+              url,
+              title: 'Revisited Timeline page',
+              timestamp,
+              deviceId: 'device-a',
+            });
+            if (delivery === 'mutation') {
+              harness.emitRuntimeMessage({
+                action: 'mutation',
+                type: 'history',
+                url,
+                historyEntry: {
+                  action: 'visit_page',
+                  url,
+                  title: 'Revisited Timeline page',
+                  timestamp,
+                  deviceId: 'device-a',
+                  userTitle: null,
+                  scrollDepth: null,
+                  timeOnPage: null,
+                  likes: null,
+                },
+              });
+            } else {
+              Object.defineProperty(document, 'visibilityState', {
+                configurable: true,
+                value: 'visible',
+              });
+              document.dispatchEvent(new Event('visibilitychange'));
+            }
+          },
+          { url: before.openedUrl, timestamp: now, delivery },
+        );
+        await expect
+          .poll(() =>
+            page.evaluate(
+              () =>
+                document.getElementById('relatedResults')._virtualScroller
+                  .data[0]?.title,
+            ),
+          )
+          .toBe('Revisited Timeline page');
+        await page.evaluate(() => {
+          Object.defineProperty(document, 'visibilityState', {
+            configurable: true,
+            value: 'visible',
+          });
+          document.dispatchEvent(new Event('visibilitychange'));
+        });
+        await expect
+          .poll(() =>
+            page.evaluate(({ anchorUrl, anchorTop }) => {
+              const row = document.querySelector(
+                `#relatedResults .result-row[data-url="${anchorUrl}"]`,
+              );
+              return row
+                ? Math.abs(row.getBoundingClientRect().top - anchorTop)
+                : Infinity;
+            }, before),
+          )
+          .toBeLessThanOrEqual(1);
+        expect(
+          await page.locator('.main').evaluate((main) => main.scrollTop),
+        ).toBeGreaterThan(1000);
+      });
+    });
+  }
 
   test('fresh explore render starts at the top of a virtualized list', async ({
     page,

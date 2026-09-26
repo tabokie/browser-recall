@@ -645,22 +645,20 @@ impl SyncController {
 
     fn persist_state(&self) -> Result<(), String> {
         let state = self.state.lock();
-        let mut config = self
-            .config_store
-            .load_or_create()
-            .map_err(|error| error.to_string())?;
-        config.sync_remember_token = state.remember_token;
-        config.sync_paused_devices = state.paused_devices.iter().cloned().collect();
-        config.sync_devices = state.devices.clone();
-        if state.remember_token {
-            config.sync_github_token = state.session_token.clone().map(Token);
-            config.sync_github_user = state.github_user.clone();
-        } else {
-            config.sync_github_token = None;
-            config.sync_github_user = None;
-        }
         self.config_store
-            .save(&config)
+            .update(|config| {
+                config.sync_remember_token = state.remember_token;
+                config.sync_paused_devices = state.paused_devices.iter().cloned().collect();
+                config.sync_devices = state.devices.clone();
+                if state.remember_token {
+                    config.sync_github_token = state.session_token.clone().map(Token);
+                    config.sync_github_user = state.github_user.clone();
+                } else {
+                    config.sync_github_token = None;
+                    config.sync_github_user = None;
+                }
+                Ok(())
+            })
             .map_err(|error| error.to_string())
     }
 }

@@ -58,8 +58,11 @@ Deleted tombstones can have null anchors. There are no standalone notes without
 highlight text and anchors.
 
 List JSON contains `slug`, `name`, `owner`, `pins`, `rules`, `timestamps`,
-`deleted`, and `deletedTs`. A pin is `{ "id": "page:...", "pinnedAt": 0,
-"source": null }`; `id` can also reference a note or snapshot. A rule is
+`deleted`, and `deletedTs`. A pin is `{ "id": "page:...", "pinnedAt": 0 }`;
+`id` can also reference a note or snapshot. Pins omit `source` when no provenance
+is recorded and retain non-null values such as `"manual"` and `"auto"`.
+This omission applies only to checkpoints; `pin_to_list` logs still require
+their nullable `source` field. A rule is
 `{ "id": "...", "type": "keyword", "config": { "pattern": "..." },
 "createdAt": 0 }`. Keyword rules match titles, case-insensitively. Function rules
 use type `function` and config `{ "description": "...", "fnSource": "..." }`.

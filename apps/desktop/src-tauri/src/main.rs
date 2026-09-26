@@ -739,21 +739,23 @@ fn update_shell_settings(app: AppHandle, payload: ShellSettingsUpdate) -> Result
 
     {
         let state = app.state::<DesktopState>();
-        let mut config = state
+        let config = state
             .config_store
             .load_or_create()
             .map_err(|error| error.to_string())?;
         let previous_log_level = config.log_level.clone();
-        config.launch_at_login = payload.launch_at_login;
-        config.log_level = desired_log_level.clone();
 
         state
             .logging
             .set_level(&desired_log_level)
             .map_err(|error| error.to_string())?;
-        if let Err(error) =
-            login_item.persist(payload.launch_at_login, || state.config_store.save(&config))
-        {
+        if let Err(error) = login_item.persist(payload.launch_at_login, || {
+            state.config_store.update(|config| {
+                config.launch_at_login = payload.launch_at_login;
+                config.log_level = desired_log_level.clone();
+                Ok(())
+            })
+        }) {
             let error = if let Err(rollback_error) = state.logging.set_level(&previous_log_level) {
                 format!(
                     "{error}; restoring the previous logging level also failed: {rollback_error}"
@@ -1301,16 +1303,13 @@ fn choose_desktop_data_folder(app: &AppHandle) -> Result<Value, String> {
     std::fs::create_dir_all(&data_dir).map_err(|error| error.to_string())?;
 
     let config_store = app.state::<DesktopState>().config_store.clone();
-    let mut config = config_store
-        .load_or_create()
-        .map_err(|error| error.to_string())?;
-    config
-        .select_data_directory(data_dir.clone())
-        .map_err(str::to_string)?;
     config_store
-        .save(&config)
+        .update(|config| {
+            config
+                .select_data_directory(data_dir.clone())
+                .map_err(std::io::Error::other)
+        })
         .map_err(|error| error.to_string())?;
-    drop(config);
 
     update_shell_state(app, |state| {
         state.data_dir = data_dir.display().to_string();
@@ -1326,12 +1325,6 @@ fn choose_desktop_data_folder(app: &AppHandle) -> Result<Value, String> {
 async fn complete_desktop_setup(app: &AppHandle, request: &Value) -> Result<Value, String> {
     let config_store = app.state::<DesktopState>().config_store.clone();
     let login_item = login_item::SystemLoginItem::new(app);
-    let mut config = config_store
-        .load_or_create()
-        .map_err(|error| error.to_string())?;
-    config
-        .complete_setup()
-        .map_err(|_| "Choose a data folder before starting Browser Recall.".to_string())?;
     let launch_at_login = request
         .get("launchAtLogin")
         .and_then(Value::as_bool)
@@ -1340,12 +1333,20 @@ async fn complete_desktop_setup(app: &AppHandle, request: &Value) -> Result<Valu
         return Err("Launch at login is unavailable on this OS".to_string());
     }
 
-    config.launch_at_login = launch_at_login;
-    if let Err(error) = login_item.persist(launch_at_login, || config_store.save(&config)) {
+    if let Err(error) = login_item.persist(launch_at_login, || {
+        config_store.update(|config| {
+            config.complete_setup().map_err(std::io::Error::other)?;
+            config.launch_at_login = launch_at_login;
+            Ok(())
+        })
+    }) {
         let error = error.to_string();
         app.state::<DesktopState>().shell.lock().login_item_error = Some(error.clone());
         return Err(error);
     }
+    let config = config_store
+        .load_or_create()
+        .map_err(|error| error.to_string())?;
     update_shell_state(app, |state| {
         state.data_dir = config.data_dir.display().to_string();
         state.setup_complete = true;

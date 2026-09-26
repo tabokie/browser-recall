@@ -142,10 +142,13 @@ npm run ci
 
 GitHub's locally safe jobs delegate to the same `ci:*` package scripts, so local
 and hosted verification cannot drift into different command sets. The native
-macOS lifecycle and Windows single-instance jobs are explicit exceptions: they
-require their platform-specific environments described below and are not part
-of `npm run ci`. Run the complete local chain before committing and the relevant
-native smoke on its required platform when those paths change.
+macOS lifecycle and Windows single-instance jobs require their platform-specific
+environments described below and are not part of `npm run ci`. The macOS README
+capture job also runs separately through `npm run ci:generate-docs`; local CI
+checks the existing image set without opening documentation windows. Run the
+complete local chain before committing, regenerate documentation when needed,
+and run native smoke checks in their required environments when those paths
+change.
 
 `npm run build:test-daemon` is the explicit prerequisite for daemon-backed
 Playwright runs. The extension CI, Windows font CI, and cold-script commands
@@ -379,6 +382,12 @@ Linux dependency installation may require administrator privileges.
   slower CI navigation to recover before the assertion and left the test reading
   hidden diagnostic markup. Run it with
   `npx playwright test tests/e2e/popup-lists.spec.js -g "receiver is stale"`.
+- The query-only navigation scenario holds the content script's visit report
+  until the first `getReportedUrl` read, then releases the report and polls for
+  the updated reported URL. The browser tab URL and an unchanged empty toolbar
+  badge do not acknowledge content-report delivery; using those signals allowed
+  a one-shot read to pass locally but race on Linux CI. Run the deterministic
+  scenario with `npx playwright test tests/e2e/extension-navigation-regressions.spec.js -g "records query-only"`.
 - macOS 15 and macOS 26 are different visual baseline environments even with
   the same Playwright version. Keep the visual job and baseline host aligned;
   the workflow invariant test guards the macOS 26 runner and browser dependency
@@ -441,8 +450,8 @@ until capture finishes.
 `scripts/lib/documentation-seed.mjs` owns the fixed reading data: 40 distinct
 pages, six pinned pages, and nine highlights from three pages across three days.
 Only two highlights have notes: a long highlight with a short note, and a short
-highlight with a long note. Native capture checks that both notes and the last
-highlight fit within the window. The capture command starts a temporary daemon
+highlight with a long note. Native capture checks that both notes fit within
+the shorter Book window. The capture command starts a temporary daemon
 to obtain complete current settings, applies
 the seed through the production Rust replay tool, and opens the native app with
 an isolated profile. The separate compiled application identifier also isolates
@@ -451,27 +460,76 @@ keyboard targeting. Login-item and URL-handler registration are disabled for the
 temporary app.
 
 `scripts/lib/documentation-window.swift` uses macOS Accessibility to navigate
-real controls and Core Graphics to capture only the app window. The capture
-command uses System Events to submit the search query. Each screen must contain
-the expected reading material and reach a stable rendered state before
-capture succeeds. No application HTML, CSS, bridge responses, or screenshot
-pixels are replaced for documentation.
+real controls and Core Graphics to capture only the app window. Each screen
+must contain the expected reading material and reach a stable rendered state
+before capture succeeds. Application HTML, CSS, and bridge responses are
+unmodified.
 
 The complete image set and `docs/images/capture.json` are updated only after
-Timeline, Lists, Search, and Book pass in both Amber and Mono. The capture
-command selects Mono through the real Settings control and verifies persistence.
-The README presents each pair side by side. The capture manifest records
-the source commit, seed hash, image hashes, dimensions, and capture time. Data and
-requested window size are fixed; macOS may constrain the window to the display.
-Relative-time labels, display scale, and OS rendering can vary between runs.
-Inspect all eight PNGs before committing. On a navigation or
-capture failure, inspect `test-results/documentation/`.
+Timeline passes in Amber and Mono and Book passes in Amber. Timeline requests
+960 × 500 points; Book requests 960 × 620 points. Only the isolated documentation
+build lowers the minimum window height to 500 points. The newest sample visits
+put the two labeled pages first, and capture checks that both titles are visible.
+The capture command selects
+Mono through the real Settings control and verifies persistence.
+`scripts/compose-documentation-hero.mjs` combines the two aligned Timeline
+captures at their original resolution using Canvas: Amber on the left, Mono
+on the right, separated by a white diagonal slash. The README shows that
+single combined image, a shorter Book image, and the two browser images,
+all displayed at 640 pixels wide;
+Search and Lists need no additional screenshots.
+
+The **Generate README Screenshots** job runs `npm run ci:generate-docs` on
+`macos-26` for pull requests and pushes to `main`. The command captures the
+native desktop and browser windows, composes the diagonal hero, then runs
+`ci:check-docs`. Pull requests receive a `readme-screenshots` artifact for review;
+main pushes commit the generated `docs/images/` files using `GITHUB_TOKEN`.
+Repository rules must permit that bot to push documentation commits to `main`;
+a denied or non-fast-forward push fails visibly and never overwrites newer work.
+Bot pushes do not trigger another workflow run. Capture failures retain
+`documentation-capture-failures` diagnostics. The [hosted macOS image configuration](https://github.com/actions/runner-images/blob/main/images/macos/scripts/build/configure-tccdb-macos.sh)
+grants the runner Accessibility and Screen Recording permissions used by the
+native helper.
+
+The Linux unit job checks committed PNG integrity with `ci:check-docs --
+--images-only`; current-source validation runs after native generation. Local
+`npm run ci` starts with the full freshness check. The checker validates source
+SHA-256 hashes, exact PNG inventory, image bytes and dimensions, diagonal
+composition sources, and README image references. The fingerprint scopes cover
+UI, fonts, locale catalogs, JavaScript dependency locks, seed and capture helpers,
+and native window configuration/assets. Unrelated Rust backend and prose edits
+do not force manual recapture; hosted CI still regenerates against the current
+backend on every run.
+
+For local freshness failures, run the named macOS capture command, inspect the
+images, and commit PNGs and manifests together. Capture checks source hashes
+again before publication, rejecting edits made while capture was running.
+Manifests are never updated without successful native capture. The check detects
+source drift, not elapsed time or changes in OS rendering.
+
+To regenerate only the combined image from the saved native sources:
+
+```bash
+node scripts/compose-documentation-hero.mjs
+```
+
+Composition-only regeneration requires current native source fingerprints and
+matching source image hashes. Changing the compositor requires desktop recapture;
+composition alone never updates or certifies native capture provenance.
+
+The compositor uses the repository's Playwright Chromium installation. The
+capture manifest records the source commit, seed hash, image hashes,
+dimensions, capture time, and composition inputs and split positions. macOS
+may constrain window size to the display. Relative-time labels, display scale,
+and OS rendering can vary between runs. Inspect the native sources and final
+combined image before committing. On a navigation or capture failure, inspect
+`test-results/documentation/`.
 
 The command closes the temporary application and removes the temporary profile
 after completion or a capture error. Existing browsing data and the regular
 `dist/desktop/` app are not used for capture. `npm run test:cold-scripts` checks the
-documentation seed at the real daemon/connector boundary in canonical CI; native capture is a separate macOS
-maintainer command.
+documentation seed at the real daemon/connector boundary in canonical CI. The
+macOS documentation job runs both native capture commands automatically.
 
 Capture the browser extension separately with:
 
@@ -485,15 +543,17 @@ headed Chromium profile, the production extension with test-control hooks, and a
 temporary real daemon. Install the repository's
 Playwright Chromium build first with `npm run ci:install-playwright`.
 `tests/e2e/documentation-browser.spec.js` serves a fictional article, seeds the
-shared reading collection through Rust replay, and starts the example article
-without highlights. The first screenshot shows the real toolbar popup over the
+shared reading collection through Rust replay with two lists, and starts the
+example article without highlights. The browser window requests 800 × 434 points so the toolbar icon and popup
+remain prominent. The first screenshot shows the real toolbar popup over the
 unmarked article. The second shows the live note editor after creating a single
 highlight through the extension. Core Graphics captures the named browser window,
 including the separate popup window. Capture includes only the isolated Chromium
 process's window IDs, so overlapping applications cannot appear in exported
 images. The helper tab stays in a minimized window
 outside the captured browser window. Extension markup, styles, and daemon
-responses are unmodified. The scenario saves the new note and checks daemon
+responses are unmodified. Both the popup and note editor must fit fully inside
+the smaller browser window. The scenario saves the new note and checks daemon
 persistence before exporting images.
 
 The documentation scenario requests English through the browser fixture. On

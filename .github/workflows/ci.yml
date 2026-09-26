@@ -24,7 +24,65 @@ jobs:
 
       - run: npm ci
 
+      - name: Verify committed README image integrity
+        run: npm run ci:check-docs -- --images-only
+
       - run: npm run ci:test
+
+  documentation-screenshots:
+    name: Generate README Screenshots
+    runs-on: macos-26
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    concurrency:
+      group: documentation-screenshots-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@1.97.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: npm ci
+
+      - run: npm run ci:install-playwright
+
+      - name: Capture native app and browser windows, compose and verify images
+        run: npm run ci:generate-docs
+
+      - name: Preserve generated documentation
+        uses: actions/upload-artifact@v7
+        with:
+          name: readme-screenshots
+          path: docs/images/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Preserve capture failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: documentation-capture-failures
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Publish refreshed images on main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git add docs/images/
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'docs: refresh generated README screenshots'
+          git push origin HEAD:main
 
   test-extension-e2e:
     name: Extension E2E Regression

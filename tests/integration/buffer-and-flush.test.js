@@ -399,7 +399,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(store.connectorAuthToken).toBeUndefined();
     expect(store.connectorLastDiagnostic).toMatchObject({
       code: 'incompatible_protocol',
-      expected: 3,
+      expected: 4,
       actual: null,
     });
 
@@ -461,7 +461,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(store.connectorAuthToken).toBeUndefined();
     expect(store.connectorLastDiagnostic).toMatchObject({
       code: 'incompatible_protocol',
-      expected: 3,
+      expected: 4,
     });
   }, 30_000);
 
@@ -1247,7 +1247,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     socket.send(
       JSON.stringify({
         type: 'pair_request',
-        protocolVersion: 3,
+        protocolVersion: 4,
         browserId: 'raw-browser',
         browserName: 'Chrome',
         extensionId: 'abcdefghijklmnop',
@@ -1373,7 +1373,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(store.desktopPendingCommands).toBe(0);
   }, 30_000);
 
-  it('reconnects immediately after an authenticated socket closes unexpectedly', async () => {
+  it('reconnects with cached credentials and refreshes a formerly misidentified Orion browser', async () => {
     const dir = mkdtempSync(
       path.join(tmpdir(), 'browser-recall-socket-close-recover-'),
     );
@@ -1424,6 +1424,16 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       return state.pendingCommands === 0;
     });
 
+    const originalToken = store.connectorAuthToken;
+    expect(
+      JSON.parse(readFileSync(path.join(dir, 'config.json'))).connectors[0]
+        .browser_name,
+    ).toBe('Chrome');
+    // Orion can expose a Chrome user agent until its identifying signal is visible.
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { userAgent: 'Chrome/123.0.0.0 Safari/537.36 Orion/1.0' },
+      configurable: true,
+    });
     const firstSocket =
       BrowserLikeWebSocket.instances[BrowserLikeWebSocket.instances.length - 1];
     firstSocket.close();
@@ -1448,6 +1458,24 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
 
     expect(BrowserLikeWebSocket.instances.length).toBeGreaterThan(1);
     expect(store.connectorState).toBe('connected');
+    expect(store.connectorAuthToken).toBe(originalToken);
+    expect(
+      JSON.parse(readFileSync(path.join(dir, 'config.json'))).connectors[0],
+    ).toMatchObject({
+      browser_name: 'Orion',
+      token: originalToken,
+    });
+    expect(
+      BrowserLikeWebSocket.sentMessages.filter(
+        (message) => message.type === 'pair_request',
+      ),
+    ).toHaveLength(1);
+    expect(BrowserLikeWebSocket.sentMessages).toContainEqual({
+      type: 'auth',
+      protocolVersion: 4,
+      token: originalToken,
+      browserName: 'Orion',
+    });
   }, 30_000);
 
   it('reconnects instead of trusting status from a socket that closes', async () => {
