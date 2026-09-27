@@ -1,7 +1,7 @@
 {
   "command": "npm run docs:screenshots",
   "inputs": {
-    "package.json": "57f2706f5e63f021739802a7572dcd464a0d6c2c0d667a1ae17e3016a85a30a9",
+    "package.json": "26c327527a52b18a9bdc76c140ef3ef0978e825289c053cc193db3238818a7a4",
     "package-lock.json": "90950dd6e3d95d1fdf490584466846dc4f642eff2f0f957af3c34130c70bae3c",
     "packages/core/attention-utils.js": "4f38498b8ae86274db4a9df56a90136c149357a0ed94d1933b95ffd8d25fa1be",
     "packages/core/bounded-response.js": "4ddb18491943ee4b29073767480858af99cf93a2b647e69f51fcec0dfe79732f",
@@ -48,9 +48,9 @@
     "packages/core/virtual-scroller.js": "4498103f7f7b18fa6d5a4b246a701c026811fb65cea085e98cdd410a6efde216",
     "apps/extension/utils.js": "eea5cc2425981454fde629445ca28c0f4eb3aa42f9b39a4f9de9ce4ba17e4ad0",
     "scripts/stage-app-assets.mjs": "4964ea5b7d48a596719d7a61a6b47b39dad29f7ba8773198ad42d7589a1e3cd2",
-    "scripts/lib/documentation-seed.mjs": "a78c1e44ea5192a5b4fc86f9d6f420722c806d10ae4e7a88f7093bd74585b52f",
+    "scripts/lib/documentation-seed.mjs": "30ede382fce3d4551e36a0e50cb9933507ae4d2bcec67f63f9ba32dca8a1c064",
     "scripts/lib/documentation-image-spec.mjs": "26d03bdf9865736b007fa6419b8888b90be757979f00a0b40f94b34ed2c46459",
-    "scripts/lib/documentation-window.swift": "1e10f97ce05e27933a1578963004b7c91e98d016e0f2f33cd2cbd5a8f9ce6354",
+    "scripts/lib/documentation-window.swift": "a1b831d3699112d8197dca2e96753a156359112c28c4d1a870ed1469d8086089",
     "scripts/lib/documentation-freshness.mjs": "1aaeed7db46bdce8c32e528e9bfdfbfb7e438848028dbb60bf515c4c20006d49",
     "scripts/lib/manual-seed.mjs": "2495a12d302cbacaf866d71ea89ae20afd1269d4ab767e1139226642604a9e97",
     "scripts/lib/seed-builder.mjs": "d7ab1c2e8b939ed65ee7f6fd1223ab8a12f20d384bb4ac013cdda75016655e64",
@@ -87,11 +87,11 @@
     "apps/desktop/src-tauri/icons/icon.png": "3a146dacc860f8de268cf6bb8615a0dca0232485a396d2c5ccba815522db10be",
     "apps/desktop/src-tauri/icons/tray-icon.png": "047da4fdb0b2cfdbf0511decfdea7cfe316f4ea2d2badc0149879ed0ba10c732",
     "apps/desktop/src-tauri/tauri.conf.json": "fb1e61058b7d989b461e6b117ca2205ab674c44b6ab551922815fac1dcdf3306",
-    "scripts/capture-documentation.mjs": "62dfbed6f243d156cf862a559e431a4473f764637d5fa3a3ba26ba6035ca3bc9",
+    "scripts/capture-documentation.mjs": "4f6e86dbb6a502bbc9b947d1e54ae326fb2459fb8e4861810d750c181dffda51",
     "scripts/compose-documentation-hero.mjs": "3168eee474aea25567292c33043f9b18b1fd1a877e6c09d52d7a87018f392cdb"
   },
   "platform": "macOS / native Tauri WKWebView",
-  "seedSha256": "a78c1e44ea5192a5b4fc86f9d6f420722c806d10ae4e7a88f7093bd74585b52f",
+  "seedSha256": "30ede382fce3d4551e36a0e50cb9933507ae4d2bcec67f63f9ba32dca8a1c064",
   "colorSchemes": ["amber", "mono"],
   "layoutPoints": {
     "timeline": { "width": 960, "height": 500 },
@@ -103,7 +103,7 @@
   },
   "screenshots": {
     "timeline.png": {
-      "sha256": "1a70a7e1de57e9881afc0d1538a2ca4c27b7c3343207f688721dcf30e66d3007",
+      "sha256": "4577d9c9b2775dbc01bb1ee0ba615aa2295cce0b2626e1fbbc21110b785d5d25",
       "width": 1920,
       "height": 1000
     },
@@ -113,19 +113,19 @@
       "height": 1240
     },
     "timeline-mono.png": {
-      "sha256": "6e0cb73648920415244a375b7bc866ace595e339bd8d5bbab9de9a75a6a3458f",
+      "sha256": "1c787c6cf226a6f32888dcd34ac5fbb948ce2702ebcc76643b070d8d5aa47cec",
       "width": 1920,
       "height": 1000
     },
     "timeline-styles.png": {
-      "sha256": "bfc68a14384eea00303655c44b4dd7b54ce86ce415093f1eced16d6cb7e7765f",
+      "sha256": "5a841a05a2e1e069cbfd67830c1e49274edaa4ae8cfdc1e2422aa248338942d3",
       "width": 1920,
       "height": 1000,
       "composition": {
         "sources": ["timeline.png", "timeline-mono.png"],
         "sourceSha256": [
-          "1a70a7e1de57e9881afc0d1538a2ca4c27b7c3343207f688721dcf30e66d3007",
-          "6e0cb73648920415244a375b7bc866ace595e339bd8d5bbab9de9a75a6a3458f"
+          "4577d9c9b2775dbc01bb1ee0ba615aa2295cce0b2626e1fbbc21110b785d5d25",
+          "1c787c6cf226a6f32888dcd34ac5fbb948ce2702ebcc76643b070d8d5aa47cec"
         ],
         "split": { "top": 0.62, "bottom": 0.38 }
       }

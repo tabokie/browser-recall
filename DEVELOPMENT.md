@@ -143,10 +143,10 @@ npm run ci
 GitHub's locally safe jobs delegate to the same `ci:*` package scripts, so local
 and hosted verification cannot drift into different command sets. The native
 macOS lifecycle and Windows single-instance jobs require their platform-specific
-environments described below and are not part of `npm run ci`. The macOS README
-capture job also runs separately through `npm run ci:generate-docs`; local CI
-checks the existing image set without opening documentation windows. Run the
-complete local chain before committing, regenerate documentation when needed,
+environments described below and are not part of `npm run ci`. README screenshot
+capture is a manual macOS workflow; local CI checks the existing image set
+without opening documentation windows. Run the complete local chain before
+committing, regenerate documentation when needed,
 and run native smoke checks in their required environments when those paths
 change.
 
@@ -449,6 +449,8 @@ until capture finishes.
 
 `scripts/lib/documentation-seed.mjs` owns the fixed reading data: 40 distinct
 pages, six pinned pages, and nine highlights from three pages across three days.
+The Timeline sample distributes distinct daily page visits across five weeks in
+August and September, with varied daily activity for the README chart.
 Only two highlights have notes: a long highlight with a short note, and a short
 highlight with a long note. Native capture checks that both notes fit within
 the shorter Book window. The capture command starts a temporary daemon
@@ -467,12 +469,14 @@ unmodified.
 
 The complete image set and `docs/images/capture.json` are updated only after
 Timeline passes in Amber and Mono and Book passes in Amber. Timeline requests
-960 × 500 layout points and ScreenCaptureKit produces 1920 × 1000 source pixels;
-Book requests 960 × 620 layout points and ScreenCaptureKit produces 1920 × 1240
-source pixels. ScreenCaptureKit renders the requested target pixel dimensions
-directly at best capture resolution; the generator never enlarges a
-nominal-resolution bitmap. Only the isolated documentation
-build lowers the minimum window height to 500 points. The newest sample visits
+960 × 500 layout points and a 1920 × 1000-pixel PNG; Book requests 960 × 620
+layout points and a 1920 × 1240-pixel PNG. ScreenCaptureKit requests its best
+available source resolution, but fixed PNG dimensions do not guarantee 2×
+source detail: a 1× virtual display can yield an upscaled image. The host
+display also determines the default capture color profile, and OS versions can
+render fonts differently. Capture and inspect the images on a high-density Mac.
+Only the isolated documentation build lowers the minimum window height to 500
+points. The newest sample visits
 put the two labeled pages first, and capture checks that both titles are visible.
 The capture command selects
 Mono through the real Settings control and verifies persistence.
@@ -484,27 +488,20 @@ standard Markdown image syntax; repository-host rendering constrains the
 high-density source images responsively.
 Search and Lists need no additional screenshots.
 
-The **Verify README Screenshots** job runs `npm run ci:generate-docs` on
-`macos-26` for pull requests and pushes to `main`. The command captures the
-native desktop and browser windows, composes the diagonal hero, then runs
-`ci:check-docs`. Pull requests and main pushes receive a `readme-screenshots`
-artifact for review. The job then compares generated `README.md` and
-`docs/images/` files with the committed files; any difference fails like a
-formatting check. The job has read-only repository permission and never creates
-or pushes a commit. Capture failures retain
-`documentation-capture-failures` diagnostics. The [hosted macOS image configuration](https://github.com/actions/runner-images/blob/main/images/macos/scripts/build/configure-tccdb-macos.sh)
-grants the runner Accessibility and Screen Recording permissions used by the
-native helper.
+Hosted CI does not regenerate or byte-compare native README screenshots: a
+runner's virtual display can produce different pixels, effective resolution,
+and color profiles from a local high-density display even with identical source
+code. Regenerate both image sets manually, inspect them, and commit their PNGs
+and manifests together.
 
-The Linux unit job checks committed PNG integrity with `ci:check-docs --
---images-only`; current-source validation runs after native generation. Local
-`npm run ci` starts with the full freshness check. The checker validates source
+The Linux unit job checks committed PNG integrity with
+`npm run ci:check-docs -- --images-only`. Local `npm run ci` starts with the full
+freshness check. The checker validates source
 SHA-256 hashes, exact PNG inventory, image bytes and dimensions, diagonal
 composition sources, and README image references. The fingerprint scopes cover
 UI, fonts, locale catalogs, JavaScript dependency locks, seed and capture helpers,
 and native window configuration/assets. Unrelated Rust backend and prose edits
-do not force manual recapture; hosted CI still regenerates against the current
-backend on every run.
+do not force manual recapture.
 
 For local freshness failures, run the named macOS capture command, inspect the
 images, and commit PNGs and manifests together. Capture checks source hashes
@@ -534,8 +531,7 @@ combined image before committing. On a navigation or capture failure, inspect
 The command closes the temporary application and removes the temporary profile
 after completion or a capture error. Existing browsing data and the regular
 `dist/desktop/` app are not used for capture. `npm run test:cold-scripts` checks the
-documentation seed at the real daemon/connector boundary in canonical CI. The
-macOS documentation job runs both native capture commands automatically.
+documentation seed at the real daemon/connector boundary in canonical CI.
 
 Capture the browser extension separately with:
 
@@ -551,11 +547,11 @@ Playwright Chromium build first with `npm run ci:install-playwright`.
 `tests/e2e/documentation-browser.spec.js` serves a fictional article, seeds the
 shared reading collection through Rust replay with two lists, and starts the
 example article without highlights. The browser window requests an 800 × 434-point
-layout and produces a canonical 1600 × 868-pixel image so the toolbar icon and
+layout and produces a 1600 × 868-pixel image so the toolbar icon and
 popup remain prominent on high-density displays. The first screenshot shows the real toolbar popup over the
 unmarked article. The second shows the live note editor after creating a single
 highlight through the extension. ScreenCaptureKit captures the named browser
-window and the separate popup window directly at 1600 × 868 source pixels.
+window and the separate popup window at 1600 × 868 output pixels.
 Capture includes only the isolated Chromium
 process's window IDs, so overlapping applications cannot appear in exported
 images. The helper tab stays in a minimized window

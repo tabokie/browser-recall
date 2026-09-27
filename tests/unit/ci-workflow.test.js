@@ -46,12 +46,7 @@ function jobBody(jobName, nextJobName) {
 
 describe('GitHub CI prerequisites', () => {
   test.each([
-    ['test', 'documentation-screenshots', 'ci:check-docs ci:test'],
-    [
-      'documentation-screenshots',
-      'test-extension-e2e',
-      'ci:install-playwright ci:generate-docs',
-    ],
+    ['test', 'test-extension-e2e', 'ci:check-docs ci:test'],
     [
       'test-extension-e2e',
       'test-rust',
@@ -117,20 +112,18 @@ describe('GitHub CI prerequisites', () => {
     expect(packageJson.scripts.ci).not.toContain('test:desktop-native');
   });
 
-  test('documentation generation is a read-only CI formatting check', () => {
-    const documentationJob = jobBody(
-      'documentation-screenshots',
-      'test-extension-e2e',
-    );
-    expect(documentationJob).toContain(
+  test('hosted CI checks committed images without recapturing them', () => {
+    const unitJob = jobBody('test', 'test-extension-e2e');
+    expect(unitJob).toContain('npm run ci:check-docs -- --images-only');
+    expect(ciWorkflow).not.toContain('documentation-screenshots:');
+    expect(ciWorkflow).not.toContain('npm run ci:generate-docs');
+    expect(ciWorkflow).not.toContain(
       'git diff --exit-code -- README.md docs/images/',
     );
-    expect(documentationJob).not.toContain('contents: write');
-    expect(documentationJob).not.toContain('git commit');
-    expect(documentationJob).not.toContain('git push');
+    expect(packageJson.scripts).not.toHaveProperty('ci:generate-docs');
   });
 
-  test('documentation capture uses canonical pixels and deterministic manifests', () => {
+  test('documentation capture uses fixed output pixels and deterministic manifests', () => {
     expect(documentationWindow).toContain('import ScreenCaptureKit');
     expect(documentationWindow).toContain('NSApplication.shared');
     expect(documentationWindow).toContain('setActivationPolicy(.prohibited)');
@@ -176,7 +169,7 @@ describe('GitHub CI prerequisites', () => {
     expect(rustToolchain).toContain('channel = "1.97.0"');
     expect(rustToolchain).toContain('"llvm-tools-preview"');
     expect(ciWorkflow.match(/dtolnay\/rust-toolchain@1\.97\.0/g)).toHaveLength(
-      8,
+      7,
     );
     expect(ciWorkflow).not.toContain('dtolnay/rust-toolchain@stable');
   });

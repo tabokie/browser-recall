@@ -140,6 +140,22 @@ test('documentation reading collection loads through the real daemon', async ({
     expect(visited.size).toBe(40);
     expect(pinned.size / visited.size).toBeLessThan(0.2);
     expect(highlighted.size / visited.size).toBeLessThan(0.1);
+    const timelineDates = new Map();
+    for (const event of seed.events.filter(
+      (entry) => entry.action === 'visit_page',
+    )) {
+      const date = new Date(event.timestamp).toISOString().slice(0, 10);
+      const pages = timelineDates.get(date) ?? new Set();
+      pages.add(event.url);
+      timelineDates.set(date, pages);
+    }
+    expect(timelineDates.size).toBeGreaterThanOrEqual(35);
+    expect(
+      new Set([...timelineDates.keys()].map((date) => date.slice(0, 7))),
+    ).toEqual(new Set(['2026-08', '2026-09']));
+    expect(
+      new Set([...timelineDates.values()].map((pages) => pages.size)).size,
+    ).toBeGreaterThanOrEqual(7);
     const savedSettings = await sendMessage({
       action: 'readDesktopValue',
       key: 'manifest:settings',

@@ -171,14 +171,6 @@ function handleSetFileSchemeAccessForTest(request) {
   return { success: true };
 }
 
-async function handleBeginPopupBootstrapForTest(request) {
-  const control = globalThis.browserRecallPreparedPopupForTest;
-  if (!control) {
-    return { success: false, error: 'Prepared popup test hook unavailable' };
-  }
-  return control.begin(request);
-}
-
 async function handleReleasePopupPreparationForTest() {
   const control = globalThis.browserRecallPreparedPopupForTest;
   if (!control) {
@@ -255,7 +247,6 @@ const testMessageHandlers = new Map([
   ['seedTestData', handleSeedTestData],
   ['getActionIconForTest', handleGetActionIconForTest],
   ['preparePopupBootstrapForTest', handlePreparePopupBootstrapForTest],
-  ['beginPopupBootstrapForTest', handleBeginPopupBootstrapForTest],
   ['openPreparedPopupForTest', handleOpenPreparedPopupForTest],
   ['setFileSchemeAccessForTest', handleSetFileSchemeAccessForTest],
   ['releasePopupPreparationForTest', handleReleasePopupPreparationForTest],

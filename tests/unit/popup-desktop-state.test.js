@@ -503,7 +503,6 @@ describe('popup desktop state rendering', () => {
       url: 'https://example.com/resume-from-paused-popup',
     };
     const identity = deferred();
-    const finalHandoff = deferred();
     const pageActivity = deferred();
     const pageSummary = deferred();
     installDom(
@@ -514,14 +513,8 @@ describe('popup desktop state rendering', () => {
       responses: {
         consumePopupBootstrap: {
           success: true,
-          pending: true,
-          bootstrap: {
-            mode: 'connector-diagnostic',
-            connector: { state: 'starting' },
-            tab,
-          },
+          bootstrap: { mode: 'private', tab },
         },
-        awaitPopupBootstrap: () => finalHandoff.promise,
         resolvePopupPageIdentity: () => identity.promise,
         setRecordingPaused: (request) => {
           sessionStore.workspace = request.paused
@@ -616,124 +609,6 @@ describe('popup desktop state rendering', () => {
     );
     expect(document.getElementById('pageUrl').textContent).toBe(
       effectiveTab.url,
-    );
-  });
-
-  it('keeps the final bootstrap when a concurrent recording toggle fails', async () => {
-    const tab = {
-      id: 48,
-      url: 'https://example.com/failed-pending-toggle',
-      title: 'Failed Pending Toggle',
-    };
-    const pauseSave = deferred();
-    const finalHandoff = deferred();
-    installDom(
-      'chrome-extension://abcdefghijklmnop/popup.html?bootstrap=failed-toggle',
-    );
-    installChromeMock({
-      tab,
-      responses: {
-        consumePopupBootstrap: {
-          success: true,
-          pending: true,
-          bootstrap: {
-            mode: 'connector-diagnostic',
-            connector: { state: 'starting' },
-            tab,
-          },
-        },
-        awaitPopupBootstrap: () => finalHandoff.promise,
-        setRecordingPaused: () => pauseSave.promise,
-      },
-    });
-
-    await import('../../apps/extension/popup.js');
-    await waitFor(() =>
-      chrome.runtime.sendMessage.mock.calls.some(
-        ([request]) => request.action === 'awaitPopupBootstrap',
-      ),
-    );
-    expect(document.documentElement.dataset.popupHidden).toBe('true');
-    document.getElementById('recordingToggle').click();
-    await waitFor(() =>
-      chrome.runtime.sendMessage.mock.calls.some(
-        ([request]) => request.action === 'setRecordingPaused',
-      ),
-    );
-
-    finalHandoff.resolve({
-      success: true,
-      bootstrap: {
-        mode: 'data-unavailable',
-        error: 'The completed bootstrap remains authoritative.',
-        diagnostic: { reason: 'prepared-page-data-unavailable' },
-      },
-    });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    pauseSave.resolve({ success: false, error: 'Pause failed' });
-
-    await waitFor(
-      () =>
-        document.getElementById('pageDiagnosticMessage').textContent ===
-        'The completed bootstrap remains authoritative.',
-    );
-    expect(
-      document.getElementById('recordingToggle').getAttribute('aria-pressed'),
-    ).toBe('false');
-  });
-
-  it('ignores a rejected pending handoff after resume owns the popup', async () => {
-    const tab = {
-      id: 49,
-      url: 'https://example.com/rejected-stale-handoff',
-      title: 'Rejected Stale Handoff',
-    };
-    const finalHandoff = deferred();
-    const pageActivity = deferred();
-    installDom(
-      'chrome-extension://abcdefghijklmnop/popup.html?bootstrap=rejected-handoff',
-    );
-    const { sessionStore } = installChromeMock({
-      tab,
-      responses: {
-        consumePopupBootstrap: {
-          success: true,
-          pending: true,
-          bootstrap: {
-            mode: 'connector-diagnostic',
-            connector: { state: 'starting' },
-            tab,
-          },
-        },
-        awaitPopupBootstrap: () => finalHandoff.promise,
-        setRecordingPaused: (request) => {
-          sessionStore.workspace = request.paused
-            ? { mode: 'private' }
-            : { mode: 'default' };
-          return { success: true };
-        },
-        recordPageActivity: () => pageActivity.promise,
-      },
-    });
-    sessionStore.workspace = { mode: 'private' };
-
-    await import('../../apps/extension/popup.js');
-    await waitFor(
-      () =>
-        document.getElementById('dashboardContent')?.style.display === 'none',
-    );
-    document.getElementById('recordingToggle').click();
-    await waitFor(() =>
-      chrome.runtime.sendMessage.mock.calls.some(
-        ([request]) => request.action === 'recordPageActivity',
-      ),
-    );
-
-    finalHandoff.reject(new Error('Prepared handoff failed late'));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(document.getElementById('fatalReloadBtn')).toBeNull();
-    expect(document.getElementById('dashboardContent').style.display).toBe(
-      'none',
     );
   });
 

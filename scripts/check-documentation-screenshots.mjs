@@ -120,7 +120,7 @@ if (errors.length) {
 } else {
   console.log(
     imagesOnly
-      ? 'README image integrity verified; native CI generation checks source freshness.'
+      ? 'README image integrity verified; run the full check locally for source freshness.'
       : 'README screenshots are current: source fingerprints, PNG hashes, dimensions, composition, and references verified.',
   );
 }

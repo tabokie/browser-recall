@@ -1,0 +1,17 @@
+- I pushed the changes to GitHub, why does the CI generated another commit named "docs: refresh generated README screenshots"? And the regenerated screenshots are smaller than before. Don't fix anything yet, I want to understand the reason first.
+- (1) Remove the screenshot regeneration step. I want instead to run screenshot generation and compare images and raise error if there's any difference, the standard code format approach. (2) Fix the generation to use pixel. (3) I prefer we use the standard markdown image format (instead of HTML), and make sure the image is high resolution enough to render under most modern displays.
+- The screenshots look low-res. Worse than before.
+- The prompt logs are messy (under ./prompts/). I'll point out a few cases. Clean them up from Git history, and update the prompt hook to avoid logging the future instances. If one commit created multiple prompt log files, merge them into the first one. (1) "<send_user_message_question_reply>" (2) "## Code review guidelines:"
+- Continue
+- Great. Let's update the README's timeline screenshot, I want there to be more dates and more bars in the time bar chart, preferably in a natural fluctuating pattern.
+- One more thing, and this is a problem we've tried to fix multiple times in the past. The popup window of browser extension sometimes flashes when being opened, the constraint was to render only one frame (if a timeout hasn't been reached) instead of progressively loading or showing incomplete frames in the middle.
+- The CI "Verify README Screenshots" job is failing on mismatches of all screenshots.
+- I downloaded the artifacts at ./documentation-capture-failures.zip
+- That's all the artifacts I got from GitHub. Why can you deduce a little? Of course the run has reached comparison, because I have already said all screenshots mismatched.
+- So I presume there's no way to use a hardcoded setting (one that is different from host OS) to generate the screenshot?
+- Let's document the nuances (in code comment of the generation script). And remove the CI verification.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) there're many tasks executed in this session, try not to miss any
+- Continue
+- Fix them all
+- Please review my uncommitted changes
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) co-authors=GPT-6 Sol, GPT-6 Astra

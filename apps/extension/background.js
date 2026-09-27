@@ -1396,7 +1396,6 @@ function storePopupBootstrap({
   bootstrap,
   mutationRevision,
   targetTabId,
-  preparation = null,
   refreshAfterMutation = true,
 }) {
   // The popup can only receive a URL from chrome.action.openPopup(), not an
@@ -1410,19 +1409,6 @@ function storePopupBootstrap({
     refreshAfterMutation,
     lifecycleConnected: false,
     claimed: false,
-    preparation:
-      preparation === null
-        ? null
-        : Promise.resolve(preparation).then(
-            (preparedBootstrap) => ({
-              success: true,
-              bootstrap: preparedBootstrap,
-            }),
-            (error) => ({
-              success: false,
-              error: error?.message || String(error),
-            }),
-          ),
     expiresAt: Date.now() + POPUP_BOOTSTRAP_TTL_MS,
   });
   setTimeout(() => {
@@ -1442,6 +1428,7 @@ function deletePopupBootstrap(token, entry) {
 }
 
 async function resolvePopupBootstrapEntry(entry) {
+  const deadline = Date.now() + POPUP_PREPARE_TIMEOUT_MS;
   let bootstrap = entry.bootstrap;
   while (
     entry.refreshAfterMutation &&
@@ -1462,9 +1449,16 @@ async function resolvePopupBootstrapEntry(entry) {
     if (!tab) {
       return { success: false, error: 'Popup bootstrap invalidated' };
     }
-    bootstrap = await preparePopupBootstrapWithTimeout(tab);
+    const remaining = deadline - Date.now();
+    bootstrap =
+      remaining > 0
+        ? await preparePopupBootstrapWithTimeout(tab, remaining)
+        : timeoutPopupBootstrap(tab);
     entry.bootstrap = bootstrap;
     entry.mutationRevision = preparationRevision;
+    // The native popup is already open. Stop rebuilding after its one shared
+    // deadline so repeated daemon mutations cannot leave a hidden window up.
+    if (bootstrap?.diagnostic?.reason === 'popup-prepare-timeout') break;
   }
   return { success: true, bootstrap };
 }
@@ -1486,37 +1480,7 @@ async function handleConsumePopupBootstrap(request) {
     return { success: false, error: 'Popup bootstrap already consumed' };
   }
   entry.claimed = true;
-  if (entry.preparation) {
-    return { success: true, pending: true, bootstrap: entry.bootstrap };
-  }
   try {
-    return await resolvePopupBootstrapEntry(entry);
-  } finally {
-    deletePopupBootstrap(token, entry);
-  }
-}
-
-async function handleAwaitPopupBootstrap(request) {
-  const token = typeof request.token === 'string' ? request.token : '';
-  const targetTabId =
-    Number.isSafeInteger(request.targetTabId) && request.targetTabId > 0
-      ? request.targetTabId
-      : null;
-  await releasePreparedActionPopup(token, targetTabId);
-  const entry = token ? pendingPopupBootstraps.get(token) : null;
-  if (!entry) return { success: true, missing: true };
-  if (!entry.claimed) {
-    return { success: false, error: 'Popup bootstrap has not been consumed' };
-  }
-  if (!entry.preparation) {
-    return { success: false, error: 'Popup bootstrap is not pending' };
-  }
-
-  try {
-    const outcome = await entry.preparation;
-    if (outcome.success !== true) return outcome;
-    entry.bootstrap = outcome.bootstrap;
-    entry.preparation = null;
     return await resolvePopupBootstrapEntry(entry);
   } finally {
     deletePopupBootstrap(token, entry);
@@ -1982,7 +1946,10 @@ function timeoutPopupBootstrap(tab) {
   };
 }
 
-async function preparePopupBootstrapWithTimeout(tab) {
+async function preparePopupBootstrapWithTimeout(
+  tab,
+  timeoutMs = POPUP_PREPARE_TIMEOUT_MS,
+) {
   let timer;
   try {
     return await Promise.race([
@@ -1990,7 +1957,7 @@ async function preparePopupBootstrapWithTimeout(tab) {
       new Promise((resolve) => {
         timer = setTimeout(
           () => resolve(timeoutPopupBootstrap(tab)),
-          POPUP_PREPARE_TIMEOUT_MS,
+          timeoutMs,
         );
       }),
     ]);
@@ -1999,57 +1966,51 @@ async function preparePopupBootstrapWithTimeout(tab) {
   }
 }
 
-async function preparePopupOpenPayload(tab) {
-  const mutationRevision = popupBootstrapMutationRevision;
-  const bootstrap = await preparePopupBootstrapWithTimeout(tab);
-  const token = storePopupBootstrap({
-    bootstrap,
-    mutationRevision,
-    targetTabId: tab?.id,
-  });
-  return {
-    bootstrap,
-    popupPath: popupBootstrapPath(token),
-  };
-}
-
-function initialPopupBootstrap(tab) {
-  if (popupTabIsUnavailable(tab)) {
-    return {
-      mode: 'unavailable',
-      message: tr('extensionNotAvailablePage', 'Not available for this page'),
+async function preparePopupOpenPayload(tab, options = {}) {
+  await options.preparationGate;
+  const deadline = Date.now() + POPUP_PREPARE_TIMEOUT_MS;
+  let mutationRevision;
+  let bootstrap;
+  try {
+    do {
+      mutationRevision = popupBootstrapMutationRevision;
+      if (options.preparedBootstrap) {
+        bootstrap = options.preparedBootstrap;
+        break;
+      }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        bootstrap = timeoutPopupBootstrap(tab);
+        break;
+      }
+      bootstrap = await preparePopupBootstrapWithTimeout(tab, remaining);
+      if (bootstrap?.diagnostic?.reason === 'popup-prepare-timeout') break;
+      // A committed mutation during preparation invalidates the projection.
+      // Rebuild before opening, within the same timeout budget.
+    } while (mutationRevision !== popupBootstrapMutationRevision);
+  } catch (error) {
+    mutationRevision = popupBootstrapMutationRevision;
+    bootstrap = {
+      mode: 'data-unavailable',
+      tab,
+      error: error?.message || String(error),
+      diagnostic: {
+        reason: 'popup-bootstrap-preparation-failed',
+        url: tab?.url || '',
+      },
     };
   }
-  return {
-    mode: 'connector-diagnostic',
-    connector: { state: 'starting' },
-    tab: {
-      id: tab.id,
-      url: tab.url,
-      title: tab.title || '',
-    },
-  };
-}
-
-function beginPopupOpenPayload(tab, options = {}) {
-  const mutationRevision = popupBootstrapMutationRevision;
-  const bootstrap = initialPopupBootstrap(tab);
-  const preparation =
-    bootstrap.mode === 'connector-diagnostic'
-      ? Promise.resolve(options.preparationGate).then(() =>
-          options.preparedBootstrap
-            ? options.preparedBootstrap
-            : preparePopupBootstrapWithTimeout(tab),
-        )
-      : null;
+  if (bootstrap?.diagnostic?.reason === 'popup-prepare-timeout') {
+    mutationRevision = popupBootstrapMutationRevision;
+  }
   const token = storePopupBootstrap({
     bootstrap,
     mutationRevision,
     targetTabId: tab?.id,
-    preparation,
     refreshAfterMutation: !options.preparedBootstrap,
   });
   return {
+    bootstrap,
     token,
     popupPath: popupBootstrapPath(token, options.actionTabId),
   };
@@ -2057,20 +2018,35 @@ function beginPopupOpenPayload(tab, options = {}) {
 
 async function openPreparedActionPopup(tab, options = {}) {
   const tabId = Number.isFinite(tab?.id) ? tab.id : undefined;
-  const { token, popupPath } = beginPopupOpenPayload(tab, {
+  // Do not show a native minimum-size popup while its page projection is still
+  // pending. Preparation is bounded by POPUP_PREPARE_TIMEOUT_MS in production.
+  const { token, popupPath } = await preparePopupOpenPayload(tab, {
     ...options,
     actionTabId: tabId,
   });
+  if (!(await popupTargetIsCurrent(tab))) {
+    pendingPopupBootstraps.delete(token);
+    return { presentation: 'cancelled' };
+  }
   if (!chrome.action?.setPopup || !chrome.action?.openPopup) {
     await chrome.tabs.create({ url: chrome.runtime.getURL(popupPath) });
     return { presentation: 'tab' };
   }
   try {
     await setPreparedActionPopup(token, tabId, popupPath);
-    await chrome.action.openPopup();
+    if (!(await popupTargetIsCurrent(tab))) {
+      await releasePreparedActionPopup(token, tabId);
+      pendingPopupBootstraps.delete(token);
+      return { presentation: 'cancelled' };
+    }
+    await chrome.action.openPopup({ windowId: tab.windowId });
     return { presentation: 'popup' };
   } catch (error) {
     await releasePreparedActionPopup(token);
+    if (!(await popupTargetIsCurrent(tab))) {
+      pendingPopupBootstraps.delete(token);
+      return { presentation: 'cancelled' };
+    }
     // Preserve the one-shot bootstrap when the host rejects its native popup;
     // the same prepared extension page remains valid as a deterministic tab.
     logDebug(
@@ -2096,6 +2072,21 @@ async function openPreparedActionPopup(tab, options = {}) {
       }
     }, POPUP_ACTION_MAPPING_FALLBACK_CLEAR_MS);
   }
+}
+
+async function popupTargetIsCurrent(tab) {
+  if (!Number.isSafeInteger(tab?.id) || !Number.isSafeInteger(tab.windowId)) {
+    return false;
+  }
+  const [activeTab] = await chrome.tabs.query({
+    active: true,
+    lastFocusedWindow: true,
+  });
+  return (
+    activeTab?.id === tab.id &&
+    activeTab.windowId === tab.windowId &&
+    activeTab.url === tab.url
+  );
 }
 
 if (chrome.action?.onClicked?.addListener) {
@@ -2136,11 +2127,11 @@ globalThis.browserRecallPreparedPopupForTest = {
     const tab = Number.isFinite(request.tabId)
       ? await chrome.tabs.get(request.tabId)
       : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
-    await openPreparedActionPopup(tab, {
+    const result = await openPreparedActionPopup(tab, {
       preparationGate,
       preparedBootstrap,
     });
-    return { success: true };
+    return { success: true, ...result };
   },
   async releasePreparation() {
     const gate = popupPreparationGateForTest;
@@ -2150,16 +2141,6 @@ globalThis.browserRecallPreparedPopupForTest = {
     popupPreparationGateForTest = null;
     gate.release();
     return { success: true };
-  },
-  async begin(request = {}) {
-    const preparationGate = createPopupPreparationGateForTest(
-      request.holdPreparation,
-    );
-    const tab = Number.isFinite(request.tabId)
-      ? await chrome.tabs.get(request.tabId)
-      : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
-    const { popupPath } = beginPopupOpenPayload(tab, { preparationGate });
-    return { success: true, popupPath };
   },
   async reset() {
     popupPreparationGateForTest?.release();
@@ -2539,9 +2520,6 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
           break;
         case 'consumePopupBootstrap':
           sendResponse(await handleConsumePopupBootstrap(request));
-          break;
-        case 'awaitPopupBootstrap':
-          sendResponse(await handleAwaitPopupBootstrap(request));
           break;
         case 'mutation':
           sendResponse(handleRuntimeMutation(request));

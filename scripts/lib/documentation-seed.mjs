@@ -93,7 +93,7 @@ export function documentationSeed() {
   ].entries()) {
     events.push({
       action: 'create_list',
-      timestamp: base - 15 * day + index,
+      timestamp: base - 36 * day + index,
       name,
       listOwner: documentationDevice,
       listId: `reading-list-${index}`,
@@ -114,21 +114,44 @@ export function documentationSeed() {
       },
     );
   }
-  // Every page is actually visited. Uneven sessions mix reading with everyday errands.
-  for (const [index, [title, url, list]] of pages.entries()) {
-    const timestamp =
-      base - (2 + (index % 12)) * day + ((index * 137) % 540) * 60000;
-    visit(index, timestamp, (23 + ((index * 47) % 430)) * 1000);
-    if (list)
-      events.push({
-        action: 'pin_to_list',
-        timestamp: timestamp + 500000,
-        name: list,
-        listOwner: documentationDevice,
-        urls: [url],
-        titles: [title],
-        source: 'manual',
-      });
+  // The Timeline chart counts distinct pages per date. Varied daily reading
+  // over five weeks gives the README chart a natural rhythm and two month labels.
+  const dailyPageCounts = [
+    2, 3, 4, 2, 1, 3, 5, 7, 4, 2, 3, 1, 2, 4, 6, 9, 5, 3, 2, 4, 7, 5, 2, 1, 4,
+    6, 8, 5, 3, 4, 2, 5, 7, 4, 3,
+  ];
+  // Keep the featured article's first visit on its existing September date.
+  const timelinePageIndices = pages
+    .map((_, index) => index)
+    .filter((index) => index !== 0);
+  const pinnedPages = new Set();
+  let pageCursor = 0;
+  for (const [dayIndex, pageCount] of dailyPageCounts.entries()) {
+    const daysAgo = dailyPageCounts.length - dayIndex;
+    for (let visitIndex = 0; visitIndex < pageCount; visitIndex++) {
+      const pageIndex =
+        daysAgo === 3 && visitIndex === 0
+          ? 0
+          : timelinePageIndices[pageCursor++ % timelinePageIndices.length];
+      const [title, url, list] = pages[pageIndex];
+      const timestamp =
+        base -
+        daysAgo * day +
+        (visitIndex * 37 + ((dayIndex * 29) % 60)) * 60000;
+      visit(pageIndex, timestamp, (23 + ((pageIndex * 47) % 430)) * 1000);
+      if (list && !pinnedPages.has(pageIndex)) {
+        pinnedPages.add(pageIndex);
+        events.push({
+          action: 'pin_to_list',
+          timestamp: timestamp + 500000,
+          name: list,
+          listOwner: documentationDevice,
+          urls: [url],
+          titles: [title],
+          source: 'manual',
+        });
+      }
+    }
   }
   // Descending Timeline order puts both saved pages first in the compact capture.
   const recent = [12, 29, 19, 24, 11, 14, 16, 30, 10, 37, 8, 0];

@@ -717,9 +717,11 @@ test.describe('Firefox extension smoke', () => {
       const api = createFirefoxWebExtensionApi();
       const activeTab = {
         id: 40,
+        windowId: 1,
         url: 'https://example.test/firefox-toolbar-popup',
         title: 'Firefox Toolbar Popup',
       };
+      api.browserApi.tabs.query = async () => [activeTab];
       const timers = new Set();
       const nativeSetTimeout = globalThis.setTimeout;
       const unrefSetTimeout = (callback, ms, ...args) => {
@@ -763,6 +765,7 @@ test.describe('Firefox extension smoke', () => {
       const api = createFirefoxWebExtensionApi();
       const activeTab = {
         id: 41,
+        windowId: 1,
         url: 'https://example.test/firefox-popup',
         title: 'Firefox Popup',
       };
@@ -817,9 +820,11 @@ test.describe('Firefox extension smoke', () => {
       const api = createFirefoxWebExtensionApi();
       const activeTab = {
         id: 42,
+        windowId: 1,
         url: 'https://example.test/firefox-popup-fallback',
         title: 'Firefox Popup Fallback',
       };
+      api.browserApi.tabs.query = async () => [activeTab];
       const createdTabs = [];
       Object.defineProperty(api.browserApi.action, 'openPopup', {
         configurable: true,

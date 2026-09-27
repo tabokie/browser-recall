@@ -89,16 +89,6 @@ function nextCurrentPageGeneration() {
   return ++currentPage.generation;
 }
 
-async function waitForPopupUiMutationSettlement() {
-  while (isPopupUiMutating()) {
-    if (hasActivePopupUiMutation()) {
-      await waitForActivePopupUiMutation();
-    } else {
-      await popupUiMutationQueue;
-    }
-  }
-}
-
 // ─── Error UI ────────────────────────────────────────────────────────
 
 function showFatalError(message) {
@@ -2686,30 +2676,7 @@ async function consumePopupBootstrap() {
   }
   return {
     bootstrap: response.bootstrap,
-    pending: response.pending === true,
-    token,
-    targetTabId,
   };
-}
-
-async function awaitPopupBootstrap(token, targetTabId) {
-  const response = await chrome.runtime.sendMessage({
-    action: 'awaitPopupBootstrap',
-    token,
-    ...(targetTabId === null ? {} : { targetTabId }),
-  });
-  if (response?.success === true && response.missing === true) return null;
-  if (response?.success !== true) {
-    throw new Error(response?.error || 'Popup bootstrap preparation failed');
-  }
-  if (
-    !response.bootstrap ||
-    typeof response.bootstrap !== 'object' ||
-    Array.isArray(response.bootstrap)
-  ) {
-    throw new Error('Popup bootstrap response is missing its prepared model');
-  }
-  return response.bootstrap;
 }
 
 async function renderPreparedDashboard(bootstrap) {
@@ -2737,58 +2704,6 @@ async function renderPreparedDashboard(bootstrap) {
   });
 }
 
-async function renderPendingPopup(bootstrap) {
-  if (
-    bootstrap?.mode !== 'connector-diagnostic' ||
-    !bootstrap.tab ||
-    typeof bootstrap.tab !== 'object'
-  ) {
-    throw new Error('Pending popup model is missing its current tab');
-  }
-  const generation = nextCurrentPageGeneration();
-  currentPage.tab = bootstrap.tab;
-  const { paused } = await loadRecordingState();
-  if (generation !== currentPage.generation) return generation;
-  if (paused) {
-    renderBannerOnly();
-    revealPopup();
-    return generation;
-  }
-
-  return generation;
-}
-
-async function renderPendingPopupHandoff(handoff) {
-  const handoffGeneration = await renderPendingPopup(handoff.bootstrap);
-  let bootstrap = null;
-  let preparationError = null;
-  try {
-    bootstrap = await awaitPopupBootstrap(handoff.token, handoff.targetTabId);
-  } catch (error) {
-    preparationError = error;
-  }
-
-  // Retain the completed outcome across an active mutation; after settlement,
-  // the page generation is the sole authority for whether it may repaint.
-  if (handoffGeneration !== currentPage.generation) return true;
-  await waitForPopupUiMutationSettlement();
-  if (handoffGeneration !== currentPage.generation) return true;
-  if (preparationError) {
-    showDesktopDataUnavailable(preparationError.message, {
-      reason: 'popup-bootstrap-preparation-failed',
-    });
-    return true;
-  }
-  if (bootstrap) {
-    await renderPreparedPopup(bootstrap);
-    return true;
-  }
-
-  popupBootstrapLifecyclePort?.disconnect?.();
-  popupBootstrapLifecyclePort = null;
-  return false;
-}
-
 async function renderPreparedPopup(bootstrap) {
   if (!bootstrap || typeof bootstrap !== 'object' || Array.isArray(bootstrap)) {
     throw new Error('Prepared popup model must be an object');
@@ -2800,9 +2715,7 @@ async function renderPreparedPopup(bootstrap) {
     currentPage.tab = bootstrap.tab;
   }
 
-  // Session storage is the authority for the recording control. The handoff
-  // generation checked by the caller prevents stale prepared data from
-  // painting after a local pause/resume transition starts.
+  // Session storage is the authority for the recording control.
   const { paused } = await loadRecordingState();
   if (
     paused &&
@@ -2888,12 +2801,8 @@ async function initPopup() {
   await loadRecordingState();
   const handoff = await consumePopupBootstrap();
   if (handoff) {
-    if (handoff.pending) {
-      if (await renderPendingPopupHandoff(handoff)) return;
-    } else {
-      await renderPreparedPopup(handoff.bootstrap);
-      return;
-    }
+    await renderPreparedPopup(handoff.bootstrap);
+    return;
   }
 
   // Startup has no painted connector diagnostic to refresh. Read the terminal

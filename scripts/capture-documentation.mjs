@@ -103,6 +103,11 @@ async function capture(name, includes, outputPixels, excludes = []) {
   let stable = 0;
   const filename = path.join(output, `${name}.png`);
   await waitFor(`${name} paint`, () => {
+    // Output pixels are not source pixels. The shared ScreenCaptureKit helper
+    // uses the host window's backing scale and display color profile; a 1×
+    // virtual display can yield an upscaled, softer 2× PNG. Native font and
+    // browser rendering can also vary by OS, so these files are not suitable
+    // for byte-for-byte comparison across different machines.
     native(
       'capture',
       filename,

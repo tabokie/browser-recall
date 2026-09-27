@@ -85,6 +85,37 @@ function pressNativeKey(pid, code) {
   ]);
 }
 
+function stageFirstRevealProbe(extensionDir) {
+  const popupPath = path.join(extensionDir, 'popup.html');
+  const markup = fs.readFileSync(popupPath, 'utf8');
+  const marker = '<meta charset="UTF-8" />';
+  if (!markup.includes(marker)) {
+    throw new Error('Could not install popup first-reveal probe');
+  }
+  fs.writeFileSync(
+    popupPath,
+    markup.replace(
+      marker,
+      `${marker}\n    <script src="first-reveal-probe.js"></script>`,
+    ),
+  );
+  fs.writeFileSync(
+    path.join(extensionDir, 'first-reveal-probe.js'),
+    `globalThis.__browserRecallFirstReveal = null;
+new MutationObserver(() => {
+  const root = document.documentElement;
+  if (!root || root.hasAttribute('data-popup-hidden')) return;
+  if (globalThis.__browserRecallFirstReveal) return;
+  globalThis.__browserRecallFirstReveal = {
+    title: document.getElementById('pageTitle')?.textContent,
+    width: document.body.getBoundingClientRect().width,
+    height: document.body.getBoundingClientRect().height,
+    opacity: getComputedStyle(root).opacity,
+  };
+}).observe(document, { subtree: true, childList: true, attributes: true });\n`,
+  );
+}
+
 async function waitForPopup(helper) {
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
@@ -97,6 +128,8 @@ async function waitForPopup(helper) {
               popup.document.documentElement.dataset.popupHidden === undefined,
             title:
               popup.document.getElementById('pageTitle')?.textContent || '',
+            firstReveal: popup.__browserRecallFirstReveal || null,
+            height: popup.document.body.getBoundingClientRect().height,
           }
         : null;
     });
@@ -123,6 +156,7 @@ await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 let context;
 let daemon;
 try {
+  stageFirstRevealProbe(extensionDir);
   daemon = await startDaemon();
   context = await chromium.launchPersistentContext(userDataDir, {
     executablePath: installedChromiumBinary(),
@@ -159,6 +193,17 @@ try {
   }
   if (popup.title !== 'Native Alt R') {
     throw new Error(`Alt+R popup targeted the wrong page: ${popup.title}`);
+  }
+  if (
+    popup.firstReveal?.title !== 'Native Alt R' ||
+    popup.firstReveal.width !== 296 ||
+    !(popup.firstReveal.height > 0) ||
+    popup.firstReveal.height !== popup.height ||
+    popup.firstReveal.opacity !== '1'
+  ) {
+    throw new Error(
+      `Alt+R first popup reveal was incomplete or resized: ${JSON.stringify(popup)}`,
+    );
   }
   console.log(`Native Alt+R opened ${popup.href}`);
   const popupState = () =>

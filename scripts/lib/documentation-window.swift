@@ -177,6 +177,9 @@ case "capture", "capture-browser":
     }) else { fail("No visible application window") }
 
     let configuration = SCStreamConfiguration()
+    // A fixed PNG size and .best capture resolution cannot force a 2× backing
+    // store on a 1× display. ScreenCaptureKit scales the available window
+    // pixels, and its default output color space follows the host display.
     configuration.width = pixelWidth
     configuration.height = pixelHeight
     configuration.scalesToFit = true

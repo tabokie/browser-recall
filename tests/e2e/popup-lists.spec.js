@@ -894,7 +894,7 @@ test.describe('Popup list chip behavior', () => {
     await popup.close();
   });
 
-  test('pending toolbar bootstrap reveals only the complete daemon data view', async ({
+  test('prepared toolbar bootstrap first reveals the complete daemon data view', async ({
     extContext,
     extensionId,
     setupDir,
@@ -956,9 +956,8 @@ test.describe('Popup list chip behavior', () => {
     const prepared = await helper.evaluate(
       (targetTabId) =>
         chrome.runtime.sendMessage({
-          action: 'beginPopupBootstrapForTest',
+          action: 'preparePopupBootstrapForTest',
           tabId: targetTabId,
-          holdPreparation: true,
         }),
       tabId,
     );
@@ -971,6 +970,26 @@ test.describe('Popup list chip behavior', () => {
 
     const popup = await extContext.newPage();
     await popup.addInitScript(() => {
+      globalThis.__firstPopupReveal = null;
+      const recordFirstReveal = () => {
+        const root = document.documentElement;
+        if (!root || root.hasAttribute('data-popup-hidden')) return;
+        if (globalThis.__firstPopupReveal) return;
+        globalThis.__firstPopupReveal = {
+          title: document.getElementById('pageTitle')?.textContent,
+          url: document.getElementById('pageUrl')?.textContent,
+          selectedLists: document.querySelectorAll('#listChips .selected')
+            .length,
+          width: document.body.getBoundingClientRect().width,
+          height: document.body.getBoundingClientRect().height,
+          opacity: getComputedStyle(root).opacity,
+        };
+      };
+      new MutationObserver(recordFirstReveal).observe(document, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+      });
       const patchRuntime = () => {
         if (!globalThis.chrome?.runtime?.sendMessage) {
           setTimeout(patchRuntime, 0);
@@ -994,27 +1013,6 @@ test.describe('Popup list chip behavior', () => {
       patchRuntime();
     });
     await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
-    await expect
-      .poll(
-        () =>
-          popup.evaluate(() => document.documentElement.dataset.popupHidden),
-        { timeout: 1000 },
-      )
-      .toBe('true');
-    await expect
-      .poll(() =>
-        popup.evaluate(
-          () => getComputedStyle(document.documentElement).opacity,
-        ),
-      )
-      .toBe('0');
-    const releaseResult = await popup.evaluate(() =>
-      chrome.runtime.sendMessage({
-        action: 'releasePopupPreparationForTest',
-      }),
-    );
-    expect(releaseResult).toMatchObject({ success: true });
-
     await expect(popup.locator('#dashboard')).toBeVisible();
     await expect(popup.locator('#pageTitle')).toHaveText(
       'Show HN: Browser Recall',
@@ -1027,6 +1025,21 @@ test.describe('Popup list chip behavior', () => {
     await expect(
       popup.locator('#listChips .list-chip.selected', { hasText: 'AI' }),
     ).toBeVisible();
+    const firstReveal = await popup.evaluate(
+      () => globalThis.__firstPopupReveal,
+    );
+    expect(firstReveal).toEqual({
+      title: 'Show HN: Browser Recall',
+      url,
+      selectedLists: 1,
+      width: 296,
+      height: expect.any(Number),
+      opacity: '1',
+    });
+    expect(firstReveal.height).toBeGreaterThan(0);
+    expect(firstReveal.height).toBe(
+      await popup.evaluate(() => document.body.getBoundingClientRect().height),
+    );
     expect(
       await popup.evaluate(() => globalThis.__preparedPopupStartupFetches),
     ).toEqual([]);
@@ -1040,7 +1053,7 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
-  test('disconnected toolbar popup opens promptly but reveals only its terminal diagnostic', async ({
+  test('disconnected toolbar popup opens only after its terminal diagnostic is prepared', async ({
     extContext,
     extensionId,
     setupDir,
@@ -1078,7 +1091,6 @@ test.describe('Popup list chip behavior', () => {
 
     try {
       await page.bringToFront();
-      const startedAt = Date.now();
       const openRequest = helper.evaluate((targetTabId) => {
         return chrome.runtime.sendMessage({
           action: 'openPreparedPopupForTest',
@@ -1088,40 +1100,16 @@ test.describe('Popup list chip behavior', () => {
         });
       }, tabId);
 
+      await helper.waitForTimeout(350);
       await expect
         .poll(
           () =>
-            helper.evaluate(() => {
-              const popup = chrome.extension.getViews({ type: 'popup' })[0];
-              return Boolean(
-                popup &&
-                popup.document.documentElement.dataset.popupHidden === 'true',
-              );
-            }),
+            helper.evaluate(
+              () => chrome.extension.getViews({ type: 'popup' }).length,
+            ),
           { timeout: 700, intervals: [25, 50, 100] },
         )
-        .toBe(true);
-      expect(Date.now() - startedAt).toBeLessThan(700);
-
-      const firstPaint = await helper.evaluate(() => {
-        const popup = chrome.extension.getViews({ type: 'popup' })[0];
-        return {
-          popupHidden:
-            popup.document.documentElement.dataset.popupHidden === 'true',
-          opacity: popup.getComputedStyle(popup.document.documentElement)
-            .opacity,
-          width: popup.document.body.getBoundingClientRect().width,
-          height: popup.document.body.getBoundingClientRect().height,
-        };
-      });
-      expect(firstPaint).toMatchObject({
-        popupHidden: true,
-        opacity: '0',
-        width: 296,
-      });
-      expect(firstPaint.height).toBeGreaterThan(0);
-
-      await expect(openRequest).resolves.toMatchObject({ success: true });
+        .toBe(0);
       const releaseResult = await helper.evaluate(() =>
         chrome.runtime.sendMessage({
           action: 'releasePopupPreparationForTest',
@@ -1129,6 +1117,7 @@ test.describe('Popup list chip behavior', () => {
       );
       expect(releaseResult).toMatchObject({ success: true });
       preparationReleased = true;
+      await expect(openRequest).resolves.toMatchObject({ success: true });
       await expect
         .poll(() =>
           helper.evaluate(() => {
@@ -1176,6 +1165,401 @@ test.describe('Popup list chip behavior', () => {
     }
   });
 
+  test('toolbar dashboard waits for its complete page projection before opening', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    localServer.addPage('/prepared-popup-dashboard', {
+      title: 'Prepared Popup Dashboard',
+      body: '<main>Prepared popup dashboard page</main>',
+    });
+    const url = localServer.url('/prepared-popup-dashboard');
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.bringToFront();
+    const helper = await openHelperPage(extContext, extensionId);
+    const tabId = await helper.evaluate(async (pageUrl) => {
+      const [tab] = await chrome.tabs.query({ url: pageUrl });
+      return tab?.id || null;
+    }, url);
+    expect(tabId).toBeTruthy();
+    let preparationReleased = false;
+    try {
+      await page.bringToFront();
+      const openRequest = helper.evaluate(
+        (targetTabId) =>
+          chrome.runtime.sendMessage({
+            action: 'openPreparedPopupForTest',
+            tabId: targetTabId,
+            holdPreparation: true,
+          }),
+        tabId,
+      );
+      await helper.waitForTimeout(350);
+      expect(
+        await helper.evaluate(
+          () => chrome.extension.getViews({ type: 'popup' }).length,
+        ),
+      ).toBe(0);
+      const released = await helper.evaluate(() =>
+        chrome.runtime.sendMessage({
+          action: 'releasePopupPreparationForTest',
+        }),
+      );
+      expect(released).toMatchObject({ success: true });
+      preparationReleased = true;
+      await expect(openRequest).resolves.toMatchObject({ success: true });
+      await expect
+        .poll(() =>
+          helper.evaluate(() => {
+            const popup = chrome.extension.getViews({ type: 'popup' })[0];
+            return popup
+              ? {
+                  hidden:
+                    popup.document.documentElement.dataset.popupHidden ===
+                    'true',
+                  title: popup.document.getElementById('pageTitle').textContent,
+                  url: popup.document.getElementById('pageUrl').textContent,
+                  diagnostic: popup.document.getElementById(
+                    'pageDiagnosticSection',
+                  ).style.display,
+                }
+              : null;
+          }),
+        )
+        .toEqual({
+          hidden: false,
+          title: 'Prepared Popup Dashboard',
+          url,
+          diagnostic: 'none',
+        });
+      await helper.evaluate(() => {
+        chrome.extension.getViews({ type: 'popup' })[0]?.close();
+      });
+    } finally {
+      if (!preparationReleased) {
+        await helper.evaluate(() =>
+          chrome.runtime.sendMessage({
+            action: 'releasePopupPreparationForTest',
+          }),
+        );
+      }
+      await helper.close();
+      await page.close();
+    }
+  });
+
+  test('delayed toolbar open cancels after a tab switch or navigation', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+    localServer.addPage('/popup-source-a', {
+      title: 'Popup Source A',
+      body: '<main>Source A</main>',
+    });
+    localServer.addPage('/popup-source-b', {
+      title: 'Popup Source B',
+      body: '<main>Source B</main>',
+    });
+    localServer.addPage('/popup-source-a-new', {
+      title: 'Popup Source A New',
+      body: '<main>Source A after navigation</main>',
+    });
+    const first = await extContext.newPage();
+    await first.goto(localServer.url('/popup-source-a'));
+    const second = await extContext.newPage();
+    await second.goto(localServer.url('/popup-source-b'));
+    const helper = await openHelperPage(extContext, extensionId);
+    const worker = extContext.serviceWorkers()[0];
+    const tabId = await helper.evaluate(async (url) => {
+      const [tab] = await chrome.tabs.query({ url });
+      return tab.id;
+    }, first.url());
+
+    await worker.evaluate(() => {
+      const setPopup = chrome.action.setPopup.bind(chrome.action);
+      globalThis.__popupOriginalSetPopup = setPopup;
+      globalThis.__popupSetStarted = false;
+      chrome.action.setPopup = async (details) => {
+        if (details.popup) {
+          globalThis.__popupSetStarted = true;
+          await new Promise((resolve) => {
+            globalThis.__releasePopupSet = resolve;
+          });
+        }
+        return setPopup(details);
+      };
+    });
+    try {
+      await first.bringToFront();
+      const opening = helper.evaluate(
+        (targetTabId) =>
+          chrome.runtime.sendMessage({
+            action: 'openPreparedPopupForTest',
+            tabId: targetTabId,
+          }),
+        tabId,
+      );
+      await expect
+        .poll(() => worker.evaluate(() => globalThis.__popupSetStarted))
+        .toBe(true);
+      await second.bringToFront();
+      await worker.evaluate(() => globalThis.__releasePopupSet());
+      await expect(opening).resolves.toMatchObject({
+        success: true,
+        presentation: 'cancelled',
+      });
+      expect(
+        await helper.evaluate(async () =>
+          (await chrome.tabs.query({})).filter((tab) =>
+            tab.url?.startsWith(chrome.runtime.getURL('popup.html')),
+          ),
+        ),
+      ).toHaveLength(0);
+
+      await first.bringToFront();
+      await worker.evaluate(() => {
+        globalThis.__popupSetStarted = false;
+      });
+      const navigatingOpen = helper.evaluate(
+        (targetTabId) =>
+          chrome.runtime.sendMessage({
+            action: 'openPreparedPopupForTest',
+            tabId: targetTabId,
+          }),
+        tabId,
+      );
+      await expect
+        .poll(() => worker.evaluate(() => globalThis.__popupSetStarted))
+        .toBe(true);
+      await first.goto(localServer.url('/popup-source-a-new'));
+      await worker.evaluate(() => globalThis.__releasePopupSet());
+      await expect(navigatingOpen).resolves.toMatchObject({
+        success: true,
+        presentation: 'cancelled',
+      });
+      expect(
+        await helper.evaluate(async () =>
+          (await chrome.tabs.query({})).filter((tab) =>
+            tab.url?.startsWith(chrome.runtime.getURL('popup.html')),
+          ),
+        ),
+      ).toHaveLength(0);
+    } finally {
+      await worker.evaluate(() => {
+        globalThis.__releasePopupSet?.();
+        chrome.action.setPopup = globalThis.__popupOriginalSetPopup;
+      });
+      await helper.close();
+      await first.close();
+      await second.close();
+    }
+  });
+
+  test('popup bootstrap refresh uses one consumption deadline', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+    localServer.addPage('/popup-refresh-deadline', {
+      title: 'Popup Refresh Deadline',
+      body: '<main>Refresh deadline</main>',
+    });
+    const page = await extContext.newPage();
+    await page.goto(localServer.url('/popup-refresh-deadline'));
+    const helper = await openHelperPage(extContext, extensionId);
+    const prepared = await helper.evaluate(async (url) => {
+      const [tab] = await chrome.tabs.query({ url });
+      return chrome.runtime.sendMessage({
+        action: 'preparePopupBootstrapForTest',
+        tabId: tab.id,
+      });
+    }, page.url());
+    expect(prepared).toMatchObject({ success: true, mode: 'dashboard' });
+    const worker = extContext.serviceWorkers()[0];
+    await worker.evaluate(() => {
+      const sendMessage = chrome.tabs.sendMessage.bind(chrome.tabs);
+      globalThis.__popupOriginalSendMessage = sendMessage;
+      globalThis.__popupIdentityCalls = 0;
+      globalThis.__releasePopupIdentity = [];
+      chrome.tabs.sendMessage = async (...args) => {
+        if (args[1]?.action === 'getPageIdentity') {
+          globalThis.__popupIdentityCalls++;
+          await new Promise((resolve) =>
+            globalThis.__releasePopupIdentity.push(resolve),
+          );
+        }
+        return sendMessage(...args);
+      };
+    });
+    try {
+      await helper.evaluate(() =>
+        chrome.runtime.sendMessage({
+          action: 'setRecordingPaused',
+          paused: false,
+        }),
+      );
+      await helper.evaluate((popupPath) => {
+        const token = new URL(popupPath, location.href).searchParams.get(
+          'bootstrap',
+        );
+        globalThis.__popupConsumed = false;
+        globalThis.__popupConsume = chrome.runtime
+          .sendMessage({ action: 'consumePopupBootstrap', token })
+          .then((response) => {
+            globalThis.__popupConsumed = true;
+            return response;
+          });
+      }, prepared.popupPath);
+      await expect
+        .poll(() => worker.evaluate(() => globalThis.__popupIdentityCalls))
+        .toBe(1);
+      await helper.evaluate(() =>
+        chrome.runtime.sendMessage({
+          action: 'setRecordingPaused',
+          paused: false,
+        }),
+      );
+      const response = await helper.evaluate(() => globalThis.__popupConsume);
+      expect(response).toMatchObject({
+        success: true,
+        bootstrap: {
+          mode: 'data-unavailable',
+          diagnostic: { reason: 'popup-prepare-timeout' },
+        },
+      });
+      expect(await worker.evaluate(() => globalThis.__popupIdentityCalls)).toBe(
+        1,
+      );
+    } finally {
+      await worker.evaluate(() => {
+        globalThis.__releasePopupIdentity?.forEach((resolve) => resolve());
+        chrome.tabs.sendMessage = globalThis.__popupOriginalSendMessage;
+      });
+      await helper.close();
+      await page.close();
+    }
+  });
+
+  test('toolbar timeout first reveals a complete terminal diagnostic', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+    localServer.addPage('/popup-timeout', {
+      title: 'Popup Timeout',
+      body: '<main>Timeout</main>',
+    });
+    const page = await extContext.newPage();
+    await page.goto(localServer.url('/popup-timeout'));
+    const helper = await openHelperPage(extContext, extensionId);
+    const worker = extContext.serviceWorkers()[0];
+    const tabId = await helper.evaluate(async (url) => {
+      const [tab] = await chrome.tabs.query({ url });
+      return tab.id;
+    }, page.url());
+    await worker.evaluate(() => {
+      const sendMessage = chrome.tabs.sendMessage.bind(chrome.tabs);
+      globalThis.__popupOriginalSendMessage = sendMessage;
+      globalThis.__popupTimeoutIdentityStarted = false;
+      chrome.tabs.sendMessage = async (...args) => {
+        if (args[1]?.action === 'getPageIdentity') {
+          globalThis.__popupTimeoutIdentityStarted = true;
+          await new Promise((resolve) => {
+            globalThis.__releasePopupTimeoutIdentity = resolve;
+          });
+        }
+        return sendMessage(...args);
+      };
+    });
+    try {
+      await page.bringToFront();
+      const opening = helper.evaluate(
+        (targetTabId) =>
+          chrome.runtime.sendMessage({
+            action: 'openPreparedPopupForTest',
+            tabId: targetTabId,
+          }),
+        tabId,
+      );
+      await expect
+        .poll(() =>
+          worker.evaluate(() => globalThis.__popupTimeoutIdentityStarted),
+        )
+        .toBe(true);
+      expect(
+        await helper.evaluate(
+          () => chrome.extension.getViews({ type: 'popup' }).length,
+        ),
+      ).toBe(0);
+      await expect(opening).resolves.toMatchObject({
+        success: true,
+        presentation: 'popup',
+      });
+      await expect
+        .poll(() =>
+          helper.evaluate(() => {
+            const popup = chrome.extension.getViews({ type: 'popup' })[0];
+            return popup
+              ? {
+                  title: popup.document
+                    .getElementById('pageDiagnosticTitle')
+                    ?.textContent.trim(),
+                  message: popup.document
+                    .getElementById('pageDiagnosticMessage')
+                    ?.textContent.trim(),
+                  hidden:
+                    popup.document.documentElement.dataset.popupHidden ===
+                    'true',
+                }
+              : null;
+          }),
+        )
+        .toMatchObject({ hidden: false });
+      const state = await helper.evaluate(() => {
+        const popup = chrome.extension.getViews({ type: 'popup' })[0];
+        return {
+          title: popup.document
+            .getElementById('pageDiagnosticTitle')
+            .textContent.trim(),
+          message: popup.document
+            .getElementById('pageDiagnosticMessage')
+            .textContent.trim(),
+          pageHeaderDisplay: popup.getComputedStyle(
+            popup.document.getElementById('pageHeader'),
+          ).display,
+        };
+      });
+      expect(state.title).toBeTruthy();
+      expect(state.message).toBeTruthy();
+      expect(state.pageHeaderDisplay).toBe('none');
+      await helper.evaluate(() => {
+        chrome.extension.getViews({ type: 'popup' })[0]?.close();
+      });
+    } finally {
+      await worker.evaluate(() => {
+        globalThis.__releasePopupTimeoutIdentity?.();
+        chrome.tabs.sendMessage = globalThis.__popupOriginalSendMessage;
+      });
+      await helper.close();
+      await page.close();
+    }
+  });
+
   test('toolbar popup releases unavailable-tab mappings before it closes and can reopen', async ({
     extContext,
     extensionId,
@@ -1202,7 +1586,11 @@ test.describe('Popup list chip behavior', () => {
             tabId: targetTabId,
           });
         }, tabId);
-
+        const opened = await openRequest;
+        expect(opened).toMatchObject({
+          success: true,
+          presentation: 'popup',
+        });
         await expect
           .poll(() =>
             helper.evaluate(
@@ -1210,7 +1598,6 @@ test.describe('Popup list chip behavior', () => {
             ),
           )
           .toBe(1);
-        await expect(openRequest).resolves.toMatchObject({ success: true });
         await expect
           .poll(() =>
             helper.evaluate(() => {
@@ -1272,7 +1659,7 @@ test.describe('Popup list chip behavior', () => {
     }
   });
 
-  test('prepared private handoff hydrates pause state and cannot overwrite a resume', async ({
+  test('private popup resume waits for its visit commit before showing page data', async ({
     extContext,
     extensionId,
     setupDir,
@@ -1333,7 +1720,7 @@ test.describe('Popup list chip behavior', () => {
       });
       if (paused?.success !== true) return paused;
       return chrome.runtime.sendMessage({
-        action: 'beginPopupBootstrapForTest',
+        action: 'preparePopupBootstrapForTest',
         tabId: tab.id,
       });
     }, url);
@@ -1349,11 +1736,9 @@ test.describe('Popup list chip behavior', () => {
         const originalSendMessage = chrome.runtime.sendMessage.bind(
           chrome.runtime,
         );
-        let releaseAwait;
         let releasePageActivity;
         globalThis.__resumeActionOrder = [];
         globalThis.__resumePageActivityPending = false;
-        globalThis.__releasePreparedPrivateHandoff = () => releaseAwait?.();
         globalThis.__releaseResumePageActivity = () => releasePageActivity?.();
         chrome.runtime.sendMessage = async (request, ...args) => {
           let responseGate = null;
@@ -1362,11 +1747,6 @@ test.describe('Popup list chip behavior', () => {
             request?.action === 'recordPageActivity'
           ) {
             globalThis.__resumeActionOrder.push(request.action);
-          }
-          if (request?.action === 'awaitPopupBootstrap') {
-            responseGate = new Promise((resolve) => {
-              releaseAwait = resolve;
-            });
           }
           if (request?.action === 'recordPageActivity') {
             globalThis.__resumePageActivityRequest = request;
@@ -1409,9 +1789,6 @@ test.describe('Popup list chip behavior', () => {
         'aria-pressed',
         'false',
       );
-      await expect(popup.locator('#dashboardContent')).toBeHidden();
-
-      await popup.evaluate(() => globalThis.__releasePreparedPrivateHandoff());
       await expect(popup.locator('#dashboardContent')).toBeHidden();
 
       await expect
@@ -1490,7 +1867,7 @@ test.describe('Popup list chip behavior', () => {
       });
       if (paused?.success !== true) return paused;
       return chrome.runtime.sendMessage({
-        action: 'beginPopupBootstrapForTest',
+        action: 'preparePopupBootstrapForTest',
         tabId: tab.id,
       });
     }, url);
