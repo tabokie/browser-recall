@@ -3,7 +3,6 @@
   "inputs": {
     "package.json": "57f2706f5e63f021739802a7572dcd464a0d6c2c0d667a1ae17e3016a85a30a9",
     "package-lock.json": "90950dd6e3d95d1fdf490584466846dc4f642eff2f0f957af3c34130c70bae3c",
-    "packages/core/.DS_Store": "e6f4de1fe738e0f18627d40350e76513c5dcef9023d94b98d5a860ab0f8e5003",
     "packages/core/attention-utils.js": "4f38498b8ae86274db4a9df56a90136c149357a0ed94d1933b95ffd8d25fa1be",
     "packages/core/bounded-response.js": "4ddb18491943ee4b29073767480858af99cf93a2b647e69f51fcec0dfe79732f",
     "packages/core/color-scheme-map.js": "6b75dd973825177aca6f88d24e8d254dd4edfa9dc8a1866033c038507f508311",
@@ -56,7 +55,6 @@
     "scripts/lib/seed-builder.mjs": "d7ab1c2e8b939ed65ee7f6fd1223ab8a12f20d384bb4ac013cdda75016655e64",
     "scripts/lib/replay-store.mjs": "4d6cb0c15dc4d9cb45b59de44a115acb222b5e09bfc2a4e04b7d91d05f96d82b",
     "tests/integration/daemon-test-harness.js": "f2352beb37f585b384ba65b9af75d224a61f73655c30648cdcd47c7c3d53113a",
-    "apps/extension/.DS_Store": "53ed82a7991435a7f137afc5d65afd3a9059315acf2a7801e28f4f64c5eae096",
     "apps/extension/attention-utils.js": "5f8a58ab40553203cda0079b78b7cabe65ed1cf8268f39ae0a6e0486be82be6c",
     "apps/extension/background-test-actions.js": "2e6184da110d585bd56b4080ea2059a6aa2a4c9406815f5c8b83b12d60a343ab",
     "apps/extension/background-test-control.js": "26934d2c6fd2703150b85381463c47a242c785e0417439c748b3a528905bf3e4",
@@ -139,20 +137,20 @@
   "platform": "Chromium 149.0.7827.55 / production extension",
   "locale": "en-US",
   "requestedWindow": { "width": 800, "height": 434 },
-  "capturedAt": "2026-09-27T01:23:51.704Z",
-  "sourceCommit": "f3208082bce5416d0ab992d091aa62f7dcd2ce52",
+  "capturedAt": "2026-09-27T03:22:28.789Z",
+  "sourceCommit": "16b9dab37dbacc461e599d761207991a088c08fe",
   "seedSha256": "a78c1e44ea5192a5b4fc86f9d6f420722c806d10ae4e7a88f7093bd74585b52f",
   "scenarioSha256": "2380fbfa82bdddf4791487b6d2713baeb45c893a1d3b15b09c8976c0a19d5d78",
   "screenshots": {
     "browser-popup-window.png": {
-      "sha256": "8f8f0346763e850ff0d9edcebb6dd708f6a9abe1666cc5288f4bded869dccdf9",
-      "width": 1600,
-      "height": 868
+      "sha256": "8d7fbc4a1c0f1930462d834dd77b2a1e9c97c80605dea6c02d6ae704770271ad",
+      "width": 800,
+      "height": 434
     },
     "browser-note-window.png": {
-      "sha256": "b45444501c69fb882890fbaab5b4c6241eb05ddf5da2d7fa38d6dbf33065f4ce",
-      "width": 1600,
-      "height": 868
+      "sha256": "5416922170a983b30cec349423f74f74152bed498f08be7ba963d6ea15765d0e",
+      "width": 800,
+      "height": 434
     }
   }
 }

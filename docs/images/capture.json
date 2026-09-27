@@ -3,7 +3,6 @@
   "inputs": {
     "package.json": "57f2706f5e63f021739802a7572dcd464a0d6c2c0d667a1ae17e3016a85a30a9",
     "package-lock.json": "90950dd6e3d95d1fdf490584466846dc4f642eff2f0f957af3c34130c70bae3c",
-    "packages/core/.DS_Store": "e6f4de1fe738e0f18627d40350e76513c5dcef9023d94b98d5a860ab0f8e5003",
     "packages/core/attention-utils.js": "4f38498b8ae86274db4a9df56a90136c149357a0ed94d1933b95ffd8d25fa1be",
     "packages/core/bounded-response.js": "4ddb18491943ee4b29073767480858af99cf93a2b647e69f51fcec0dfe79732f",
     "packages/core/color-scheme-map.js": "6b75dd973825177aca6f88d24e8d254dd4edfa9dc8a1866033c038507f508311",
@@ -56,7 +55,6 @@
     "scripts/lib/seed-builder.mjs": "d7ab1c2e8b939ed65ee7f6fd1223ab8a12f20d384bb4ac013cdda75016655e64",
     "scripts/lib/replay-store.mjs": "4d6cb0c15dc4d9cb45b59de44a115acb222b5e09bfc2a4e04b7d91d05f96d82b",
     "tests/integration/daemon-test-harness.js": "f2352beb37f585b384ba65b9af75d224a61f73655c30648cdcd47c7c3d53113a",
-    "apps/desktop/ui/.DS_Store": "aff2c626e8071c8fcab820cc890949f547623bc321dd987a06d218d14532f53e",
     "apps/desktop/ui/attention-utils.js": "c913974a4940df7d9ab83871ae240821d846ae7d2f597f1e989bc58229d9ce41",
     "apps/desktop/ui/bookmark-parser.js": "0cecc7e3d228ad48595d09f43555afe34d6304abff361091dc9caeeaf8d99208",
     "apps/desktop/ui/color-schemes.css": "23bc18429474f074f71222b9719046a95f6c088725610e4e5b8fc8ac6f343f64",
@@ -83,7 +81,6 @@
     "apps/desktop/ui/utils.js": "849e90e145e6bfad9af7d3751b34b966b39603bea57863dfce4e055ccca47100",
     "apps/desktop/ui/virtual-scroller.js": "dd6dc0601e86bec3e503451dd0cf37330dafb73d6994aafcc76f9acd85292407",
     "apps/desktop/package.json": "1643db18b0bd6e0cce510e3bab61e4889bc4a7beb37a1ec4eb679f7cef7a0612",
-    "apps/desktop/src-tauri/icons/.DS_Store": "bcacd4ea2fa3ce06fd6e574860a688d2ac332ee625b62b491b28859b9397a495",
     "apps/desktop/src-tauri/icons/icon.icns": "27af23b25f93f42712fb5aaad2bd7edb437a0c5a056c4164b9d30ef524c493d6",
     "apps/desktop/src-tauri/icons/icon.ico": "a6544e3bee5cfd371bf321ae3df7f335859544c4cf1540950b8748095f84b9e0",
     "apps/desktop/src-tauri/icons/icon.png": "3a146dacc860f8de268cf6bb8615a0dca0232485a396d2c5ccba815522db10be",
@@ -93,8 +90,8 @@
     "scripts/compose-documentation-hero.mjs": "3168eee474aea25567292c33043f9b18b1fd1a877e6c09d52d7a87018f392cdb"
   },
   "platform": "macOS / native Tauri WKWebView",
-  "capturedAt": "2026-09-27T01:23:35.949Z",
-  "sourceCommit": "f3208082bce5416d0ab992d091aa62f7dcd2ce52",
+  "capturedAt": "2026-09-27T03:22:18.762Z",
+  "sourceCommit": "16b9dab37dbacc461e599d761207991a088c08fe",
   "seedSha256": "a78c1e44ea5192a5b4fc86f9d6f420722c806d10ae4e7a88f7093bd74585b52f",
   "colorSchemes": ["amber", "mono"],
   "requestedWindows": {
@@ -103,29 +100,29 @@
   },
   "screenshots": {
     "timeline.png": {
-      "sha256": "1a70a7e1de57e9881afc0d1538a2ca4c27b7c3343207f688721dcf30e66d3007",
-      "width": 1920,
-      "height": 1000
+      "sha256": "ecc20b4dc4989c03f12bcd3ab600bf59f7b725392bdded2357549256f9f990ab",
+      "width": 960,
+      "height": 500
     },
     "book.png": {
-      "sha256": "d904de0e606b61fc702c0d8a4982ec3e00314b6f9a360cdea4b1bcce3a5ca65b",
-      "width": 1920,
-      "height": 1240
+      "sha256": "0176f3fff7a2d869876a8733c419ff4a0482793c8265f995f800719c9c0ddc9f",
+      "width": 960,
+      "height": 620
     },
     "timeline-mono.png": {
-      "sha256": "6e0cb73648920415244a375b7bc866ace595e339bd8d5bbab9de9a75a6a3458f",
-      "width": 1920,
-      "height": 1000
+      "sha256": "38e5980753a20bc4fd2e25c5e7eab8f36a808143711905b61b93fbe605dcf890",
+      "width": 960,
+      "height": 500
     },
     "timeline-styles.png": {
-      "sha256": "bfc68a14384eea00303655c44b4dd7b54ce86ce415093f1eced16d6cb7e7765f",
-      "width": 1920,
-      "height": 1000,
+      "sha256": "c6ab7dc621d01833c18558f58898f01cac8cc07a43de08495fa0a8fbc8aa45c8",
+      "width": 960,
+      "height": 500,
       "composition": {
         "sources": ["timeline.png", "timeline-mono.png"],
         "sourceSha256": [
-          "1a70a7e1de57e9881afc0d1538a2ca4c27b7c3343207f688721dcf30e66d3007",
-          "6e0cb73648920415244a375b7bc866ace595e339bd8d5bbab9de9a75a6a3458f"
+          "ecc20b4dc4989c03f12bcd3ab600bf59f7b725392bdded2357549256f9f990ab",
+          "38e5980753a20bc4fd2e25c5e7eab8f36a808143711905b61b93fbe605dcf890"
         ],
         "split": { "top": 0.62, "bottom": 0.38 }
       }
