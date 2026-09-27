@@ -150,6 +150,10 @@
     ]),
     commands: wrapObject(rawApi.commands, ['getAll']),
     contextMenus: rawApi.contextMenus,
+    declarativeNetRequest: wrapObject(rawApi.declarativeNetRequest, [
+      'getSessionRules',
+      'updateSessionRules',
+    ]),
     runtime,
     scripting: wrapObject(rawApi.scripting, ['executeScript']),
     storage,

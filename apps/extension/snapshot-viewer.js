@@ -246,9 +246,13 @@ async function handleSnapshotViewerAction(request) {
           error: 'Snapshot highlight controls are still loading',
         };
       }
-      frame.contentDocument
-        ?.getElementById('browser-recall-highlight-overlay')
-        ?.remove();
+      if (
+        !(await extensionSurface.closeHighlightEditOverlay(
+          frame.contentDocument,
+        ))
+      ) {
+        return { success: false, error: 'Could not save the open note' };
+      }
       snapshotHighlightLifecycle.dispose({ clearExisting: true });
       snapshotMarkupHidden = true;
       return { success: true };
@@ -390,9 +394,9 @@ frame.addEventListener('load', async () => {
 });
 
 function attachMarkClickHandler(doc, mark, highlightLifecycle) {
-  mark.addEventListener('click', (event) => {
+  mark.addEventListener('click', async (event) => {
     event.stopPropagation();
-    doc.getElementById('browser-recall-highlight-overlay')?.remove();
+    if (!(await extensionSurface.closeHighlightEditOverlay(doc))) return;
 
     const noteSlug = mark.dataset.noteSlug;
     const text = mark.dataset.highlightText || mark.textContent;

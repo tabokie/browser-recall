@@ -1933,6 +1933,78 @@ test.describe('desktop visual regression', () => {
     });
   });
 
+  test('mono selected leaf lists keep the marker and pin count visible', async ({
+    page,
+  }) => {
+    const pinnedUrl = 'https://example.com/mono-selected-list';
+    const pinnedSlug = generateSlugFromUrl(pinnedUrl);
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'mono',
+        extraSession: {
+          'list:design': {
+            slug: 'design',
+            name: 'Design references',
+            pins: [
+              {
+                id: pageKey(pinnedSlug),
+                pinnedAt: Date.now(),
+                source: null,
+              },
+            ],
+          },
+          [pageKey(pinnedSlug)]: {
+            slug: pinnedSlug,
+            url: pinnedUrl,
+            title: 'Mono selected list',
+          },
+        },
+      });
+
+      const design = page.locator('.sidebar-item[data-list-id="design"]');
+      await design.evaluate((item) => item.click());
+      await expect(design).toHaveClass(/active/);
+      await expect(design.locator('.pin-count')).toHaveText('1');
+
+      expect(
+        await design.evaluate((item) => {
+          const marker = item.querySelector('.list-leaf-dot');
+          const count = item.querySelector('.pin-count');
+          return {
+            foreground: getComputedStyle(item).color,
+            marker: getComputedStyle(marker, '::before').borderTopColor,
+            count: getComputedStyle(count).color,
+          };
+        }),
+      ).toEqual({
+        foreground: 'rgb(255, 255, 255)',
+        marker: 'rgb(255, 255, 255)',
+        count: 'rgb(255, 255, 255)',
+      });
+
+      await page.evaluate(() =>
+        document.documentElement.setAttribute('data-theme', 'dark'),
+      );
+      expect(
+        await design.evaluate((item) => {
+          const marker = item.querySelector('.list-leaf-dot');
+          const count = item.querySelector('.pin-count');
+          return {
+            foreground: getComputedStyle(item).color,
+            marker: getComputedStyle(marker, '::before').borderTopColor,
+            count: getComputedStyle(count).color,
+          };
+        }),
+      ).toEqual({
+        foreground: 'rgb(26, 26, 26)',
+        marker: 'rgb(26, 26, 26)',
+        count: 'rgb(26, 26, 26)',
+      });
+    });
+  });
+
   test('timeline selection paints before timeline content rendering starts @webkit', async ({
     page,
   }) => {

@@ -2,6 +2,7 @@
 // Only uses Chrome APIs (scripting, tabs, fetch). No deps back to background.js.
 import { logDebug } from './logger.js';
 import { readBoundedResponse } from '../../packages/core/bounded-response.js';
+import { fetchSnapshotResource } from './snapshot-resource-fetch.js';
 
 const captureSessions = new Map();
 let nextCaptureId = 1;
@@ -208,7 +209,7 @@ async function loadSavepageResource(
   const timeout = setTimeout(() => controller.abort(), RESOURCE_TIMEOUT_MS);
 
   try {
-    const response = await fetch(location, {
+    const response = await fetchSnapshotResource(location, {
       method: 'GET',
       mode: 'cors',
       cache: 'no-cache',

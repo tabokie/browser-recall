@@ -58,6 +58,13 @@ updating the fork unless the policy itself is being changed:
   for about 130 MB of existing snapshot data. The default is false. A video
   rejected by this policy is an intentional omission, not an unavailable
   resource, and must not increase the user-facing resource-failure count.
+- **Embed CSS images as URLs, not custom properties.** `mergeCSSImages = false`
+  preserves the original cascade. Replacing `url()` with `var()` makes an
+  unsupported vendor-prefixed declaration parse successfully and then fail at
+  computed-value time, erasing an earlier valid background instead of being
+  ignored. Douban's logo and rating sprites expose this with prefixed
+  `image-set()` fallbacks. Resource downloads remain deduplicated; repeated
+  embedded bytes are subject to the snapshot budget.
 - **Retain most unsaved resource URLs.** Browser Recall sets
   `removeUnsavedURLs = false`, preserving its pre-fork behavior of making a
   failed resource URL absolute so it can recover when a snapshot is viewed

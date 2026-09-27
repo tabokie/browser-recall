@@ -12,6 +12,10 @@ import {
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
 import { SCHEME_HEX } from './color-scheme-map.js';
 import { logDebug, logError } from './logger.js';
+import {
+  acceptPopupNoteSession,
+  mutatePopupNoteSession,
+} from './popup-note-session.js';
 import { createBadgeController } from './badge-controller.js';
 import { getBrowserCapabilities } from './browser-capabilities.js';
 import {
@@ -1579,6 +1583,18 @@ function resetPreparedActionPopups() {
 }
 
 chrome.runtime.onConnect.addListener((port) => {
+  if (
+    acceptPopupNoteSession(port, {
+      save: handleUpdateNote,
+      remove: handleDeleteNote,
+      enqueue: (request) => enqueueDesktopCommand('updateNote', request),
+      async onError(error, tabId) {
+        logError('[popup] Note save on close failed:', error);
+        await notifyTabUserActionError(tabId, error);
+      },
+    })
+  )
+    return;
   const prefix = 'popup-bootstrap:';
   if (typeof port.name !== 'string' || !port.name.startsWith(prefix)) return;
   const [token, encodedTabId = ''] = port.name.slice(prefix.length).split(':');
@@ -2312,6 +2328,9 @@ async function handleCreateNote(request, sender) {
 }
 
 async function handleDeleteNote(request) {
+  if (request.noteEditSessionId) {
+    return mutatePopupNoteSession(request.noteEditSessionId, 'deleteNote');
+  }
   const response = await runDesktopCommand('deleteNote', {
     noteSlug: request.noteSlug,
   });
@@ -2320,6 +2339,13 @@ async function handleDeleteNote(request) {
 }
 
 async function handleUpdateNote(request) {
+  if (request.noteEditSessionId) {
+    return mutatePopupNoteSession(
+      request.noteEditSessionId,
+      'updateNote',
+      request.note,
+    );
+  }
   const response = await runDesktopCommand('updateNote', {
     noteSlug: request.noteSlug,
     note: request.note,

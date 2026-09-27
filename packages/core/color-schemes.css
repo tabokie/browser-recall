@@ -161,6 +161,10 @@ html[data-theme='dark'][data-color-scheme='mono'] {
 [data-color-scheme='mono'] .sidebar-item.active .icon {
   color: var(--accent-on-primary);
 }
+[data-color-scheme='mono'] .sidebar-item.active .list-leaf-dot,
+[data-color-scheme='mono'] .sidebar-item.active .pin-count {
+  color: var(--accent-on-primary);
+}
 
 [data-color-scheme='mono'] .sort-toggle-option.active {
   background: var(--accent-primary);

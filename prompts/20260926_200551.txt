@@ -1,0 +1,12 @@
+- The Mono style of desktop app has minor issue with coloring. When a list item is selected on the sidebar, the rounded bullet icon becomes invisible, and the list count text is invisible too.
+- The snapshot capture still has significant issues. This site ([https://music.douban.com/subject/38215856/](https://music.douban.com/subject/38215856/)) for example, can be captured but many resources are unavailable, the end result is not usable.
+- Continue
+- Improve one thing: closing browser's note edit window automatically saves the note, without clicking the checkmark button.
+- That applies to note edit window in webpage, in popup, and in PDF's highlight window.
+- Continue
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them all
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) co-author=GPT-5.6 Sol, GPT-6 Astra
+- Sure
+- As code comment somewhere
+- Continue

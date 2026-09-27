@@ -213,9 +213,9 @@ function initContentScript() {
   // Marks own their click listener because events inside open shadow roots are
   // retargeted to the host before they reach the document adapter.
   function attachMarkClickHandler(mark) {
-    mark.addEventListener('click', (event) => {
+    mark.addEventListener('click', async (event) => {
       event.stopPropagation();
-      document.getElementById('browser-recall-highlight-overlay')?.remove();
+      if (!(await extensionSurface.closeHighlightEditOverlay(document))) return;
 
       const noteSlug = mark.dataset.noteSlug;
       const text = mark.dataset.highlightText || mark.textContent;
@@ -729,7 +729,8 @@ function initContentScript() {
     const panel = shadow.querySelector('.panel');
     if (panel) panel.scrollTop = panelScrollTop;
 
-    shadow.querySelector('.close-btn').addEventListener('click', () => {
+    shadow.querySelector('.close-btn').addEventListener('click', async () => {
+      if (!(await extensionSurface.saveHighlightNoteEditors(shadow))) return;
       _panelDismissed = true;
       teardownPanel();
     });
@@ -1006,10 +1007,18 @@ function initContentScript() {
       }
       sendResponse({ success: true });
     } else if (request.action === 'hideHighlightMarkup') {
-      document.getElementById('browser-recall-highlight-overlay')?.remove();
-      markupHidden = true;
-      highlightLifecycle.dispose({ clearExisting: true });
-      sendResponse({ success: true });
+      extensionSurface.closeHighlightEditOverlay(document).then((saved) => {
+        if (!saved) {
+          sendResponse({
+            success: false,
+            error: 'Could not save the open note',
+          });
+          return;
+        }
+        markupHidden = true;
+        highlightLifecycle.dispose({ clearExisting: true });
+        sendResponse({ success: true });
+      });
     } else if (request.action === 'showHighlightMarkup') {
       markupHidden = false;
       reapplyHighlights({ clearExisting: true })

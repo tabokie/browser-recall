@@ -7,6 +7,7 @@ describe('Save Page capture sessions', () => {
     vi.useFakeTimers();
     globalThis.chrome = {
       runtime: {
+        getURL: (path) => `chrome-extension://test-extension${path}`,
         onMessage: {
           addListener: vi.fn((listener) => {
             messageListener = listener;
@@ -15,6 +16,13 @@ describe('Save Page capture sessions', () => {
       },
       scripting: {
         executeScript: vi.fn(async () => []),
+      },
+      declarativeNetRequest: {
+        getSessionRules: vi.fn(async () => []),
+        updateSessionRules: vi.fn(async () => {}),
+      },
+      webRequest: {
+        onHeadersReceived: { addListener: vi.fn(), removeListener: vi.fn() },
       },
       storage: {
         session: { get: vi.fn(async () => ({})) },

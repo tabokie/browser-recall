@@ -46,6 +46,7 @@ Optional references may be omitted only when they are valid non-page URLs; malfo
 
 - The extension sends semantic daemon commands (`reportVisit`, `reportLeave`, `createNote`, etc.), not raw replay log records.
 - The connector command buffer is a short-lived availability bridge, not a second durable write model. Keep it out of replay schema decisions.
+- Dismissal-triggered mutations must share one serialized editor operation with explicit save and delete; popup destruction must transfer unsaved commands to the connector buffer before releasing volatile state.
 - Fire-and-forget connector work must observe failures and publish an explicit diagnostic state transition; validation errors must never strand the connector in `starting` or `connecting`.
 - Popup and badge reads should ask the daemon for current data when opened/refreshed; do not maintain product entity caches in the extension.
 - Content scripts run in an isolated world. Page-world History API overrides require an injected page-world bridge; DOM events cross worlds but JS property overrides do not.

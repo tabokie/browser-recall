@@ -265,7 +265,9 @@ loadLazyContent = false;
 lazyLoadType = 0;
 loadLazyImages = true;
 retainCrossFrames = true;
-mergeCSSImages = true;
+/* Keep url() values: introducing var() makes unsupported vendor declarations
+   valid at parse time, then invalid at computed-value time, erasing fallbacks. */
+mergeCSSImages = false;
 executeScripts = false;
 removeUnsavedURLs = false;
 removeElements = true;

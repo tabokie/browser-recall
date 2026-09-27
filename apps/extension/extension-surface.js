@@ -213,6 +213,22 @@
     (doc.head || doc.documentElement).appendChild(style);
   }
 
+  const noteEditors = new WeakMap();
+  const noteOverlays = new WeakMap();
+
+  async function saveHighlightNoteEditors(root) {
+    const results = await Promise.all(
+      [...root.querySelectorAll('.highlight-item')].map((item) =>
+        noteEditors.get(item)?.save(),
+      ),
+    );
+    return results.every((result) => result !== false);
+  }
+
+  function closeHighlightEditOverlay(doc = document) {
+    return noteOverlays.get(doc)?.save() ?? Promise.resolve(true);
+  }
+
   function openHighlightNoteEditor({
     item,
     note,
@@ -222,6 +238,7 @@
     save,
     onSaved = () => {},
     onError = () => {},
+    onChange = () => {},
     view = window,
   }) {
     const row = item?.querySelector('.highlight-note-row');
@@ -236,12 +253,13 @@
     action.title = confirmTitle || '';
     action.innerHTML = HIGHLIGHT_ICON_CONFIRM;
 
-    let saving = false;
+    let saving = null;
     let finished = false;
 
     const finish = (displayNote) => {
       if (finished) return;
       finished = true;
+      noteEditors.delete(item);
       action.removeEventListener('click', saveCurrent);
       row.innerHTML = displayNote
         ? `<span class="highlight-note-text">${escapeHtml(displayNote)}</span>`
@@ -254,36 +272,63 @@
       if (deleteAction) deleteAction.disabled = false;
     };
 
-    const saveCurrent = async () => {
-      if (saving || finished) return;
-      saving = true;
+    const runMutation = (task) => {
+      if (saving) return saving;
+      if (finished) return Promise.resolve(true);
       action.disabled = true;
+      editor.contentEditable = 'false';
       // Saving replaces the note slug. Keep sibling deletion locked until the
       // caller has installed the committed identity returned by save().
       if (deleteAction) deleteAction.disabled = true;
-      const nextNote = editor.innerText.replace(/\r\n/g, '\n');
-      try {
-        const result = await save(nextNote);
-        note.note = nextNote;
-        await onSaved(result, nextNote);
-        if (item.isConnected) finish(nextNote);
-      } catch (error) {
-        onError(error);
-        if (item.isConnected) {
-          saving = false;
-          action.disabled = false;
-          if (deleteAction) deleteAction.disabled = false;
-          editor.focus();
+      saving = (async () => {
+        try {
+          await task();
+          return true;
+        } catch (error) {
+          onError(error);
+          if (item.isConnected) {
+            action.disabled = false;
+            editor.contentEditable = 'plaintext-only';
+            if (deleteAction) deleteAction.disabled = false;
+            editor.focus();
+          }
+          return false;
+        } finally {
+          saving = null;
         }
-      }
+      })();
+      return saving;
     };
 
+    const saveCurrent = () =>
+      runMutation(async () => {
+        const nextNote = editor.innerText.replace(/\r\n/g, '\n');
+        const result =
+          nextNote === (note.note || '')
+            ? { noteSlug: note.slug }
+            : await save(nextNote);
+        note.note = nextNote;
+        await onSaved(result, nextNote);
+        finish(nextNote);
+      });
+    const controller = {
+      save: saveCurrent,
+      remove: (remove) =>
+        runMutation(async () => {
+          await remove();
+          finish(note.note || '');
+        }),
+    };
+    noteEditors.set(item, controller);
+    editor.addEventListener('input', () => {
+      onChange(editor.innerText.replace(/\r\n/g, '\n'));
+    });
     action.addEventListener('click', saveCurrent);
     editor.addEventListener('keydown', (event) => {
       event.stopPropagation();
       if (event.key === 'Escape' && !saving) {
         event.preventDefault();
-        finish(note.note || '');
+        void saveCurrent();
       } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
         void saveCurrent();
@@ -301,6 +346,7 @@
     range.collapse(false);
     selection.removeAllRanges();
     selection.addRange(range);
+    return controller;
   }
 
   function createHighlightEditOverlay({
@@ -317,7 +363,8 @@
     onDelete,
     onError = () => {},
   }) {
-    doc.getElementById('browser-recall-highlight-overlay')?.remove();
+    // Callers close the previous editor before reading replacement note identity.
+    if (noteOverlays.has(doc)) return;
 
     const host = doc.createElement('div');
     host.id = 'browser-recall-highlight-overlay';
@@ -373,9 +420,10 @@
         doc.removeEventListener('mousedown', handleOutsideClick);
       }
       host.remove();
+      noteOverlays.delete(doc);
     };
     const item = shadow.querySelector('.highlight-item');
-    openHighlightNoteEditor({
+    const controller = openHighlightNoteEditor({
       item,
       note,
       placeholder,
@@ -389,32 +437,27 @@
       onError,
       view,
     });
+    noteOverlays.set(doc, controller);
 
     const deleteAction = shadow.querySelector('.note-action-btn.delete');
-    deleteAction.addEventListener('click', async () => {
-      deleteAction.disabled = true;
-      try {
+    deleteAction.addEventListener('click', () => {
+      void controller.remove(async () => {
         await onDelete();
         removeHost();
-      } catch (error) {
-        onError(error);
-        if (host.isConnected) deleteAction.disabled = false;
-      }
+      });
     });
 
     handleOutsideClick = (event) => {
-      if (!host.contains(event.target)) removeHost();
-    };
-    setTimeout(() => {
-      if (host.isConnected) {
-        doc.addEventListener('mousedown', handleOutsideClick);
+      if (!host.contains(event.target) && !deleteAction.disabled) {
+        void controller.save();
       }
-    }, 100);
+    };
+    doc.addEventListener('mousedown', handleOutsideClick);
 
     positionNearRect(host, rect, view);
     const editor = shadow.querySelector('.highlight-note-editor');
     editor?.focus();
-    return { host, editor, remove: removeHost };
+    return { host, editor, remove: controller.save };
   }
 
   function positionNearRect(host, rect, win = window, options = {}) {
@@ -448,6 +491,8 @@
 
   globalThis.browserRecallExtensionSurface = {
     createHighlightEditOverlay,
+    closeHighlightEditOverlay,
+    saveHighlightNoteEditors,
     escapeHtml,
     formatHighlightExcerpt,
     highlightEntryCss: HIGHLIGHT_ENTRY_CSS,

@@ -74,7 +74,7 @@ describe('GitHub CI prerequisites', () => {
       'playwright install --with-deps --no-shell chromium webkit',
     );
     expect(packageJson.scripts['ci:test-extension-e2e']).toBe(
-      'npm run build:test-daemon && playwright test tests/e2e/extension-font-fallback.spec.js tests/e2e/popup-lists.spec.js tests/e2e/snapshot-slug-meta.spec.js tests/e2e/snapshot-resource-timeout.spec.js tests/e2e/extension-navigation-regressions.spec.js tests/e2e/url-tracking.spec.js && playwright test tests/e2e/highlight-note-edit.spec.js && npm run test:firefox:smoke',
+      'npm run build:test-daemon && playwright test tests/e2e/extension-font-fallback.spec.js tests/e2e/popup-lists.spec.js tests/e2e/snapshot-slug-meta.spec.js tests/e2e/snapshot-resource-timeout.spec.js tests/e2e/extension-navigation-regressions.spec.js tests/e2e/url-tracking.spec.js && playwright test tests/e2e/highlight-note-edit.spec.js tests/e2e/note-dismiss-save.spec.js && npm run test:firefox:smoke',
     );
     expect(packageJson.scripts['test:visual']).toBe(
       'npm run build:desktop-ui && npm run test:visual:wkwebview && npm run test:visual:chromium && npm run test:visual:webkit',

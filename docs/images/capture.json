@@ -1,13 +1,13 @@
 {
   "command": "npm run docs:screenshots",
   "inputs": {
-    "package.json": "99c0b94e62518d8d16dc0c498b895b05175f19b6d426f2e164b976e983bf44c3",
+    "package.json": "57f2706f5e63f021739802a7572dcd464a0d6c2c0d667a1ae17e3016a85a30a9",
     "package-lock.json": "90950dd6e3d95d1fdf490584466846dc4f642eff2f0f957af3c34130c70bae3c",
     "packages/core/.DS_Store": "e6f4de1fe738e0f18627d40350e76513c5dcef9023d94b98d5a860ab0f8e5003",
     "packages/core/attention-utils.js": "4f38498b8ae86274db4a9df56a90136c149357a0ed94d1933b95ffd8d25fa1be",
     "packages/core/bounded-response.js": "4ddb18491943ee4b29073767480858af99cf93a2b647e69f51fcec0dfe79732f",
     "packages/core/color-scheme-map.js": "6b75dd973825177aca6f88d24e8d254dd4edfa9dc8a1866033c038507f508311",
-    "packages/core/color-schemes.css": "6c94a5f50836461d226ca4bacb0204c2047ef9bb9bbc27d514c968cf513792ca",
+    "packages/core/color-schemes.css": "576b15f90d0a26061926908139c173ae5ccc2386d83c6c295f25b6cd1e0b8e1f",
     "packages/core/connector-diagnostics.js": "1df1c881ad11f073cce1c0166290a0d222013b92684edf2d603675eee9022bcf",
     "packages/core/dark-theme.css": "0d2c5efba45e74cff6d751574cb64a344f11abb19b16ad44ccf62e6f43fe2b83",
     "packages/core/entity-types.js": "26b6407b20dbc0e4e7f15d151b748103b553b10992b847f6f308e1b542c75af3",
@@ -93,8 +93,8 @@
     "scripts/compose-documentation-hero.mjs": "3168eee474aea25567292c33043f9b18b1fd1a877e6c09d52d7a87018f392cdb"
   },
   "platform": "macOS / native Tauri WKWebView",
-  "capturedAt": "2026-09-26T01:18:53.456Z",
-  "sourceCommit": "3566af2372c88885474fbd33bd16c6166dbdb3ee",
+  "capturedAt": "2026-09-27T01:23:35.949Z",
+  "sourceCommit": "f3208082bce5416d0ab992d091aa62f7dcd2ce52",
   "seedSha256": "a78c1e44ea5192a5b4fc86f9d6f420722c806d10ae4e7a88f7093bd74585b52f",
   "colorSchemes": ["amber", "mono"],
   "requestedWindows": {
@@ -103,7 +103,7 @@
   },
   "screenshots": {
     "timeline.png": {
-      "sha256": "8398659125e098e6e68029ffdbd51cf736e2f39a5a062e9c8a59b3f05244891f",
+      "sha256": "1a70a7e1de57e9881afc0d1538a2ca4c27b7c3343207f688721dcf30e66d3007",
       "width": 1920,
       "height": 1000
     },
@@ -113,19 +113,19 @@
       "height": 1240
     },
     "timeline-mono.png": {
-      "sha256": "49e51a99973ed1c86dcbb0f4a2191de5b3925a37090b94f29d0dd09378a872a9",
+      "sha256": "6e0cb73648920415244a375b7bc866ace595e339bd8d5bbab9de9a75a6a3458f",
       "width": 1920,
       "height": 1000
     },
     "timeline-styles.png": {
-      "sha256": "383f62e1cfdfee8011395ebb2df3ab8f3c160ea9151f6fb127906e26dabf152f",
+      "sha256": "bfc68a14384eea00303655c44b4dd7b54ce86ce415093f1eced16d6cb7e7765f",
       "width": 1920,
       "height": 1000,
       "composition": {
         "sources": ["timeline.png", "timeline-mono.png"],
         "sourceSha256": [
-          "8398659125e098e6e68029ffdbd51cf736e2f39a5a062e9c8a59b3f05244891f",
-          "49e51a99973ed1c86dcbb0f4a2191de5b3925a37090b94f29d0dd09378a872a9"
+          "1a70a7e1de57e9881afc0d1538a2ca4c27b7c3343207f688721dcf30e66d3007",
+          "6e0cb73648920415244a375b7bc866ace595e339bd8d5bbab9de9a75a6a3458f"
         ],
         "split": { "top": 0.62, "bottom": 0.38 }
       }

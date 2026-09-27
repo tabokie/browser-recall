@@ -5,6 +5,7 @@ import {
   isInternalBrowserUrl,
 } from './utils.js';
 import { logDebug, logError } from './logger.js';
+import { createPopupNoteSession } from './popup-note-session.js';
 import { applyTheme } from './theme.js';
 import { pageKey } from './entity-types.js';
 import { formatDesktopConnectorState } from './connector-diagnostics.js';
@@ -959,17 +960,25 @@ function renderNotes(notes) {
   showSection('notesSection');
 }
 
+const popupNoteSessions = new Map();
+
 function bindHighlightActions(container) {
   container.querySelectorAll('.note-action-btn.delete').forEach((btn) => {
     btn.addEventListener('click', () => {
       void runPopupUiMutation('delete-note', async () => {
-        const noteSlug = btn.closest('.highlight-item')?.dataset.noteSlug;
+        const item = btn.closest('.highlight-item');
+        const noteSlug = item?.dataset.noteSlug;
         if (!noteSlug) return;
-        const response = await chrome.runtime.sendMessage({
-          action: 'deleteNote',
-          noteSlug,
-        });
+        const session = popupNoteSessions.get(item);
+        const response = session
+          ? await session.remove()
+          : await chrome.runtime.sendMessage({
+              action: 'deleteNote',
+              noteSlug,
+            });
         requireSuccessfulResponse(response, 'deleteNote');
+        session?.close();
+        popupNoteSessions.delete(item);
         const [tab] = await chrome.tabs.query({
           active: true,
           currentWindow: true,
@@ -987,7 +996,11 @@ function bindHighlightActions(container) {
         currentPage.notes = currentPage.notes.filter(
           (n) => n.slug !== noteSlug,
         );
-        renderNotes(currentPage.notes);
+        item.remove();
+        document.getElementById('annotationCount').textContent = String(
+          currentPage.notes.length,
+        ).padStart(2, '0');
+        if (!currentPage.notes.length) hideSection('notesSection');
       }).catch((error) => showErrorBubble(error.message));
     });
   });
@@ -1005,30 +1018,42 @@ function bindHighlightActions(container) {
 }
 
 function openHighlightNoteEditor(item, note) {
+  const session = createPopupNoteSession(note, currentPage.tab?.id, (error) =>
+    showErrorBubble(error.message),
+  );
+  popupNoteSessions.set(item, session);
   extensionSurface.openHighlightNoteEditor({
     item,
     note,
     placeholder: tr('extensionAddNote', 'Add a note...', undefined),
     confirmTitle: tr('commonConfirm', 'Confirm', undefined),
     editTitle: tr('extensionEditNote', 'Edit note', undefined),
-    save: (nextNote) =>
-      runPopupUiMutation('save-highlight-note', async () => {
-        const response = requireSuccessfulResponse(
-          await chrome.runtime.sendMessage({
-            action: 'updateNote',
-            noteSlug: item.dataset.noteSlug,
-            note: nextNote,
-          }),
-          'updateNote',
+    onChange: (text) => session.update(text),
+    async save(nextNote) {
+      let response;
+      const saved = await runPopupUiMutation(
+        'save-highlight-note',
+        async () => {
+          response = requireSuccessfulResponse(
+            await session.save(nextNote),
+            'updateNote',
+          );
+          if (typeof response.noteSlug !== 'string' || !response.noteSlug) {
+            throw new Error('updateNote response missing noteSlug');
+          }
+        },
+      );
+      if (!saved)
+        throw new Error(
+          'Another popup action is still pending; retry saving the note',
         );
-        if (typeof response.noteSlug !== 'string' || !response.noteSlug) {
-          throw new Error('updateNote response missing noteSlug');
-        }
-        return response;
-      }),
+      return response;
+    },
     onSaved(response) {
       note.slug = response.noteSlug;
-      renderNotes(currentPage.notes);
+      item.dataset.noteSlug = response.noteSlug;
+      session.close();
+      popupNoteSessions.delete(item);
     },
     onError(error) {
       showErrorBubble(error.message);

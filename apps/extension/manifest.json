@@ -8,6 +8,8 @@
     "tabs",
     "activeTab",
     "scripting",
+    "declarativeNetRequestWithHostAccess",
+    "webRequest",
     "webNavigation",
     "contextMenus",
     "alarms"
