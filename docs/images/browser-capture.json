@@ -49,8 +49,9 @@
     "apps/extension/utils.js": "eea5cc2425981454fde629445ca28c0f4eb3aa42f9b39a4f9de9ce4ba17e4ad0",
     "scripts/stage-app-assets.mjs": "4964ea5b7d48a596719d7a61a6b47b39dad29f7ba8773198ad42d7589a1e3cd2",
     "scripts/lib/documentation-seed.mjs": "a78c1e44ea5192a5b4fc86f9d6f420722c806d10ae4e7a88f7093bd74585b52f",
-    "scripts/lib/documentation-window.swift": "b4a4458380924a90d7b3e732ce6b6a8ee35dbb238795ff136a8db2aff89a1279",
-    "scripts/lib/documentation-freshness.mjs": "0b34e766636c5aed2dffd59224690fe1a876fd500048de48f0bddb93ef116b35",
+    "scripts/lib/documentation-image-spec.mjs": "26d03bdf9865736b007fa6419b8888b90be757979f00a0b40f94b34ed2c46459",
+    "scripts/lib/documentation-window.swift": "1e10f97ce05e27933a1578963004b7c91e98d016e0f2f33cd2cbd5a8f9ce6354",
+    "scripts/lib/documentation-freshness.mjs": "1aaeed7db46bdce8c32e528e9bfdfbfb7e438848028dbb60bf515c4c20006d49",
     "scripts/lib/manual-seed.mjs": "2495a12d302cbacaf866d71ea89ae20afd1269d4ab767e1139226642604a9e97",
     "scripts/lib/seed-builder.mjs": "d7ab1c2e8b939ed65ee7f6fd1223ab8a12f20d384bb4ac013cdda75016655e64",
     "scripts/lib/replay-store.mjs": "4d6cb0c15dc4d9cb45b59de44a115acb222b5e09bfc2a4e04b7d91d05f96d82b",
@@ -127,7 +128,7 @@
     "apps/extension/virtual-scroller.js": "7aee4fc01dfa2347baf55da54eb6ff6763f95b627611fc0fd416f065ab1dd1a5",
     "scripts/capture-browser-documentation.mjs": "096bfdbedb8cc01a0cd3d1d3b7f955480dec13dc071b5d24b97480a3cd5b57b6",
     "scripts/lib/desktop-test-runtime.mjs": "7c4d752dc7c2968c9d6722815af14bd60d74cd6f026da698c3784a4d28f5d3a1",
-    "tests/e2e/documentation-browser.spec.js": "2380fbfa82bdddf4791487b6d2713baeb45c893a1d3b15b09c8976c0a19d5d78",
+    "tests/e2e/documentation-browser.spec.js": "d7574f0da93c205ef885f5ea4e41673710da761cd340f3321c86ea6ea4caf8d2",
     "tests/e2e/fixtures.js": "10d674911f49ac89a3df16b0a087c8ec783077b2b7a00c3c04a358f28073fba5",
     "tests/e2e/helpers.js": "c6ba609c697f703e8908b0af3743ba1a90d08691c7236636344e69226e93f549",
     "tests/fixtures/bookmarks.html": "5796497df1371d4f6ad5317e71d251b596b633128db153b8893fa4d9248518b0",
@@ -136,21 +137,20 @@
   },
   "platform": "Chromium 149.0.7827.55 / production extension",
   "locale": "en-US",
-  "requestedWindow": { "width": 800, "height": 434 },
-  "capturedAt": "2026-09-27T03:22:28.789Z",
-  "sourceCommit": "16b9dab37dbacc461e599d761207991a088c08fe",
+  "layoutPoints": { "width": 800, "height": 434 },
+  "outputPixels": { "width": 1600, "height": 868 },
   "seedSha256": "a78c1e44ea5192a5b4fc86f9d6f420722c806d10ae4e7a88f7093bd74585b52f",
-  "scenarioSha256": "2380fbfa82bdddf4791487b6d2713baeb45c893a1d3b15b09c8976c0a19d5d78",
+  "scenarioSha256": "d7574f0da93c205ef885f5ea4e41673710da761cd340f3321c86ea6ea4caf8d2",
   "screenshots": {
     "browser-popup-window.png": {
-      "sha256": "8d7fbc4a1c0f1930462d834dd77b2a1e9c97c80605dea6c02d6ae704770271ad",
-      "width": 800,
-      "height": 434
+      "sha256": "7b0d7dd2bb3442e48fa6fd1dcacf90a4a46220bc0f0bc2507c8fa830fc31c4c7",
+      "width": 1600,
+      "height": 868
     },
     "browser-note-window.png": {
-      "sha256": "5416922170a983b30cec349423f74f74152bed498f08be7ba963d6ea15765d0e",
-      "width": 800,
-      "height": 434
+      "sha256": "b45444501c69fb882890fbaab5b4c6241eb05ddf5da2d7fa38d6dbf33065f4ce",
+      "width": 1600,
+      "height": 868
     }
   }
 }

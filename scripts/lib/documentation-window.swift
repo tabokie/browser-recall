@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
+import ScreenCaptureKit
 
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data("\(message)\n".utf8))
@@ -89,7 +90,18 @@ case "frame", "frame-browser":
     NSRunningApplication(processIdentifier: pid)?.activate(options: [.activateIgnoringOtherApps])
 case "click":
     guard args.count == 4 else { fail("Expected accessible label") }
-    clickPoint(point(control(args[3])))
+    guard let targetApplication = NSRunningApplication(processIdentifier: pid) else {
+        fail("Browser Recall application unavailable")
+    }
+    targetApplication.activate(options: [.activateIgnoringOtherApps])
+    let activationDeadline = Date().addingTimeInterval(2)
+    while !targetApplication.isActive && Date() < activationDeadline {
+        Thread.sleep(forTimeInterval: 0.02)
+    }
+    guard targetApplication.isActive else { fail("Cannot activate Browser Recall") }
+    guard AXUIElementPerformAction(control(args[3]), kAXPressAction as CFString) == .success else {
+        fail("Cannot press accessible control: \(args[3])")
+    }
 case "search":
     guard args.count == 4 else { fail("Expected search text") }
     let field = control("searchDraftInput")
@@ -126,38 +138,91 @@ case "visible-text":
     }
     print(visible ? "true" : "false")
 case "capture", "capture-browser":
-    guard args.count == (args[2] == "capture-browser" ? 5 : 4) else { fail("Expected output path and browser title for browser capture") }
-    let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]
-    let ownedWindows = windows.filter {
-        ($0[kCGWindowOwnerPID as String] as? Int32) == pid && ($0[kCGWindowLayer as String] as? Int) == 0
+    // ScreenCaptureKit needs a WindowServer-backed application connection even
+    // though this helper does not present its own user interface. Initialize
+    // AppKit only for captures so Accessibility-derived physical clicks retain
+    // the established command-line helper behavior.
+    let helperApplication = NSApplication.shared
+    helperApplication.setActivationPolicy(.prohibited)
+    let browserCapture = args[2] == "capture-browser"
+    let pixelIndex = browserCapture ? 5 : 4
+    guard args.count == pixelIndex + 2,
+          let pixelWidth = Int(args[pixelIndex]), let pixelHeight = Int(args[pixelIndex + 1]),
+          pixelWidth > 0, pixelHeight > 0 else {
+        fail("Expected output path, optional browser title, and positive output pixel dimensions")
     }
-    let candidates = args[2] == "capture-browser"
-        ? ownedWindows.filter { ($0[kCGWindowName as String] as? String)?.contains(args[4]) == true }
+    let contentSemaphore = DispatchSemaphore(value: 0)
+    var shareableContent: SCShareableContent?
+    var shareableContentError: Error?
+    SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: true) { content, error in
+        shareableContent = content
+        shareableContentError = error
+        contentSemaphore.signal()
+    }
+    guard contentSemaphore.wait(timeout: .now() + 10) == .success else {
+        fail("Timed out while enumerating capturable windows")
+    }
+    if let error = shareableContentError {
+        fail("Cannot enumerate capturable windows: \(error.localizedDescription)")
+    }
+    guard let content = shareableContent else { fail("No capturable windows available") }
+    let ownedWindows = content.windows.filter {
+        $0.owningApplication?.processID == pid && $0.windowLayer == 0
+    }
+    let candidates = browserCapture
+        ? ownedWindows.filter { $0.title?.contains(args[4]) == true }
         : ownedWindows
-    guard let info = candidates.max(by: {
-        let a = CGRect(dictionaryRepresentation: $0[kCGWindowBounds as String] as! CFDictionary)!
-        let b = CGRect(dictionaryRepresentation: $1[kCGWindowBounds as String] as! CFDictionary)!
-        return a.width * a.height < b.width * b.height
+    guard let selected = candidates.max(by: {
+        $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height
     }) else { fail("No visible application window") }
-    let id = CGWindowID(info[kCGWindowNumber as String] as! UInt32)
-    let captured: CGImage?
-    if args[2] == "capture-browser" {
-        let bounds = CGRect(dictionaryRepresentation: info[kCGWindowBounds as String] as! CFDictionary)!
-        // Core Graphics expects raw window IDs, not CFNumber objects. Restrict
-        // capture to this process so an overlapping user window cannot leak in.
-        var ids: [UnsafeRawPointer?] = ownedWindows.map {
-            UnsafeRawPointer(bitPattern: UInt($0[kCGWindowNumber as String] as! UInt32))
+
+    let configuration = SCStreamConfiguration()
+    configuration.width = pixelWidth
+    configuration.height = pixelHeight
+    configuration.scalesToFit = true
+    configuration.preservesAspectRatio = false
+    configuration.showsCursor = false
+    configuration.captureResolution = .best
+    let filter: SCContentFilter
+    if browserCapture {
+        guard let display = content.displays.first(where: {
+            $0.frame.intersects(selected.frame)
+        }) else { fail("Browser window is not on a capturable display") }
+        let visibleOwnedWindows = ownedWindows.filter {
+            $0.frame.intersects(selected.frame)
         }
-        let windowArray = ids.withUnsafeMutableBufferPointer {
-            CFArrayCreate(nil, $0.baseAddress, $0.count, nil)!
-        }
-        captured = CGImage(windowListFromArrayScreenBounds: bounds, windowArray: windowArray, imageOption: [.boundsIgnoreFraming, .bestResolution])
+        filter = SCContentFilter(display: display, including: visibleOwnedWindows)
+        configuration.sourceRect = CGRect(
+            x: selected.frame.minX - display.frame.minX,
+            y: selected.frame.minY - display.frame.minY,
+            width: selected.frame.width,
+            height: selected.frame.height
+        )
+        configuration.ignoreShadowsDisplay = true
     } else {
-        captured = CGWindowListCreateImage(.null, .optionIncludingWindow, id, [.boundsIgnoreFraming, .bestResolution])
+        filter = SCContentFilter(desktopIndependentWindow: selected)
+        configuration.ignoreShadowsSingleWindow = true
     }
-    guard let image = captured,
+
+    let captureSemaphore = DispatchSemaphore(value: 0)
+    var capturedImage: CGImage?
+    var captureError: Error?
+    SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) { image, error in
+        capturedImage = image
+        captureError = error
+        captureSemaphore.signal()
+    }
+    guard captureSemaphore.wait(timeout: .now() + 10) == .success else {
+        fail("Timed out while capturing documentation pixels")
+    }
+    if let error = captureError {
+        fail("Cannot capture Browser Recall: \(error.localizedDescription)")
+    }
+    guard let image = capturedImage,
+          image.width == pixelWidth,
+          image.height == pixelHeight,
           let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
-        fail("Cannot capture Browser Recall; check Screen Recording permission")
+        fail("ScreenCaptureKit did not produce the requested documentation pixels")
     }
     try png.write(to: URL(fileURLWithPath: args[3]))
 default:

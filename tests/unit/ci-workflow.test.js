@@ -20,6 +20,19 @@ const macosLifecycleSmoke = fs.readFileSync(
   path.join(repoRoot, 'tests/smoke/macos-desktop-window-lifecycle.mjs'),
   'utf8',
 );
+const documentationWindow = fs.readFileSync(
+  path.join(repoRoot, 'scripts/lib/documentation-window.swift'),
+  'utf8',
+);
+const desktopCapture = fs.readFileSync(
+  path.join(repoRoot, 'scripts/capture-documentation.mjs'),
+  'utf8',
+);
+const browserCapture = fs.readFileSync(
+  path.join(repoRoot, 'tests/e2e/documentation-browser.spec.js'),
+  'utf8',
+);
+const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
 
 function jobBody(jobName, nextJobName) {
   const start = ciWorkflow.indexOf(`  ${jobName}:`);
@@ -102,6 +115,48 @@ describe('GitHub CI prerequisites', () => {
       'node tests/smoke/macos-desktop-window-lifecycle.mjs',
     );
     expect(packageJson.scripts.ci).not.toContain('test:desktop-native');
+  });
+
+  test('documentation generation is a read-only CI formatting check', () => {
+    const documentationJob = jobBody(
+      'documentation-screenshots',
+      'test-extension-e2e',
+    );
+    expect(documentationJob).toContain(
+      'git diff --exit-code -- README.md docs/images/',
+    );
+    expect(documentationJob).not.toContain('contents: write');
+    expect(documentationJob).not.toContain('git commit');
+    expect(documentationJob).not.toContain('git push');
+  });
+
+  test('documentation capture uses canonical pixels and deterministic manifests', () => {
+    expect(documentationWindow).toContain('import ScreenCaptureKit');
+    expect(documentationWindow).toContain('NSApplication.shared');
+    expect(documentationWindow).toContain('setActivationPolicy(.prohibited)');
+    expect(documentationWindow).toContain('AXUIElementPerformAction');
+    expect(documentationWindow).toContain('SCScreenshotManager.captureImage');
+    expect(documentationWindow).toContain('configuration.width = pixelWidth');
+    expect(documentationWindow).toContain('configuration.height = pixelHeight');
+    expect(documentationWindow).not.toContain('.nominalResolution');
+    expect(documentationWindow).not.toContain('interpolationQuality');
+    expect(documentationWindow).not.toContain('context.draw(image');
+    for (const source of [desktopCapture, browserCapture]) {
+      expect(source).not.toContain('capturedAt:');
+      expect(source).not.toContain('sourceCommit:');
+    }
+  });
+
+  test('README uses standard Markdown image references', () => {
+    expect(readme).not.toContain('<img');
+    for (const image of [
+      'timeline-styles.png',
+      'browser-popup-window.png',
+      'browser-note-window.png',
+      'book.png',
+    ]) {
+      expect(readme).toContain(`](docs/images/${image})`);
+    }
   });
 
   test('cold Rust commands prepare generated build inputs', () => {

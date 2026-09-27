@@ -12,6 +12,7 @@ import {
   captureInputs,
   assertCaptureInputs,
 } from '../../scripts/lib/documentation-freshness.mjs';
+import { documentationCaptureSpec } from '../../scripts/lib/documentation-image-spec.mjs';
 
 const nativeCapture = process.env.BROWSER_RECALL_DOCUMENTATION_NATIVE === '1';
 test.use({
@@ -198,7 +199,13 @@ test('browser documentation separates the clean popup from note taking', async (
         execFileSync(nativeHelper, [String(pid), ...args], {
           encoding: 'utf8',
         });
-      native('frame-browser', 'A smaller, slower web', '800', '434');
+      const browserSpec = documentationCaptureSpec.browser;
+      native(
+        'frame-browser',
+        'A smaller, slower web',
+        String(browserSpec.layoutPoints.width),
+        String(browserSpec.layoutPoints.height),
+      );
       pageSession = await extContext.newCDPSession(page);
       await pageSession.send('Emulation.clearDeviceMetricsOverride');
       // Open the real toolbar popup for the real source tab.
@@ -261,7 +268,13 @@ test('browser documentation separates the clean popup from note taking', async (
         await expect
           .poll(
             () => {
-              native('capture-browser', filename, 'A smaller, slower web');
+              native(
+                'capture-browser',
+                filename,
+                'A smaller, slower web',
+                String(browserSpec.outputPixels.width),
+                String(browserSpec.outputPixels.height),
+              );
               const bytes = fs.readFileSync(filename);
               const hash = createHash('sha256').update(bytes).digest('hex');
               stable = hash === previous ? stable + 1 : 0;
@@ -353,11 +366,8 @@ test('browser documentation separates the clean popup from note taking', async (
         inputs,
         platform: `Chromium ${extContext.browser().version()} / production extension`,
         locale,
-        requestedWindow: { width: 800, height: 434 },
-        capturedAt: new Date().toISOString(),
-        sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], {
-          encoding: 'utf8',
-        }).trim(),
+        layoutPoints: documentationCaptureSpec.browser.layoutPoints,
+        outputPixels: documentationCaptureSpec.browser.outputPixels,
         seedSha256: hash(fs.readFileSync('scripts/lib/documentation-seed.mjs')),
         scenarioSha256: hash(fs.readFileSync(testInfo.file)),
         screenshots: Object.fromEntries(

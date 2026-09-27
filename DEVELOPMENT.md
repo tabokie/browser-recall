@@ -460,14 +460,18 @@ keyboard targeting. Login-item and URL-handler registration are disabled for the
 temporary app.
 
 `scripts/lib/documentation-window.swift` uses macOS Accessibility to navigate
-real controls and Core Graphics to capture only the app window. Each screen
+real controls and ScreenCaptureKit to capture only the app window. Each screen
 must contain the expected reading material and reach a stable rendered state
 before capture succeeds. Application HTML, CSS, and bridge responses are
 unmodified.
 
 The complete image set and `docs/images/capture.json` are updated only after
 Timeline passes in Amber and Mono and Book passes in Amber. Timeline requests
-960 × 500 points; Book requests 960 × 620 points. Only the isolated documentation
+960 × 500 layout points and ScreenCaptureKit produces 1920 × 1000 source pixels;
+Book requests 960 × 620 layout points and ScreenCaptureKit produces 1920 × 1240
+source pixels. ScreenCaptureKit renders the requested target pixel dimensions
+directly at best capture resolution; the generator never enlarges a
+nominal-resolution bitmap. Only the isolated documentation
 build lowers the minimum window height to 500 points. The newest sample visits
 put the two labeled pages first, and capture checks that both titles are visible.
 The capture command selects
@@ -475,18 +479,19 @@ Mono through the real Settings control and verifies persistence.
 `scripts/compose-documentation-hero.mjs` combines the two aligned Timeline
 captures at their original resolution using Canvas: Amber on the left, Mono
 on the right, separated by a white diagonal slash. The README shows that
-single combined image, a shorter Book image, and the two browser images,
-all displayed at 640 pixels wide;
+single combined image, a shorter Book image, and the two browser images with
+standard Markdown image syntax; repository-host rendering constrains the
+high-density source images responsively.
 Search and Lists need no additional screenshots.
 
-The **Generate README Screenshots** job runs `npm run ci:generate-docs` on
+The **Verify README Screenshots** job runs `npm run ci:generate-docs` on
 `macos-26` for pull requests and pushes to `main`. The command captures the
 native desktop and browser windows, composes the diagonal hero, then runs
-`ci:check-docs`. Pull requests receive a `readme-screenshots` artifact for review;
-main pushes commit the generated `docs/images/` files using `GITHUB_TOKEN`.
-Repository rules must permit that bot to push documentation commits to `main`;
-a denied or non-fast-forward push fails visibly and never overwrites newer work.
-Bot pushes do not trigger another workflow run. Capture failures retain
+`ci:check-docs`. Pull requests and main pushes receive a `readme-screenshots`
+artifact for review. The job then compares generated `README.md` and
+`docs/images/` files with the committed files; any difference fails like a
+formatting check. The job has read-only repository permission and never creates
+or pushes a commit. Capture failures retain
 `documentation-capture-failures` diagnostics. The [hosted macOS image configuration](https://github.com/actions/runner-images/blob/main/images/macos/scripts/build/configure-tccdb-macos.sh)
 grants the runner Accessibility and Screen Recording permissions used by the
 native helper.
@@ -518,10 +523,11 @@ matching source image hashes. Changing the compositor requires desktop recapture
 composition alone never updates or certifies native capture provenance.
 
 The compositor uses the repository's Playwright Chromium installation. The
-capture manifest records the source commit, seed hash, image hashes,
-dimensions, capture time, and composition inputs and split positions. macOS
-may constrain window size to the display. Relative-time labels, display scale,
-and OS rendering can vary between runs. Inspect the native sources and final
+capture manifest records input fingerprints, the seed hash, image hashes,
+exact pixel dimensions, and composition inputs and split positions. The manifest
+omits run timestamps and source commit identifiers so identical inputs produce
+identical generated metadata. macOS may constrain window size to the display.
+Relative-time labels and OS rendering can vary between runs. Inspect the native sources and final
 combined image before committing. On a navigation or capture failure, inspect
 `test-results/documentation/`.
 
@@ -544,11 +550,13 @@ temporary real daemon. Install the repository's
 Playwright Chromium build first with `npm run ci:install-playwright`.
 `tests/e2e/documentation-browser.spec.js` serves a fictional article, seeds the
 shared reading collection through Rust replay with two lists, and starts the
-example article without highlights. The browser window requests 800 × 434 points so the toolbar icon and popup
-remain prominent. The first screenshot shows the real toolbar popup over the
+example article without highlights. The browser window requests an 800 × 434-point
+layout and produces a canonical 1600 × 868-pixel image so the toolbar icon and
+popup remain prominent on high-density displays. The first screenshot shows the real toolbar popup over the
 unmarked article. The second shows the live note editor after creating a single
-highlight through the extension. Core Graphics captures the named browser window,
-including the separate popup window. Capture includes only the isolated Chromium
+highlight through the extension. ScreenCaptureKit captures the named browser
+window and the separate popup window directly at 1600 × 868 source pixels.
+Capture includes only the isolated Chromium
 process's window IDs, so overlapping applications cannot appear in exported
 images. The helper tab stays in a minimized window
 outside the captured browser window. Extension markup, styles, and daemon

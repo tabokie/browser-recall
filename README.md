@@ -4,23 +4,23 @@ For the things you meant to come back to.
 
 Browser Recall keeps your browsing history, highlights, and saved pages in a folder on your computer. Browse as usual. Come back when a half-remembered sentence starts bothering you.
 
-<img src="docs/images/timeline-styles.png" alt="Browser Recall Timeline: Amber on the left and Mono on the right, divided diagonally" width="640">
+![Browser Recall Timeline: Amber on the left and Mono on the right, divided diagonally](docs/images/timeline-styles.png)
 
 ## While you browse
 
 The **browser extension** keeps the current page close at hand. Pin the page to a list, leave a rating, or save a **snapshot** to read later, even offline.
 
-<img src="docs/images/browser-popup-window.png" alt="Browser Recall popup in English, anchored to the browser toolbar above an article with no highlights" width="640">
+![Browser Recall popup in English, anchored to the browser toolbar above an article with no highlights](docs/images/browser-popup-window.png)
 
 ## Keep a line, and your thought
 
 Save a **highlight** from something you are reading. Add a **note** while the thought is still fresh.
 
-<img src="docs/images/browser-note-window.png" alt="Browser Recall note editor in English, open beneath a highlighted passage in the browser window" width="640">
+![Browser Recall note editor in English, open beneath a highlighted passage in the browser window](docs/images/browser-note-window.png)
 
 **Book** brings those passages and notes together, grouped by day.
 
-<img src="docs/images/book.png" alt="Book, bringing saved highlights and personal notes together" width="640">
+![Book, bringing saved highlights and personal notes together](docs/images/book.png)
 
 ## Find your way back
 

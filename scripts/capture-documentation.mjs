@@ -25,6 +25,7 @@ import {
   captureInputs,
   assertCaptureInputs,
 } from './lib/documentation-freshness.mjs';
+import { documentationCaptureSpec } from './lib/documentation-image-spec.mjs';
 import {
   launchTestDaemon,
   waitForDaemonListening,
@@ -87,7 +88,7 @@ async function waitFor(description, check) {
   );
 }
 
-async function capture(name, includes, excludes = []) {
+async function capture(name, includes, outputPixels, excludes = []) {
   const ready = () => {
     const tree = native('dump');
     return (
@@ -102,7 +103,12 @@ async function capture(name, includes, excludes = []) {
   let stable = 0;
   const filename = path.join(output, `${name}.png`);
   await waitFor(`${name} paint`, () => {
-    native('capture', filename);
+    native(
+      'capture',
+      filename,
+      String(outputPixels.width),
+      String(outputPixels.height),
+    );
     const current = hash(readFileSync(filename));
     stable = current === previous ? stable + 1 : 0;
     previous = current;
@@ -279,18 +285,32 @@ try {
       names.push(filename);
       return filename;
     };
-    native('frame', '960', '500');
+    const timelineSpec = documentationCaptureSpec.desktop.timeline;
+    native(
+      'frame',
+      String(timelineSpec.layoutPoints.width),
+      String(timelineSpec.layoutPoints.height),
+    );
     const labeledPages = [
       'A smaller, slower web',
       'Why I still keep a personal website',
     ];
-    await capture(name('timeline'), [...labeledPages, 'exploreBtn']);
+    await capture(
+      name('timeline'),
+      [...labeledPages, 'exploreBtn'],
+      timelineSpec.outputPixels,
+    );
     for (const title of labeledPages) {
       if (native('visible-text', title) !== 'true')
         throw new Error(`${scheme} Timeline clips labeled page ${title}`);
     }
     if (scheme === 'mono') continue;
-    native('frame', '960', '620');
+    const bookSpec = documentationCaptureSpec.desktop.book;
+    native(
+      'frame',
+      String(bookSpec.layoutPoints.width),
+      String(bookSpec.layoutPoints.height),
+    );
     native('click', 'highlightsHistoryBtn');
     await capture(
       name('book'),
@@ -306,6 +326,7 @@ try {
         'Reading an old notebook is a conversation',
         'Some ideas need to be met twice.',
       ],
+      bookSpec.outputPixels,
       ['searchDraftInput'],
     );
     for (const text of ['Leave the unfinished bits in.', 'matters to them.']) {
@@ -336,15 +357,17 @@ try {
         command: 'npm run docs:screenshots',
         inputs,
         platform: 'macOS / native Tauri WKWebView',
-        capturedAt: new Date().toISOString(),
-        sourceCommit: run('git', ['rev-parse', 'HEAD']),
         seedSha256: hash(
           readFileSync(path.join(root, 'scripts/lib/documentation-seed.mjs')),
         ),
         colorSchemes: ['amber', 'mono'],
-        requestedWindows: {
-          timeline: { width: 960, height: 500 },
-          book: { width: 960, height: 620 },
+        layoutPoints: {
+          timeline: documentationCaptureSpec.desktop.timeline.layoutPoints,
+          book: documentationCaptureSpec.desktop.book.layoutPoints,
+        },
+        outputPixels: {
+          timeline: documentationCaptureSpec.desktop.timeline.outputPixels,
+          book: documentationCaptureSpec.desktop.book.outputPixels,
         },
         screenshots,
       }),
@@ -365,7 +388,12 @@ try {
     mkdirSync(failureDir, { recursive: true });
     try {
       writeFileSync(path.join(failureDir, 'accessibility.txt'), native('dump'));
-      native('capture', path.join(failureDir, 'failure.png'));
+      native(
+        'capture',
+        path.join(failureDir, 'failure.png'),
+        String(documentationCaptureSpec.desktop.timeline.outputPixels.width),
+        String(documentationCaptureSpec.desktop.timeline.outputPixels.height),
+      );
     } catch (captureError) {
       console.error(captureError.message);
     }

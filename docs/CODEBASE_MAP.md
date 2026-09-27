@@ -189,9 +189,13 @@ This map intentionally excludes removed extension-only storage/sync internals.
   screenshots; `docs/STORE_LISTING.md` contains the Chrome Web Store copy.
 - `scripts/capture-documentation.mjs` builds and captures an isolated native
   macOS app. `scripts/lib/documentation-seed.mjs` owns fictional reading data;
+  `scripts/lib/documentation-image-spec.mjs` owns canonical layout-point and
+  output-pixel dimensions;
   `scripts/lib/documentation-window.swift` navigates native accessible controls
-  and captures the actual window. Timeline is captured in Amber and Mono;
-  Book is captured in Amber at a shorter window height.
+  and uses ScreenCaptureKit to render the actual window directly at exact
+  high-density pixel dimensions without bitmap enlargement. Timeline is captured
+  in Amber and Mono; Book
+  is captured in Amber at a shorter window height.
   `scripts/compose-documentation-hero.mjs` combines the aligned Timeline
   sources with a diagonal slash for the opening README image. `docs/images/`
   holds the native sources, combined image, and capture manifest.
@@ -200,8 +204,9 @@ This map intentionally excludes removed extension-only storage/sync internals.
   checks fingerprints, PNG inventory/hashes/dimensions, diagonal composition
   provenance, and the four README image references through `ci:check-docs` in
   local CI and after hosted native generation. The `documentation-screenshots`
-  job runs `ci:generate-docs`, uploads pull-request images, and publishes refreshed
-  `docs/images/` on main. The Linux unit job checks committed image integrity.
+  job runs `ci:generate-docs`, uploads generated images, and fails when generated
+  `README.md` or `docs/images/` files differ from committed files. The hosted job
+  never creates commits. The Linux unit job checks committed image integrity.
   `tests/integration/documentation-freshness.test.js`
   exercises the checker CLI against disposable source and image mutations.
 - `tests/e2e/manual-seed-workflow.spec.js` checks the documentation collection's
@@ -209,7 +214,8 @@ This map intentionally excludes removed extension-only storage/sync internals.
 - `scripts/capture-browser-documentation.mjs` runs
   `tests/e2e/documentation-browser.spec.js` to capture the production extension's
   popup and live note editor against the real daemon. Documentation export
-  captures two native 800 × 434-point browser-window images in English: the toolbar popup over
+  captures two native 800 × 434-point browser-window layouts as canonical
+  1600 × 868-pixel images in English: the toolbar popup over
   an unmarked article, then the note editor beneath a newly created highlight.
   The scenario verifies English labels, the clean popup state, and note
   persistence before exporting images and `docs/images/browser-capture.json`.

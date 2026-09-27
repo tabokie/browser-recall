@@ -9,6 +9,7 @@ const shared = [
   'apps/extension/utils.js',
   'scripts/stage-app-assets.mjs',
   'scripts/lib/documentation-seed.mjs',
+  'scripts/lib/documentation-image-spec.mjs',
   'scripts/lib/documentation-window.swift',
   'scripts/lib/documentation-freshness.mjs',
   'scripts/lib/manual-seed.mjs',
@@ -46,8 +47,10 @@ export function captureInputs(root, kind) {
     const absolute = path.join(root, relative);
     const entry = statSync(absolute, { throwIfNoEntry: true });
     if (entry.isDirectory()) {
-      for (const name of readdirSync(absolute).sort())
+      for (const name of readdirSync(absolute).sort()) {
+        if (name === '.DS_Store') continue;
         visit(`${relative}/${name}`);
+      }
     } else if (entry.isFile()) {
       files[relative] = createHash('sha256')
         .update(readFileSync(absolute))

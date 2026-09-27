@@ -517,12 +517,14 @@ native capture workflow. A temporary daemon supplies complete settings before
 fictional events are materialized through the production Rust replay tool. A
 separate compiled Tauri identifier, executable name, and isolated profile keep native capture
 apart from the user's running app, single-instance socket, and data. macOS
-Accessibility drives the real controls; Core Graphics captures the window after
-content assertions and stable-pixel checks. Timeline is captured at 960 × 500
+Accessibility drives the real controls; ScreenCaptureKit captures the window
+after content assertions and stable-pixel checks. Timeline is captured at 960 × 500
 points in Amber and Mono using the real Settings control. Only the isolated
 documentation build lowers the minimum window height. The two labeled sample
 pages have the newest visits, and capture verifies both titles fit in the window.
-A deterministic Canvas compositor merges
+ScreenCaptureKit renders canonical 1920 × 1000-pixel Timeline images and a
+1920 × 1240-pixel Book image directly at best capture resolution. The generator
+never enlarges a nominal-resolution bitmap. A deterministic Canvas compositor merges
 the aligned captures with a diagonal slash; the manifest records the source
 image hashes and split positions. Book is captured only in Amber at 960 × 620
 points and verifies both note pairings remain inside the shorter window. The shared seed keeps pins and annotations sparse
@@ -534,12 +536,13 @@ documentation job and is also available as a maintainer command. `docs/images/ca
 Both capture manifests store source-file hashes from the shared desktop/browser
 scope policy. Capture rejects source changes before publishing its output.
 `npm run ci:generate-docs` captures both applications and runs the full
-`ci:check-docs` verification on hosted macOS. Pull requests expose generated
-images as artifacts; main pushes publish only `docs/images/` through a bot
-commit, with ordinary fast-forward and repository permission checks. Linux unit
-CI verifies committed image integrity independently of source freshness. Local
-CI starts with the full freshness check. The checker validates PNG hashes,
-dimensions, composition provenance, and the README's four image references.
+`ci:check-docs` verification on hosted macOS. Pull requests and main pushes expose
+generated images as artifacts, then fail when generation changes `README.md` or
+`docs/images/`; hosted CI never commits generated documentation. Linux unit CI
+verifies committed image integrity independently of source freshness. Local CI
+starts with the full freshness check. The checker validates exact canonical PNG
+pixel dimensions, hashes, composition provenance, and the README's four standard
+Markdown image references.
 Fingerprints cover UI/assets/locales, JavaScript dependency locks, seed/capture
 code, and native window configuration; backend-only and documentation-only
 edits do not force manual recapture. Hosted capture still uses the current
@@ -552,12 +555,13 @@ by a route fixture; extension UI and persistence use production implementations.
 The browser sample uses two lists to keep the unmodified popup compact. The popup
 document receives a real prepared source-tab model. On macOS,
 documentation export launches headed Chromium with a process-local English
-language override, pins the extension, and sizes the browser to 800 × 434
-points before capturing two browser-window states:
+language override, pins the extension, and sizes the browser to an 800 × 434-point
+layout before producing canonical 1600 × 868-pixel captures of two browser-window states:
 the actual toolbar popup over an article without highlights, then the live note
-editor beneath a newly created highlight. Core Graphics captures the named
-browser window from only that Chromium process's native window IDs, preserving
-popup-window stacking while excluding overlapping applications.
+editor beneath a newly created highlight. ScreenCaptureKit captures the named
+browser window and popup directly at the target pixel dimensions from only that
+Chromium process's native windows, preserving popup-window stacking while
+excluding overlapping applications.
 English popup labels, the empty highlight state, popup and editor bounds, and note persistence must pass
 before two images and `docs/images/browser-capture.json` are exported. Ordinary
 test runs remain headless and attach two content screenshots to test results

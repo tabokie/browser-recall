@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertCaptureInputs } from './lib/documentation-freshness.mjs';
+import { documentationImagePixels } from './lib/documentation-image-spec.mjs';
 
 const args = process.argv.slice(2);
 const imagesOnly = args.includes('--images-only');
@@ -49,10 +50,18 @@ for (const capture of captures) {
         bytes.length < 24
       )
         throw new Error(`Invalid PNG: ${name}`);
+      const expected = documentationImagePixels[name];
+      const width = bytes.readUInt32BE(16);
+      const height = bytes.readUInt32BE(20);
+      if (width !== expected.width || height !== expected.height) {
+        throw new Error(
+          `${name} must be ${expected.width} × ${expected.height} pixels`,
+        );
+      }
       if (
         createHash('sha256').update(bytes).digest('hex') !== recorded.sha256 ||
-        bytes.readUInt32BE(16) !== recorded.width ||
-        bytes.readUInt32BE(20) !== recorded.height
+        width !== recorded.width ||
+        height !== recorded.height
       )
         throw new Error(`Screenshot does not match capture manifest: ${name}`);
       available.add(`docs/images/${name}`);
@@ -83,9 +92,12 @@ for (const capture of captures) {
 }
 try {
   const readme = readFileSync(path.join(root, 'README.md'), 'utf8');
-  const images = [
-    ...readme.matchAll(/<img\b[^>]*\bsrc="([^"]+)"|!\[[^\]]*\]\(([^\s)]+)/g),
-  ].map((match) => match[1] || match[2]);
+  if (/<img\b/i.test(readme)) {
+    throw new Error('README images must use standard Markdown image syntax');
+  }
+  const images = [...readme.matchAll(/!\[[^\]]*\]\(([^\s)]+)/g)].map(
+    (match) => match[1],
+  );
   const expected = [
     'docs/images/timeline-styles.png',
     'docs/images/browser-popup-window.png',

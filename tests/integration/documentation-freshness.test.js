@@ -47,7 +47,21 @@ test('screenshot CI checks actual files, capture provenance, and README referenc
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a4AAAAABJRU5ErkJggg==',
       'base64',
     );
-    const sha256 = createHash('sha256').update(png).digest('hex');
+    const dimensions = {
+      'timeline.png': [1920, 1000],
+      'timeline-mono.png': [1920, 1000],
+      'timeline-styles.png': [1920, 1000],
+      'book.png': [1920, 1240],
+      'browser-popup-window.png': [1600, 868],
+      'browser-note-window.png': [1600, 868],
+    };
+    const image = (name, override) => {
+      const bytes = Buffer.from(png);
+      const [width, height] = override || dimensions[name];
+      bytes.writeUInt32BE(width, 16);
+      bytes.writeUInt32BE(height, 20);
+      return bytes;
+    };
     const desktop = { inputs: captureInputs(work, 'desktop'), screenshots: {} };
     const browser = { inputs: captureInputs(work, 'browser'), screenshots: {} };
     for (const [manifest, names] of [
@@ -63,13 +77,22 @@ test('screenshot CI checks actual files, capture provenance, and README referenc
       [browser, ['browser-popup-window.png', 'browser-note-window.png']],
     ]) {
       for (const name of names) {
-        write(`docs/images/${name}`, png);
-        manifest.screenshots[name] = { sha256, width: 1, height: 1 };
+        const bytes = image(name);
+        const [width, height] = dimensions[name];
+        write(`docs/images/${name}`, bytes);
+        manifest.screenshots[name] = {
+          sha256: createHash('sha256').update(bytes).digest('hex'),
+          width,
+          height,
+        };
       }
     }
     desktop.screenshots['timeline-styles.png'].composition = {
       sources: ['timeline.png', 'timeline-mono.png'],
-      sourceSha256: [sha256, sha256],
+      sourceSha256: [
+        desktop.screenshots['timeline.png'].sha256,
+        desktop.screenshots['timeline-mono.png'].sha256,
+      ],
     };
     const save = () => {
       write('docs/images/capture.json', JSON.stringify(desktop));
@@ -110,23 +133,41 @@ test('screenshot CI checks actual files, capture provenance, and README referenc
     fails('desktop capture has no source fingerprints');
     desktop.inputs = captureInputs(work, 'desktop');
     save();
-    write('docs/images/book.png', Buffer.concat([png, Buffer.from('changed')]));
+    write(
+      'docs/images/book.png',
+      Buffer.concat([image('book.png'), Buffer.from('changed')]),
+    );
     fails('Screenshot does not match capture manifest: book.png');
     expect(run('--images-only').status).toBe(1);
-    write('docs/images/book.png', png);
+    write('docs/images/book.png', image('book.png'));
     rmSync(file('docs/images/book.png'));
     fails('book.png');
-    write('docs/images/book.png', png);
-    desktop.screenshots['book.png'].height = 2;
+    write('docs/images/book.png', image('book.png'));
+    desktop.screenshots['book.png'].height = 1239;
     save();
     fails('Screenshot does not match capture manifest: book.png');
-    desktop.screenshots['book.png'].height = 1;
+    desktop.screenshots['book.png'].height = 1240;
+    const undersizedBook = image('book.png', [960, 620]);
+    write('docs/images/book.png', undersizedBook);
+    desktop.screenshots['book.png'] = {
+      sha256: createHash('sha256').update(undersizedBook).digest('hex'),
+      width: 960,
+      height: 620,
+    };
+    save();
+    fails('book.png must be 1920 × 1240 pixels');
+    write('docs/images/book.png', image('book.png'));
+    desktop.screenshots['book.png'] = {
+      sha256: createHash('sha256').update(image('book.png')).digest('hex'),
+      width: 1920,
+      height: 1240,
+    };
     desktop.screenshots['timeline-styles.png'].composition.sourceSha256[0] =
       'stale';
     save();
     fails('Timeline composition is stale');
     desktop.screenshots['timeline-styles.png'].composition.sourceSha256[0] =
-      sha256;
+      desktop.screenshots['timeline.png'].sha256;
     save();
     write(
       'README.md',
