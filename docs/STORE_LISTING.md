@@ -1,44 +1,46 @@
-# Browser Recall — Chrome Web Store copy
+# Browser Recall — Chrome Web Store Copy
 
 ## Short description
 
-Keep your browsing history, highlights, and saved pages on your computer. Requires the Browser Recall desktop app.
+Keep browsing history, highlights, and saved pages on your computer. Requires the Browser Recall desktop app.
 
 ## Detailed description
 
-For the things you meant to come back to.
+Browser Recall connects Chrome to a local desktop library of browsing history,
+highlights, notes, lists, and saved pages.
 
-Browser Recall keeps a personal collection of what you read online. The Chrome extension works with the Browser Recall desktop app, where your history, highlights, lists, and saved pages live.
+- **Find pages:** browse Timeline or search recorded titles, URLs, highlights,
+  annotations, and saved snapshot text.
+- **Keep highlights:** select text and press Alt+H. Read highlights and annotations
+  together in Book.
+- **Organize pages:** pin pages to lists from the popup. Keyword rules collect pages
+  whose titles match a pattern.
+- **Save copies:** press Alt+S to capture a local snapshot and reopen the saved page
+  from the desktop app, including offline.
 
-Find a page again.
-Browse your Timeline or search recorded titles and URLs, highlights, notes, and text from saved snapshots.
+The desktop app must run while browsing. Open the extension popup and approve the
+connection in Browser Recall after installation.
 
-Keep the line that matters.
-Select a passage and press Alt+H. Read your highlights together in Book, with your own notes alongside them.
-
-Make a little collection.
-Pin pages to lists from the extension popup. Add a keyword rule to collect pages with matching words in their titles.
-
-Save a copy.
-Press Alt+S to capture a local snapshot. Reopen saved pages from the desktop app when you need them, including offline.
-
-Keep your data close.
-Browser Recall stores your collection in a folder on your computer. No Browser Recall account, analytics, or telemetry. Optional sync uses a GitHub repository you control.
-
-The desktop app is required and must stay running while you browse. After installing the extension, open the popup and approve the connection in Browser Recall.
+Browser Recall stores data in a folder chosen during desktop setup. No Browser
+Recall account is required, and Browser Recall sends no analytics. Experimental
+GitHub sync shares recent history logs and note files through a repository you
+control; snapshot files remain local.
 
 Default shortcuts:
 
-- Alt+R — Open the extension popup
-- Alt+H — Highlight selected text
-- Alt+S — Capture a snapshot
-- Alt+L — Like the current page
+| Shortcut | Action |
+| --- | --- |
+| Alt+R | Open the popup |
+| Alt+H | Highlight selected text |
+| Alt+S | Capture a snapshot |
+| Alt+L | Like the current page |
 
-On macOS, use Option in place of Alt. Shortcuts can be changed in Chrome's extension settings.
+On macOS, use Option instead of Alt. Change shortcuts in Chrome's extension settings.
 
 ## Listing details
 
 - Category: Productivity
 - Language: English
 - Privacy policy: [PRIVACY.md](PRIVACY.md)
-- Desktop screenshots: [images/](images/) — demonstrate the companion app, not Chrome popup screens.
+- Screenshots: [images/](images/). Desktop images show the companion app; browser
+  images show the Chrome popup and highlight editor.

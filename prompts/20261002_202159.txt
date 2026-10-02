@@ -1,0 +1,9 @@
+- In the desktop app, deleting a page from a list resets the scroll position to the beginning. While fixing this, make sure there's no other cases where the scroll position is reset.
+- Let's overhaul documents in root-level and under ./docs (except README.md). Make sure they are up-to-date, and use succinct, concise language. Avoid excessively long paragraphs. Convey the key ideas on point without filler phrases and redundancies.
+- Continue
+- Some of the wording is still very hard to understand. It is using too much invented lingo but not straightforward and on-point. For example, "The verifier seeds only note objects without log history. Logged notes replay from events. Selective-checkpoint timing drift is reported separately from discrepancies." even I can't understand this one.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them all
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) co-author=GPT-6 Sol, GPT-6.1 Sol
+- As code comment somewhere
+- Commit with these gaps

@@ -4051,6 +4051,104 @@ test.describe('desktop visual regression', () => {
     });
   });
 
+  test('an external highlight mutation keeps the Book reading position', async ({
+    page,
+  }) => {
+    const fixtures = denseHighlightHistoryFixtures(Date.now());
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: fixtures.historyEntries,
+        extraSession: fixtures.extraSession,
+      });
+      await page.setViewportSize({ width: 1280, height: 500 });
+      await page.locator('#highlightsHistoryBtn').click();
+      const anchor = page.locator(
+        `.highlight-history-entry[data-note-slug="${fixtures.noteSlugs[10]}"]`,
+      );
+      await anchor.scrollIntoViewIfNeeded();
+      const before = await page
+        .locator('.main')
+        .evaluate((main) => (main.scrollTop += 200));
+      expect(before).toBeGreaterThan(0);
+      await anchor.evaluate((entry) => (entry.dataset.refreshProbe = 'before'));
+
+      await page.evaluate(() =>
+        window.__desktopVisualHarness.emitRuntimeMessage({
+          action: 'mutation',
+          type: 'note',
+          noteSlug: 'external-highlight',
+        }),
+      );
+      await expect(page.locator('[data-refresh-probe="before"]')).toHaveCount(
+        0,
+      );
+      const after = await page
+        .locator('.main')
+        .evaluate((main) => main.scrollTop);
+      expect(Math.abs(after - before)).toBeLessThanOrEqual(1);
+    });
+  });
+
+  // Scroll regression tests must cover daemon notifications and user scrolling
+  // between delayed refresh batches.
+  test('scrolling while Book refreshes keeps the latest reading position @webkit', async ({
+    page,
+  }) => {
+    const fixtures = denseHighlightHistoryFixtures(Date.now(), 205);
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        ...fixtures,
+      });
+      await page.locator('#highlightsHistoryBtn').click();
+      await expect(page.locator('.highlight-history-entry')).toHaveCount(205);
+      await page.locator('.main').evaluate((main) => (main.scrollTop = 0));
+      await page.evaluate(() => {
+        const invoke = window.__TAURI__.core.invoke;
+        let paused = false;
+        window.__TAURI__.core.invoke = async (command, payload) => {
+          if (
+            !paused &&
+            command === 'bridge_action' &&
+            payload?.request?.action === 'getHighlightHistoryPage' &&
+            payload.request.cursor
+          ) {
+            paused = true;
+            await new Promise((resolve) => {
+              window.__releaseBookRefresh = resolve;
+            });
+          }
+          return invoke(command, payload);
+        };
+        window.__desktopVisualHarness.emitRuntimeMessage({
+          action: 'mutation',
+          type: 'note',
+          noteSlug: 'external-highlight',
+        });
+      });
+      await page.waitForFunction(
+        () => typeof window.__releaseBookRefresh === 'function',
+      );
+      await expect(page.locator('.highlight-history-entry')).toHaveCount(100);
+      const before = await page
+        .locator('.main')
+        .evaluate((main) => (main.scrollTop = 600));
+      expect(before).toBeGreaterThan(0);
+      await page.evaluate(() => window.__releaseBookRefresh());
+      await expect(page.locator('.highlight-history-entry')).toHaveCount(205);
+      await expect
+        .poll(() =>
+          page.locator('#results').evaluate((el) => el.style.minHeight),
+        )
+        .toBe('');
+      expect(
+        await page.locator('.main').evaluate((main) => main.scrollTop),
+      ).toBe(before);
+    });
+  });
+
   test('editing a scrolled highlight keeps its entry and surrounding content anchored', async ({
     page,
   }) => {
@@ -8583,6 +8681,108 @@ test.describe('desktop visual regression', () => {
       });
       expect(Math.abs(after.scrollTop - before)).toBeLessThanOrEqual(80);
       expect(after.scrollTop).toBeLessThan(after.maxScroll - 200);
+
+      await page
+        .locator('#relatedResults .result-row')
+        .first()
+        .evaluate((row) => (row.dataset.refreshProbe = 'before-mutation'));
+      await page.evaluate(() =>
+        window.__desktopVisualHarness.emitRuntimeMessage({
+          action: 'mutation',
+          type: 'pins',
+          listId: 'research',
+        }),
+      );
+      await expect(
+        page.locator('[data-refresh-probe="before-mutation"]'),
+      ).toHaveCount(0);
+      const afterNotification = await page
+        .locator('.main')
+        .evaluate((main) => main.scrollTop);
+      expect(Math.abs(afterNotification - before)).toBeLessThanOrEqual(100);
+
+      const externallyRemovedUrl = 'https://example.com/delete-scroll-3';
+      const externallyRemovedId = pageKey(
+        generateSlugFromUrl(externallyRemovedUrl),
+      );
+      await page.evaluate((pinId) => {
+        const harness = window.__desktopVisualHarness;
+        const list = harness.sessionValue('list:research');
+        harness.updateSessionValue('list:research', {
+          ...list,
+          pins: list.pins.filter((pin) => pin.id !== pinId),
+        });
+        harness.emitRuntimeMessage({
+          action: 'mutation',
+          type: 'pins',
+          listId: 'research',
+        });
+      }, externallyRemovedId);
+      await expect(
+        page.locator(
+          `#relatedResults .result-row[data-url="${externallyRemovedUrl}"]`,
+        ),
+      ).toHaveCount(0);
+      const afterExternalChange = await page
+        .locator('.main')
+        .evaluate((main) => main.scrollTop);
+      expect(Math.abs(afterExternalChange - before)).toBeLessThanOrEqual(160);
+    });
+  });
+
+  test('a failed list refresh shows the daemon error and keeps the current rows', async ({
+    page,
+  }) => {
+    const errors = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    const url = 'https://example.com/refresh-failure';
+    const slug = generateSlugFromUrl(url);
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        extraSession: {
+          [listKey('research')]: {
+            slug: 'research',
+            name: 'Research',
+            pins: [{ id: pageKey(slug), pinnedAt: Date.now() }],
+          },
+          [pageKey(slug)]: {
+            slug,
+            url,
+            title: 'Refresh failure page',
+            watermark: Date.now(),
+          },
+        },
+      });
+      await page.locator('.sidebar-item[data-list-id="research"]').click();
+      const row = page.locator(
+        `#relatedResults .result-row[data-url="${url}"]`,
+      );
+      await expect(row).toBeVisible();
+      await row.evaluate((el) => (el.dataset.refreshProbe = 'unchanged'));
+      await page.evaluate(() => {
+        const invoke = window.__TAURI__.core.invoke;
+        window.__TAURI__.core.invoke = async (command, payload) => {
+          if (
+            command === 'bridge_action' &&
+            payload?.request?.action === 'getListDisplay'
+          ) {
+            throw 'Daemon read failed';
+          }
+          return invoke(command, payload);
+        };
+        window.__desktopVisualHarness.emitRuntimeMessage({
+          action: 'mutation',
+          type: 'pins',
+          listId: 'research',
+        });
+      });
+      await expect(page.locator('#errorBubble')).toBeVisible();
+      await expect(page.locator('#errorBubble')).toContainText(
+        'Daemon read failed',
+      );
+      await expect(row).toHaveAttribute('data-refresh-probe', 'unchanged');
+      expect(errors).toEqual([]);
     });
   });
 

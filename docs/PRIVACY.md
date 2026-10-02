@@ -1,69 +1,80 @@
-# browser-recall — Privacy Policy
+# Browser Recall — Privacy Policy
 
-**Last updated:** April 2026
+**Last updated:** October 2, 2026
 
-## What data browser-recall collects
+Browser Recall stores product data locally. Browser Recall does not send analytics
+or browsing data to a developer-operated service. Optional GitHub sync uses a
+repository selected by the user.
 
-browser-recall records the following data as you browse:
+## Data recorded
 
-- **Page URLs and titles** from your browsing history
-- **Page visit timestamps** and visit duration
-- **User-created notes** attached to pages
-- **Text highlights** you select on pages
-- **Page snapshots** (full offline copies) when you explicitly capture them
-- **Likes/dislikes** you assign to pages
-- **Lists** you create to organize pages
-- **Smart rules** you configure for automatic page categorization
+When recording is enabled, Browser Recall records page URLs, titles, visit times,
+time on page, and scroll depth. User actions can add highlights, annotations,
+ratings, lists, rules, edited titles, and imported bookmarks or history.
 
-## Where your data is stored
+Explicit snapshot capture saves page HTML, embedded resources, and extracted text.
+Snapshot content can include information displayed on the captured page.
 
-All product data is stored in a **local folder on your device** that you choose during desktop setup. Browser Recall Desktop writes JSONL logs, JSON checkpoints, notes, and snapshots directly through its local daemon. No data is sent to any server by default.
+Local configuration stores a device ID, approved browser installations, connection
+tokens, and recent connection activity. Settings control recording, excluded URLs,
+display, and sync. Stop recording pauses capture across the browser extension.
+The daemon, the desktop app's local data service, applies URL exclusions.
 
-A small amount of connector state is kept in Chrome's built-in extension storage (`chrome.storage.session` and `chrome.storage.local`), such as pairing identity, connection state, and short-lived commands waiting for the desktop app. Product settings and durable history live in the desktop data folder.
+## Local storage
 
-## Optional sync
+The desktop app writes event logs, JSON files describing current pages and lists,
+notes, and snapshots to the folder chosen during setup. Product data uses JSON,
+JSONL, HTML, and Markdown files. The data folder can be copied or backed up directly.
 
-browser-recall offers optional multi-device sync through a transport you configure yourself:
+Extension storage holds pairing details, connection details, recording status, and
+commands waiting briefly to be sent to the desktop. Snapshot HTML is sent directly
+to the desktop without being saved in extension storage. Desktop configuration and
+local diagnostic logs are stored separately from the product data folder.
 
-- **GitHub** — syncs to a repository you own, using a personal access token you provide
+The browser extension communicates with the paired desktop daemon through a
+WebSocket connection on the same computer. Snapshot capture may request page resources from
+the servers that host those resources.
 
-When sync is enabled, your browsing data is transmitted only to the GitHub repository you configure. browser-recall never sends data to Anthropic, the extension developer, or any Browser Recall cloud service.
+## Optional GitHub sync
 
-## What browser-recall does NOT do
+GitHub sync is disabled by default. When enabled, Browser Recall uses the supplied
+personal access token to contact GitHub and upload recent logs from the current
+device and note JSON files to the configured repository. Snapshot HTML and Markdown files are
+not uploaded by the current sync implementation.
 
-- No analytics or telemetry
-- No tracking pixels or fingerprinting
-- No data collection by the extension developer
-- No advertisements
-- No third-party SDKs or services
-- No data sharing with any party
+Repository permissions determine who can access synced data. Remembered GitHub
+tokens are stored in local desktop configuration; tokens can also be kept only for
+the current session. Browser Recall does not provide a hosted sync service.
 
-## Permissions
-
-browser-recall requests the following Chrome permissions:
+## Browser permissions
 
 | Permission | Purpose |
-|---|---|
-| `storage` | Store connector pairing/session state and short-lived pending commands |
-| `tabs` | Read the URL and title of the active tab |
-| `activeTab` | Interact with the current page for highlights and snapshots |
-| `scripting` | Inject content scripts for highlights and snapshots |
-| `webNavigation` | Detect page navigations for history tracking |
-| `contextMenus` | Add right-click menu items (highlight, snapshot, etc.) |
-| `alarms` | Retry local desktop connector reconnection and queue draining |
-| `<all_urls>` | Content scripts run on all pages to enable highlighting and snapshots |
+| --- | --- |
+| `storage` | Desktop connection credentials, recording status, and pending commands |
+| `tabs` | Identify tabs and perform current-page actions |
+| `activeTab` | User-initiated actions on the current page |
+| `scripting` | Run highlight and snapshot scripts; read the original page URL from saved snapshots |
+| `webNavigation` | Page and same-document navigation detection |
+| `contextMenus` | Highlight and snapshot actions |
+| `alarms` | Retry the desktop connection and send queued commands |
+| `declarativeNetRequestWithHostAccess` | Temporary rules allowing appropriate referrer headers when downloading snapshot resources |
+| `webRequest` | Snapshot redirect and response-header inspection |
+| `<all_urls>` host access | Page capture, highlights, and snapshot resources on supported pages |
 
-## Data export
+Chrome's separate **Allow access to file URLs** setting enables extension actions
+on snapshots opened as local files.
 
-Your data folder IS your export. All data is stored as plain JSON and JSONL files that you can read, copy, or back up at any time without the extension.
+## Deletion
 
-## Data deletion
+Removing the extension removes the extension's stored data but leaves the desktop
+library intact. Quit Browser Recall and standalone daemons before deleting the
+selected data folder, or use Delete under desktop Settings → Data.
 
-To delete all browser-recall data:
-
-1. Remove the extension from Chrome
-2. Delete the data folder you selected during setup
+Local deletion does not remove copies in backups or GitHub repository history.
+Delete those copies separately when removing all retained data. Desktop
+configuration and diagnostic logs must also be removed separately for a complete
+local uninstall.
 
 ## Contact
 
-For privacy questions or concerns, open an issue at the project's GitHub repository.
+For privacy questions, open an issue in the project's GitHub repository.

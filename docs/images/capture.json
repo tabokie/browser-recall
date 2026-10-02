@@ -72,7 +72,7 @@
     "apps/desktop/ui/fonts/nunito.woff2": "f85212b2392aff6c178df5c0c6176fe341785ba641e6ec4ab0c80fb10dc38e0c",
     "apps/desktop/ui/highlight-format.js": "9e5be7cc41e99dbfa9f5262aebacfe77da0cbca58416e6e53536cb01abd6f00d",
     "apps/desktop/ui/index.html": "bd421b96b343f184bd28465d06498752e2d821679094d5bfdc77a31b2e90f1a4",
-    "apps/desktop/ui/index.js": "8645189e0bf91dcade1fd5aa0417b80271e51aa8e11c5e8e314af64191525b58",
+    "apps/desktop/ui/index.js": "d92f10ada06d7582a90dc6870c96479a8b8c07ae22bc890e918827ac33afbbd1",
     "apps/desktop/ui/logger.js": "73939f96285999acfd96bf693d081955a6be4cb6929f17b2aeea59774b632f8c",
     "apps/desktop/ui/search-runtime.d.ts": "4c41e73480a780bc85d7e8f8279c87ba00e8b0753a52ca82375aca32baa1d797",
     "apps/desktop/ui/search-runtime.js": "68b8a6cd99b5b64628df2c8f86224a80a5eca025dd3c77cdab1e315f409dadf7",
@@ -103,29 +103,29 @@
   },
   "screenshots": {
     "timeline.png": {
-      "sha256": "4577d9c9b2775dbc01bb1ee0ba615aa2295cce0b2626e1fbbc21110b785d5d25",
+      "sha256": "2fc2e219fd539c5f85faa313432d86b49c1a510561923f622f1ebaf7232706a1",
       "width": 1920,
       "height": 1000
     },
     "book.png": {
-      "sha256": "d904de0e606b61fc702c0d8a4982ec3e00314b6f9a360cdea4b1bcce3a5ca65b",
+      "sha256": "be53fbf6922f1aeb3c2ab46833e57b459e863e77f62a3aa7243a3fce7ea3219e",
       "width": 1920,
       "height": 1240
     },
     "timeline-mono.png": {
-      "sha256": "1c787c6cf226a6f32888dcd34ac5fbb948ce2702ebcc76643b070d8d5aa47cec",
+      "sha256": "ebed3eedee0453a25ed7355df8d260a887391d5d0d92ddbec12f11545d8e54bd",
       "width": 1920,
       "height": 1000
     },
     "timeline-styles.png": {
-      "sha256": "5a841a05a2e1e069cbfd67830c1e49274edaa4ae8cfdc1e2422aa248338942d3",
+      "sha256": "0bc58e0efa168d9c2f09f0b77c65510cb0524b7e09be5a4c2667b904607f5c45",
       "width": 1920,
       "height": 1000,
       "composition": {
         "sources": ["timeline.png", "timeline-mono.png"],
         "sourceSha256": [
-          "4577d9c9b2775dbc01bb1ee0ba615aa2295cce0b2626e1fbbc21110b785d5d25",
-          "1c787c6cf226a6f32888dcd34ac5fbb948ce2702ebcc76643b070d8d5aa47cec"
+          "2fc2e219fd539c5f85faa313432d86b49c1a510561923f622f1ebaf7232706a1",
+          "ebed3eedee0453a25ed7355df8d260a887391d5d0d92ddbec12f11545d8e54bd"
         ],
         "split": { "top": 0.62, "bottom": 0.38 }
       }

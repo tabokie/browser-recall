@@ -1971,7 +1971,7 @@ async function toggleResultPin(listId, url, title) {
   await sendAction({ action: 'toggleListPin', listId, url });
   // Invalidate local cache — the entity now has the authoritative pin state.
   // The mutation notification will also invalidate, but callers that call
-  // refreshPins() inline need the cache cleared before that runs.
+  // refreshCurrentView() inline need the cache cleared before that runs.
   delete allListPins[listId];
 }
 
@@ -2594,17 +2594,22 @@ function renderListSkeleton() {
   vs.setData([], () => '');
 }
 
-function refreshCurrentView() {
-  if (activeView.type === 'category') {
-    showCategory(activeView.value);
-  } else if (activeView.type === 'list') {
-    showList({ slug: activeView.id, name: activeView.name });
-  } else if (activeView.type === 'explore') {
-    showExplore();
-  } else if (isHighlightHistoryView()) {
-    showHighlightsHistory();
-  } else if (activeView.type === 'recycle-bin') {
-    showRecycleBin();
+async function refreshCurrentView() {
+  try {
+    if (activeView.type === 'category') {
+      await showCategory(activeView.value, { preserveScroll: true });
+    } else if (activeView.type === 'list') {
+      await refreshListPins();
+    } else if (activeView.type === 'explore') {
+      preserveRelatedScrollOnNextRender = true;
+      await runSearchFilterPipeline();
+    } else if (isHighlightHistoryView()) {
+      await showHighlightsHistory({ preserveScroll: true });
+    } else if (activeView.type === 'recycle-bin') {
+      await showRecycleBin();
+    }
+  } catch (error) {
+    surfaceBackgroundError('Could not refresh current view', error);
   }
 }
 
@@ -2652,7 +2657,7 @@ function filterByCategory(entries, category) {
 // Time chart tooltips initialized via initCharts() in initialize()
 
 // --- Display ---
-async function showCategory(category) {
+async function showCategory(category, { preserveScroll = false } = {}) {
   activeView = { type: 'category', value: category };
   updateSidebarActive();
   const categoryLabels = {
@@ -2665,7 +2670,7 @@ async function showCategory(category) {
   updateMainTitle(categoryLabels[category] || category);
   document.getElementById('queryBuilder').style.display = 'none';
 
-  renderResultsSkeleton();
+  if (!preserveScroll) renderResultsSkeleton();
   showNormalLayout();
 
   // Demand-load history
@@ -2678,7 +2683,7 @@ async function showCategory(category) {
   const filtered = filterByCategory(allEntries, category);
   const estimatedByDay = category === 'all' ? getEstimatedByDay() : undefined;
   renderTimeChart(filtered, estimatedByDay);
-  await displayHistoryRows(filtered);
+  await displayHistoryRows(filtered, { preserveScroll });
   if (!isActiveCategoryView(category)) return;
 
   // Wire up demand-loading on scroll
@@ -2983,16 +2988,22 @@ function activateHighlightsHistoryShell() {
   updateMainTitle(tr('desktopBook', 'Book'), 'desktopBook');
 }
 
-async function showHighlightsHistory({ activate = true } = {}) {
+async function showHighlightsHistory({
+  activate = true,
+  preserveScroll = false,
+} = {}) {
   const renderSequence = ++highlightHistoryState.renderSequence;
   if (activate) activateHighlightsHistoryShell();
   showNormalLayout();
-  resetMainScroll();
+  const main = document.querySelector('.main');
+  if (!preserveScroll) resetMainScroll();
   document.getElementById('queryBuilder').style.display = 'none';
   document.getElementById('timeChart').classList.remove('visible');
   disableGlobalVirtualScrollerForDirectRender();
 
   const container = document.getElementById('results');
+  if (preserveScroll) container.style.minHeight = `${container.offsetHeight}px`;
+  else container.style.minHeight = '';
   destroyHighlightHistoryJustification();
   container.innerHTML = '';
   highlightHistoryState.items = [];
@@ -3030,6 +3041,13 @@ async function showHighlightsHistory({ activate = true } = {}) {
       document
         .querySelector(HIGHLIGHT_HISTORY_LIST_SELECTOR)
         ?.insertAdjacentHTML('beforeend', message);
+  } finally {
+    if (isCurrentHighlightHistoryRender(renderSequence) && preserveScroll) {
+      // Keep scrolling performed while later batches were loading.
+      const latestScrollTop = main.scrollTop;
+      container.style.minHeight = '';
+      main.scrollTop = latestScrollTop;
+    }
   }
 }
 
@@ -3203,31 +3221,21 @@ async function showExplore({
   }
 }
 
-// Incremental refresh after pin toggle — preserves scroll position and search state.
-async function refreshPins() {
-  if (activeView.type === 'explore') {
-    runSearchFilterPipeline();
-  } else if (activeView.type === 'list') {
-    const listId = activeView.id;
-    if (!allListPins[listId]) {
-      const projection = await loadListDisplay(listId);
-      if (!projection) throw new Error(`List not found: ${listId}`);
-      allListPins[listId] = projection.pins;
-    }
-    const pins = allListPins[listId];
-    updatePinCount(listId, pins.length);
-    if (pins.length === 0) {
-      document.getElementById('relatedResults').innerHTML =
-        `<div class="no-results">${escapeHtml(tr('desktopNoPinnedPages', 'No pinned pages'))}</div>`;
-      document.getElementById('relatedChart').classList.remove('visible');
-    } else {
-      const { pinsResolved, pageSnap } = await resolvePinsForDisplay(pins);
-      const enriched = pinsResolved.map((r) =>
-        enrichPinResult(r, pins, pageSnap),
-      );
-      await renderListPinView(enriched, listId);
-    }
-  }
+// Reload list data without replacing the search controls or resetting scroll.
+async function refreshListPins() {
+  const listId = activeView.id;
+  const projection = await loadListDisplay(listId);
+  if (!projection) throw new Error(`List not found: ${listId}`);
+  if (activeView.type !== 'list' || activeView.id !== listId) return;
+  const pins = projection.pins;
+  allListPins[listId] = pins;
+  updatePinCount(listId, pins.length);
+  const { pinsResolved, pageSnap } = await resolvePinsForDisplay(pins);
+  const enriched = pinsResolved.map((r) => enrichPinResult(r, pins, pageSnap));
+  await renderListPinView(enriched, listId, {
+    preserveScroll: true,
+    renderPanel: false,
+  });
 }
 
 async function showList(list) {
@@ -3977,11 +3985,15 @@ let listPinsData = [];
 let listPinsListId = null;
 
 // Render all pins into #relatedResults with search filtering support
-async function renderListPinView(allPins, listId) {
+async function renderListPinView(
+  allPins,
+  listId,
+  { preserveScroll = false, renderPanel = true } = {},
+) {
   listPinsData = allPins;
   listPinsListId = listId;
-  renderSearchPanel();
-  await runListPinFilter();
+  if (renderPanel) renderSearchPanel();
+  await runListPinFilter({ preserveScroll });
 }
 
 // Run the active view's search pipeline after an explicit commit/filter change.
@@ -4002,7 +4014,7 @@ function runActiveSearchPipeline() {
 }
 
 // Filter list pins by the committed query, then apply filters
-async function runListPinFilter() {
+async function runListPinFilter({ preserveScroll = false } = {}) {
   const allQueries = committedSearchQuery.trim()
     ? [committedSearchQuery.trim()]
     : [];
@@ -4025,7 +4037,9 @@ async function runListPinFilter() {
   }
   filtered = applyFilters(filtered);
 
-  renderFilteredPins(filtered, listPinsListId, allQueries.join(' '));
+  renderFilteredPins(filtered, listPinsListId, allQueries.join(' '), {
+    preserveScroll,
+  });
 }
 
 function disableRelatedVirtualScrollerForDirectRender(container) {
@@ -4139,11 +4153,17 @@ function renderDirectSearchResults(results) {
 }
 
 // Render filtered pin results directly so list selection can operate on every row.
-function renderFilteredPins(pins, listId, searchQuery) {
+function renderFilteredPins(
+  pins,
+  listId,
+  searchQuery,
+  { preserveScroll: preserveScrollRequested = false } = {},
+) {
   const relatedContainer = document.getElementById('relatedResults');
   disableRelatedVirtualScrollerForDirectRender(relatedContainer);
 
   if (pins.length === 0) {
+    preserveRelatedScrollOnNextRender = false;
     consumeRelatedTopReset();
     relatedContainer.innerHTML = searchQuery.trim()
       ? `<div class="no-results">${escapeHtml(tr('desktopNoMatchingPins', 'No matching pins'))}</div>`
@@ -4158,9 +4178,13 @@ function renderFilteredPins(pins, listId, searchQuery) {
   const sorted = applySortOrder([...pins], effectiveSort);
   const maxAtt = Math.max(...sorted.map((r) => r.attScore), 0.1);
 
-  const preserveScroll = preserveRelatedScrollOnNextRender;
+  const preserveScroll =
+    preserveScrollRequested || preserveRelatedScrollOnNextRender;
   preserveRelatedScrollOnNextRender = false;
   const renderAtTop = preserveScroll ? false : consumeRelatedTopReset();
+  const relatedScrollAnchor = preserveScroll
+    ? captureRelatedDomScrollAnchor(relatedContainer)
+    : null;
   if (renderAtTop) {
     document.querySelector('.main').scrollTop = 0;
   }
@@ -4186,8 +4210,11 @@ function renderFilteredPins(pins, listId, searchQuery) {
       }),
     )
     .join('');
-  if (preserveScroll)
-    document.querySelector('.main').scrollTop = previousScrollTop;
+  if (preserveScroll) {
+    if (!restoreRelatedDomScrollAnchor(relatedContainer, relatedScrollAnchor)) {
+      document.querySelector('.main').scrollTop = previousScrollTop;
+    }
+  }
   bindPinClicks(relatedContainer, listId);
 
   // Time chart for pins
@@ -4322,7 +4349,7 @@ async function enrichFromEntityStorage(entries, opts = {}) {
   }
 }
 
-async function displayHistoryRows(entries) {
+async function displayHistoryRows(entries, { preserveScroll = false } = {}) {
   if (!entries || entries.length === 0) {
     displayMessage('No history entries found');
     return;
@@ -4352,7 +4379,11 @@ async function displayHistoryRows(entries) {
       likes: e.likes,
       hasHighlightNotes: e.hasHighlightNotes,
     });
-  vs.setData(sorted, renderFn);
+  if (preserveScroll) {
+    vs.updateData(sorted, renderFn, { preserveScroll: true });
+  } else {
+    vs.setData(sorted, renderFn);
+  }
 
   // Enrich in background — mutates entries in place, then re-render visible rows
   enrichFromEntityStorage(displayEntries, { includeVisitDates: false }).then(
@@ -5383,7 +5414,7 @@ function bindPinClicks(container, listId) {
     const title = pinBtn.dataset.pinTitle;
     const cid = container._pinListId;
     await toggleResultPin(cid, url, title);
-    refreshPins();
+    void refreshCurrentView();
   });
 }
 
@@ -7948,10 +7979,10 @@ chrome.runtime.onMessage.addListener((request) => {
     const activeListId = activeView.type === 'list' ? activeView.id : null;
     if (request.listId) {
       delete allListPins[request.listId];
-      if (request.listId === activeListId) refreshCurrentView();
+      if (request.listId === activeListId) void refreshCurrentView();
     } else {
       allListPins = {};
-      if (activeListId) refreshCurrentView();
+      if (activeListId) void refreshCurrentView();
     }
   } else if (type === 'lists') {
     renderLists();
@@ -8921,7 +8952,7 @@ function bindFocusContentDelegation(content) {
       // Update pin button appearance
       pinBtn.classList.toggle('pinned');
       // Refresh background UI
-      refreshPins();
+      void refreshCurrentView();
       return;
     }
   });
@@ -9351,7 +9382,7 @@ document.addEventListener('keydown', async (e) => {
     if (url) await toggleResultPin(listId, url, title);
   }
   preserveRelatedScrollOnNextRender = true;
-  refreshPins();
+  void refreshCurrentView();
 });
 
 // --- Ctrl+C / Ctrl+V for page copy-paste ---
@@ -9411,7 +9442,7 @@ document.addEventListener('keydown', async (e) => {
       listId,
       urls: urls,
     });
-    refreshPins();
+    void refreshCurrentView();
   }
 
   if (key === 'a') {

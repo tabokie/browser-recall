@@ -1,667 +1,358 @@
-# Browser Recall — Development Guide
+# Browser Recall — Development
+
+See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for how Browser Recall works and
+[CODEBASE_MAP.md](docs/CODEBASE_MAP.md) for where features are implemented.
 
 ## Prerequisites
 
-- [Rust](https://rustup.rs/) via `rustup`; the repository pins Rust 1.97.0 in
-  `rust-toolchain.toml`, and GitHub CI uses the same version
-- Node.js 24+ (for npm scripts, test runners)
-- `cargo-llvm-cov` 0.8.5 (for the coverage workflow included in full CI)
+- Node.js 24+ and npm dependencies from `package-lock.json`.
+- Rust 1.97.0 with Rustfmt, Clippy, and LLVM tools, pinned in `rust-toolchain.toml`.
+- Platform build tools: Xcode Command Line Tools on macOS, MSVC/WebView2 on Windows,
+  or Tauri's Linux system dependencies listed in `.github/workflows/ci.yml`.
+- `cargo-llvm-cov` 0.8.5 for the full coverage/CI workflow.
 
 ```bash
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Install Node dependencies
-npm install
-
-# Install the pinned Rust coverage command
+npm ci
 cargo install cargo-llvm-cov --version 0.8.5 --locked
+npm run ci:install-playwright
+npm run ci:install-desktop-visual-browsers
 ```
 
-## Building
+Playwright installation includes Linux system libraries and fonts through
+`--with-deps`; Linux installation may require administrator privileges.
 
-Use one command for a complete local build:
+## Build and run
 
 ```bash
 npm run build
 ```
 
-This is the canonical build command. It builds every artifact needed for manual install and testing:
+`npm run build` prepares the Chromium and Firefox extensions and builds the desktop
+app. Load an extension from `dist/extension/`, not `apps/extension/`.
 
-- `dist/extension/chrome/` — the self-contained Chrome extension to load from `chrome://extensions/` with "Load unpacked". This is the directory Chrome must use; do not load `apps/extension/` directly.
-- `dist/extension/firefox/` — the Firefox WebExtension variant. It uses the same code but stages a Firefox background module script manifest instead of Chrome's service worker manifest.
-- `dist/desktop/ui/` — the staged desktop web UI consumed by Tauri. This is an intermediate build artifact, not something to install directly.
-- `dist/desktop/<platform>/bin/` — the raw desktop executable copied from Cargo/Tauri release output when the desktop app is built.
-- `dist/desktop/<platform>/app/`, `dist/desktop/<platform>/dmg/`, and other bundle-type folders — desktop app bundles collected from Tauri release output.
+| Output | Use |
+| --- | --- |
+| `dist/extension/chrome/` | Chrome/Chromium unpacked extension |
+| `dist/extension/firefox/` | Firefox temporary add-on |
+| `dist/desktop/ui/` | Desktop HTML, JavaScript, CSS, and fonts used by Tauri |
+| `dist/desktop/<platform>/bin/` | Desktop executable |
+| `dist/desktop/macos/app/` | macOS app bundle |
+| `dist/desktop/<platform>/<bundle>/` | Release-only installer outputs |
 
-Tauri still uses `target/` internally as a Rust build cache, but release artifacts that users need are collected under `dist/`.
+Cargo and Tauri keep build files in `target/`. After a successful build, the build
+scripts replace the platform's output directory in `dist/desktop/`. If replacement
+fails, the scripts restore the previous output.
 
-Artifact collection stages a complete platform tree before replacing
-`dist/desktop/<platform>/`. On Windows this allows `npm run build` to finish
-while a previously collected executable is still running: the executable is
-retired and the staged executable is installed inside the stable platform
-directory, which WebView2 may keep locked as a whole, before stale
-non-executable output is replaced by the staged remainder. If any promotion
-step fails, the collector restores the complete prior executable and remainder
-tree before reporting the failure. If Windows retains the renamed old
-executable until its process exits, the collector explicitly reports that the
-new executable was installed successfully, explains that closing the window
-only hides the app, and reports the retained old file separately. Quit Browser
-Recall from its tray menu to release that file; the next build retries cleanup
-automatically.
+Windows builds can replace the output while an earlier Browser Recall process
+still runs. Windows may prevent deletion of the executable used by that process.
+The build reports undeleted files and retries cleanup on the next build. Quit
+Browser Recall from the tray menu to release the executable.
 
-The canonical build intentionally does not create an installer. It produces an
-`.app` bundle on macOS and the raw desktop executable on other platforms.
-Installer packaging is a release-only step because macOS may open installer UI
-during DMG creation.
-
-On macOS, the canonical desktop build signs the complete `.app` bundle and then runs `scripts/verify-macos-app-bundle.mjs`. Local builds use Tauri's ad-hoc `-` identity so `Info.plist` and resources are bound instead of leaving only the linker-signed executable; `scripts/finalize-macos-app-bundle.mjs` replaces the per-build CDHash designated requirement with the stable bundle identifier. `scripts/build-tauri-app.mjs` classifies Tauri's missing-notarization-credentials message as expected local-build information while preserving every other warning; distribution builds still show and enforce notarization failures. This stabilizes local OS identity but does not authenticate a publisher. If an Apple Development or Developer ID Application certificate is installed, set `APPLE_SIGNING_IDENTITY` to the identity reported by `security find-identity -v -p codesigning`; Tauri gives that environment variable precedence and the local ad-hoc finalization is skipped. DMG builds fail before bundling unless this Apple identity is present, and distribution also requires notarization.
-
-### Specialized Builds
-
-These commands exist for focused development only. Prefer `npm run build` when preparing artifacts for manual testing.
+### Focused commands
 
 ```bash
-npm run build:extension                         # stage dist/extension/chrome/ and dist/extension/firefox/
-npm run build:desktop-ui                        # only stage dist/desktop/ui/
-npm run build --workspace @browser-recall/desktop      # build the desktop app bundle
-npm run build:dmg --workspace @browser-recall/desktop  # release-only DMG packaging
+npm run build:extension
+npm run build:desktop-ui
+npm run build --workspace @browser-recall/desktop
+npm run dev:desktop
 ```
 
-### Extension Icons
-
-Place PNG icons in `apps/extension/icons/`:
-
-- `icon16.png` (16x16)
-- `icon48.png` (48x48)
-- `icon128.png` (128x128)
-
-See `apps/extension/icons/README.md` for details.
-
-### Desktop Icons
-
-Desktop and extension raster assets are generated from the root SVG sources:
+`npm run build` produces a macOS `.app` and executables on other platforms.
+Installer packaging is a separate release step:
 
 ```bash
-npm run generate:icons
+npm run build:dmg --workspace @browser-recall/desktop
 ```
 
-The command is cross-platform. It renders every desktop slot directly at its
-native target size so already-antialiased SVG edges are not softened by a
-second downsampling pass. The Windows `.ico` includes 16, 20, 24, 28, 32, 36,
-40, 48, 56, 64, 72, 80, 96, 112, 128, and 256 px representations for standard
-shell DPI variants. At runtime, the Windows desktop assigns matching small and
-large representations to its HWND and refreshes them after monitor DPI changes.
-The macOS `.icns` includes every standard and Retina PNG-backed slot without
-requiring `iconutil`. Extension toolbar slots retain their separately tuned
-supersampling pipeline. Commit the regenerated assets with any source icon
-change. Tauri's build script watches the desktop PNG, ICO, and ICNS files so
-the executable and app bundle are re-embedded after regeneration.
+macOS local builds use ad-hoc signing, which does not require an Apple certificate.
+The signature uses a stable app identifier, and the build verifies the complete
+bundle. Set `APPLE_SIGNING_IDENTITY` to an installed Apple signing identity for
+certificate signing. DMG builds require an Apple signing identity; distribution
+also requires notarization credentials.
 
-## Loading the Extension
+### Connect the browser
 
-1. Open Chrome and go to `chrome://extensions/`
-2. Enable "Developer mode" (toggle in top right)
-3. Click "Load unpacked"
-4. Select the `dist/extension/chrome/` directory
-5. Open the extension details and enable **Allow access to file URLs** so snapshots opened from Browser Recall Desktop can expose their embedded identity to the connector. If the setting is disabled, the snapshot popup explains the requirement and opens the extension details page.
-6. The extension appears in your toolbar
+1. Start Browser Recall and complete folder/device setup.
+2. In `chrome://extensions/`, enable Developer mode and load
+   `dist/extension/chrome/`.
+3. Open the popup, click Refresh, and approve pairing in the desktop app.
+4. Enable **Allow access to file URLs** in extension details for desktop-opened
+   file snapshots.
 
-For Firefox development, open `about:debugging#/runtime/this-firefox`, click "Load Temporary Add-on", and select `dist/extension/firefox/manifest.json`.
+Firefox development uses `about:debugging#/runtime/this-firefox` and
+`dist/extension/firefox/manifest.json`. The extension options page directs users to
+the desktop app.
 
-You can also validate and launch the Firefox build with Mozilla's `web-ext`:
+After extension changes, rebuild the extension and reload the extension. After
+Rust changes, rebuild and restart the relevant desktop or daemon process.
+
+### Icons and locales
+
+`npm run generate:icons` renders root SVG sources into desktop ICO/ICNS slots,
+extension icons, and tray assets. Inspect actual target sizes and commit generated
+assets with source changes.
+
+Add locales to `SUPPORTED_LOCALES` in `packages/core/i18n.js` and create a complete
+`packages/core/locales/<code>/messages.json`. Run `npm run locales:check`.
+Builds check that every translation has the required keys, placeholders, and HTML,
+and preserves keyboard shortcuts, code, and product and technical names.
+
+## Verification
+
+Run focused checks during development. Run `npm run ci` before committing.
+Local checks and GitHub Actions use the same `ci:*` package scripts. Tests of native
+windows, tray actions, and process startup run separately.
+
+| Command | Scope |
+| --- | --- |
+| `npm test` | Vitest unit and integration suites |
+| `npm run test:integration` | JavaScript integration suites |
+| `npm run build:test-daemon` | Build the daemon before Playwright tests that use the daemon |
+| `npm run test:e2e` | Playwright workflows |
+| `npm run test:visual` | Build UI assets; run native WKWebView, Chromium, and selected WebKit tests |
+| `npm run ci:test-rust` | Build UI assets and run Rust workspace tests |
+| `npm run test:cold-scripts` | Run manual test-data generation against the daemon |
+| `npm run coverage` | JavaScript/Rust coverage and uncovered-line monitor |
+| `npm run ci` | Documentation check, tests, browser installation, coverage, and lint |
+
+Focused examples:
 
 ```bash
-npx web-ext lint --source-dir dist/extension/firefox
-npx web-ext run --source-dir dist/extension/firefox --firefox /path/to/firefox
+npx vitest run tests/integration/page-identity-parity.test.js
+npm run build:test-daemon
+npx playwright test tests/e2e/popup-lists.spec.js
+npx playwright test tests/e2e/desktop-visual.spec.js --grep 'scroll'
+cargo test -p browser-recall-daemon --test read_projections
 ```
 
-### First Run
+Playwright uses one worker and the Chromium version installed by Playwright. Build
+the daemon before starting tests that use the daemon; compiling Rust during test
+setup can exceed the startup timeout. To test a build without cached Rust output,
+set `CARGO_TARGET_DIR` to a temporary directory and run the same `ci:*` command.
 
-1. Start Browser Recall Desktop with `npm run dev:desktop`
-2. Load `dist/extension/chrome/` as an unpacked extension
-3. Open the extension popup and click `Refresh`
-4. Approve the connection dialog in the desktop app
+### Product coverage
 
-The extension options page is only a stub. The main UI runs in the desktop app window.
+Test desktop and extension changes through Playwright user scenarios. Connect the
+extension to a real daemon when possible. Use Rust integration tests for daemon
+commands and native app behavior that Playwright cannot exercise.
 
-### After Code Changes
+When existing tests miss a bug, add the missing scenario and confirm the test fails
+before fixing the code. Tests for missing permissions or failed message delivery
+must cause those failures. Tests that generate random data must use a fixed random
+seed so a failure can be reproduced.
 
-- **Extension JavaScript/HTML changes**: Reload the extension at `chrome://extensions/`
-- **Desktop/Rust changes**: Rebuild or rerun the relevant Rust target, then restart that process
+`coverage:monitor` reports untested production lines and counts test lines. Use
+coverage to find missing scenarios rather than chase a percentage. Adding JavaScript
+unit-test lines or inline Rust unit-test lines requires an explicit architecture
+exception using `ALLOW_UNIT_TEST_GROWTH=1`.
 
-## Testing
+### Desktop visual baselines
 
-### Full Local CI
+`npm run test:visual` runs the native macOS WKWebView chart-layout probe, all
+Chromium desktop visual tests, and `@webkit` cases. The native probe skips on
+other operating systems. Desktop visual tests replace Tauri calls with test
+responses. Separate Rust and native tests check the real desktop integration.
 
-Run the complete cross-platform CI test and lint chain locally with:
+Generate and verify reference screenshots on macOS 26 with the Playwright browser
+versions in the lockfile. Book and search-tracer tests cover scrollbars that overlay
+content and scrollbars that reserve 11 px of space. Keep reference screenshots for
+both layouts. WebKit Book screenshots use exact matching;
+inspect differences before changing baselines or tolerances.
 
-```bash
-npm run ci
-```
+The Book test renames the bundled Gentium Book Plus family to expose missing
+font weights. System-font tests check that Chinese, Japanese, and Korean characters
+render distinctly before comparing font families. Failed GitHub Actions runs keep expected, actual, and difference PNGs
+for seven days.
 
-GitHub's locally safe jobs delegate to the same `ci:*` package scripts, so local
-and hosted verification cannot drift into different command sets. The native
-macOS lifecycle and Windows single-instance jobs require their platform-specific
-environments described below and are not part of `npm run ci`. README screenshot
-capture is a manual macOS workflow; local CI checks the existing image set
-without opening documentation windows. Run the complete local chain before
-committing, regenerate documentation when needed,
-and run native smoke checks in their required environments when those paths
-change.
+If every visual test fails before execution with `browserType.launch`, `SIGABRT`,
+or `kill EPERM`, rerun the same command with browser-launch permissions. A sandbox
+launch failure does not justify changing product code or assertions.
 
-`npm run build:test-daemon` is the explicit prerequisite for daemon-backed
-Playwright runs. The extension CI, Windows font CI, and cold-script commands
-run that build before Playwright starts. Compiling inside a 30-second fixture
-can fail only on a fresh runner; a prior local test run hides the problem by
-warming Cargo's cache. For a focused direct `npx playwright test` invocation,
-run `npm run build:test-daemon` first.
+### Native platform checks
 
-To verify the same boundary locally with an empty build cache on macOS/Linux:
-
-```bash
-CARGO_TARGET_DIR="$(mktemp -d /tmp/browser-recall-ci-cold.XXXXXX)" npm run ci:test-windows-extension-font
-```
-
-The font scenario is cross-platform despite the CI job name. The temporary
-Cargo directory isolates the cold build from the normal cache; remove that
-specific temporary directory after inspection. This command exercises build,
-daemon launch, connector pairing, and the browser assertion without spending
-a GitHub Actions run.
-
-### Unit Tests (Vitest)
-
-~600 tests covering pure logic: search helpers, rule engine, utilities, sync, caching.
-
-```bash
-npm test                           # run all unit tests
-npx vitest run tests/unit/utils.test.js   # run a specific file
-npx vitest                         # watch mode
-```
-
-Config: `vitest.config.js`. Tests: `tests/**/*.test.js`.
-
-### E2E Tests (Playwright)
-
-~331 tests covering full extension flows: history, lists, settings, sync, snapshots, recycle bin, rules, downtime.
-
-```bash
-npx playwright test                          # run all E2E tests
-npx playwright test tests/e2e/lists.spec.js  # run a specific file
-npx playwright test --headed                 # visible browser
-npm run test:visual                          # build UI; run native WKWebView, Chromium, and tagged WebKit visual checks
-```
-
-Config: `playwright.config.js`. Tests: `tests/e2e/*.spec.js`. Runs use one worker; Chromium is the default channel, and the tagged desktop visual pass selects WebKit explicitly.
-
-Hosted CI also runs `npm run ci:test-extension-e2e`, covering the popup,
-snapshot-highlight, snapshot resource/shadow-DOM, and actual platform-font
-regression suites with pinned Chromium. Navigation regressions include delayed
-YouTube metadata and failed delivery recovery; the full highlight-note editing
-suite covers daemon title cleanup when only Timeline retains the earlier visit,
-and PDF panel save/retry behavior through the real daemon. The staged
-Firefox compatibility smoke suite follows those capture checks. The Windows
-job separately runs the Win32-only locked-artifact replacement test before
-building and launching the native smoke executable.
-
-Two opt-in local smokes cross native browser boundaries that headless
-Playwright cannot: `npm run test:shortcut:native` launches a disposable headed
-Chromium profile on macOS and sends a system Option+R event, while
-`npm run test:firefox:real` launches the staged Firefox artifact through the
-pinned `web-ext@10.5.0` runner and verifies Firefox's actual content-script API
-shape. The latter uses `FIREFOX_BINARY` when set and otherwise uses the standard
-macOS Firefox path.
-
-Canonical local and hosted runs use Playwright's pinned Chromium. When that
-browser has not yet been downloaded but stable Google Chrome is installed, a
-focused desktop-only run can explicitly select the system Chrome channel:
-
-```powershell
-$env:BROWSER_RECALL_PLAYWRIGHT_ENGINE = 'chrome'
-npx playwright test tests/e2e/desktop-visual.spec.js --grep "settings renders nullable profiles"
-Remove-Item Env:BROWSER_RECALL_PLAYWRIGHT_ENGINE
-```
-
-This opt-in changes only the local browser executable; CI continues to install
-and run the pinned Chromium build. Chrome-branded builds 137 and newer reject
-command-line loading of unpacked extensions, so do not use the `chrome` channel
-for extension E2E. On Windows, installed Edge remains a valid local Chromium
-extension runner when the pinned browser cannot be downloaded:
-
-```powershell
-$env:BROWSER_RECALL_PLAYWRIGHT_ENGINE = 'msedge'
-npx playwright test tests/e2e/extension-font-fallback.spec.js
-Remove-Item Env:BROWSER_RECALL_PLAYWRIGHT_ENGINE
-```
-
-`npm run test:visual` is the canonical desktop visual check. It first stages
-`dist/desktop/ui/`, runs a native macOS WKWebView chart-layout probe when on
-macOS, runs the full `tests/e2e/desktop-visual.spec.js` suite in Chromium, then
-runs its `@webkit` cases against WebKit. The native probe loads the staged
-production CSS and verifies that highlighting a chart bar cannot move the page
-list; it skips on non-macOS hosts. Install both browsers with
-`npm run ci:install-desktop-visual-browsers`.
-
-Chromium element snapshots for highlight history and the search tracer include
-the measured main-panel scrollbar gutter in their filenames. macOS can use
-an overlay scrollbar (0 px gutter) or a reserved scrollbar (11 px), changing
-both available width and centered-sheet pixel alignment. Both Book and search
-tracer scenarios explicitly set and assert each gutter, independent of system
-preferences. Keep both baselines;
-an unrecognized gutter produces a missing-baseline failure rather than reusing
-another layout. Desktop visual CI runs on macOS 26, matching the macOS major
-version used to capture the committed baselines. Run baseline generation and
-verification on macOS 26 with the locked Playwright browsers. WebKit highlight
-history snapshots use exact pixel matching; do not compensate for a different
-macOS rendering environment by loosening one screenshot assertion at a time.
-
-The visual suite also runs the native startup paint-check helper against a
-browser that first produces a blank frame and then loads the paused desktop
-surface. The same test requires a persistently blank frame to fail. The native
-lifecycle smoke waits up to 15 seconds for a painted frame instead of assuming
-that a native window title means the webview has loaded. On failure the native
-smoke retains its screenshot, bitmap, isolated app logs, and error under
-`test-results/native-lifecycle/` before cleaning up its temporary app. These
-files are retained locally; the workflow does not upload them automatically.
-
-The native macOS lifecycle test registers a real status item and must never run in a persistent personal login session. Run it only in an ephemeral macOS user or disposable CI runner:
+The macOS window lifecycle test registers a real tray item. Run the test only in a
+temporary macOS login session or disposable CI runner:
 
 ```bash
 BROWSER_RECALL_ISOLATED_MACOS_SESSION=1 npm run test:desktop-native
 ```
 
-It verifies the actual bundle, painted startup-error reporting, repaired-storage relaunch, accessible tray placement/menu activation, repeated reopening, focus, and frame preservation. Playwright separately covers visible Resume command wiring, while Rust exercises the real absent-daemon repair-and-restart boundary and concurrent start serialization. The smoke test unregisters its test app before deleting the temporary bundle, but the ephemeral-session requirement remains because Control Center can retain status-item ownership state independently of Launch Services. GitHub CI runs this scenario on a fresh macOS 26 VM so the native test covers the Control Center generation where the regression occurred without polluting a developer login session.
+The macOS window lifecycle test checks visible startup errors, relaunch after
+storage repair, tray activation, window reopening, focus, and saved window size and
+position. Failure screenshots and logs remain under
+`test-results/native-lifecycle/` before the temporary app is removed.
 
-Windows has a separate native single-instance smoke test. Build the desktop app,
-close any running Browser Recall instance, then run:
+On Windows, close any running Browser Recall process before the single-instance
+test:
 
 ```powershell
 npm run test:desktop-single-instance
 ```
 
-It launches the real executable twice, verifies that the second process exits,
-and waits for the original process to log the forwarded
-`browser-recall://settings` route. Before launch it also uses the native Win32
-icon API to verify that every generated ICO representation is embedded in the
-executable pixel-for-pixel, then inspects the running HWND to require native
-DPI-sized small and taskbar icons. The processes use disposable configuration,
-log, and WebView2 profiles and suppress protocol and launch-at-login
-registration, so the smoke does not read product data, start sync, reuse the
-installed app's browser state, or replace the user's OS registrations. The
-production single-instance identifier is still exercised,
-so a running Browser Recall process must be closed first. Run the resource-only
-icon check without stopping an existing desktop process with
-`node tests/smoke/windows-desktop-single-instance.mjs --icons-only`. Hosted CI
-runs the complete smoke test on `windows-latest`.
-
-When running under a filesystem/process sandbox, Chromium launch may require an unsandboxed command approval. If every visual test fails at `0ms` with `browserType.launch: Target page, context or browser has been closed`, `SIGABRT`, or `kill EPERM`, rerun the same command with browser-launch permissions instead of changing the tests or package script. A focused `npx playwright test ... -g "<name>"` run can pass while the sandboxed npm visual script fails, because the failure is at browser launch before any test code runs.
-
-If tests fail with Chrome process errors:
+The Windows single-instance test uses temporary configuration and WebView2 profiles,
+verifies executable and window icons at different display scales, and checks deep
+links passed from a second process to the first. Run the
+icon check without closing the app:
 
 ```bash
-pkill -9 -f 'Google Chrome'
+node tests/smoke/windows-desktop-single-instance.mjs --icons-only
 ```
 
-### Playwright Browser Setup
+`npm run ci:test-windows-cleanup` checks test cleanup. Windows cleanup must stop
+the app and child processes before deleting profiles. Files that remain locked or
+cannot be deleted cause the test to fail. Windows CI builds before browser setup.
 
-Playwright needs a Chromium binary. Install it if you haven't:
+Tests on macOS and Linux do not compile Rust code restricted to Windows. For the additional
+Windows GNU type check, install MinGW and the Rust target:
 
 ```bash
-npm run ci:install-playwright
+rustup target add x86_64-pc-windows-gnu
+npm run check:desktop:windows
 ```
 
-Both browser-install commands use `--with-deps`. On Linux this installs
-Playwright's system libraries and fonts, including CJK fonts; downloading only
-the browser leaves font fallback dependent on the runner image. The CJK font
-scenario checks distinct rendered glyphs before comparing platform font names,
-so identical missing-glyph boxes cannot masquerade as successful rendering.
-Linux dependency installation may require administrator privileges.
+On macOS, MinGW is available through `brew install mingw-w64`. The cross-check
+builds UI assets and checks all desktop targets; Windows CI still verifies
+MSVC linking and runtime behavior. `.gitattributes` keeps imported script shebangs
+LF across operating systems.
 
-### Reproducing CI Environment Differences
-
-- The Book date headings require the bundled Gentium Book Plus **bold italic**
-  face. Regular and italic faces alone allowed WebKit to use an installed bold
-  italic font on the developer machine while synthesizing the weight on CI.
-  The Book visual scenario aliases the CSS family in served HTML/CSS so installed
-  fonts cannot fill missing weights, and verifies the bold italic face loaded.
-  Removing that face reproduces the original 282-pixel WebKit mismatch locally.
-  Chromium runs the Book and search tracer scenarios with explicit 0- and
-  11-pixel gutters so both snapshot variants are checked on every run.
-  The three WOFF2 assets come from the official
-  [SIL Gentium Plus 6.200 release](https://software.sil.org/gentium/download/previous-versions/)
-  and use the existing `apps/desktop/ui/fonts/OFL.txt` license.
-- Windows native smoke cleanup must terminate the process tree while the desktop
-  parent is still alive. Killing the parent first can leave WebView2 descendants
-  holding the disposable profile open. `npm run ci:test-windows-cleanup`
-  includes a real Windows descendant with an exclusive file lock to exercise
-  the shared teardown helper; that case is explicitly skipped on other hosts.
-  Windows CI runs cleanup tests immediately after `npm ci`, before compiling
-  the desktop. Executable-artifact tests still run after the build.
-  The same suite checks an already-signalled process and nested read-only files
-  on every host. Windows releases its test lock only after the cleanup helper
-  reports an actual failed removal, then asserts that a retry occurred.
-  This handshake avoids relying on a fixed sleep to overlap removal and release.
-  Profile removal uses awaited `node:fs/promises.rm`: Node 24.20.0's native
-  `rmSync` maps Windows permission-denied errors to `EPERM` without retrying
-  them and lacks the asynchronous implementation's read-only-file handling.
-  The helper owns the bounded retry loop so failed attempts can be observed.
-  Persistent errors still fail and identify the child path that cannot be removed.
-  Teardown attempts every process stop and profile removal even after an error;
-  multiple errors are retained in an `AggregateError`, with the original smoke
-  failure first and as the cause.
-- macOS Rust tests and Clippy do not compile `#[cfg(target_os = "windows")]`
-  branches. Before changing Windows host code, run the real Windows target
-  check locally. On macOS, install the MinGW compiler and Windows Rust standard
-  library once, then use:
-
-  ```bash
-  brew install mingw-w64
-  rustup target add x86_64-pc-windows-gnu
-  npm run check:desktop:windows
-  ```
-
-  This command stages the UI and checks every desktop target, including the
-  login-item integration test, against the locked Windows dependencies. It was
-  verified with Rust 1.97.0 and Homebrew MinGW-w64 14.0.0_3. It catches Windows
-  type errors such as calling `into_owned()` on `winreg::RegValue.bytes`, which
-  is already a `Vec<u8>`. It does not execute Windows code or validate MSVC
-  linking, WebView2, registry access, or single-instance delivery; the native
-  Windows job remains required. That job builds before installing browsers so
-  compile errors fail early. The cross-check is an additional platform check,
-  not part of the host-only `npm run ci` chain.
-- `.gitattributes` keeps text checkouts LF even when Windows Git enables
-  `core.autocrlf`. The pinned Vite transform mishandles a CRLF shebang in an
-  imported `.mjs` script, causing Vitest to report a syntax error at the importing
-  test. A disposable checkout with `core.autocrlf=true` followed by
-  `npm run ci:test-windows-artifacts` exercises this import boundary on macOS too;
-  the native locked-executable scenario still requires Windows. Existing Windows
-  checkouts need their working files checked out again to apply the LF policy.
-- The stale-receiver popup scenario forces a state revision after preparing
-  the popup, keeps `getPageIdentity` delivery failing across every reread, and
-  verifies recovery after the test fault is cleared. A one-shot fault allowed
-  slower CI navigation to recover before the assertion and left the test reading
-  hidden diagnostic markup. Run it with
-  `npx playwright test tests/e2e/popup-lists.spec.js -g "receiver is stale"`.
-- The query-only navigation scenario holds the content script's visit report
-  until the first `getReportedUrl` read, then releases the report and polls for
-  the updated reported URL. The browser tab URL and an unchanged empty toolbar
-  badge do not acknowledge content-report delivery; using those signals allowed
-  a one-shot read to pass locally but race on Linux CI. Run the deterministic
-  scenario with `npx playwright test tests/e2e/extension-navigation-regressions.spec.js -g "records query-only"`.
-- macOS 15 and macOS 26 are different visual baseline environments even with
-  the same Playwright version. Keep the visual job and baseline host aligned;
-  the workflow invariant test guards the macOS 26 runner and browser dependency
-  installation commands. Matching the major version is not sufficient evidence
-  that raster output matches: inspect actual and diff images before attributing
-  a mismatch to the operating system or updating a baseline. The Book scenario
-  uses strict soft screenshot assertions to report all six visual states in
-  one failed run; its longer timeout allows those diagnostics to complete.
-  Failed visual jobs retain synthetic expected, actual, and diff PNGs in the
-  `desktop-visual-failure-screenshots` GitHub Actions artifact for seven days.
-  Download that artifact from the failed run before considering another run.
-  Linux font fallback and Windows native behavior still need their actual
-  operating systems for complete verification.
-
-### Coverage Monitor
-
-Use the coverage monitor to find uncovered production lines worth reviewing and to track the long-term test investment mix:
+### Browser-specific tests
 
 ```bash
-npm run coverage:js       # generate per-line JS coverage data for stable JS tests
-npm run coverage:rust     # generate Rust llvm-cov coverage data for the workspace
-npm run coverage:monitor  # print uncovered line ranges and suite LoC mix
-npm run coverage          # run JS coverage, Rust coverage, then the monitor
+npm run test:firefox:smoke
+npm run test:firefox:real
+npm run test:shortcut:native
 ```
 
-`coverage:rust` uses the pinned `cargo-llvm-cov` prerequisite above and stages the desktop UI required by Tauri's compile-time context before covering all workspace targets. Coverage percentages are context, not a target. The useful output is the uncovered file/line list from the stable JS coverage source plus Rust llvm-cov missing-line output: review those gaps and decide whether they represent real user workflows that deserve E2E or daemon integration coverage. `coverage:monitor` also enforces the E2E-first policy by keeping JS unit and inline Rust unit LoC at or below their current baselines unless `ALLOW_UNIT_TEST_GROWTH=1` is set for an explicit architecture exception.
+`test:firefox:real` uses `web-ext@10.5.0` and the browser specified by `FIREFOX_BINARY`
+when provided. `test:shortcut:native` sends Option+R to a temporary Chromium window
+on macOS.
 
-GitHub CI's **Cold Script Smoke** job runs the coverage workflow and a daemon-backed Playwright check of the manual seeded-data helper. `npm run test:cold-scripts` builds the daemon before Playwright starts so a cold Rust compile does not consume the fixture's daemon-startup timeout. Run that focused local check after installing Playwright Chromium.
+Focused local desktop tests may set `BROWSER_RECALL_PLAYWRIGHT_ENGINE=chrome`
+when pinned Chromium is unavailable. Extension tests require pinned Chromium or
+an explicit `msedge` channel; Chrome-branded builds reject command-line unpacked
+extension loading. The `ci:*` scripts always use the pinned browsers.
 
-### Manual Testing
-
-Launch a temporary daemon and Chrome profile with the staged extension loaded. Nothing touches your personal browser profile.
+## Manual testing and debugging
 
 ```bash
-npm run manual              # blank state
-npm run manual:seed         # pre-seeded with 3 pages, 1 note
-npm run manual:case <name>  # loads seeds/<name>.mjs
+npm run manual
+npm run manual:seed
+npm run manual:case -- <name>
 ```
 
-Closing the browser prints a data diff showing everything that changed during the session.
+Manual testing starts a temporary daemon and browser profile, then prints changes
+to stored data after the browser closes. Test-data scripts in gitignored
+`seeds/<name>.mjs` return `events`, `entities`, `deviceId`, and `settings`. Test-data
+generation starts with complete current daemon settings, applies setting events,
+then explicit overrides.
 
-Seed cases live in `seeds/` (gitignored). Each `.mjs` file exports a function returning `{ events, entities, deviceId, settings }`. The seed builder (`scripts/lib/seed-builder.mjs`) is shared by manual tooling and the daemon-backed cold-script E2E workflow.
+| Component | Where to inspect |
+| --- | --- |
+| Desktop | `npm run dev:desktop` terminal and native logs |
+| Background worker | Extension details → Inspect service worker |
+| Content script | Page DevTools console |
+| Popup | Inspect popup |
+| Runtime diagnostics | Settings → Advanced → Debug logging; resets on restart |
 
-### Documentation Screenshots
+Stop only the temporary process associated with a failed test. Inspect test setup
+errors and logs before retrying browser setup.
 
-The README uses native macOS screenshots from the
-real Tauri app, backed by the real daemon and a fictional reading collection.
+## Check stored data
+
+`replay-verify` checks whether saved JSON files agree with the event logs.
+The replay verifier applies log entries using the same Rust code as the daemon,
+then compares the rebuilt data with the files on disk. Set `recall_data_dir` to
+the folder chosen during desktop setup:
+
+```bash
+recall_data_dir="/absolute/path/to/chosen-data-folder"
+recall_replay_dir="$(mktemp -d)"
+cargo run -q -p browser-recall-replay --bin replay-verify -- \
+  --data-dir "$recall_data_dir" --write "$recall_replay_dir" --verbose
+```
+
+The verifier does not read the desktop app's folder setting. Without `--data-dir`,
+the verifier reads `~/browser-data`.
+
+Every run writes rebuilt data and replaces the output directory, including any
+existing contents. `--write` selects the output directory; omitting `--write` uses
+`/tmp/browser-replay`. The example creates a disposable directory. Never use the
+data folder as the output directory.
+
+Notes mentioned in the logs are rebuilt from the logs. Note files with no matching
+log entries are loaded directly because the logs cannot reconstruct those notes.
+
+The report uses three labels for differences:
+
+- `schema-gap`: fields added or removed as the data format changed.
+- `timing-drift`: differences in fields such as timestamps, time on page, or pin
+  order that the verifier allows to differ between saved files and rebuilt data.
+- `data`: other differences that need investigation.
+
+The labels classify differences by field; the labels do not establish the cause.
+Use `--verbose` to inspect the values. The report also lists records found only in
+the rebuilt data or only on disk.
+
+## Documentation screenshots
+
+Documentation capture is a manual macOS workflow. Both commands require a logged-in
+macOS desktop, Xcode Command Line Tools, Accessibility permission, Screen Recording
+permission, and the Chromium version installed by Playwright.
 
 ```bash
 npm run docs:screenshots
-```
-
-Run from a logged-in macOS desktop with Xcode Command Line Tools, the normal
-build prerequisites, and Accessibility and Screen Recording permission for the
-terminal or agent hosting the command. The command builds the desktop UI,
-daemon, and a separate **Browser Recall Documentation** application. The
-documentation window briefly comes to the foreground; leave the window alone
-until capture finishes.
-
-`scripts/lib/documentation-seed.mjs` owns the fixed reading data: 40 distinct
-pages, six pinned pages, and nine highlights from three pages across three days.
-The Timeline sample distributes distinct daily page visits across five weeks in
-August and September, with varied daily activity for the README chart.
-Only two highlights have notes: a long highlight with a short note, and a short
-highlight with a long note. Native capture checks that both notes fit within
-the shorter Book window. The capture command starts a temporary daemon
-to obtain complete current settings, applies
-the seed through the production Rust replay tool, and opens the native app with
-an isolated profile. The separate compiled application identifier also isolates
-Tauri's single-instance socket; a distinct executable name isolates native
-keyboard targeting. Login-item and URL-handler registration are disabled for the
-temporary app.
-
-`scripts/lib/documentation-window.swift` uses macOS Accessibility to navigate
-real controls and ScreenCaptureKit to capture only the app window. Each screen
-must contain the expected reading material and reach a stable rendered state
-before capture succeeds. Application HTML, CSS, and bridge responses are
-unmodified.
-
-The complete image set and `docs/images/capture.json` are updated only after
-Timeline passes in Amber and Mono and Book passes in Amber. Timeline requests
-960 × 500 layout points and a 1920 × 1000-pixel PNG; Book requests 960 × 620
-layout points and a 1920 × 1240-pixel PNG. ScreenCaptureKit requests its best
-available source resolution, but fixed PNG dimensions do not guarantee 2×
-source detail: a 1× virtual display can yield an upscaled image. The host
-display also determines the default capture color profile, and OS versions can
-render fonts differently. Capture and inspect the images on a high-density Mac.
-Only the isolated documentation build lowers the minimum window height to 500
-points. The newest sample visits
-put the two labeled pages first, and capture checks that both titles are visible.
-The capture command selects
-Mono through the real Settings control and verifies persistence.
-`scripts/compose-documentation-hero.mjs` combines the two aligned Timeline
-captures at their original resolution using Canvas: Amber on the left, Mono
-on the right, separated by a white diagonal slash. The README shows that
-single combined image, a shorter Book image, and the two browser images with
-standard Markdown image syntax; repository-host rendering constrains the
-high-density source images responsively.
-Search and Lists need no additional screenshots.
-
-Hosted CI does not regenerate or byte-compare native README screenshots: a
-runner's virtual display can produce different pixels, effective resolution,
-and color profiles from a local high-density display even with identical source
-code. Regenerate both image sets manually, inspect them, and commit their PNGs
-and manifests together.
-
-The Linux unit job checks committed PNG integrity with
-`npm run ci:check-docs -- --images-only`. Local `npm run ci` starts with the full
-freshness check. The checker validates source
-SHA-256 hashes, exact PNG inventory, image bytes and dimensions, diagonal
-composition sources, and README image references. The fingerprint scopes cover
-UI, fonts, locale catalogs, JavaScript dependency locks, seed and capture helpers,
-and native window configuration/assets. Unrelated Rust backend and prose edits
-do not force manual recapture.
-
-For local freshness failures, run the named macOS capture command, inspect the
-images, and commit PNGs and manifests together. Capture checks source hashes
-again before publication, rejecting edits made while capture was running.
-Manifests are never updated without successful native capture. The check detects
-source drift, not elapsed time or changes in OS rendering.
-
-To regenerate only the combined image from the saved native sources:
-
-```bash
-node scripts/compose-documentation-hero.mjs
-```
-
-Composition-only regeneration requires current native source fingerprints and
-matching source image hashes. Changing the compositor requires desktop recapture;
-composition alone never updates or certifies native capture provenance.
-
-The compositor uses the repository's Playwright Chromium installation. The
-capture manifest records input fingerprints, the seed hash, image hashes,
-exact pixel dimensions, and composition inputs and split positions. The manifest
-omits run timestamps and source commit identifiers so identical inputs produce
-identical generated metadata. macOS may constrain window size to the display.
-Relative-time labels and OS rendering can vary between runs. Inspect the native sources and final
-combined image before committing. On a navigation or capture failure, inspect
-`test-results/documentation/`.
-
-The command closes the temporary application and removes the temporary profile
-after completion or a capture error. Existing browsing data and the regular
-`dist/desktop/` app are not used for capture. `npm run test:cold-scripts` checks the
-documentation seed at the real daemon/connector boundary in canonical CI.
-
-Capture the browser extension separately with:
-
-```bash
 npm run docs:screenshots:browser
 ```
 
-The browser workflow requires a logged-in macOS desktop and the same native
-capture permissions as desktop screenshots. The browser workflow uses an isolated
-headed Chromium profile, the production extension with test-control hooks, and a
-temporary real daemon. Install the repository's
-Playwright Chromium build first with `npm run ci:install-playwright`.
-`tests/e2e/documentation-browser.spec.js` serves a fictional article, seeds the
-shared reading collection through Rust replay with two lists, and starts the
-example article without highlights. The browser window requests an 800 × 434-point
-layout and produces a 1600 × 868-pixel image so the toolbar icon and
-popup remain prominent on high-density displays. The first screenshot shows the real toolbar popup over the
-unmarked article. The second shows the live note editor after creating a single
-highlight through the extension. ScreenCaptureKit captures the named browser
-window and the separate popup window at 1600 × 868 output pixels.
-Capture includes only the isolated Chromium
-process's window IDs, so overlapping applications cannot appear in exported
-images. The helper tab stays in a minimized window
-outside the captured browser window. Extension markup, styles, and daemon
-responses are unmodified. Both the popup and note editor must fit fully inside
-the smaller browser window. The scenario saves the new note and checks daemon
-persistence before exporting images.
+Run desktop and browser capture separately so native focus does not interfere.
+Capture uses separate test app identifiers, browser profiles, fictional data, and a real
+daemon. The regular app and personal browsing data are not used. Leave capture
+windows alone until completion.
 
-The documentation scenario requests English through the browser fixture. On
-macOS, a disposable launcher passes `-AppleLanguages '(en)'` to headed Chromium;
-the override applies only to that process. The capture checks actual English
-popup labels before exporting, and the manifest records the locale.
+| Capture | Layout | PNG output |
+| --- | --- | --- |
+| Timeline, Amber and Mono | 960 × 500 points | 1920 × 1000 pixels |
+| Book, Amber | 960 × 620 points | 1920 × 1240 pixels |
+| Browser popup and highlight editor | 800 × 434 points | 1600 × 868 pixels |
 
-`scripts/capture-browser-documentation.mjs` exports both images and
-`docs/images/browser-capture.json` after the scenario passes. A normal Playwright
-run uses headless Chromium, keeps two content images in test artifacts, and
-leaves documentation assets untouched. Inspect both browser images after
-regeneration. Run native desktop capture
-and browser capture separately so browser windows cannot take focus during
-native input.
+The capture scripts operate the real app and browser. The scripts check content,
+window dimensions, language, and whether rendering has finished before saving
+images and capture manifests. Browser capture uses
+English and verifies note persistence. Capture failures retain evidence in
+`test-results/documentation/`.
 
-## Debugging
-
-- **Desktop app**: run `npm run dev:desktop` and watch the Tauri / Rust logs in that terminal
-- **Background service worker**: `chrome://extensions/` -> extension details -> "Inspect views: service worker"
-- **Content script**: Open DevTools on any webpage and check the console
-- **Popup**: Right-click the extension icon -> "Inspect popup"
-- **Debug logging**: Enable in Settings -> Advanced -> Debug logging. Logs go to the service worker console via `logDebug()`.
-
-## Adding a Locale
-
-Add the locale code, native display name, and any system-locale aliases to
-`SUPPORTED_LOCALES` in `packages/core/i18n.js`, then add a complete
-`packages/core/locales/<code>/messages.json` catalog. Run
-`npm run locales:check`; extension and desktop builds run the same validation
-before staging. Catalogs must preserve keys, placeholders, HTML tags,
-`<code>`/`<kbd>` contents, product names, browser names, shortcuts, and other
-protected technical terms from English.
-
-## Formatting
+Fixed output dimensions do not guarantee 2× source detail on a 1× display.
+Use a high-density Mac and inspect source PNGs and the combined Timeline image.
+Commit images with `docs/images/capture.json` and `docs/images/browser-capture.json`.
 
 ```bash
-npm run fmt              # format all JS/JSON files in-place
-npm run fmt:check        # check formatting (CI mode, no writes)
-cargo fmt                # format Rust code
-cargo fmt -- --check     # check Rust formatting (CI mode)
+node scripts/compose-documentation-hero.mjs
+npm run ci:check-docs
+npm run ci:check-docs -- --images-only
 ```
 
-## Lint & Analysis
+To rebuild the combined Timeline image without taking new screenshots, source
+files and input images must still match the hashes in the capture manifest.
+Changes to the script that combines the images require new desktop screenshots.
+
+The full checker verifies source-file hashes, image hashes and dimensions, inputs
+to the combined image, and README image links. Linux CI checks image integrity;
+local CI also checks whether source files have changed since capture. Prose-only
+and backend-only edits do not require new screenshots. Never update capture
+manifests without a successful capture.
+
+## Formatting and analysis
 
 ```bash
-npm run lint:unused      # unused files/exports/deps
-npm run lint:duplicates  # duplicated code blocks
-cargo clippy --workspace --all-targets -- -D warnings  # Rust lints
+npm run fmt
+npm run fmt:check
+cargo fmt
+cargo fmt -- --check
+npm run lint:unused
+npm run lint:duplicates
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-## Replay Verification
-
-Replays the full JSONL event log through `effectOf` and diffs the result against on-disk checkpoints. Useful for validating that the replay engine reproduces the expected state.
-Existing note objects are used as replay base state only when no log event references them. Notes with log history are rebuilt from those events so tombstone idempotence does not hide their related replay effects. Differences caused by selective checkpoint timing, including an earlier `createdAt` recovered from visit logs, are reported separately from genuine data discrepancies.
-
-```bash
-cargo run -q -p browser-recall-replay --bin replay-verify --                         # default output
-cargo run -q -p browser-recall-replay --bin replay-verify -- --write /tmp/my-replay  # custom output dir
-cargo run -q -p browser-recall-replay --bin replay-verify -- --verbose               # show all diffs (not just 5 per category)
-```
-
-## Snapshot Identity Migration
-
-Snapshot HTML must contain both `x-browser-recall-slug` and
-`x-browser-recall-url`. Before running a build that requires this identity,
-migrate the persistent snapshot corpus using the authoritative page
-checkpoints:
-
-```bash
-npm run migrate:snapshot-identity -- --data-dir /absolute/path/to/browser-data --check
-npm run migrate:snapshot-identity -- --data-dir /absolute/path/to/browser-data
-```
-
-The migration validates snapshot/page identities and shards, corrects obsolete
-metadata, adds missing metadata, and replaces each changed HTML file atomically.
-The `--check` form is read-only and exits nonzero while files remain pending.
-
-## Project Structure
-
-```
-.
-├── apps/desktop/
-│   ├── src-tauri/          # Tauri shell and desktop bridge
-│   └── ui/                 # Main Browser Recall interface
-├── apps/extension/         # Chromium/Firefox connector extension
-│   ├── manifest.json       # MV3 manifest
-│   ├── background.js       # Connector service worker
-│   ├── connector/          # Pairing, WS bridge, command buffer
-│   ├── content.js          # Page capture, attention tracking
-│   ├── popup.html/js       # Popup dashboard
-│   ├── options-stub.html/js # Opens the desktop app
-│   └── savepage/           # Save Page WE fork (HTML snapshots)
-├── crates/daemon/          # Pairing, storage, search, sync transport
-├── crates/replay/          # Pure event replay, entity effects, replay verifier
-├── crates/search/src/lib.rs # Native search crate
-├── packages/core/          # Shared JS modules during desktop split
-├── tests/
-│   ├── *.test.js           # Vitest unit tests
-│   ├── e2e/                # Playwright E2E specs
-│   ├── lib/seed-builder.mjs # Manual seed-data builder
-│   └── fixtures/           # Test data files
-├── scripts/                # Manual test browser + data migration helpers
-├── seeds/                  # Manual test seed cases (gitignored)
-├── plans/                  # Implementation plans
-├── Cargo.toml              # Rust dependencies
-└── package.json            # npm scripts and dev dependencies
-```
+Rust toolchain pins must match local configuration and hosted CI. Use formatting
+and analysis appropriate to the changed files; run the complete CI chain before
+committing.
