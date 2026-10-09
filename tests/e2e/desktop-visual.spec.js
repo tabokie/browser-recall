@@ -1631,6 +1631,26 @@ test.describe('desktop visual regression', () => {
         animations: 'disabled',
         maxDiffPixelRatio: 0.01,
       });
+      const chromeStore = page.getByRole('link', { name: 'Chrome Web Store' });
+      const firefoxStore = page.getByRole('link', { name: 'Firefox Add-ons' });
+      await expect(chromeStore).toHaveAttribute(
+        'href',
+        'https://chromewebstore.google.com/detail/browser-recall/BROWSER_RECALL_CHROME_WEB_STORE_ID',
+      );
+      await expect(firefoxStore).toHaveAttribute(
+        'href',
+        'https://addons.mozilla.org/firefox/addon/browser-recall-connector/',
+      );
+      await firefoxStore.click();
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness.openedExternalUrls(),
+          ),
+        )
+        .toEqual([
+          'https://addons.mozilla.org/firefox/addon/browser-recall-connector/',
+        ]);
     });
   });
 

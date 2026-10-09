@@ -4209,7 +4209,7 @@
         background: var(--desktop-paper-surface);
         border: 1px solid var(--desktop-paper-border);
         border-radius: 16px;
-        padding: 40px 36px 32px;
+        padding: 32px 36px 28px;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.06);
       }
       .onboarding-card h1 {
@@ -4225,10 +4225,10 @@
         font-size: 14px;
         color: var(--text-secondary);
         line-height: 1.6;
-        margin: 0 0 28px;
+        margin: 0 0 20px;
       }
       .onboarding-section {
-        margin-bottom: 20px;
+        margin-bottom: 16px;
       }
       .onboarding-section h3 {
         font-family: var(--font-body);
@@ -4242,6 +4242,17 @@
         font-size: 13px;
         color: var(--text-secondary);
         margin: 0 0 10px;
+      }
+      .onboarding-store-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 16px;
+        margin: 0 0 10px;
+        font-size: 13px;
+      }
+      .onboarding-store-links a {
+        color: var(--accent-primary);
+        text-underline-offset: 3px;
       }
       .onboarding-section label:not(.toggle-switch) {
         display: block;
@@ -4509,7 +4520,7 @@
       </button>
     </div>
 
-    <!-- Onboarding screen (shown when Browser Recall Desktop is not paired yet) -->
+    <!-- Onboarding screen (shown before desktop setup is complete) -->
     <div id="onboarding">
       <div class="onboarding-card" id="onboardingSetupCard">
         <button
@@ -4532,10 +4543,10 @@
             />
           </svg>
         </button>
-        <h1 data-i18n="extensionShortName">browser-recall</h1>
-        <p class="onboarding-desc" data-i18n="desktopOnboardingIntro">
-          browser-recall saves browsing history, notes, and highlights through
-          Browser Recall Desktop into a local plain-text data folder.
+        <h1 data-i18n="extensionName">Browser Recall</h1>
+        <p class="onboarding-desc" data-i18n="commonProductIntro">
+          The desktop app organizes and searches your collection. The browser
+          extension records visits and saves snapshots, highlights, and notes.
         </p>
 
         <div class="onboarding-section onboarding-colors">
@@ -4552,12 +4563,25 @@
         </div>
 
         <div class="onboarding-section onboarding-live-capture">
-          <h3 data-i18n="desktopOnboardingLiveCapture">Live capture</h3>
-          <p data-i18n="desktopOnboardingLiveCaptureText">
-            Install the browser extension and pair it from the extension popup.
-            Browser Recall Desktop must stay running in the background to record
-            visits.
-          </p>
+          <h3 data-i18n="desktopOnboardingLiveCapture">
+            Install extensions now or later
+          </h3>
+          <div class="onboarding-store-links">
+            <a
+              href="https://chromewebstore.google.com/detail/browser-recall/BROWSER_RECALL_CHROME_WEB_STORE_ID"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-i18n="extensionStoreChrome"
+              >Chrome Web Store</a
+            >
+            <a
+              href="https://addons.mozilla.org/firefox/addon/browser-recall-connector/"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-i18n="extensionStoreFirefox"
+              >Firefox Add-ons</a
+            >
+          </div>
           <div class="option" id="onboardingLaunchAtLoginRow">
             <div class="option-row">
               <span data-i18n="desktopLaunchAtLoginLong"
@@ -4582,9 +4606,9 @@
           <h3 data-i18n="desktopOnboardingDataHeading">
             Choose your data folder
           </h3>
-          <p data-i18n="desktopOnboardingDataText">
-            Browser Recall stores plain-text local data in the folder you
-            choose. No default folder is used until you make this choice.
+          <p data-i18n="commonDataOwnership">
+            Your data stays in your chosen folder as readable JSON and Markdown
+            files.
           </p>
           <button id="onboardingDirBtn" data-i18n="desktopChooseDataFolder">
             Choose Data Folder
@@ -4636,9 +4660,8 @@
                 >Browsing history</strong
               >
               <span data-i18n="desktopOnboardingHistoryText"
-                >Every page visit is automatically saved by Browser Recall
-                Desktop and stays searchable by title, web address, and
-                content.</span
+                >Keep browsing history without a time limit. Find saved visits
+                by title and URL in the desktop app.</span
               >
             </div>
           </div>
@@ -4660,9 +4683,8 @@
                 >Highlights &amp; notes</strong
               >
               <span data-i18n-html="desktopOnboardingHighlightsTextHtml"
-                >Select text and press <kbd>Alt+H</kbd> to highlight it, or
-                press <kbd>Alt+H</kbd> with no selection to add a note to the
-                current page.</span
+                >Select text on a webpage and press <kbd>Alt+H</kbd> in the
+                browser extension to highlight it and add a note.</span
               >
             </div>
           </div>
@@ -4684,8 +4706,8 @@
                 >Page snapshots</strong
               >
               <span data-i18n-html="desktopOnboardingSnapshotsTextHtml"
-                >Press <kbd>Alt+S</kbd> to save an offline copy of the page
-                through the desktop bridge.</span
+                >Press <kbd>Alt+S</kbd> in the browser extension to save a
+                compact snapshot of the current page for offline reading.</span
               >
             </div>
           </div>
@@ -4705,8 +4727,8 @@
             <div class="onboarding-feature-text">
               <strong data-i18n="commonLists">Lists</strong>
               <span data-i18n="desktopOnboardingListsText"
-                >Organize pages into lists. Use automatic inbox rules to create
-                a live-updating list.</span
+                >Organize pages into lists. A page can belong to more than one
+                list.</span
               >
             </div>
           </div>

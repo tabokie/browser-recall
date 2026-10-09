@@ -2,7 +2,7 @@
 import {
   generateSlugFromUrl,
   escapeHtml,
-  isInternalBrowserUrl,
+  isUnavailablePageUrl,
 } from './utils.js';
 import { logDebug, logError } from './logger.js';
 import { createPopupNoteSession } from './popup-note-session.js';
@@ -1927,23 +1927,19 @@ async function createListAndPin(name) {
   logDebug('[popup] Created list and pinned page:', name, listId);
 }
 
-// Recording pause state is session-only and shared with content/background code
-// through the single `workspace: { mode }` schema.
+// The background owns recording state for popup and content-script consumers.
 async function loadRecordingState() {
   if (recordingUiState.hydrated) {
     return { paused: recordingUiState.paused };
   }
-  const { workspace } = await chrome.storage.session.get(['workspace']);
-  if (
-    workspace !== undefined &&
-    (!workspace ||
-      typeof workspace !== 'object' ||
-      Array.isArray(workspace) ||
-      (workspace.mode !== 'default' && workspace.mode !== 'private'))
-  ) {
-    throw new Error('Stored recording state must have mode default or private');
+  const recording = requireSuccessfulResponse(
+    await chrome.runtime.sendMessage({ action: 'getRecordingState' }),
+    'getRecordingState',
+  );
+  if (recording.mode !== 'default' && recording.mode !== 'private') {
+    throw new Error('Recording state must have mode default or private');
   }
-  recordingUiState.paused = workspace?.mode === 'private';
+  recordingUiState.paused = recording.mode === 'private';
   recordingUiState.hydrated = true;
   applyRecordingBarState();
   return { paused: recordingUiState.paused };
@@ -2010,6 +2006,12 @@ async function handleRecordingToggleClick() {
     if (nextPaused) {
       renderBannerOnly();
     }
+  } catch (error) {
+    // The background may have committed the global state before a page receiver
+    // failed. Read the committed state so the toggle remains truthful.
+    recordingUiState.hydrated = false;
+    await loadRecordingState();
+    throw error;
   } finally {
     applyRecordingBarState();
   }
@@ -2020,6 +2022,10 @@ document.getElementById('recordingToggle').addEventListener('click', () => {
   void runPopupUiMutation('recording-toggle', handleRecordingToggleClick).catch(
     (error) => {
       logError('[popup] Recording toggle failed:', error);
+      renderPageDiagnostic({
+        title: tr('extensionActionFailed', 'Action failed', undefined),
+        message: error.message,
+      });
     },
   );
 });
@@ -2501,9 +2507,7 @@ async function resolveActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (
     !tab ||
-    !tab.url ||
-    isInternalBrowserUrl(tab.url) ||
-    (tab.url.startsWith('chrome-extension://') && !isSnapshotViewerUrl(tab.url))
+    (isUnavailablePageUrl(tab.url) && !isSnapshotViewerUrl(tab.url))
   ) {
     showUnavailablePage(
       tr('extensionNotAvailablePage', 'Not available for this page', undefined),
@@ -2514,7 +2518,10 @@ async function resolveActiveTab() {
 }
 
 function isSnapshotViewerUrl(url) {
-  return url.startsWith(chrome.runtime.getURL('snapshot-viewer.html'));
+  return (
+    typeof url === 'string' &&
+    url.startsWith(chrome.runtime.getURL('snapshot-viewer.html'))
+  );
 }
 
 async function resolveEffectiveUrl(tab) {

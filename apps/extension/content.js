@@ -55,7 +55,6 @@ if (!markdownExtractorModule?.extractMarkdown) {
 let contentScriptInitialized = false;
 
 function readRecordingMode(workspace) {
-  if (workspace === undefined) return 'default';
   if (
     !workspace ||
     typeof workspace !== 'object' ||
@@ -73,31 +72,37 @@ function ensureContentScriptInitialized() {
   initContentScript();
 }
 
-// A page can load while recording is paused and remain open after recording
-// resumes. Keep that content-script instance dormant, but initialize its
-// receiver on the explicit session transition instead of requiring a reload.
-chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== 'session' || !changes.workspace) return;
+// Firefox does not expose session storage to content scripts. Read recording
+// state through the background and keep a receiver available on dormant pages
+// so resuming recording does not require reloading those pages.
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action !== 'recordingStateChanged') return false;
   try {
-    if (readRecordingMode(changes.workspace.newValue) === 'default') {
+    if (readRecordingMode(request) === 'default') {
       ensureContentScriptInitialized();
     }
+    sendResponse({ success: true });
   } catch (error) {
     console.error('[content] Invalid recording state:', error);
+    sendResponse({ success: false, error: error.message });
   }
+  return false;
 });
 
-chrome.storage.session
-  .get(['workspace'])
+chrome.runtime
+  .sendMessage({ action: 'getRecordingState' })
   .then((result) => {
-    if (readRecordingMode(result.workspace) === 'private') {
+    if (result?.success !== true) {
+      throw new Error(result?.error || 'Recording state is unavailable');
+    }
+    if (readRecordingMode(result) === 'private') {
       console.log('[content] Recording paused — all tracking disabled');
       return;
     }
     ensureContentScriptInitialized();
   })
   .catch((error) => {
-    console.error('[content] Could not load recording state:', error);
+    console.error('[content] Could not initialize page capture:', error);
   });
 
 function initContentScript() {
@@ -317,16 +322,9 @@ function initContentScript() {
 
   // ─── Page Reporting ───────────────────────────────────────────────────
 
-  // Must match INTERNAL_URL_PREFIXES in utils.js (can't import — content scripts are non-module).
-  const internalUrlPrefixes = ['chrome://', 'edge://', 'about:'];
-
   function reportForUrl(url, delta) {
     if (getEmbeddedPageSlug()) return;
-    if (
-      internalUrlPrefixes.some((prefix) => url.startsWith(prefix)) ||
-      url.startsWith('chrome-extension://')
-    )
-      return;
+    if (pageIdentity.isUnavailablePageUrl(url)) return;
     chrome.runtime
       .sendMessage({ action: 'recordPageActivity', url, ...delta })
       .catch((error) => {
@@ -1065,6 +1063,8 @@ function initContentScript() {
     } else if (request.action === 'showLikeNotification') {
       showLikeNotification(request.delta);
       sendResponse({ success: true });
+    } else {
+      return false;
     }
 
     return true; // Keep channel open for async sendResponse

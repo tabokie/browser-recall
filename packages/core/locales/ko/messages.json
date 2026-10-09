@@ -387,21 +387,17 @@
     "message": "데이터 폴더를 선택하세요",
     "description": "Onboarding data-folder heading."
   },
-  "desktopOnboardingDataText": {
-    "message": "Browser Recall은 선택한 폴더에 일반 텍스트 로컬 데이터를 저장합니다. 이 항목을 선택할 때까지는 기본 폴더가 사용되지 않습니다.",
+  "commonDataOwnership": {
+    "message": "데이터는 선택한 폴더에 읽을 수 있는 JSON 및 Markdown 파일로 저장됩니다.",
     "description": "Onboarding data-folder explanation."
   },
-  "desktopOnboardingIntro": {
-    "message": "browser-recall은 Browser Recall Desktop을 통해 검색 기록, 메모, 하이라이트를 로컬 일반 텍스트 데이터 폴더에 저장합니다.",
+  "commonProductIntro": {
+    "message": "데스크톱 앱에서 컬렉션을 정리하고 검색하세요. 브라우저 확장 프로그램은 방문 기록, 스냅샷, 하이라이트와 메모를 저장합니다.",
     "description": "Onboarding product description."
   },
   "desktopOnboardingLiveCapture": {
-    "message": "라이브 캡처",
+    "message": "확장 프로그램을 지금 또는 나중에 설치하세요",
     "description": "Onboarding live capture heading."
-  },
-  "desktopOnboardingLiveCaptureText": {
-    "message": "브라우저 확장 프로그램을 설치하고 확장 팝업에서 페어링하세요. Browser Recall Desktop은 방문을 기록하기 위해 백그라운드에서 계속 실행되어야 합니다.",
-    "description": "Onboarding live capture explanation."
   },
   "desktopOnboardingPickColor": {
     "message": "색상을 선택하세요",
@@ -412,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "브라우저에서 Browser Recall 팝업을 열고 ‘데스크톱과 페어링’을 클릭하세요.",
+    "message": "Browser Recall 브라우저 확장 프로그램은 자동으로 연결됩니다.",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -992,7 +988,7 @@
     "description": "Extension popup placeholder URL text."
   },
   "extensionDesktopControl": {
-    "message": "데스크탑 제어",
+    "message": "데스크톱 앱",
     "description": "Extension options heading."
   },
   "extensionDesktopOffline": {
@@ -1004,7 +1000,7 @@
     "description": "Extension options heading."
   },
   "extensionMainUiRunsInDesktop": {
-    "message": "기본 Browser Recall 인터페이스는 데스크톱 앱에서 실행됩니다.",
+    "message": "Browser Recall 데스크톱 앱에서 목록을 정리하고 저장된 페이지, 하이라이트, 메모와 스냅샷을 검색하세요.",
     "description": "Extension options explanatory text."
   },
   "extensionNotSet": {
@@ -1342,7 +1338,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "텍스트를 선택하고 <kbd>Alt+H</kbd>를 누르면 강조 표시됩니다.",
+    "message": "웹페이지에서 텍스트를 선택하고 브라우저 확장 프로그램에서 <kbd>Alt+H</kbd>를 눌러 하이라이트와 메모를 추가하세요.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {
@@ -1350,7 +1346,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryText": {
-    "message": "모든 페이지 방문은 Browser Recall Desktop에 의해 자동으로 저장되며 제목, 웹 주소 및 콘텐츠로 검색 가능한 상태로 유지됩니다.",
+    "message": "방문 기록을 기간 제한 없이 보관합니다. 데스크톱 앱에서 제목과 URL로 저장된 방문을 찾으세요.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryTitle": {
@@ -1358,11 +1354,11 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingListsText": {
-    "message": "페이지를 목록으로 구성합니다. 자동 받은 편지함 규칙을 사용하여 실시간 업데이트 목록을 만듭니다.",
+    "message": "페이지를 목록으로 정리하세요. 한 페이지를 여러 목록에 추가할 수 있습니다.",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTextHtml": {
-    "message": "<kbd>Alt+S</kbd>를 누르면 데스크톱 브리지를 통해 페이지의 오프라인 사본이 저장됩니다.",
+    "message": "브라우저 확장 프로그램에서 <kbd>Alt+S</kbd>를 눌러 현재 페이지의 간결한 스냅샷을 저장하고 오프라인으로 읽으세요.",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTitle": {
@@ -1370,7 +1366,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "브라우저에서 Browser Recall 팝업을 열고 ‘데스크톱과 페어링’을 클릭하세요.",
+    "message": "Browser Recall 브라우저 확장 프로그램은 자동으로 연결됩니다.",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {
@@ -1600,5 +1596,13 @@
   "desktopBook": {
     "message": "책",
     "description": "Primary desktop highlight-book navigation label."
+  },
+  "extensionStoreChrome": {
+    "message": "Chrome Web Store",
+    "description": "Browser extension store link label."
+  },
+  "extensionStoreFirefox": {
+    "message": "Firefox Add-ons",
+    "description": "Browser extension store link label."
   }
 }

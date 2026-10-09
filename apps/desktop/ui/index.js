@@ -4432,20 +4432,22 @@ function buildDetailHtml(url, attDetail, notes, likes = 0) {
   return html;
 }
 
-function bindDetailUrlHandlers(container) {
-  container.querySelectorAll('.detail-url a[href]').forEach((link) => {
-    link.addEventListener('click', async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const url = link.getAttribute('href');
-      if (!url) return;
-      try {
-        await chrome.tabs.create({ url });
-      } catch (error) {
-        surfaceBackgroundError('Could not open URL', error);
-      }
+function bindExternalUrlHandlers(container) {
+  container
+    .querySelectorAll('.detail-url a[href], .onboarding-store-links a[href]')
+    .forEach((link) => {
+      link.addEventListener('click', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const url = link.getAttribute('href');
+        if (!url) return;
+        try {
+          await chrome.tabs.create({ url });
+        } catch (error) {
+          surfaceBackgroundError('Could not open URL', error);
+        }
+      });
     });
-  });
 }
 
 // Lazy-load extra detail data (notes, lists, snapshots) when detail is expanded
@@ -5263,7 +5265,7 @@ function openPageDetailCard(
       body.innerHTML =
         html +
         (extraHtml ? `<div class="detail-extra">${extraHtml}</div>` : '');
-      bindDetailUrlHandlers(body);
+      bindExternalUrlHandlers(body);
       bindNoteDeleteButtons(body);
       bindSnapshotClickHandlers(body);
     })
@@ -6561,7 +6563,7 @@ document.getElementById('selectDirBtn').addEventListener('click', async () => {
       showStatus(
         tr(
           'desktopOpenPopupPair',
-          'Open the Browser Recall popup in Chrome and click Pair with desktop.',
+          'The Browser Recall browser extension connects automatically.',
         ),
         'success',
       );
@@ -9077,6 +9079,7 @@ async function showOnboarding() {
   }
   applyDesktopConnectorUi();
   await initializeOnboardingLaunchAtLogin();
+  bindExternalUrlHandlers(el);
 
   dirBtn.addEventListener('click', async () => {
     await chooseDesktopDataFolderForOnboarding();

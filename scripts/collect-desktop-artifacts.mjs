@@ -291,9 +291,11 @@ function replacePlatformOutput(platformOutDir, stagedDir, platformName, warn) {
     return;
   }
 
-  const backupDir = fs.existsSync(platformOutDir)
+  const backupRoot = fs.existsSync(platformOutDir)
     ? fs.mkdtempSync(`${platformOutDir}.backup-`)
     : null;
+  // Directory rename destinations must not already exist on Windows.
+  const backupDir = backupRoot ? path.join(backupRoot, 'previous') : null;
   let backedUp = false;
   try {
     if (backupDir) {
@@ -311,17 +313,16 @@ function replacePlatformOutput(platformOutDir, stagedDir, platformName, warn) {
           `Could not install or restore ${platformOutDir}. Previous output retained at ${backupDir}`,
         );
       }
-    } else if (backupDir) {
-      fs.rmSync(backupDir, { recursive: true, force: true });
     }
+    if (backupRoot) fs.rmSync(backupRoot, { recursive: true, force: true });
     throw error;
   }
-  if (backupDir) {
+  if (backupRoot) {
     try {
-      fs.rmSync(backupDir, { recursive: true, force: true });
+      fs.rmSync(backupRoot, { recursive: true, force: true });
     } catch (error) {
       warn(
-        `Build succeeded at ${platformOutDir}. Could not remove backup ${backupDir}: ${error.message}`,
+        `Build succeeded at ${platformOutDir}. Could not remove backup ${backupRoot}: ${error.message}`,
       );
     }
   }

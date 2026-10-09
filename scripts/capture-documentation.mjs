@@ -21,6 +21,7 @@ import { format } from 'prettier';
 import { buildManualSeedFiles } from './lib/manual-seed.mjs';
 import { documentationSeed } from './lib/documentation-seed.mjs';
 import { composeDocumentationHero } from './compose-documentation-hero.mjs';
+import { verifyMacosDocumentationApp } from './verify-macos-documentation-app.mjs';
 import {
   captureInputs,
   assertCaptureInputs,
@@ -130,12 +131,15 @@ try {
       '--bundles',
       'app',
       '--config',
-      JSON.stringify({
-        identifier: 'app.browser-recall.documentation',
-        productName: 'Browser Recall Documentation',
-      }),
+      path.join(root, 'scripts/documentation-tauri.conf.json'),
     ],
     path.join(root, 'apps/desktop'),
+  );
+  verifyMacosDocumentationApp(
+    path.join(
+      root,
+      'target/release/bundle/macos/Browser Recall Documentation.app',
+    ),
   );
 
   const server = net.createServer();
@@ -203,12 +207,11 @@ try {
     path.join(app, 'Contents/MacOS/browser-recall-desktop'),
     path.join(app, 'Contents/MacOS/browser-recall-documentation'),
   );
-  // Keep OS URL routing with the user's installed application.
+  // The build configuration excludes URL schemes in both the retained bundle
+  // and this temporary capture copy.
   run('/usr/libexec/PlistBuddy', [
     '-c',
     'Set :CFBundleExecutable browser-recall-documentation',
-    '-c',
-    'Delete :CFBundleURLTypes',
     path.join(app, 'Contents/Info.plist'),
   ]);
   run('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', app]);

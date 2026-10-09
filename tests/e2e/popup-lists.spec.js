@@ -128,22 +128,25 @@ async function getActionIconForUrl(helper, url) {
 }
 
 async function waitForContentScript(helper, page, url) {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const ready = await helper.evaluate(async (pageUrl) => {
-      const tabs = await chrome.tabs.query({ url: pageUrl });
-      if (!tabs.length) return false;
-      try {
-        await chrome.tabs.sendMessage(tabs[0].id, { action: 'isPdfPage' });
-        return true;
-      } catch {
-        return false;
-      }
-    }, url);
-    if (ready) return;
-    await page.reload();
-    await page.waitForLoadState('domcontentloaded');
-  }
-  throw new Error(`content script did not load for ${url}`);
+  await page.waitForLoadState('domcontentloaded');
+  await expect
+    .poll(
+      () =>
+        helper.evaluate(async (pageUrl) => {
+          const tabs = await chrome.tabs.query({ url: pageUrl });
+          if (!tabs.length) return false;
+          try {
+            const response = await chrome.tabs.sendMessage(tabs[0].id, {
+              action: 'isPdfPage',
+            });
+            return typeof response?.isPdf === 'boolean';
+          } catch {
+            return false;
+          }
+        }, url),
+      { message: `Content script did not initialize for ${url}` },
+    )
+    .toBe(true);
 }
 
 test('popup shows identity failure detail when the receiver is stale', async ({
@@ -534,72 +537,135 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
-  test('popup reconnects to a tab that loaded while recording was paused', async ({
-    extContext,
-    extensionId,
-    setupDir,
-    localServer,
-  }) => {
-    void setupDir;
-    localServer.addPage('/resume-paused-tab', {
-      title: 'Resume Paused Tab',
-      body: '<main>Loaded while Browser Recall recording was paused.</main>',
-    });
-    const url = localServer.url('/resume-paused-tab');
-
-    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
-    const helper = await openHelperPage(extContext, extensionId);
-    await helper.evaluate(async () => {
-      const response = await chrome.runtime.sendMessage({
-        action: 'setRecordingPaused',
-        paused: true,
+  for (const failure of ['transport', 'acknowledgement', 'persistent']) {
+    test(`popup resumes a paused tab with a ${failure} delivery failure`, async ({
+      extContext,
+      extensionId,
+      setupDir,
+      localServer,
+    }) => {
+      void setupDir;
+      localServer.addPage('/resume-paused-tab', {
+        title: 'Resume Paused Tab',
+        body: '<main>Loaded while Browser Recall recording was paused.</main>',
       });
-      if (response?.success !== true) {
-        throw new Error(response?.error || 'Could not pause recording');
-      }
-    });
+      const url = localServer.url('/resume-paused-tab');
 
-    const page = await extContext.newPage();
-    await page.goto(url);
-    const prepared = await helper.evaluate(async (pageUrl) => {
-      const [tab] = await chrome.tabs.query({ url: pageUrl });
-      if (!tab?.id) throw new Error('Paused page tab not found');
-      try {
-        await chrome.tabs.sendMessage(tab.id, { action: 'isPdfPage' });
-        throw new Error('Paused page unexpectedly installed its receiver');
-      } catch (error) {
-        if (
-          error.message === 'Paused page unexpectedly installed its receiver'
-        ) {
-          throw error;
+      await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+      const helper = await openHelperPage(extContext, extensionId);
+      await helper.evaluate(async () => {
+        const response = await chrome.runtime.sendMessage({
+          action: 'setRecordingPaused',
+          paused: true,
+        });
+        if (response?.success !== true) {
+          throw new Error(response?.error || 'Could not pause recording');
         }
+      });
+
+      const page = await extContext.newPage();
+      await page.goto(url);
+      const prepared = await helper.evaluate(async (pageUrl) => {
+        const [tab] = await chrome.tabs.query({ url: pageUrl });
+        if (!tab?.id) throw new Error('Paused page tab not found');
+        const pageActions = await chrome.tabs.sendMessage(tab.id, {
+          action: 'isPdfPage',
+        });
+        if (pageActions !== undefined) {
+          throw new Error('Paused page unexpectedly initialized page actions');
+        }
+
+        return chrome.runtime.sendMessage({
+          action: 'preparePopupBootstrapForTest',
+          tabId: tab.id,
+        });
+      }, url);
+      expect(prepared).toMatchObject({ success: true, mode: 'private' });
+
+      const popup = await extContext.newPage();
+      await popup.goto(
+        `chrome-extension://${extensionId}/${prepared.popupPath}`,
+      );
+      await expectPopupRevealed(popup);
+      await expect(popup.locator('#dashboardContent')).toBeHidden();
+      await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
+      await expect(popup.locator('#recordingToggle')).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+
+      const worker = extContext.serviceWorkers()[0];
+      await worker.evaluate(
+        async ({ url, failure }) => {
+          const [tab] = await chrome.tabs.query({ url });
+          const send = chrome.tabs.sendMessage.bind(chrome.tabs);
+          globalThis.recordingResumeAttempts = 0;
+          globalThis.restoreRecordingResumeDelivery = () => {
+            chrome.tabs.sendMessage = send;
+          };
+          chrome.tabs.sendMessage = (tabId, request, ...args) => {
+            if (
+              tabId === tab.id &&
+              request.action === 'recordingStateChanged' &&
+              request.mode === 'default'
+            ) {
+              globalThis.recordingResumeAttempts += 1;
+              if (
+                globalThis.recordingResumeAttempts === 1 ||
+                failure === 'persistent'
+              ) {
+                return failure === 'transport'
+                  ? Promise.reject(
+                      new Error(
+                        'Could not establish connection. Receiving end does not exist.',
+                      ),
+                    )
+                  : Promise.resolve({
+                      success: false,
+                      error: 'Recording receiver temporarily unavailable',
+                    });
+              }
+            }
+            return send(tabId, request, ...args);
+          };
+        },
+        { url, failure },
+      );
+
+      try {
+        await popup.locator('#recordingToggle').click();
+        if (failure === 'persistent') {
+          await expect(popup.locator('#pageDiagnosticSection')).toBeVisible();
+          await expect(popup.locator('#pageDiagnosticMessage')).toContainText(
+            'Recording receiver temporarily unavailable',
+          );
+          await expect(popup.locator('#recordingToggle')).toHaveAttribute(
+            'aria-pressed',
+            'false',
+          );
+          expect(
+            await worker.evaluate(() => globalThis.recordingResumeAttempts),
+          ).toBe(3);
+        } else {
+          await expect(popup.locator('#pageTitle')).toHaveText(
+            'Resume Paused Tab',
+          );
+          await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
+          expect(
+            await worker.evaluate(() => globalThis.recordingResumeAttempts),
+          ).toBeGreaterThan(1);
+        }
+      } finally {
+        await worker.evaluate(() =>
+          globalThis.restoreRecordingResumeDelivery(),
+        );
       }
 
-      return chrome.runtime.sendMessage({
-        action: 'preparePopupBootstrapForTest',
-        tabId: tab.id,
-      });
-    }, url);
-    expect(prepared).toMatchObject({ success: true, mode: 'private' });
-
-    const popup = await extContext.newPage();
-    await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
-    await expectPopupRevealed(popup);
-    await expect(popup.locator('#dashboardContent')).toBeHidden();
-    await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
-    await expect(popup.locator('#recordingToggle')).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
-
-    await popup.locator('#recordingToggle').click();
-    await expect(popup.locator('#pageTitle')).toHaveText('Resume Paused Tab');
-    await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
-
-    await popup.close();
-    await helper.close();
-    await page.close();
-  });
+      await popup.close();
+      await helper.close();
+      await page.close();
+    });
+  }
 
   test('popup hides applied highlight markup without deleting the saved note', async ({
     extContext,

@@ -128,7 +128,7 @@ crash recovery, history reads, ordering highlights by creation time, and sync.
 
 | File | Implements |
 | --- | --- |
-| `packages/core/page-identity.js` | Normalize URLs, generate file identifiers, and distinguish URL changes from full page loads |
+| `packages/core/page-identity.js` | Normalize URLs, generate file identifiers, classify unavailable browser pages, and distinguish URL changes from full page loads |
 | `packages/core/highlight-lifecycle.js` | Save selected text and locations, restore highlights, and repair marks after page content changes |
 | `packages/core/markdown-extractor.js` | Live DOM-to-Markdown conversion for searchable snapshots |
 | `packages/core/snapshot-html.js` | Validate saved URL/slug metadata, clean highlight markup, and prepare snapshots for reopening |
@@ -162,6 +162,7 @@ do not maintain a second production copy.
 | `scripts/migrate-snapshot-identity.mjs` | Check and update snapshot URL/slug metadata through temporary-file replacement |
 | `scripts/rust-coverage.mjs`, `scripts/test-coverage-monitor.mjs` | Coverage generation, uncovered-line reporting, and test-growth guard |
 | `scripts/capture-documentation.mjs` | Native macOS desktop documentation capture |
+| `scripts/documentation-tauri.conf.json`, `scripts/verify-macos-documentation-app.mjs` | Isolated documentation app configuration and verification that generated bundles declare no URL schemes |
 | `scripts/capture-browser-documentation.mjs` | Native macOS browser documentation capture |
 | `scripts/lib/documentation-seed.mjs` | Fictional reading collection |
 | `scripts/lib/documentation-window.swift`, `scripts/lib/documentation-image-spec.mjs` | Operate native windows, capture screenshots, and define image dimensions |
@@ -184,7 +185,7 @@ do not maintain a second production copy.
 | Combined data reads and successful writes not yet saved to checkpoints | `crates/daemon/tests/read_projections.rs` |
 | Commands, write ordering, and change notifications | `crates/daemon/tests/commands.rs`, `crates/daemon/tests/command_authority.rs`, `crates/daemon/tests/runtime.rs` |
 | Replay schemas, idempotence, and verifier | `crates/replay/tests/` |
-| Popup membership and prepared dashboard | `tests/e2e/popup-lists.spec.js` |
+| Popup membership, prepared dashboard, and recording-resume delivery failures | `tests/e2e/popup-lists.spec.js` |
 | Live navigation and correct URLs in visit records | `tests/e2e/extension-navigation-regressions.spec.js`, `tests/e2e/url-tracking.spec.js` |
 | Highlight creation, editing, and PDF behavior | `tests/e2e/highlight-note-edit.spec.js` |
 | Save when an editor or popup closes | `tests/e2e/note-dismiss-save.spec.js` |
@@ -192,11 +193,13 @@ do not maintain a second production copy.
 | Seeded cross-feature workflows | `tests/e2e/seeded-combination-workflows.spec.js`, `tests/e2e/manual-seed-workflow.spec.js` |
 | Desktop layout, navigation, search, and scroll retention | `tests/e2e/desktop-visual.spec.js` |
 | Native WKWebView chart layout | `tests/smoke/macos-wkwebview-chart-layout.mjs` |
+| Documentation bundles preserve macOS app URL routing and URL activation reuses the running process | `tests/smoke/macos-documentation-url-routing.mjs` |
 | macOS startup, tray, and window lifecycle | `tests/smoke/macos-desktop-window-lifecycle.mjs` |
 | Windows icons, single instance, and teardown | `tests/smoke/windows-desktop-single-instance.mjs`, `tests/integration/windows-desktop-cleanup.test.js` |
 | Saved desktop language and right-to-left layout | `tests/e2e/desktop-locale-setting.spec.js` |
 | Native extension localization and system fonts | `tests/e2e/extension-localization.spec.js`, `tests/e2e/extension-font-fallback.spec.js` |
-| Real Firefox and native popup shortcut | `tests/smoke/firefox-real-content.mjs`, `tests/smoke/native-extension-shortcut.mjs` |
+| Real Firefox automatic capture and navigation, daemon persistence before identity probes, recording resume, and options-page popup messages | `tests/smoke/firefox-real-content.mjs` |
+| Native popup shortcut | `tests/smoke/native-extension-shortcut.mjs` |
 | Documentation images match the recorded source files and capture results | `tests/integration/documentation-freshness.test.js` |
 | Browser documentation capture | `tests/e2e/documentation-browser.spec.js` |
 

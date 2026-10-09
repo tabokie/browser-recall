@@ -1,4 +1,5 @@
 (function () {
+  const MAX_EDITOR_QUOTE_HEIGHT = 70;
   const SHADOW_CSS = `
     :host {
       all: initial;
@@ -59,6 +60,11 @@
       min-width: 0;
       padding-left: 10px;
       border-left: 3px solid var(--br-accent-red, var(--accent-red));
+    }
+
+    .highlight-item.is-editing .highlight-quote {
+      max-height: ${MAX_EDITOR_QUOTE_HEIGHT}px;
+      overflow: hidden;
     }
 
     .highlight-quote-line {
@@ -229,6 +235,43 @@
     return noteOverlays.get(doc)?.save() ?? Promise.resolve(true);
   }
 
+  function fitEditorQuote(quote, excerpt) {
+    if (quote.scrollHeight <= MAX_EDITOR_QUOTE_HEIGHT) return () => {};
+    const original = [...quote.childNodes];
+    const segments = Array.from(
+      new Intl.Segmenter(undefined, { granularity: 'word' }).segment(
+        formatHighlightExcerpt(excerpt),
+      ),
+      ({ segment }) => segment,
+    );
+    const line = quote.ownerDocument.createElement('div');
+    line.className = 'highlight-quote-line';
+    const preview = quote.ownerDocument.createElement('span');
+    preview.className = 'highlight-excerpt';
+    line.appendChild(preview);
+    quote.replaceChildren(line);
+
+    const render = (count) => {
+      const prefix = segments
+        .slice(0, count)
+        .join('')
+        .trimEnd()
+        .replace(/\.+$/, '');
+      preview.textContent = `${prefix}...`;
+    };
+    // Measure actual wrapping, retaining only complete words before the ellipsis.
+    let low = 0;
+    let high = segments.length - 1;
+    while (low < high) {
+      const count = Math.ceil((low + high) / 2);
+      render(count);
+      if (quote.scrollHeight <= MAX_EDITOR_QUOTE_HEIGHT) low = count;
+      else high = count - 1;
+    }
+    render(low);
+    return () => quote.replaceChildren(...original);
+  }
+
   function openHighlightNoteEditor({
     item,
     note,
@@ -246,6 +289,12 @@
     const deleteAction = item?.querySelector('.note-action-btn.delete');
     if (!row || !action || action.classList.contains('confirm')) return;
 
+    item.classList.add('is-editing');
+    const restoreQuote = fitEditorQuote(
+      item.querySelector('.highlight-quote'),
+      note.excerpt,
+    );
+
     row.innerHTML = `<span class="highlight-note-editor" contenteditable="plaintext-only" role="textbox" aria-multiline="true" data-placeholder="${escapeHtml(placeholder || '')}">${escapeHtml(note.note || '')}</span>`;
     const editor = row.querySelector('.highlight-note-editor');
     action.classList.remove('edit');
@@ -260,6 +309,8 @@
       if (finished) return;
       finished = true;
       noteEditors.delete(item);
+      item.classList.remove('is-editing');
+      restoreQuote();
       action.removeEventListener('click', saveCurrent);
       row.innerHTML = displayNote
         ? `<span class="highlight-note-text">${escapeHtml(displayNote)}</span>`

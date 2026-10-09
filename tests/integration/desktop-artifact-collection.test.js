@@ -141,7 +141,13 @@ test.each([
         expect(failure.message).toContain(path.join(outDir, entries[0]));
         expect(
           readFileSync(
-            path.join(outDir, entries[0], 'bin', 'browser-recall-desktop'),
+            path.join(
+              outDir,
+              entries[0],
+              'previous',
+              'bin',
+              'browser-recall-desktop',
+            ),
             'utf8',
           ),
         ).toBe('previous');
@@ -157,6 +163,83 @@ test.each([
     } finally {
       rename?.mockRestore();
       rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test.each([false, true])(
+  'replaces stale desktop output with Windows directory semantics (promotion failure: %s)',
+  (failPromotion) => {
+    const root = fs.mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-desktop-artifacts-'),
+    );
+    const cargoReleaseDir = path.join(root, 'target-release');
+    const outDir = path.join(root, 'dist-desktop');
+    const platformOutDir = path.join(outDir, 'macos');
+    const oldArtifact = path.join(platformOutDir, 'app', 'Old.app', 'Contents');
+    const newArtifact = path.join(platformOutDir, 'dmg', 'Browser Recall.dmg');
+    fs.mkdirSync(path.join(cargoReleaseDir, 'bundle', 'dmg'), {
+      recursive: true,
+    });
+    fs.mkdirSync(path.join(platformOutDir, 'app', 'Old.app'), {
+      recursive: true,
+    });
+    fs.writeFileSync(oldArtifact, 'previous app');
+    fs.writeFileSync(
+      path.join(cargoReleaseDir, 'browser-recall-desktop'),
+      'bin',
+    );
+    fs.writeFileSync(
+      path.join(cargoReleaseDir, 'bundle', 'dmg', 'Browser Recall.dmg'),
+      'dmg',
+    );
+
+    const rename = fs.renameSync;
+    const renameSpy = vi
+      .spyOn(fs, 'renameSync')
+      .mockImplementation((source, destination) => {
+        // Windows cannot rename a directory onto an existing directory.
+        if (fs.statSync(source).isDirectory() && fs.existsSync(destination)) {
+          throw Object.assign(new Error('EPERM: rename destination exists'), {
+            code: 'EPERM',
+          });
+        }
+        if (
+          failPromotion &&
+          source.startsWith(`${platformOutDir}.staging-`) &&
+          destination === platformOutDir
+        ) {
+          throw new Error('simulated output promotion failure');
+        }
+        return rename(source, destination);
+      });
+    try {
+      const collect = () =>
+        collectDesktopArtifacts({
+          cargoReleaseDir,
+          outDir,
+          platformName: 'macos',
+          bundles: ['dmg'],
+        });
+      if (failPromotion) {
+        expect(collect).toThrow('simulated output promotion failure');
+        expect(fs.readFileSync(oldArtifact, 'utf8')).toBe('previous app');
+        expect(fs.existsSync(newArtifact)).toBe(false);
+      } else {
+        collect();
+        expect(fs.existsSync(path.join(platformOutDir, 'app'))).toBe(false);
+        expect(fs.readFileSync(newArtifact, 'utf8')).toBe('dmg');
+        expect(
+          fs.readFileSync(
+            path.join(platformOutDir, 'bin', 'browser-recall-desktop'),
+            'utf8',
+          ),
+        ).toBe('bin');
+      }
+      expect(fs.readdirSync(outDir)).toEqual(['macos']);
+    } finally {
+      renameSpy.mockRestore();
+      fs.rmSync(root, { recursive: true, force: true });
     }
   },
 );

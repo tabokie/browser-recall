@@ -1018,6 +1018,9 @@ test.describe('Firefox extension smoke', () => {
 
       const api = createFirefoxWebExtensionApi({
         async sendMessage(message) {
+          if (message?.action === 'getRecordingState') {
+            return { success: true, mode: 'default' };
+          }
           if (message?.action === 'getDesktopConnectorState') {
             return {
               success: true,

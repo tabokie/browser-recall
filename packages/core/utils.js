@@ -3,25 +3,21 @@ import {
   canonicalizePageUrl,
   generateSlug,
   generateSlugFromUrl,
+  INTERNAL_URL_PREFIXES,
 } from './page-identity.js';
 export {
   canonicalizePageUrl,
   generateSlugFromUrl,
   isSameDocumentPageUrl,
+  INTERNAL_URL_PREFIXES,
+  isInternalBrowserUrl,
+  isUnavailablePageUrl,
 } from './page-identity.js';
 
 /** Max words of page body text captured for rule matching. Duplicated in content.js (non-module). */
 export const BODY_WORD_LIMIT = 200;
 
-export const INTERNAL_URL_PREFIXES = ['chrome://', 'edge://', 'about:'];
 export const DEFAULT_URL_BLACKLIST = [...INTERNAL_URL_PREFIXES];
-
-export function isInternalBrowserUrl(url) {
-  if (typeof url !== 'string') {
-    throw new Error('Browser URL must be a string');
-  }
-  return INTERNAL_URL_PREFIXES.some((prefix) => url.startsWith(prefix));
-}
 
 // Send a message to background and throw on error response.
 // Use for all data-reading messages where silent defaults are unacceptable.

@@ -387,21 +387,17 @@
     "message": "Choose your data folder",
     "description": "Onboarding data-folder heading."
   },
-  "desktopOnboardingDataText": {
-    "message": "Browser Recall stores plain-text local data in the folder you choose. No default folder is used until you make this choice.",
+  "commonDataOwnership": {
+    "message": "Your data stays in your chosen folder as readable JSON and Markdown files.",
     "description": "Onboarding data-folder explanation."
   },
-  "desktopOnboardingIntro": {
-    "message": "browser-recall saves browsing history, notes, and highlights through Browser Recall Desktop into a local plain-text data folder.",
+  "commonProductIntro": {
+    "message": "The desktop app organizes and searches your collection. The browser extension records visits and saves snapshots, highlights, and notes.",
     "description": "Onboarding product description."
   },
   "desktopOnboardingLiveCapture": {
-    "message": "Live capture",
+    "message": "Install extensions now or later",
     "description": "Onboarding live capture heading."
-  },
-  "desktopOnboardingLiveCaptureText": {
-    "message": "Install the browser extension and pair it from the extension popup. Browser Recall Desktop must stay running in the background to record visits.",
-    "description": "Onboarding live capture explanation."
   },
   "desktopOnboardingPickColor": {
     "message": "Pick a color",
@@ -412,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "Open the Browser Recall popup in your browser and click Pair with desktop.",
+    "message": "The Browser Recall browser extension connects automatically.",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -1020,7 +1016,7 @@
     "description": "Extension popup placeholder URL text."
   },
   "extensionDesktopControl": {
-    "message": "Desktop Control",
+    "message": "Desktop app",
     "description": "Extension options heading."
   },
   "extensionDesktopOffline": {
@@ -1032,7 +1028,7 @@
     "description": "Extension options heading."
   },
   "extensionMainUiRunsInDesktop": {
-    "message": "The main Browser Recall interface runs in the desktop app.",
+    "message": "Organize lists and search saved pages, highlights, notes, and snapshots in the Browser Recall desktop app.",
     "description": "Extension options explanatory text."
   },
   "extensionNotSet": {
@@ -1370,7 +1366,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "Select text and press <kbd>Alt+H</kbd> to highlight it.",
+    "message": "Select text on a webpage and press <kbd>Alt+H</kbd> in the browser extension to highlight it and add a note.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {
@@ -1378,7 +1374,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryText": {
-    "message": "Every page visit is automatically saved by Browser Recall Desktop and stays searchable by title, web address, and content.",
+    "message": "Keep browsing history without a time limit. Find saved visits by title and URL in the desktop app.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryTitle": {
@@ -1386,11 +1382,11 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingListsText": {
-    "message": "Organize pages into lists. Use automatic inbox rules to create a live-updating list.",
+    "message": "Organize pages into lists. A page can belong to more than one list.",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTextHtml": {
-    "message": "Press <kbd>Alt+S</kbd> to save an offline copy of the page through the desktop bridge.",
+    "message": "Press <kbd>Alt+S</kbd> in the browser extension to save a compact snapshot of the current page for offline reading.",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTitle": {
@@ -1398,7 +1394,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "Open the Browser Recall popup in your browser and click Pair with desktop.",
+    "message": "The Browser Recall browser extension connects automatically.",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {
@@ -1600,5 +1596,13 @@
   "desktopBook": {
     "message": "Book",
     "description": "Primary desktop highlight-book navigation label."
+  },
+  "extensionStoreChrome": {
+    "message": "Chrome Web Store",
+    "description": "Browser extension store link label."
+  },
+  "extensionStoreFirefox": {
+    "message": "Firefox Add-ons",
+    "description": "Browser extension store link label."
   }
 }

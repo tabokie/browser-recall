@@ -387,21 +387,17 @@
     "message": "Choisissez votre dossier de données",
     "description": "Onboarding data-folder heading."
   },
-  "desktopOnboardingDataText": {
-    "message": "Browser Recall stocke les données locales en texte brut dans le dossier de votre choix. Aucun dossier par défaut n'est utilisé jusqu'à ce que vous fassiez ce choix.",
+  "commonDataOwnership": {
+    "message": "Vos données restent dans le dossier choisi, sous forme de fichiers JSON et Markdown lisibles.",
     "description": "Onboarding data-folder explanation."
   },
-  "desktopOnboardingIntro": {
-    "message": "browser-recall enregistre l'historique de navigation, les notes et les surlignages via Browser Recall Desktop dans un dossier de données local en texte brut.",
+  "commonProductIntro": {
+    "message": "L’application de bureau organise votre collection et permet d’y effectuer des recherches. L’extension de navigateur enregistre les visites, les instantanés, les passages surlignés et les notes.",
     "description": "Onboarding product description."
   },
   "desktopOnboardingLiveCapture": {
-    "message": "Capture en direct",
+    "message": "Installez les extensions maintenant ou plus tard",
     "description": "Onboarding live capture heading."
-  },
-  "desktopOnboardingLiveCaptureText": {
-    "message": "Installez l'extension du navigateur et associez-la à partir de la fenêtre contextuelle de l'extension. Browser Recall Desktop doit rester exécuté en arrière-plan pour enregistrer les visites.",
-    "description": "Onboarding live capture explanation."
   },
   "desktopOnboardingPickColor": {
     "message": "Choisissez une couleur",
@@ -412,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "Ouvrez la fenêtre contextuelle Browser Recall dans votre navigateur, puis cliquez sur « Associer à l’application de bureau ».",
+    "message": "L’extension de navigateur Browser Recall se connecte automatiquement.",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -992,7 +988,7 @@
     "description": "Extension popup placeholder URL text."
   },
   "extensionDesktopControl": {
-    "message": "Contrôle de bureau",
+    "message": "Application de bureau",
     "description": "Extension options heading."
   },
   "extensionDesktopOffline": {
@@ -1004,7 +1000,7 @@
     "description": "Extension options heading."
   },
   "extensionMainUiRunsInDesktop": {
-    "message": "L'interface principale Browser Recall s'exécute dans l'application de bureau.",
+    "message": "Organisez vos listes et recherchez des pages enregistrées, des passages surlignés, des notes et des instantanés dans l’application de bureau Browser Recall.",
     "description": "Extension options explanatory text."
   },
   "extensionNotSet": {
@@ -1342,7 +1338,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "Sélectionnez le texte et appuyez sur <kbd>Alt+H</kbd> pour le mettre en surbrillance.",
+    "message": "Sélectionnez du texte sur une page web et appuyez sur <kbd>Alt+H</kbd> dans l’extension pour le surligner et ajouter une note.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {
@@ -1350,7 +1346,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryText": {
-    "message": "Chaque visite de page est automatiquement enregistrée par Browser Recall Desktop et reste consultable par titre, adresse Web et contenu.",
+    "message": "Conservez votre historique de navigation sans limite de temps. Retrouvez les visites enregistrées par titre et URL dans l’application de bureau.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryTitle": {
@@ -1358,11 +1354,11 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingListsText": {
-    "message": "Organisez les pages en listes. Utilisez les règles automatiques de la boîte de réception pour créer une liste mise à jour en direct.",
+    "message": "Classez les pages en listes. Une page peut appartenir à plusieurs listes.",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTextHtml": {
-    "message": "Appuyez sur <kbd>Alt+S</kbd> pour enregistrer une copie hors ligne de la page via le pont avec l’application de bureau.",
+    "message": "Appuyez sur <kbd>Alt+S</kbd> dans l’extension pour enregistrer un instantané compact de la page actuelle et le lire hors connexion.",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTitle": {
@@ -1370,7 +1366,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "Ouvrez la fenêtre contextuelle Browser Recall dans votre navigateur, puis cliquez sur « Associer à l’application de bureau ».",
+    "message": "L’extension de navigateur Browser Recall se connecte automatiquement.",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {
@@ -1600,5 +1596,13 @@
   "desktopBook": {
     "message": "Livre",
     "description": "Primary desktop highlight-book navigation label."
+  },
+  "extensionStoreChrome": {
+    "message": "Chrome Web Store",
+    "description": "Browser extension store link label."
+  },
+  "extensionStoreFirefox": {
+    "message": "Firefox Add-ons",
+    "description": "Browser extension store link label."
   }
 }

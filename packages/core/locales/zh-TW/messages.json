@@ -387,21 +387,17 @@
     "message": "選擇您的資料資料夾",
     "description": "Onboarding data-folder heading."
   },
-  "desktopOnboardingDataText": {
-    "message": "Browser Recall 將純文字本機資料儲存在您選擇的資料夾中。在您做出此選擇之前，不會使用預設資料夾。",
+  "commonDataOwnership": {
+    "message": "你的資料以可讀的 JSON 和 Markdown 檔案儲存在你選擇的資料夾中。",
     "description": "Onboarding data-folder explanation."
   },
-  "desktopOnboardingIntro": {
-    "message": "browser-recall 透過 Browser Recall Desktop，將瀏覽記錄、筆記與醒目提示儲存到本機純文字資料夾。",
+  "commonProductIntro": {
+    "message": "桌面應用程式用於整理和搜尋收藏。瀏覽器擴充功能記錄網頁造訪，並儲存快照、重點標記和筆記。",
     "description": "Onboarding product description."
   },
   "desktopOnboardingLiveCapture": {
-    "message": "即時捕捉",
+    "message": "現在或稍後安裝擴充功能",
     "description": "Onboarding live capture heading."
-  },
-  "desktopOnboardingLiveCaptureText": {
-    "message": "安裝瀏覽器擴充功能並從擴充功能彈出視窗中進行配對。 Browser Recall Desktop 必須在後台保持運作以記錄存取。",
-    "description": "Onboarding live capture explanation."
   },
   "desktopOnboardingPickColor": {
     "message": "選擇一種顏色",
@@ -412,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "在瀏覽器中開啟 Browser Recall 彈出視窗，然後按一下「與桌面配對」。",
+    "message": "Browser Recall 瀏覽器擴充功能會自動連線。",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -992,7 +988,7 @@
     "description": "Extension popup placeholder URL text."
   },
   "extensionDesktopControl": {
-    "message": "桌面控制",
+    "message": "桌面應用程式",
     "description": "Extension options heading."
   },
   "extensionDesktopOffline": {
@@ -1004,7 +1000,7 @@
     "description": "Extension options heading."
   },
   "extensionMainUiRunsInDesktop": {
-    "message": "主 Browser Recall 介面在桌面應用程式中運作。",
+    "message": "在 Browser Recall 桌面應用程式中整理清單，搜尋已儲存的網頁、重點標記、筆記和快照。",
     "description": "Extension options explanatory text."
   },
   "extensionNotSet": {
@@ -1342,7 +1338,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "選取文字並按 <kbd>Alt+H</kbd> 即可醒目提示。",
+    "message": "在網頁上選取文字，然後透過瀏覽器擴充功能按 <kbd>Alt+H</kbd> 標示文字並新增筆記。",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {
@@ -1350,7 +1346,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryText": {
-    "message": "每次頁面訪問都會由 Browser Recall Desktop 自動儲存，並可透過標題、網址和內容進行搜尋。",
+    "message": "長期保留瀏覽歷史。在桌面應用程式中依標題和網址尋找已儲存的造訪記錄。",
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryTitle": {
@@ -1358,11 +1354,11 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingListsText": {
-    "message": "將頁面組織到清單中。使用自動收件匣規則建立即時更新清單。",
+    "message": "將網頁整理到清單中。一個網頁可以屬於多個清單。",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTextHtml": {
-    "message": "按 <kbd>Alt+S</kbd> 可透過桌面橋接器儲存頁面的離線副本。",
+    "message": "透過瀏覽器擴充功能按 <kbd>Alt+S</kbd> 儲存目前網頁的精簡快照，以便離線閱讀。",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTitle": {
@@ -1370,7 +1366,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "在瀏覽器中開啟 Browser Recall 彈出視窗，然後按一下「與桌面配對」。",
+    "message": "Browser Recall 瀏覽器擴充功能會自動連線。",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {
@@ -1600,5 +1596,13 @@
   "desktopBook": {
     "message": "書冊",
     "description": "Primary desktop highlight-book navigation label."
+  },
+  "extensionStoreChrome": {
+    "message": "Chrome Web Store",
+    "description": "Browser extension store link label."
+  },
+  "extensionStoreFirefox": {
+    "message": "Firefox Add-ons",
+    "description": "Browser extension store link label."
   }
 }

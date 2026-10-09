@@ -96,22 +96,25 @@ async function getActiveTabBadge(helper) {
 }
 
 async function waitForContentScript(helper, page, url) {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const ready = await helper.evaluate(async (pageUrl) => {
-      const tabs = await chrome.tabs.query({ url: pageUrl });
-      if (!tabs.length) return false;
-      try {
-        await chrome.tabs.sendMessage(tabs[0].id, { action: 'isPdfPage' });
-        return true;
-      } catch {
-        return false;
-      }
-    }, url);
-    if (ready) return;
-    await page.reload();
-    await page.waitForLoadState('domcontentloaded');
-  }
-  throw new Error(`content script did not load for ${url}`);
+  await page.waitForLoadState('domcontentloaded');
+  await expect
+    .poll(
+      () =>
+        helper.evaluate(async (pageUrl) => {
+          const tabs = await chrome.tabs.query({ url: pageUrl });
+          if (!tabs.length) return false;
+          try {
+            const response = await chrome.tabs.sendMessage(tabs[0].id, {
+              action: 'isPdfPage',
+            });
+            return typeof response?.isPdf === 'boolean';
+          } catch {
+            return false;
+          }
+        }, url),
+      { message: `Content script did not initialize for ${url}` },
+    )
+    .toBe(true);
 }
 
 async function countReloadWarnings(page, reloadMessage) {
@@ -254,7 +257,9 @@ test.describe('extension navigation regressions', () => {
                 globalThis.navigationDeliveryAttempts <= deliveryFailures
               ) {
                 return Promise.reject(
-                  new Error('Forced missing navigation receiver'),
+                  new Error(
+                    'Could not establish connection. Receiving end does not exist.',
+                  ),
                 );
               }
             }
@@ -281,7 +286,9 @@ test.describe('extension navigation regressions', () => {
             const [tab] = await chrome.tabs.query({ url });
             return chrome.action.getTitle({ tabId: tab.id });
           }, destinationUrl);
-          expect(title).toContain('Forced missing navigation receiver');
+          expect(title).toContain(
+            'Could not establish connection. Receiving end does not exist.',
+          );
           if (recovery === 'retry') {
             // Recover without opening the popup or sending another navigation.
             await worker.evaluate(() => {
@@ -351,7 +358,7 @@ test.describe('extension navigation regressions', () => {
           return chrome.action.getTitle({ tabId: tab.id });
         }, recoveredUrl);
         expect(recoveredTitle).not.toContain(
-          'Forced missing navigation receiver',
+          'Could not establish connection. Receiving end does not exist.',
         );
       } finally {
         await worker.evaluate(() => globalThis.restoreNavigationDelivery());

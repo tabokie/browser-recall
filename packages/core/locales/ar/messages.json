@@ -387,21 +387,17 @@
     "message": "اختر مجلد البيانات الخاص بك",
     "description": "Onboarding data-folder heading."
   },
-  "desktopOnboardingDataText": {
-    "message": "يقوم Browser Recall بتخزين البيانات المحلية ذات النص العادي في المجلد الذي تختاره. لا يتم استخدام أي مجلد افتراضي حتى تقوم بهذا الاختيار.",
+  "commonDataOwnership": {
+    "message": "تبقى بياناتك في المجلد الذي تختاره كملفات JSON وMarkdown قابلة للقراءة.",
     "description": "Onboarding data-folder explanation."
   },
-  "desktopOnboardingIntro": {
-    "message": "يحفظ browser-recall سجل التصفح والملاحظات والتمييزات عبر Browser Recall Desktop في مجلد بيانات نصية عادية محلي.",
+  "commonProductIntro": {
+    "message": "ينظم تطبيق سطح المكتب مجموعتك ويبحث فيها. تسجل إضافة المتصفح الزيارات وتحفظ اللقطات والتظليلات والملاحظات.",
     "description": "Onboarding product description."
   },
   "desktopOnboardingLiveCapture": {
-    "message": "التقاط مباشر",
+    "message": "ثبّت الإضافات الآن أو لاحقًا",
     "description": "Onboarding live capture heading."
-  },
-  "desktopOnboardingLiveCaptureText": {
-    "message": "قم بتثبيت ملحق المتصفح وقم بإقرانه من النافذة المنبثقة للامتداد. يجب أن يظل Browser Recall Desktop قيد التشغيل في الخلفية لتسجيل الزيارات.",
-    "description": "Onboarding live capture explanation."
   },
   "desktopOnboardingPickColor": {
     "message": "اختر لونًا",
@@ -412,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "افتح نافذة Browser Recall المنبثقة في متصفحك وانقر على «الإقران بسطح المكتب».",
+    "message": "تتصل إضافة المتصفح Browser Recall تلقائيًا.",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -992,7 +988,7 @@
     "description": "Extension popup placeholder URL text."
   },
   "extensionDesktopControl": {
-    "message": "التحكم في سطح المكتب",
+    "message": "تطبيق سطح المكتب",
     "description": "Extension options heading."
   },
   "extensionDesktopOffline": {
@@ -1004,7 +1000,7 @@
     "description": "Extension options heading."
   },
   "extensionMainUiRunsInDesktop": {
-    "message": "تعمل الواجهة الرئيسية Browser Recall في تطبيق سطح المكتب.",
+    "message": "نظم القوائم وابحث في الصفحات والتظليلات والملاحظات واللقطات المحفوظة في تطبيق سطح المكتب Browser Recall.",
     "description": "Extension options explanatory text."
   },
   "extensionNotSet": {
@@ -1342,7 +1338,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "حدد النص واضغط <kbd>Alt+H</kbd> لتمييزه.",
+    "message": "حدد نصًا على صفحة ويب واضغط <kbd>Alt+H</kbd> في إضافة المتصفح لتظليله وإضافة ملاحظة.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {
@@ -1350,7 +1346,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryText": {
-    "message": "يتم حفظ كل زيارة للصفحة تلقائيًا بواسطة Browser Recall Desktop وتظل قابلة للبحث حسب العنوان وعنوان الويب والمحتوى.",
+    "message": "احتفظ بسجل التصفح دون حد زمني. ابحث عن الزيارات المحفوظة بالعنوان والرابط في تطبيق سطح المكتب.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryTitle": {
@@ -1358,11 +1354,11 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingListsText": {
-    "message": "تنظيم الصفحات في القوائم. استخدم قواعد البريد الوارد التلقائية لإنشاء قائمة تحديث مباشر.",
+    "message": "نظم الصفحات في قوائم. يمكن أن تنتمي الصفحة إلى أكثر من قائمة.",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTextHtml": {
-    "message": "اضغط <kbd>Alt+S</kbd> لحفظ نسخة من الصفحة دون اتصال عبر جسر سطح المكتب.",
+    "message": "اضغط <kbd>Alt+S</kbd> في إضافة المتصفح لحفظ لقطة صغيرة الحجم من الصفحة الحالية لقراءتها دون اتصال.",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTitle": {
@@ -1370,7 +1366,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "افتح نافذة Browser Recall المنبثقة في متصفحك وانقر على «الإقران بسطح المكتب».",
+    "message": "تتصل إضافة المتصفح Browser Recall تلقائيًا.",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {
@@ -1600,5 +1596,13 @@
   "desktopBook": {
     "message": "الكتاب",
     "description": "Primary desktop highlight-book navigation label."
+  },
+  "extensionStoreChrome": {
+    "message": "Chrome Web Store",
+    "description": "Browser extension store link label."
+  },
+  "extensionStoreFirefox": {
+    "message": "Firefox Add-ons",
+    "description": "Browser extension store link label."
   }
 }

@@ -36,6 +36,8 @@ const scopes = {
     'apps/desktop/src-tauri/icons',
     'apps/desktop/src-tauri/tauri.conf.json',
     'scripts/capture-documentation.mjs',
+    'scripts/documentation-tauri.conf.json',
+    'scripts/verify-macos-documentation-app.mjs',
     'scripts/compose-documentation-hero.mjs',
   ],
   browser: [

@@ -150,6 +150,12 @@ function installChromeMock({ tab, responses }) {
         onDisconnect: { addListener: vi.fn() },
       })),
       sendMessage: vi.fn(async (request) => {
+        if (request.action === 'getRecordingState') {
+          return {
+            success: true,
+            mode: sessionStore.workspace?.mode ?? 'default',
+          };
+        }
         if (
           ['trimTitle', 'getPopupAccessState', 'getPopupLists'].includes(
             request.action,

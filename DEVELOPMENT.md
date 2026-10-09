@@ -6,6 +6,8 @@ See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for how Browser Recall works and
 ## Prerequisites
 
 - Node.js 24+ and npm dependencies from `package-lock.json`.
+- Firefox for the real Firefox extension check; CI pins Firefox 157.0.1. Set
+  `FIREFOX_BINARY` if Firefox is not installed at the default system path.
 - Rust 1.97.0 with Rustfmt, Clippy, and LLVM tools, pinned in `rust-toolchain.toml`.
 - Platform build tools: Xcode Command Line Tools on macOS, MSVC/WebView2 on Windows,
   or Tauri's Linux system dependencies listed in `.github/workflows/ci.yml`.
@@ -244,9 +246,17 @@ npm run test:firefox:real
 npm run test:shortcut:native
 ```
 
-`test:firefox:real` uses `web-ext@10.5.0` and the browser specified by `FIREFOX_BINARY`
-when provided. `test:shortcut:native` sends Option+R to a temporary Chromium window
-on macOS.
+`test:firefox:real` uses `web-ext@10.5.0`, a headless Firefox browser, and an isolated
+real daemon. The check verifies production content-script startup, navigation,
+query normalization, persisted visits, and recording resume on a page opened while
+recording was paused. Visit persistence is checked before querying page identity,
+so the check cannot rescue failed automatic navigation. Every setup allocation
+shares the cleanup boundary, including daemon startup. The check runs in
+`ci:test-extension-e2e`, in both local CI
+and hosted CI, and verifies options-page messages in prepared and direct popups.
+`test:firefox:smoke` uses simulated browser APIs and does not launch
+Firefox. `test:shortcut:native` sends Option+R to a temporary Chromium window on
+macOS.
 
 Focused local desktop tests may set `BROWSER_RECALL_PLAYWRIGHT_ENGINE=chrome`
 when pinned Chromium is unavailable. Extension tests require pinned Chromium or
@@ -343,6 +353,18 @@ npm run docs:screenshots:browser
 ```
 
 Run desktop and browser capture separately so native focus does not interfere.
+The documentation build uses `scripts/documentation-tauri.conf.json` to disable
+URL schemes in the retained bundle and temporary capture copy. The capture
+verifies the retained bundle before launching the copy. Native macOS CI also
+checks that registering the retained bundle preserves Browser Recall URL routing
+and that app URL activation reopens a hidden window in the same process. The check
+uses a temporary app and profile, and targets the app explicitly to preserve the
+user's default URL handler:
+
+```bash
+node tests/smoke/macos-documentation-url-routing.mjs
+```
+
 Capture uses separate test app identifiers, browser profiles, fictional data, and a real
 daemon. The regular app and personal browsing data are not used. Leave capture
 windows alone until completion.

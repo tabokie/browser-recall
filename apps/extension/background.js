@@ -6,8 +6,8 @@ import './browser-api.js';
 import { requirePrivilegedBrowserApis } from './browser-privileged-api.js';
 import {
   generateSlugFromUrl,
-  isInternalBrowserUrl,
   isSameDocumentPageUrl,
+  isUnavailablePageUrl,
 } from './utils.js';
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
 import { SCHEME_HEX } from './color-scheme-map.js';
@@ -177,20 +177,6 @@ async function getWorkspaceState() {
   return workspace;
 }
 
-// Session storage is in-memory IPC, survives SW termination, and is cleared on
-// browser restart. Chromium requires an explicit content-script access grant;
-// Firefox exposes extension session storage without this Chromium-only API.
-if (getBrowserCapabilities().supportsSessionAccessLevel) {
-  chrome.storage.session
-    .setAccessLevel({
-      accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS',
-    })
-    .catch((error) => {
-      logError('[background] Could not expose session storage:', error);
-      setLocalFailure('session_access_failed', error.message);
-    });
-}
-
 const badgeController = createBadgeController({
   logDebug,
   normalIconPaths: DEFAULT_ICON_PATHS,
@@ -282,6 +268,9 @@ function userActionErrorMessage(
   error,
   fallback = tr('extensionActionFailed', 'Action failed'),
 ) {
+  if (error?.code === 'navigation-delivery-failed') {
+    return String(error.message);
+  }
   if (isExtensionRuntimeFailure(error)) {
     return tr(
       'extensionReloaded',
@@ -1045,11 +1034,7 @@ chrome.commands.onCommand.addListener(async (command, commandTab) => {
   const snapshotSlug = snapshotViewerSlugFromUrl(tab?.url);
   const targetsSnapshotViewer =
     command === 'highlight-selection' && Boolean(snapshotSlug);
-  if (
-    !tab?.url ||
-    isInternalBrowserUrl(tab.url) ||
-    (tab.url.startsWith('chrome-extension://') && !targetsSnapshotViewer)
-  ) {
+  if (!tab || (isUnavailablePageUrl(tab.url) && !targetsSnapshotViewer)) {
     logDebug('[background] Command ignored: no suitable tab');
     return { success: true, handled: false, reason: 'no_suitable_tab' };
   }
@@ -1606,10 +1591,7 @@ function snapshotViewerSlugFromUrl(url) {
 function popupTabIsUnavailable(tab) {
   return (
     !tab ||
-    !tab.url ||
-    isInternalBrowserUrl(tab.url) ||
-    (tab.url.startsWith('chrome-extension://') &&
-      !snapshotViewerSlugFromUrl(tab.url))
+    (isUnavailablePageUrl(tab.url) && !snapshotViewerSlugFromUrl(tab.url))
   );
 }
 
@@ -2435,6 +2417,55 @@ function handleRuntimeMutation(request) {
   return { success: true };
 }
 
+async function notifyRecordingState(tab, mode) {
+  let lastError;
+  let receivedResponse = false;
+  for (const delay of [0, 100, 500]) {
+    if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+    try {
+      const response = await chrome.tabs.sendMessage(
+        tab.id,
+        { action: 'recordingStateChanged', mode },
+        { frameId: 0 },
+      );
+      receivedResponse ||= response !== undefined;
+      if (response?.success !== true) {
+        throw new Error(
+          response?.error || 'Recording receiver did not acknowledge delivery',
+        );
+      }
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (!receivedResponse) {
+    // Closed, restricted, and not-yet-injected tabs have no content receiver.
+    // Distinguish those tabs from a loaded receiver whose delivery has failed.
+    let currentTab;
+    try {
+      currentTab = await chrome.tabs.get(tab.id);
+    } catch {
+      return;
+    }
+    if (currentTab.url !== tab.url || isUnavailablePageUrl(currentTab.url))
+      return;
+    try {
+      const [execution] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id, frameIds: [0] },
+        func: () => typeof globalThis.browserRecallPageIdentity === 'object',
+      });
+      if (execution?.result === false) return;
+    } catch (error) {
+      logDebug('[recording] tab cannot run content scripts:', error.message);
+      return;
+    }
+  }
+  throw new Error(
+    `Could not update recording state for ${tab.url}: ${lastError.message}`,
+  );
+}
+
 async function handleSetRecordingPaused(request) {
   if (typeof request.paused !== 'boolean') {
     throw new Error('setRecordingPaused requires a boolean paused value');
@@ -2447,6 +2478,16 @@ async function handleSetRecordingPaused(request) {
   });
   popupBootstrapMutationRevision += 1;
   await badgeController.setRecordingPaused(paused);
+  const tabs = await chrome.tabs.query({});
+  const results = await Promise.allSettled(
+    tabs
+      .filter((tab) => !isUnavailablePageUrl(tab.url))
+      .map((tab) => notifyRecordingState(tab, paused ? 'private' : 'default')),
+  );
+  const failures = results.filter((result) => result.status === 'rejected');
+  if (failures.length) {
+    throw new Error(failures.map((result) => result.reason.message).join('\n'));
+  }
   return { success: true };
 }
 
@@ -2503,6 +2544,12 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
           break;
         case 'setRecordingPaused':
           sendResponse(await handleSetRecordingPaused(request));
+          break;
+        case 'getRecordingState':
+          sendResponse({
+            success: true,
+            mode: (await getWorkspaceState())?.mode ?? 'default',
+          });
           break;
         // Page lifecycle
         case 'recordPageActivity':

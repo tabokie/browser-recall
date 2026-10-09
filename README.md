@@ -51,13 +51,13 @@ All data collected by the app are stored using plain, readable formats such as J
 
 ## Install
 
-<!-- Store URLs are placeholders. Replace APP_ID, CHROME_EXTENSION_ID, and FIREFOX_ADDON_ID before publishing. -->
+<!-- Replace APP_ID and BROWSER_RECALL_CHROME_WEB_STORE_ID before publishing. The Chrome extension is pending review. -->
 
 Install both the desktop app and the browser extension.
 
 Desktop app is supported on MacOS and on Windows. The signed macOS app is available as a paid download from the [App Store](https://apps.apple.com/app/idAPP_ID). You can also [build from source](DEVELOPMENT.md#build-and-run).
 
-Browser extension is free on the [Chrome Web Store](https://chromewebstore.google.com/detail/browser-recall/CHROME_EXTENSION_ID) and [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/browser-recall-connector/). Edge and Orion are supported using the Chromium extension.
+Browser extension is free on the [Chrome Web Store](https://chromewebstore.google.com/detail/browser-recall/BROWSER_RECALL_CHROME_WEB_STORE_ID) and [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/browser-recall-connector/). Edge and Orion are supported using the Chromium extension.
 
 ## Caveats
 
@@ -68,4 +68,3 @@ Browser Recall is one particular take on keeping a durable and searchable record
 ---
 
 [Development](DEVELOPMENT.md) · [Privacy](docs/PRIVACY.md) · MIT licensed
-

@@ -19,6 +19,32 @@ function timer(label) {
     console.log(`[timer] ${label}: ${(performance.now() - t0).toFixed(0)}ms`);
 }
 
+async function waitForInstalledOptionsPage(context, extensionId) {
+  const optionsUrl = `chrome-extension://${extensionId}/options-stub.html`;
+  let watchPage;
+  let timeout;
+  try {
+    await new Promise((resolve, reject) => {
+      timeout = setTimeout(
+        () =>
+          reject(new Error('Extension install did not open its options page')),
+        10000,
+      );
+      watchPage = (page) => {
+        void page
+          .waitForURL(optionsUrl, { timeout: 10000 })
+          .then(resolve)
+          .catch(() => {});
+      };
+      context.on('page', watchPage);
+      context.pages().forEach(watchPage);
+    });
+  } finally {
+    clearTimeout(timeout);
+    context.off('page', watchPage);
+  }
+}
+
 export const test = base.extend({
   extensionHeadless: [true, { option: true, scope: 'worker' }],
   extensionEnglish: [false, { option: true, scope: 'worker' }],
@@ -87,6 +113,9 @@ export const test = base.extend({
         try {
           const extId = await waitForExtensionId(ctx);
           ctx._browserRecallExtensionId = extId;
+          // openOptionsPage can reuse a blank tab during first installation.
+          // Wait for that named transition before creating the helper tab.
+          await waitForInstalledOptionsPage(ctx, extId);
           const probe = await ctx.newPage();
           await probe.goto(`chrome-extension://${extId}/test-helper.html`, {
             timeout: 5000,

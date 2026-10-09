@@ -1,0 +1,52 @@
+- Google Web Store is suggesting me to reduce extension permission: "Instead of requesting broad host permissions, consider using the activeTab permission". What do you think?
+- Generate 128x128 pixel PNG icon based on browser-recall-default.svg for me
+- "Desktop Windows Single Instance" CI job is failing:
+
+× desktop artifact collection > clears stale platform output before collecting current bundle types 52ms&#x20;
+&#x20;    → EPERM: operation not permitted, rename 'C:\Users\RUNNER\~1\AppData\Local\Temp\browser-recall-desktop-artifacts-c6JREn\dist-desktop\macos' -> 'C:\Users\RUNNER\~1\AppData\Local\Temp\browser-recall-desktop-artifacts-c6JREn\dist-desktop\macos.backup-3VhGyy'&#x20;
+✓ desktop artifact collection > does not copy wrong-platform executables into the platform output&#x20;
+✓ desktop artifact collection > fails when expected desktop artifacts are missing&#x20;
+⎯⎯⎯⎯⎯⎯⎯**&#x20;Failed Tests 1&#x20;**⎯⎯⎯⎯⎯⎯⎯&#x20;
+&#x20;Test Files  **1 failed** (1)&#x20;
+&#x20;     Tests  **1 failed** | **26 passed** (27)&#x20;
+**&#x20;FAIL&#x20;**&#x20;tests/unit/stage-app-assets.test.js > desktop artifact collection > clears stale platform output before collecting current bundle types&#x20;
+&#x20;  Start at  04:48:10&#x20;
+**Error**: EPERM: operation not permitted, rename 'C:\Users\RUNNER\~1\AppData\Local\Temp\browser-recall-desktop-artifacts-c6JREn\dist-desktop\macos' -> 'C:\Users\RUNNER\~1\AppData\Local\Temp\browser-recall-desktop-artifacts-c6JREn\dist-desktop\macos.backup-3VhGyy'&#x20;
+&#x20;  Duration  6.08s (transform 195ms, setup 0ms, collect 242ms, tests 5.53s, environment 0ms, prepare 103ms)&#x20;
+❯ replacePlatformOutput scripts/collect-desktop-artifacts.mjs:300:10&#x20;
+298|   try {&#x20;
+299|     if (backupDir) {&#x20;
+**Error:&#x20;**&#x45;rror: EPERM: operation not permitted, rename 'C:\Users\RUNNER\~1\AppData\Local\Temp\browser-recall-desktop-artifacts-c6JREn\dist-desktop\macos' -> 'C:\Users\RUNNER\~1\AppData\Local\Temp\browser-recall-desktop-artifacts-c6JREn\dist-desktop\macos.backup-3VhGyy'&#x20;
+&#x20;❯ replacePlatformOutput scripts/collect-desktop-artifacts.mjs:300:10&#x20;
+&#x20;❯ collectDesktopArtifacts scripts/collect-desktop-artifacts.mjs:357:5&#x20;
+&#x20;❯ tests/unit/stage-app-assets.test.js:844:28&#x20;
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯&#x20;
+Serialized Error: { errno: -4048, code: 'EPERM', syscall: 'rename', path: 'C:\Users\RUNNER\~1\AppData\Local\Temp\browser-recall-desktop-artifacts-c6JREn\dist-desktop\macos', dest: 'C:\Users\RUNNER\~1\AppData\Local\Temp\browser-recall-desktop-artifacts-c6JREn\dist-desktop\macos.backup-3VhGyy' }&#x20;
+300|       fs.renameSync(platformOutDir, backupDir);&#x20;
+&#x20;  \|          ^&#x20;
+301|       backedUp = true;&#x20;
+302|     }&#x20;
+❯ collectDesktopArtifacts scripts/collect-desktop-artifacts.mjs:357:5&#x20;
+❯ tests/unit/stage-app-assets.test.js:844:28&#x20;
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯&#x20;
+25h&#x20;
+**Error:&#x20;**&#x50;rocess completed with exit code 1.
+- I want an improvement. In the extension's note editing UI, the highlight is rendered verbatim. I want it to be capped at a fixed height and use "[...]" to omit the middle part.
+- That is ugly. We should only omit full sentences, not breaking them or even words. If it is complex algorithmically to pick a section in the middle of an arbitrary highlight, we can omit the tail of the highlight instead.
+- Actually, no need to consider sentence breaking, just pick a position at word boundary, and use the simple "..." to finish off.
+- Shorter, cap it two four vertical lines.
+- Let's improve the in-app guiding messages. (1) Desktop app's onboarding message should be more specific on the role of desktop and extension. And provide links to the extension store. (2) Extension's options page should also include messages similar if not identical to desktop's onboarding messages. (3) All the messages should be roughly consistent and coherent to the project README.md.
+- Show me the screenshots of changes in desktop app and in extension.
+- (1) No need to explicitly state out the connection process (in app and in README), it should happen automatically. And specifically in desktop, we should phrase it like "Install extensions now or later" because it is not mandatory.  (2) Remove parts about extension in the extension options, it's useless. (3) Simplify the added messages in app, it's making the UI bloating up.
+- Firefox extension is not working, it reports the error below. I wonder why none of the local and CI checks caught this issue before.
+
+Page Data Unavailable
+Browser Recall extension reloaded. Please reload the page and try again.
+reason: navigation-delivery-failed
+url: https://www.google.com.hk/search?client=firefox-b-d&q=test
+error: Page navigation capture is delayed; retrying automatically. Could not establish connection. Receiving end does not exist.
+- The normal tab works now, but on the options page, the error is misleading: "Page Data Unavailable".
+- When I click the extension options' "Open Browser Recall", it is not opening the currently opened desktop app, but a fresh one.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) 
+- Fix them all. README.md was updated my me, keep it as is.
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) co-author=GPT-6.1 Sol

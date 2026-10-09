@@ -240,6 +240,18 @@ and YouTube navigation. Browser history events detect navigation that bypasses t
 injected script. Both paths report leaving and visiting pages, reset highlights,
 and update the badge. Duplicate navigation reports do not repeat those actions.
 
+The background script owns the session recording state. The popup and content
+scripts read that state through `getRecordingState`. Content scripts receive
+`recordingStateChanged` messages when
+recording is paused or resumed. A page loaded while recording is paused keeps only
+the recording-state receiver until recording resumes. Content scripts do not read
+`storage.session`, which Firefox exposes only to trusted extension contexts.
+Recording-state delivery requires an acknowledgement and retries transient
+failures. Persistent failures in loaded content scripts produce a popup diagnostic;
+the popup reads the committed global state before updating the recording toggle.
+Shared page-availability classification excludes browser and extension pages,
+with explicit exceptions for snapshot viewers.
+
 Navigation messages retry when a page script is temporarily unavailable. A newer
 navigation cancels pending work for an older navigation. Failed delivery produces
 an error for the affected tab. Leave reports keep the title of the page being left;
@@ -404,6 +416,12 @@ of the native desktop interface.
 Local and hosted verification share `ci:*` scripts. Documentation captures are
 manual macOS workflows. Native window pixels are composited over a fixed light
 Sonoma wallpaper; capture manifests fingerprint the wallpaper asset and crop.
+The documentation app has a separate bundle identifier and declares no URL
+schemes in either the retained build or the temporary capture copy. A native
+check verifies that registering the retained bundle preserves the existing
+Browser Recall URL handler and that opening the app URL reopens a hidden window
+in the same isolated process. The process-reuse check targets the temporary app
+explicitly, so the user's default URL handler is unchanged.
 Desktop freshness also covers native shell source and Cargo dependencies; desktop
 and browser workflows share native compilation and pixel-stability checks.
 Chrome Web Store screenshots derive from verified browser captures. The exporter

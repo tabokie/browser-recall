@@ -387,21 +387,17 @@
     "message": "Escolha a sua pasta de dados",
     "description": "Onboarding data-folder heading."
   },
-  "desktopOnboardingDataText": {
-    "message": "Browser Recall armazena os dados locais em texto simples na pasta que escolher. Nenhuma pasta padrão será utilizada até que faça essa escolha.",
+  "commonDataOwnership": {
+    "message": "Os seus dados ficam na pasta escolhida como ficheiros JSON e Markdown legíveis.",
     "description": "Onboarding data-folder explanation."
   },
-  "desktopOnboardingIntro": {
-    "message": "browser-recall guarda o histórico de navegação, notas e destaques através de Browser Recall Desktop numa pasta local de dados de texto simples.",
+  "commonProductIntro": {
+    "message": "A aplicação de ambiente de trabalho organiza e pesquisa a sua coleção. A extensão do navegador regista visitas e guarda capturas, destaques e notas.",
     "description": "Onboarding product description."
   },
   "desktopOnboardingLiveCapture": {
-    "message": "Captura ao vivo",
+    "message": "Instale as extensões agora ou mais tarde",
     "description": "Onboarding live capture heading."
-  },
-  "desktopOnboardingLiveCaptureText": {
-    "message": "Instale a extensão do navegador e emparelhe-a no pop-up da extensão. Browser Recall Desktop deve permanecer a ser executado em segundo plano para registar as visitas.",
-    "description": "Onboarding live capture explanation."
   },
   "desktopOnboardingPickColor": {
     "message": "Escolha uma cor",
@@ -412,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "Abra o pop-up do Browser Recall no seu browser e clique em «Emparelhar com o ambiente de trabalho».",
+    "message": "A extensão de navegador do Browser Recall liga-se automaticamente.",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -992,7 +988,7 @@
     "description": "Extension popup placeholder URL text."
   },
   "extensionDesktopControl": {
-    "message": "Controlo da área de trabalho",
+    "message": "Aplicação de ambiente de trabalho",
     "description": "Extension options heading."
   },
   "extensionDesktopOffline": {
@@ -1004,7 +1000,7 @@
     "description": "Extension options heading."
   },
   "extensionMainUiRunsInDesktop": {
-    "message": "A interface principal Browser Recall é executada na aplicação de ambiente de trabalho.",
+    "message": "Organize listas e pesquise páginas guardadas, destaques, notas e capturas na aplicação de ambiente de trabalho do Browser Recall.",
     "description": "Extension options explanatory text."
   },
   "extensionNotSet": {
@@ -1342,7 +1338,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "Selecione o texto e prima <kbd>Alt+H</kbd> para o destacar.",
+    "message": "Selecione texto numa página web e prima <kbd>Alt+H</kbd> na extensão para o destacar e adicionar uma nota.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {
@@ -1350,7 +1346,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryText": {
-    "message": "Cada visita à página é guardada automaticamente por Browser Recall Desktop e permanece pesquisável por título, endereço web e conteúdo.",
+    "message": "Guarde o histórico de navegação sem limite de tempo. Encontre visitas guardadas por título e URL na aplicação de ambiente de trabalho.",
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryTitle": {
@@ -1358,11 +1354,11 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingListsText": {
-    "message": "Organize as páginas em listas. Utilize regras de caixa de entrada automática para criar uma lista de atualização em direto.",
+    "message": "Organize páginas em listas. Uma página pode pertencer a mais de uma lista.",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTextHtml": {
-    "message": "Prima <kbd>Alt+S</kbd> para guardar uma cópia offline da página através da ligação à aplicação de ambiente de trabalho.",
+    "message": "Prima <kbd>Alt+S</kbd> na extensão para guardar uma captura compacta da página atual e ler offline.",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTitle": {
@@ -1370,7 +1366,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "Abra o pop-up do Browser Recall no seu browser e clique em «Emparelhar com o ambiente de trabalho».",
+    "message": "A extensão de navegador do Browser Recall liga-se automaticamente.",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {
@@ -1600,5 +1596,13 @@
   "desktopBook": {
     "message": "Livro",
     "description": "Primary desktop highlight-book navigation label."
+  },
+  "extensionStoreChrome": {
+    "message": "Chrome Web Store",
+    "description": "Browser extension store link label."
+  },
+  "extensionStoreFirefox": {
+    "message": "Firefox Add-ons",
+    "description": "Browser extension store link label."
   }
 }

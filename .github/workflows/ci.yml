@@ -50,7 +50,15 @@ jobs:
       - name: Install Playwright Chromium
         run: npm run ci:install-playwright
 
+      - name: Install Firefox
+        id: firefox
+        uses: browser-actions/setup-firefox@v1
+        with:
+          firefox-version: '157.0.1'
+
       - run: npm run ci:test-extension-e2e
+        env:
+          FIREFOX_BINARY: ${{ steps.firefox.outputs.firefox-path }}
 
   test-rust:
     name: Rust Tests
@@ -181,6 +189,9 @@ jobs:
           BROWSER_RECALL_ISOLATED_MACOS_SESSION: '1'
         run: node tests/smoke/macos-desktop-window-lifecycle.mjs
 
+      - name: Verify documentation builds preserve app URL routing
+        run: node tests/smoke/macos-documentation-url-routing.mjs
+
   test-desktop-single-instance:
     name: Desktop Windows Single Instance
     runs-on: windows-latest
@@ -202,7 +213,7 @@ jobs:
 
       - run: npm run build --workspace @browser-recall/desktop
 
-      - run: npm run ci:test-windows-artifacts
+      - run: npm run ci:test-windows-artifacts -- tests/integration/desktop-artifact-collection.test.js
 
       - name: Install Playwright Chromium
         run: npm run ci:install-playwright

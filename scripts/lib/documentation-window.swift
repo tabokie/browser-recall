@@ -11,6 +11,11 @@ func fail(_ message: String) -> Never {
 }
 
 let args = CommandLine.arguments
+if args.count == 3 && args[1] == "url-handler" {
+    guard let url = URL(string: args[2]) else { fail("Invalid URL") }
+    print(NSWorkspace.shared.urlForApplication(toOpen: url)?.path ?? "none")
+    exit(0)
+}
 if args.count == 3 && args[1] == "pid" {
     guard let running = NSWorkspace.shared.runningApplications.first(where: {
         $0.bundleURL?.resolvingSymlinksInPath().path == URL(fileURLWithPath: args[2]).resolvingSymlinksInPath().path
@@ -75,6 +80,47 @@ func control(_ name: String) -> AXUIElement {
 }
 
 switch args[2] {
+case "reuse-url":
+    guard args.count == 5, let url = URL(string: args[3]),
+          let running = NSRunningApplication(processIdentifier: pid),
+          let closeButton = attribute(window, kAXCloseButtonAttribute) else {
+        fail("Expected app URL and application path")
+    }
+    guard AXUIElementPerformAction(closeButton as! AXUIElement, kAXPressAction as CFString) == .success else {
+        fail("Cannot close Browser Recall window")
+    }
+    let hideDeadline = Date().addingTimeInterval(5)
+    while !(attribute(app, "AXWindows") as? [AXUIElement] ?? []).isEmpty && Date() < hideDeadline {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    }
+    guard (attribute(app, "AXWindows") as? [AXUIElement] ?? []).isEmpty else {
+        fail("Browser Recall window did not hide")
+    }
+    var delivered = false
+    var openedPid: pid_t?
+    var deliveryError: String?
+    NSWorkspace.shared.open([url], withApplicationAt: URL(fileURLWithPath: args[4]), configuration: NSWorkspace.OpenConfiguration()) { opened, error in
+        openedPid = opened?.processIdentifier
+        deliveryError = error?.localizedDescription
+        delivered = true
+    }
+    let deadline = Date().addingTimeInterval(10)
+    while Date() < deadline {
+        if delivered && running.isActive && !(attribute(app, "AXWindows") as? [AXUIElement] ?? []).isEmpty { break }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    }
+    guard deliveryError == nil, openedPid == pid, running.isActive,
+          !(attribute(app, "AXWindows") as? [AXUIElement] ?? []).isEmpty else {
+        fail("App URL did not reopen the existing process: \(deliveryError ?? String(describing: openedPid))")
+    }
+    let expectedPath = URL(fileURLWithPath: args[4]).resolvingSymlinksInPath().path
+    let matches = NSWorkspace.shared.runningApplications.filter {
+        $0.bundleURL?.resolvingSymlinksInPath().path == expectedPath
+    }
+    guard matches.count == 1 && matches[0].processIdentifier == pid else {
+        fail("App URL launched another process")
+    }
+    print("App URL reopened the existing process \(pid)")
 case "dump":
     print(descendants(window).map(label).joined(separator: "\n"))
 case "frame", "frame-browser":

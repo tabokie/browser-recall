@@ -8,7 +8,5 @@ export function getBrowserCapabilities() {
   return {
     buildTarget,
     supportsPromiseOnMessage: buildTarget !== 'chromium',
-    supportsSessionAccessLevel:
-      typeof chrome.storage.session.setAccessLevel === 'function',
   };
 }

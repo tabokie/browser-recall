@@ -387,21 +387,17 @@
     "message": "选择数据文件夹",
     "description": "Onboarding data-folder heading."
   },
-  "desktopOnboardingDataText": {
-    "message": "Browser Recall 会把纯文本本地数据存入你选择的文件夹。在你选择之前不会使用默认文件夹。",
+  "commonDataOwnership": {
+    "message": "你的数据以可读的 JSON 和 Markdown 文件保存在你选择的文件夹中。",
     "description": "Onboarding data-folder explanation."
   },
-  "desktopOnboardingIntro": {
-    "message": "browser-recall 通过 Browser Recall Desktop 将浏览历史、笔记和高亮保存到本地纯文本数据文件夹。",
+  "commonProductIntro": {
+    "message": "桌面应用用于整理和搜索收藏。浏览器扩展记录网页访问，并保存快照、高亮和笔记。",
     "description": "Onboarding product description."
   },
   "desktopOnboardingLiveCapture": {
-    "message": "实时捕获",
+    "message": "现在或以后安装扩展",
     "description": "Onboarding live capture heading."
-  },
-  "desktopOnboardingLiveCaptureText": {
-    "message": "安装浏览器扩展，并从扩展弹窗完成配对。Browser Recall Desktop 必须在后台保持运行才能记录访问。",
-    "description": "Onboarding live capture explanation."
   },
   "desktopOnboardingPickColor": {
     "message": "选择颜色",
@@ -412,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "在浏览器中打开 Browser Recall 弹窗，然后点击“与桌面配对”。",
+    "message": "Browser Recall 浏览器扩展会自动连接。",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -992,7 +988,7 @@
     "description": "Extension popup placeholder URL text."
   },
   "extensionDesktopControl": {
-    "message": "桌面控制",
+    "message": "桌面应用",
     "description": "Extension options heading."
   },
   "extensionDesktopOffline": {
@@ -1004,7 +1000,7 @@
     "description": "Extension options heading."
   },
   "extensionMainUiRunsInDesktop": {
-    "message": "Browser Recall 的主界面在桌面应用中运行。",
+    "message": "在 Browser Recall 桌面应用中整理列表，搜索已保存的网页、高亮、笔记和快照。",
     "description": "Extension options explanatory text."
   },
   "extensionNotSet": {
@@ -1342,7 +1338,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "选择文本并按 <kbd>Alt+H</kbd> 可高亮。",
+    "message": "在网页上选中文本，然后通过浏览器扩展按 <kbd>Alt+H</kbd> 高亮文本并添加笔记。",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {
@@ -1350,7 +1346,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryText": {
-    "message": "Browser Recall Desktop 会自动保存每次页面访问，并可按标题、网址和内容搜索。",
+    "message": "长期保留浏览历史。在桌面应用中按标题和网址查找已保存的访问记录。",
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryTitle": {
@@ -1358,11 +1354,11 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingListsText": {
-    "message": "把页面整理到列表中。使用自动收件箱规则创建实时更新的列表。",
+    "message": "将网页整理到列表中。一个网页可以属于多个列表。",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTextHtml": {
-    "message": "按 <kbd>Alt+S</kbd> 通过桌面桥保存页面的离线副本。",
+    "message": "通过浏览器扩展按 <kbd>Alt+S</kbd> 保存当前网页的精简快照，以便离线阅读。",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTitle": {
@@ -1370,7 +1366,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "在浏览器中打开 Browser Recall 弹窗，然后点击“与桌面配对”。",
+    "message": "Browser Recall 浏览器扩展会自动连接。",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {
@@ -1600,5 +1596,13 @@
   "desktopBook": {
     "message": "书册",
     "description": "Primary desktop highlight-book navigation label."
+  },
+  "extensionStoreChrome": {
+    "message": "Chrome Web Store",
+    "description": "Browser extension store link label."
+  },
+  "extensionStoreFirefox": {
+    "message": "Firefox Add-ons",
+    "description": "Browser extension store link label."
   }
 }

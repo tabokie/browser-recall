@@ -387,21 +387,17 @@
     "message": "अपना डेटा फ़ोल्डर चुनें",
     "description": "Onboarding data-folder heading."
   },
-  "desktopOnboardingDataText": {
-    "message": "Browser Recall आपके द्वारा चुने गए फ़ोल्डर में सादा-पाठ स्थानीय डेटा संग्रहीत करता है। जब तक आप यह विकल्प नहीं चुनते तब तक किसी भी डिफ़ॉल्ट फ़ोल्डर का उपयोग नहीं किया जाता है।",
+  "commonDataOwnership": {
+    "message": "आपका डेटा चुने हुए फ़ोल्डर में पढ़ने योग्य JSON और Markdown फ़ाइलों के रूप में रहता है।",
     "description": "Onboarding data-folder explanation."
   },
-  "desktopOnboardingIntro": {
-    "message": "browser-recall ब्राउज़िंग इतिहास, नोट्स और हाइलाइट्स को Browser Recall Desktop के माध्यम से स्थानीय सादे-पाठ डेटा फ़ोल्डर में सहेजता है।",
+  "commonProductIntro": {
+    "message": "डेस्कटॉप ऐप आपके संग्रह को व्यवस्थित करता है और उसमें खोजता है। ब्राउज़र एक्सटेंशन विज़िट रिकॉर्ड करता है और स्नैपशॉट, हाइलाइट और नोट सहेजता है।",
     "description": "Onboarding product description."
   },
   "desktopOnboardingLiveCapture": {
-    "message": "लाइव कैप्चर",
+    "message": "एक्सटेंशन अभी या बाद में इंस्टॉल करें",
     "description": "Onboarding live capture heading."
-  },
-  "desktopOnboardingLiveCaptureText": {
-    "message": "ब्राउज़र एक्सटेंशन इंस्टॉल करें और इसे एक्सटेंशन पॉपअप से पेयर करें। विज़िट रिकॉर्ड करने के लिए Browser Recall Desktop को पृष्ठभूमि में चालू रहना चाहिए।",
-    "description": "Onboarding live capture explanation."
   },
   "desktopOnboardingPickColor": {
     "message": "एक रंग चुनें",
@@ -412,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "अपने ब्राउज़र में Browser Recall पॉपअप खोलें और ‘डेस्कटॉप के साथ पेयर करें’ पर क्लिक करें।",
+    "message": "Browser Recall ब्राउज़र एक्सटेंशन अपने आप कनेक्ट होता है।",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -992,7 +988,7 @@
     "description": "Extension popup placeholder URL text."
   },
   "extensionDesktopControl": {
-    "message": "डेस्कटॉप नियंत्रण",
+    "message": "डेस्कटॉप ऐप",
     "description": "Extension options heading."
   },
   "extensionDesktopOffline": {
@@ -1004,7 +1000,7 @@
     "description": "Extension options heading."
   },
   "extensionMainUiRunsInDesktop": {
-    "message": "मुख्य Browser Recall इंटरफ़ेस डेस्कटॉप ऐप में चलता है।",
+    "message": "Browser Recall डेस्कटॉप ऐप में सूचियाँ व्यवस्थित करें और सहेजे गए पेज, हाइलाइट, नोट और स्नैपशॉट खोजें।",
     "description": "Extension options explanatory text."
   },
   "extensionNotSet": {
@@ -1342,7 +1338,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "टेक्स्ट चुनकर उसे हाइलाइट करने के लिए <kbd>Alt+H</kbd> दबाएँ।",
+    "message": "वेबपृष्ठ पर टेक्स्ट चुनें और ब्राउज़र एक्सटेंशन में <kbd>Alt+H</kbd> दबाकर उसे हाइलाइट करें और नोट जोड़ें।",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {
@@ -1350,7 +1346,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryText": {
-    "message": "प्रत्येक पृष्ठ विज़िट Browser Recall Desktop द्वारा स्वचालित रूप से सहेजी जाती है और शीर्षक, वेब पते और सामग्री द्वारा खोजने योग्य रहती है।",
+    "message": "ब्राउज़िंग इतिहास बिना समय सीमा के रखें। डेस्कटॉप ऐप में शीर्षक और URL से सहेजी गई विज़िट खोजें।",
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryTitle": {
@@ -1358,11 +1354,11 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingListsText": {
-    "message": "पृष्ठों को सूचियों में व्यवस्थित करें. लाइव-अपडेटिंग सूची बनाने के लिए स्वचालित इनबॉक्स नियमों का उपयोग करें।",
+    "message": "पृष्ठों को सूचियों में व्यवस्थित करें। एक पृष्ठ एक से अधिक सूचियों में हो सकता है।",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTextHtml": {
-    "message": "डेस्कटॉप ब्रिज के माध्यम से पृष्ठ की ऑफ़लाइन प्रति सहेजने के लिए <kbd>Alt+S</kbd> दबाएँ।",
+    "message": "ब्राउज़र एक्सटेंशन में <kbd>Alt+S</kbd> दबाकर मौजूदा पृष्ठ का छोटा स्नैपशॉट ऑफ़लाइन पढ़ने के लिए सहेजें।",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTitle": {
@@ -1370,7 +1366,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "अपने ब्राउज़र में Browser Recall पॉपअप खोलें और ‘डेस्कटॉप के साथ पेयर करें’ पर क्लिक करें।",
+    "message": "Browser Recall ब्राउज़र एक्सटेंशन अपने आप कनेक्ट होता है।",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {
@@ -1600,5 +1596,13 @@
   "desktopBook": {
     "message": "पुस्तक",
     "description": "Primary desktop highlight-book navigation label."
+  },
+  "extensionStoreChrome": {
+    "message": "Chrome Web Store",
+    "description": "Browser extension store link label."
+  },
+  "extensionStoreFirefox": {
+    "message": "Firefox Add-ons",
+    "description": "Browser extension store link label."
   }
 }

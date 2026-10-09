@@ -1,6 +1,20 @@
 // Shared page identity helpers. Keep this module browser-global-free: Node
 // scripts, extension modules, and generated classic content scripts all use it.
 
+export const INTERNAL_URL_PREFIXES = ['chrome://', 'edge://', 'about:'];
+
+export function isInternalBrowserUrl(url) {
+  if (typeof url !== 'string') {
+    throw new Error('Browser URL must be a string');
+  }
+  return INTERNAL_URL_PREFIXES.some((prefix) => url.startsWith(prefix));
+}
+
+export function isUnavailablePageUrl(url) {
+  if (url === undefined || url === null || url === '') return true;
+  return isInternalBrowserUrl(url) || /^(chrome|moz)-extension:\/\//.test(url);
+}
+
 export function generateSlug(text, hashInput) {
   if (!text || text.trim() === '') {
     throw new Error('generateSlug: text must be non-empty');
@@ -29,13 +43,15 @@ export function canonicalizePageUrl(url) {
   }
   const keptParams = [];
   let removedParam = false;
-  for (const [key, value] of parsed.searchParams.entries()) {
+  // Firefox content-script wrappers do not expose the URLSearchParams iterator
+  // as an iterable. Callback traversal also preserves duplicate keys and order.
+  parsed.searchParams.forEach((value, key) => {
     if (key.startsWith('_')) {
       removedParam = true;
-      continue;
+      return;
     }
     keptParams.push([key, value]);
-  }
+  });
   if (!removedParam) return url;
   parsed.search = '';
   for (const [key, value] of keptParams) {
@@ -71,6 +87,9 @@ export function isSameDocumentPageUrl(left, right) {
 export function createPageIdentityGlobalScript() {
   return `// Generated from packages/core/page-identity.js by scripts/stage-app-assets.mjs.
 (function installBrowserRecallPageIdentity() {
+  const INTERNAL_URL_PREFIXES = ${JSON.stringify(INTERNAL_URL_PREFIXES)};
+  const isInternalBrowserUrl = ${isInternalBrowserUrl.toString()};
+  const isUnavailablePageUrl = ${isUnavailablePageUrl.toString()};
   const generateSlug = ${generateSlug.toString()};
   const canonicalizePageUrl = ${canonicalizePageUrl.toString()};
   const pageSlugTextFromUrl = ${pageSlugTextFromUrl.toString()};
@@ -78,6 +97,7 @@ export function createPageIdentityGlobalScript() {
   const isSameDocumentPageUrl = ${isSameDocumentPageUrl.toString()};
 
   globalThis.browserRecallPageIdentity = Object.freeze({
+    isUnavailablePageUrl,
     canonicalizePageUrl,
     generateSlugFromUrl,
     isSameDocumentPageUrl,

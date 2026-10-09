@@ -387,21 +387,17 @@
     "message": "データフォルダーを選択してください",
     "description": "Onboarding data-folder heading."
   },
-  "desktopOnboardingDataText": {
-    "message": "Browser Recall は、選択したフォルダーにプレーンテキストのローカル データを保存します。この選択をするまで、デフォルトのフォルダーは使用されません。",
+  "commonDataOwnership": {
+    "message": "データは選択したフォルダーに、読み取り可能な JSON と Markdown ファイルとして保存されます。",
     "description": "Onboarding data-folder explanation."
   },
-  "desktopOnboardingIntro": {
-    "message": "browser-recall は、Browser Recall Desktop を通じて閲覧履歴、メモ、ハイライトをローカルのプレーンテキストデータフォルダに保存します。",
+  "commonProductIntro": {
+    "message": "デスクトップアプリでコレクションを整理・検索できます。ブラウザー拡張機能で閲覧履歴、スナップショット、ハイライト、ノートを保存できます。",
     "description": "Onboarding product description."
   },
   "desktopOnboardingLiveCapture": {
-    "message": "ライブキャプチャ",
+    "message": "拡張機能は今すぐ、または後でインストール",
     "description": "Onboarding live capture heading."
-  },
-  "desktopOnboardingLiveCaptureText": {
-    "message": "ブラウザ拡張機能をインストールし、拡張機能ポップアップからペアリングします。訪問を記録するには、Browser Recall Desktop をバックグラウンドで実行し続ける必要があります。",
-    "description": "Onboarding live capture explanation."
   },
   "desktopOnboardingPickColor": {
     "message": "色を選択してください",
@@ -412,7 +408,7 @@
     "description": "Desktop pairing button label."
   },
   "desktopPairInstructions": {
-    "message": "ブラウザで Browser Recall のポップアップを開き、「デスクトップとペアリング」をクリックします。",
+    "message": "Browser Recall ブラウザー拡張機能は自動的に接続します。",
     "description": "Status shown when desktop pairing is ready."
   },
   "desktopPageDetailsUnavailable": {
@@ -992,7 +988,7 @@
     "description": "Extension popup placeholder URL text."
   },
   "extensionDesktopControl": {
-    "message": "デスクトップコントロール",
+    "message": "デスクトップアプリ",
     "description": "Extension options heading."
   },
   "extensionDesktopOffline": {
@@ -1004,7 +1000,7 @@
     "description": "Extension options heading."
   },
   "extensionMainUiRunsInDesktop": {
-    "message": "メインの Browser Recall インターフェイスはデスクトップ アプリで実行されます。",
+    "message": "Browser Recall デスクトップアプリでリストを整理し、保存したページ、ハイライト、ノート、スナップショットを検索できます。",
     "description": "Extension options explanatory text."
   },
   "extensionNotSet": {
@@ -1342,7 +1338,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTextHtml": {
-    "message": "テキストを選択して <kbd>Alt+H</kbd> を押すとハイライトできます。",
+    "message": "ページ上のテキストを選択し、ブラウザー拡張機能で <kbd>Alt+H</kbd> を押すと、ハイライトやメモを追加できます。",
     "description": "Localized UI text."
   },
   "desktopOnboardingHighlightsTitle": {
@@ -1350,7 +1346,7 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryText": {
-    "message": "すべてのページ訪問は Browser Recall Desktop によって自動的に保存され、タイトル、Web アドレス、コンテンツで検索できる状態が維持されます。",
+    "message": "閲覧履歴を期限なく保存します。デスクトップアプリでタイトルや URL から保存済みの履歴を検索できます。",
     "description": "Localized UI text."
   },
   "desktopOnboardingHistoryTitle": {
@@ -1358,11 +1354,11 @@
     "description": "Localized UI text."
   },
   "desktopOnboardingListsText": {
-    "message": "ページをリストに整理します。自動受信トレイ ルールを使用して、ライブ更新リストを作成します。",
+    "message": "ページをリストに整理します。1 つのページを複数のリストに追加できます。",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTextHtml": {
-    "message": "<kbd>Alt+S</kbd> を押すと、デスクトップブリッジ経由でページのオフラインコピーを保存できます。",
+    "message": "ブラウザー拡張機能で <kbd>Alt+S</kbd> を押すと、現在のページのコンパクトなスナップショットを保存し、オフラインで読めます。",
     "description": "Localized UI text."
   },
   "desktopOnboardingSnapshotsTitle": {
@@ -1370,7 +1366,7 @@
     "description": "Localized UI text."
   },
   "desktopOpenPopupPair": {
-    "message": "ブラウザで Browser Recall のポップアップを開き、「デスクトップとペアリング」をクリックします。",
+    "message": "Browser Recall ブラウザー拡張機能は自動的に接続します。",
     "description": "Localized UI text."
   },
   "desktopPageProperties": {
@@ -1600,5 +1596,13 @@
   "desktopBook": {
     "message": "ブック",
     "description": "Primary desktop highlight-book navigation label."
+  },
+  "extensionStoreChrome": {
+    "message": "Chrome Web Store",
+    "description": "Browser extension store link label."
+  },
+  "extensionStoreFirefox": {
+    "message": "Firefox Add-ons",
+    "description": "Browser extension store link label."
   }
 }

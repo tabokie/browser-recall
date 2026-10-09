@@ -827,34 +827,6 @@ describe('desktop artifact collection', () => {
     );
   });
 
-  it('clears stale platform output before collecting current bundle types', () => {
-    const root = mkdtempSync(
-      join(tmpdir(), 'browser-recall-desktop-artifacts-'),
-    );
-    const cargoReleaseDir = join(root, 'target-release');
-    const outDir = join(root, 'dist-desktop');
-    mkdirSync(join(cargoReleaseDir, 'bundle', 'dmg'), { recursive: true });
-    mkdirSync(join(outDir, 'macos', 'app', 'Old.app'), { recursive: true });
-    writeFileSync(join(cargoReleaseDir, 'browser-recall-desktop'), 'bin');
-    writeFileSync(
-      join(cargoReleaseDir, 'bundle', 'dmg', 'Browser Recall.dmg'),
-      'dmg',
-    );
-
-    collectDesktopArtifacts({
-      cargoReleaseDir,
-      outDir,
-      platformName: 'macos',
-      bundles: ['dmg'],
-    });
-    stagedDirs.push(root);
-
-    expect(existsSync(join(outDir, 'macos', 'app', 'Old.app'))).toBe(false);
-    expect(existsSync(join(outDir, 'macos', 'dmg', 'Browser Recall.dmg'))).toBe(
-      true,
-    );
-  });
-
   it('does not copy wrong-platform executables into the platform output', () => {
     const root = mkdtempSync(
       join(tmpdir(), 'browser-recall-desktop-artifacts-'),

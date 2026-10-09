@@ -1,0 +1,9 @@
+{
+  "identifier": "app.browser-recall.documentation",
+  "productName": "Browser Recall Documentation",
+  "plugins": {
+    "deep-link": {
+      "desktop": []
+    }
+  }
+}

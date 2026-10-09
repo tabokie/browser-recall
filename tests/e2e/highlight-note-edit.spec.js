@@ -11,6 +11,124 @@ import {
 } from './helpers.js';
 
 test.describe('Highlight note edit', () => {
+  for (const layout of ['wrapped', 'multiline', 'unbroken']) {
+    test(`long ${layout} highlight previews omit the tail at a word boundary and preserve the saved excerpt`, async ({
+      extContext,
+      extensionId,
+      localServer,
+    }, testInfo) => {
+      const separator = layout === 'multiline' ? '\n\n' : ' ';
+      const body =
+        layout === 'unbroken'
+          ? 'unbreakable'.repeat(250)
+          : `A long passage with repeated details and emoji 👩🏽‍💻.${separator}`.repeat(
+              50,
+            );
+      const excerpt = `Beginning of the highlighted passage.${separator}${body}${separator}End of the highlighted passage.`;
+      localServer.addPage('/long-note-preview', {
+        title: 'Long Highlight Preview',
+        body: `<p id="passage" style="white-space:pre-wrap">${excerpt}</p>`,
+      });
+      const url = localServer.url('/long-note-preview');
+      const slug = getSlugForUrl(url);
+      const noteSlug = 'long-note-preview';
+      await resetAndSeed(extContext, extensionId, [
+        settingsCheckpoint(),
+        {
+          path: pageCheckpointPath(slug),
+          data: pageEntityFixture({
+            slug,
+            url,
+            title: 'Long Highlight Preview',
+            timestamps: { 'test-device': Date.now() },
+            parentIds: [],
+            childIds: [`note:${noteSlug}`],
+          }),
+        },
+        {
+          path: `objects/notes/${noteSlug}.json`,
+          data: noteEntityFixture({
+            slug: noteSlug,
+            excerpt: [excerpt],
+            note: '',
+            cssPath: ['#passage'],
+            url,
+          }),
+        },
+      ]);
+      const page = await extContext.newPage();
+      await page.setViewportSize({ width: 640, height: 480 });
+      await page.goto(url);
+      const mark = page.locator('mark.browser-recall-highlight').first();
+      await expect(mark).toBeVisible();
+      await mark.click({ position: { x: 15, y: 8 } });
+      const overlay = page.locator('#browser-recall-highlight-overlay');
+      await expect(overlay).toBeVisible();
+      await overlay.screenshot({
+        path: testInfo.outputPath('page-note-editor.png'),
+      });
+      expect((await overlay.boundingBox()).height).toBeLessThanOrEqual(120);
+      await page.keyboard.type('Annotation for the complete passage');
+      await page.keyboard.press('Control+Enter');
+      await expect(overlay).toHaveCount(0);
+
+      const helper = await openHelperPage(extContext, extensionId);
+      const prepared = await helper.evaluate(async (pageUrl) => {
+        const [tab] = await chrome.tabs.query({ url: pageUrl });
+        return chrome.runtime.sendMessage({
+          action: 'preparePopupBootstrapForTest',
+          tabId: tab.id,
+        });
+      }, url);
+      expect(prepared.success).toBe(true);
+      const popup = await extContext.newPage();
+      await popup.goto(
+        `chrome-extension://${extensionId}/${prepared.popupPath}`,
+      );
+      const item = popup.locator('#notesSection .highlight-item').first();
+      await item.locator('.highlight-edit-action').click();
+      await popup
+        .locator('#notesSection')
+        .screenshot({ path: testInfo.outputPath('popup-note-editor.png') });
+      const quote = item.locator('.highlight-quote');
+      await expect(quote).toContainText('...');
+      const preview = await quote.innerText();
+      expect(preview).toMatch(/^Beginning of the highlighted passage\./);
+      expect(preview).toMatch(/\.\.\.$/);
+      expect(preview).not.toMatch(/\.{4}$/);
+      const retained = preview.slice(0, -3);
+      expect(excerpt.startsWith(retained)).toBe(true);
+      // Every word in the fixture is followed by whitespace or punctuation.
+      expect(excerpt[retained.length]).toMatch(/[\s.]/);
+      expect((await quote.boundingBox()).height).toBeLessThanOrEqual(70);
+      expect(
+        await quote.evaluate((element) => element.scrollHeight),
+      ).toBeLessThanOrEqual(70);
+      await item.locator('.highlight-note-editor').fill('Updated annotation');
+      await item.locator('.highlight-edit-action.confirm').click();
+      await expect(item.locator('.highlight-note-text')).toHaveText(
+        'Updated annotation',
+      );
+      await expect(quote.locator('.highlight-excerpt')).toHaveText(
+        excerpt.split('\n'),
+      );
+      const saved = await helper.evaluate(
+        (pageSlug) =>
+          chrome.runtime.sendMessage({
+            action: 'loadPageNotes',
+            slug: pageSlug,
+          }),
+        slug,
+      );
+      expect(saved.success).toBe(true);
+      expect(saved.notes[0].excerpt).toEqual([excerpt]);
+      expect(saved.notes[0].note).toBe('Updated annotation');
+      await popup.close();
+      await helper.close();
+      await page.close();
+    });
+  }
+
   test('highlight preserves the live page title when only Timeline retains the earlier visit', async ({
     extContext,
     extensionId,
