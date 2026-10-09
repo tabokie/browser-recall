@@ -1,51 +1,71 @@
+<img src='icons/browser-recall-default.svg' width=100 height=100 align='right'/>
+
 # Browser Recall
 
-For the things you meant to come back to.
+Help browser remember things.
 
-Browser Recall keeps your browsing history, highlights, and saved pages in a folder on your computer. Browse as usual. Come back when a half-remembered sentence starts bothering you.
+- Keep browsing **history** without a time limit. Capture compact webpage **snapshots**.
+- Organize webpages with **lists**. A page can belong to more than one list, as it should.
+- Add highlights and **notes** directly on the webpage and find them again in context.
+- **Search** across titles, URLs, highlights, notes, and snapshots from one place.
 
-![Browser Recall Timeline: Amber on the left and Mono on the right, divided diagonally](docs/images/timeline-styles.png)
+All data collected by the app are stored using plain, readable formats such as JSON and Markdown, in a directory of your choosing. You can inspect the files directly, search them with file tools, or ask an agent to analyze them. An AGENTS.md file in the data directory explains the layout and conventions. Nothing in the collection depends on Browser Recall to remain readable. You own your data.
 
-## While you browse
+## Gallery
 
-The **browser extension** keeps the current page close at hand. Pin the page to a list, leave a rating, or save a **snapshot** to read later, even offline.
+<table>
+  <tr>
+    <td>
+      <p align="center">
+        <img src="docs/images/timeline-styles.png" alt="Browser Recall Timeline showing browsing history in Amber and Mono color schemes">
+        <br>
+        <strong>Timeline</strong> — browsing history and search
+      </p>
+    </td>
+    <td>
+      <p align="center">
+        <img src="docs/images/book.png" alt="Browser Recall Book showing collected highlights and notes grouped by day">
+        <br>
+        <strong>Book</strong> — highlights and notes, gathered by day
+      </p>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <p align="center">
+        <img src="docs/images/browser-popup-window.png" alt="Browser extension popup showing page details, lists, and saved snapshots">
+        <br>
+        Browser extension popup window
+      </p>
+    </td>
+    <td>
+      <p align="center">
+        <img src="docs/images/browser-note-window.png" alt="Browser extension note editor beneath a highlighted passage on a webpage">
+        <br>
+        Highlight text and add a note on the page
+      </p>
+    </td>
+  </tr>
+</table>
 
-![Browser Recall popup in English, anchored to the browser toolbar above an article with no highlights](docs/images/browser-popup-window.png)
 
-## Keep a line, and your thought
+## Install
 
-Save a **highlight** from something you are reading. Add a **note** while the thought is still fresh.
+<!-- Store URLs are placeholders. Replace APP_ID, CHROME_EXTENSION_ID, and FIREFOX_ADDON_ID before publishing. -->
 
-![Browser Recall note editor in English, open beneath a highlighted passage in the browser window](docs/images/browser-note-window.png)
+Install both the desktop app and the browser extension.
 
-**Book** brings those passages and notes together, grouped by day.
+Desktop app is supported on MacOS and on Windows. The signed macOS app is available as a paid download from the [App Store](https://apps.apple.com/app/idAPP_ID). You can also [build from source](DEVELOPMENT.md#build-and-run).
 
-![Book, bringing saved highlights and personal notes together](docs/images/book.png)
+Browser extension is free on the [Chrome Web Store](https://chromewebstore.google.com/detail/browser-recall/CHROME_EXTENSION_ID) and [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/FIREFOX_ADDON_ID/). Edge and Orion are supported using the Chromium extension.
 
-## Find your way back
+## Caveats
 
-**Timeline** brings your visits together. Search titles and URLs, highlights, notes, or text in saved snapshots. A page does not have to make it into your bookmarks to be worth finding again.
+Browser Recall is 100% implemented by AI agents under my supervision. From the outside, the software quality appears good enough based on my own use. But I would not recommend reading the implementation without AI assistance. For your context, almost every prompt used to build the project is tracked in [./prompts](./prompts).
 
-## Keep a small collection
-
-**Lists** give a small project, a passing interest, or a weekend reading pile a place to live. Pin pages yourself, or add a keyword rule that collects matching page titles.
-
-## A folder of your own
-
-History, notes, lists, and snapshots live on your computer. No Browser Recall account. No analytics or telemetry. Optional sync uses a GitHub repository you control.
-
-The desktop app holds your collection. The browser extension records visits and lets you highlight, save, and pin without leaving the page. Keep the desktop app running while you browse.
-
-[Read the privacy policy](docs/PRIVACY.md)
-
-## Try Browser Recall
-
-Browser Recall currently has a [source-build setup](DEVELOPMENT.md#build-and-run). You need the desktop app and the [browser extension](DEVELOPMENT.md#connect-the-browser).
-
-Chrome, Edge, and Orion use the Chromium extension build. Firefox has a separate build.
+Browser Recall is one particular take on keeping a durable and searchable record of the web you have seen. There're other options out there that might suit you better. [Hister](https://hister.org/), for example, focuses more on building a powerful search engine.
 
 ---
 
-[Development](DEVELOPMENT.md) · [Architecture](docs/ARCHITECTURE.md) · [Codebase map](docs/CODEBASE_MAP.md) · MIT licensed
+[Development](DEVELOPMENT.md) · [Privacy](docs/PRIVACY.md) · MIT licensed
 
-Screenshots show the real macOS app and browser extension with fictional reading data. The opening image combines Amber and Mono captures programmatically. [Regenerate the screenshots](DEVELOPMENT.md#documentation-screenshots).
