@@ -1,14 +1,18 @@
 {
+  "extensionPackageName": {
+    "message": "Browser Recall Connector",
+    "description": "Browser extension package name."
+  },
   "extensionName": {
     "message": "Browser Recall",
-    "description": "Product name shown in extension metadata and UI."
+    "description": "Product name shown in UI."
   },
   "extensionShortName": {
     "message": "browser-recall",
     "description": "Lowercase product mark used in compact desktop UI."
   },
   "extensionDescription": {
-    "message": "Browser Recall Desktop 的浏览器连接器。在浏览器中捕获页面，并在本地打开完整应用。",
+    "message": "Browser Recall Desktop 的浏览器连接器。",
     "description": "Extension store and browser management description."
   },
   "commandOpenPopup": {

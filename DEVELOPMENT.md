@@ -35,13 +35,28 @@ app. Load an extension from `dist/extension/`, not `apps/extension/`.
 | `dist/extension/chrome/` | Chrome/Chromium unpacked extension |
 | `dist/extension/firefox/` | Firefox temporary add-on |
 | `dist/desktop/ui/` | Desktop HTML, JavaScript, CSS, and fonts used by Tauri |
-| `dist/desktop/<platform>/bin/` | Desktop executable |
-| `dist/desktop/macos/app/` | macOS app bundle |
-| `dist/desktop/<platform>/<bundle>/` | Release-only installer outputs |
+| `dist/desktop/macos/app/Browser Recall.app` | macOS app to launch or copy to Applications |
+| `dist/desktop/windows/bin/browser-recall-desktop.exe` | Windows executable to launch; also used by native Windows tests |
+| `dist/desktop/linux/bin/browser-recall-desktop` | Linux executable to launch |
+| `dist/desktop/macos/bin/browser-recall-desktop` | Standalone macOS executable; normal macOS use launches the app bundle |
+
+`dist/desktop/<platform>/bin/` contains a copy of the release executable from
+`target/release/`; collection does not compile a second executable. On macOS,
+`Browser Recall.app` already contains the executable under `Contents/MacOS/`, so
+the additional `bin/` copy is not needed to launch the app bundle.
+
+Bundle outputs follow `dist/desktop/<platform>/<bundle>/`, where `<platform>` is
+the operating system and `<bundle>` is the Tauri bundle type. For example,
+`dist/desktop/macos/app/` uses the `app` bundle type. The `app` bundle is produced
+by a normal macOS build; installer bundles require a separate packaging command.
 
 Cargo and Tauri keep build files in `target/`. After a successful build, the build
 scripts replace the platform's output directory in `dist/desktop/`. If replacement
-fails, the scripts restore the previous output.
+fails, the scripts restore the previous output. If restoration also fails, the
+error identifies the retained backup directory for recovery.
+
+macOS app collection copies only `Browser Recall.app` from Cargo's bundle directory.
+Other bundles left by documentation screenshot runs are excluded from build output.
 
 Windows builds can replace the output while an earlier Browser Recall process
 still runs. Windows may prevent deletion of the executable used by that process.
@@ -63,6 +78,12 @@ Installer packaging is a separate release step:
 ```bash
 npm run build:dmg --workspace @browser-recall/desktop
 ```
+
+`build:dmg` collects macOS disk images (`.dmg` files) into
+`dist/desktop/macos/dmg/`, where the Tauri bundle type is `dmg`. The command replaces
+the macOS output directory with the executable and disk images. Windows and Linux
+local builds produce executables; the repository does not provide installer
+packaging commands for those platforms.
 
 macOS local builds use ad-hoc signing, which does not require an Apple certificate.
 The signature uses a stable app identifier, and the build verifies the complete
@@ -293,6 +314,23 @@ The labels classify differences by field; the labels do not establish the cause.
 Use `--verbose` to inspect the values. The report also lists records found only in
 the rebuilt data or only on disk.
 
+### Repair snapshot identity metadata
+
+Snapshots require embedded URL and slug metadata. To repair older snapshots,
+quit Browser Recall Desktop and run the migration against the chosen data folder:
+
+```bash
+npm run migrate:snapshot-identity -- --data-dir "/absolute/path/to/data-folder" --check
+npm run migrate:snapshot-identity -- --data-dir "/absolute/path/to/data-folder"
+```
+
+`--check` reports `scanned`, `current`, `pending`, and `updated` counts without
+writing; its exit code is 1 when repair is pending. Invalid page URLs, mismatched
+slugs, missing page checkpoints, and invalid snapshot paths produce errors.
+The migration validates the collection before writing and replaces each affected
+HTML file through a temporary file on the same volume. Page checkpoints, logs,
+and Markdown files remain unchanged. A second run reports no pending repairs.
+
 ## Documentation screenshots
 
 Documentation capture is a manual macOS workflow. Both commands require a logged-in
@@ -309,15 +347,29 @@ Capture uses separate test app identifiers, browser profiles, fictional data, an
 daemon. The regular app and personal browsing data are not used. Leave capture
 windows alone until completion.
 
-| Capture | Layout | PNG output |
+| Capture | Window layout | PNG output with wallpaper |
 | --- | --- | --- |
-| Timeline, Amber and Mono | 960 × 500 points | 1920 × 1000 pixels |
-| Book, Amber | 960 × 620 points | 1920 × 1240 pixels |
-| Browser popup and highlight editor | 800 × 434 points | 1600 × 868 pixels |
+| Timeline, Amber and Mono | 960 × 620 points | 2080 × 1400 pixels |
+| Book, Amber | 960 × 620 points | 2080 × 1400 pixels |
+| Browser popup and highlight editor | 800 × 434 points | 1760 × 1028 pixels |
+
+Every screenshot places the captured window over a fixed light Sonoma wallpaper,
+with 40 points of margin and native shadows. The wallpaper asset is
+`scripts/assets/documentation-sonoma-light.png`, exported at 2560 × 2560 pixels
+from Apple's built-in `/System/Library/Desktop Pictures/Sonoma.heic` light image.
+The capture centers and crops the asset to fill each output image. Capture manifests
+record the wallpaper's SHA-256 hash and crop, and the documentation checker verifies
+the asset even with `--images-only`.
+
+The capture uses transparent native window pixels and never reads the current
+desktop wallpaper. Other application windows, desktop icons, widgets, the Dock,
+and menu bar are excluded. The window and margin must fit on one display. The
+combined Timeline image keeps the wallpaper outside the diagonal color-scheme divider.
 
 The capture scripts operate the real app and browser. The scripts check content,
 window dimensions, language, and whether rendering has finished before saving
-images and capture manifests. Browser capture uses
+images and capture manifests. Both commands share native helper compilation,
+capture arguments, and pixel-stability checks. Browser capture uses
 English and verifies note persistence. Capture failures retain evidence in
 `test-results/documentation/`.
 
@@ -335,11 +387,29 @@ To rebuild the combined Timeline image without taking new screenshots, source
 files and input images must still match the hashes in the capture manifest.
 Changes to the script that combines the images require new desktop screenshots.
 
+Export the Chrome Web Store variants from the verified browser captures on macOS:
+
+```bash
+node scripts/export-chrome-web-store-screenshots.mjs
+```
+
+The exporter writes the popup and highlight editor to
+`docs/images/chrome-web-store/` as 1280 × 800, 24-bit RGB PNGs without alpha,
+alongside `capture.json`. The export manifest records the browser image hashes,
+conversion source hashes, and output hashes and dimensions. Temporary export files
+stay on the destination volume; conversion failures preserve the previous export.
+The exporter crops only the wallpaper at the sides and scales uniformly, preserving
+the complete browser window. The documentation images keep their original dimensions.
+
 The full checker verifies source-file hashes, image hashes and dimensions, inputs
-to the combined image, and README image links. Linux CI checks image integrity;
+to the combined image, Chrome Web Store export freshness and RGB format, and README
+image links. `--images-only` still checks that Chrome Web Store exports match their
+browser source images, but skips capture and conversion source-code fingerprints.
+Linux CI checks image integrity;
 local CI also checks whether source files have changed since capture. Prose-only
-and backend-only edits do not require new screenshots. Never update capture
-manifests without a successful capture.
+and daemon-only source edits do not require new screenshots. Desktop freshness
+includes native shell source, capabilities, build scripts, and Cargo dependency
+and toolchain files. Never update capture manifests without a successful capture.
 
 ## Formatting and analysis
 

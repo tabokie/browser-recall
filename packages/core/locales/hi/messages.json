@@ -1,14 +1,18 @@
 {
+  "extensionPackageName": {
+    "message": "Browser Recall Connector",
+    "description": "Browser extension package name."
+  },
   "extensionName": {
     "message": "Browser Recall",
-    "description": "Product name shown in extension metadata and UI."
+    "description": "Product name shown in UI."
   },
   "extensionShortName": {
     "message": "browser-recall",
     "description": "Lowercase product mark used in compact desktop UI."
   },
   "extensionDescription": {
-    "message": "Browser Recall Desktop के लिए ब्राउज़र कनेक्टर। ब्राउज़र में पेज कैप्चर करें और स्थानीय रूप से पूरा ऐप खोलें।",
+    "message": "Browser Recall Desktop के लिए ब्राउज़र कनेक्टर।",
     "description": "Extension store and browser management description."
   },
   "commandOpenPopup": {

@@ -1,18 +1,27 @@
+function windowCaptureSpec(width, height) {
+  const paddingPoints = 40;
+  return {
+    layoutPoints: { width, height },
+    paddingPoints,
+    outputPixels: {
+      width: (width + paddingPoints * 2) * 2,
+      height: (height + paddingPoints * 2) * 2,
+    },
+  };
+}
+
+export const documentationWallpaper = {
+  name: 'Sonoma, Light (Still)',
+  file: 'scripts/assets/documentation-sonoma-light.png',
+  crop: 'center-cover',
+};
+
 export const documentationCaptureSpec = {
   desktop: {
-    timeline: {
-      layoutPoints: { width: 960, height: 500 },
-      outputPixels: { width: 1920, height: 1000 },
-    },
-    book: {
-      layoutPoints: { width: 960, height: 620 },
-      outputPixels: { width: 1920, height: 1240 },
-    },
+    timeline: windowCaptureSpec(960, 620),
+    book: windowCaptureSpec(960, 620),
   },
-  browser: {
-    layoutPoints: { width: 800, height: 434 },
-    outputPixels: { width: 1600, height: 868 },
-  },
+  browser: windowCaptureSpec(800, 434),
 };
 
 export const documentationImagePixels = {

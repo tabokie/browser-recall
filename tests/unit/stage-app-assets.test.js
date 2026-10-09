@@ -230,7 +230,7 @@ describe('extension staged assets', () => {
     stageExtensionAssets(outDir);
 
     const manifest = JSON.parse(readFileSync(join(outDir, 'manifest.json')));
-    const messages = JSON.parse(
+    const en = JSON.parse(
       readFileSync(join(outDir, '_locales', 'en', 'messages.json'), 'utf8'),
     );
     const coreMessages = JSON.parse(
@@ -243,16 +243,16 @@ describe('extension staged assets', () => {
       readFileSync(join(outDir, '_locales', 'zh_CN', 'messages.json'), 'utf8'),
     );
     expect(manifest.default_locale).toBe('en');
-    expect(manifest.name).toBe('__MSG_extensionName__');
+    expect(manifest.name).toBe('__MSG_extensionPackageName__');
     expect(manifest.description).toBe('__MSG_extensionDescription__');
     expect(manifest.commands['highlight-selection'].description).toBe(
       '__MSG_commandHighlightSelection__',
     );
-    expect(messages.extensionName.message).toBe('Browser Recall');
-    expect(messages.commandCaptureSnapshot.message).toBe(
+    expect(en.extensionPackageName.message).toBe('Browser Recall Connector');
+    expect(en.commandCaptureSnapshot.message).toBe(
       'Capture snapshot of current page',
     );
-    expect(messages.desktopSync).toBeUndefined();
+    expect(en.desktopSync).toBeUndefined();
     expect(coreMessages.extensionName.message).toBe('Browser Recall');
     expect(coreMessages.desktopSync).toBeUndefined();
     expect(zhMessages.extensionCaptureFrame.message).toBe('捕获画面');

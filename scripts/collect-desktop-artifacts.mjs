@@ -50,11 +50,15 @@ function copyReleaseExecutable(cargoReleaseDir, platformOutDir, platformName) {
 function copyBundles(cargoReleaseDir, platformOutDir, platformName, bundles) {
   const bundleDir = path.join(cargoReleaseDir, 'bundle');
   for (const bundleName of bundles) {
-    const source = path.join(
+    let source = path.join(
       bundleDir,
       bundleSourceName(platformName, bundleName),
     );
-    const destination = path.join(platformOutDir, bundleName);
+    let destination = path.join(platformOutDir, bundleName);
+    if (platformName === 'macos' && bundleName === 'app') {
+      source = path.join(source, 'Browser Recall.app');
+      destination = path.join(destination, 'Browser Recall.app');
+    }
     if (!copyIfExists(source, destination)) {
       throw new Error(`Missing ${bundleName} bundle output: ${source}`);
     }
@@ -287,8 +291,40 @@ function replacePlatformOutput(platformOutDir, stagedDir, platformName, warn) {
     return;
   }
 
-  fs.rmSync(platformOutDir, { recursive: true, force: true });
-  fs.renameSync(stagedDir, platformOutDir);
+  const backupDir = fs.existsSync(platformOutDir)
+    ? fs.mkdtempSync(`${platformOutDir}.backup-`)
+    : null;
+  let backedUp = false;
+  try {
+    if (backupDir) {
+      fs.renameSync(platformOutDir, backupDir);
+      backedUp = true;
+    }
+    fs.renameSync(stagedDir, platformOutDir);
+  } catch (error) {
+    if (backedUp) {
+      try {
+        fs.renameSync(backupDir, platformOutDir);
+      } catch (restorationError) {
+        throw new AggregateError(
+          [error, restorationError],
+          `Could not install or restore ${platformOutDir}. Previous output retained at ${backupDir}`,
+        );
+      }
+    } else if (backupDir) {
+      fs.rmSync(backupDir, { recursive: true, force: true });
+    }
+    throw error;
+  }
+  if (backupDir) {
+    try {
+      fs.rmSync(backupDir, { recursive: true, force: true });
+    } catch (error) {
+      warn(
+        `Build succeeded at ${platformOutDir}. Could not remove backup ${backupDir}: ${error.message}`,
+      );
+    }
+  }
 }
 
 function parseBundles(args) {

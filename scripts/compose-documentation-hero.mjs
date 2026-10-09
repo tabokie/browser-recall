@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { format } from 'prettier';
 import { assertCaptureInputs } from './lib/documentation-freshness.mjs';
+import { documentationCaptureSpec } from './lib/documentation-image-spec.mjs';
 
 export async function composeDocumentationHero(directory) {
   const sources = ['timeline.png', 'timeline-mono.png'];
@@ -27,7 +28,7 @@ export async function composeDocumentationHero(directory) {
   try {
     const page = await browser.newPage();
     const dataUrl = await page.evaluate(
-      async ({ images, width, height }) => {
+      async ({ images, width, height, padding }) => {
         const loaded = await Promise.all(
           images.map(async (src) => {
             const image = new Image();
@@ -43,6 +44,15 @@ export async function composeDocumentationHero(directory) {
         context.drawImage(loaded[0], 0, 0);
         context.save();
         context.beginPath();
+        context.roundRect(
+          padding,
+          padding,
+          width - padding * 2,
+          height - padding * 2,
+          32,
+        );
+        context.clip();
+        context.beginPath();
         context.moveTo(width * 0.62, 0);
         context.lineTo(width, 0);
         context.lineTo(width, height);
@@ -51,12 +61,22 @@ export async function composeDocumentationHero(directory) {
         context.clip();
         context.drawImage(loaded[1], 0, 0);
         context.restore();
+        context.save();
+        context.beginPath();
+        context.rect(
+          padding,
+          padding,
+          width - padding * 2,
+          height - padding * 2,
+        );
+        context.clip();
         context.beginPath();
         context.moveTo(width * 0.62, 0);
         context.lineTo(width * 0.38, height);
         context.strokeStyle = '#ffffff';
         context.lineWidth = width / 580;
         context.stroke();
+        context.restore();
         return canvas.toDataURL('image/png');
       },
       {
@@ -65,6 +85,7 @@ export async function composeDocumentationHero(directory) {
         ),
         width,
         height,
+        padding: documentationCaptureSpec.desktop.timeline.paddingPoints * 2,
       },
     );
     bytes = Buffer.from(dataUrl.split(',')[1], 'base64');

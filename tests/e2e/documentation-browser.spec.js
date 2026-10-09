@@ -12,7 +12,14 @@ import {
   captureInputs,
   assertCaptureInputs,
 } from '../../scripts/lib/documentation-freshness.mjs';
-import { documentationCaptureSpec } from '../../scripts/lib/documentation-image-spec.mjs';
+import {
+  documentationCaptureSpec,
+  documentationWallpaper,
+} from '../../scripts/lib/documentation-image-spec.mjs';
+import {
+  compileDocumentationWindow,
+  captureDocumentationWindow,
+} from '../../scripts/lib/documentation-native-capture.mjs';
 
 const nativeCapture = process.env.BROWSER_RECALL_DOCUMENTATION_NATIVE === '1';
 test.use({
@@ -183,18 +190,7 @@ test('browser documentation separates the clean popup from note taking', async (
         'SystemInfo.getProcessInfo',
       );
       const pid = processInfo.find((process) => process.type === 'browser').id;
-      const nativeHelper = testInfo.outputPath('documentation-window');
-      const arch = { arm64: 'arm64', x64: 'x86_64' }[process.arch];
-      if (!arch) throw new Error(`Unsupported architecture: ${process.arch}`);
-      fs.mkdirSync(path.dirname(nativeHelper), { recursive: true });
-      execFileSync('/usr/bin/swiftc', [
-        '-suppress-warnings',
-        '-target',
-        `${arch}-apple-macos14.0`,
-        'scripts/lib/documentation-window.swift',
-        '-o',
-        nativeHelper,
-      ]);
+      const nativeHelper = compileDocumentationWindow(testInfo.outputPath());
       const native = (...args) =>
         execFileSync(nativeHelper, [String(pid), ...args], {
           encoding: 'utf8',
@@ -263,28 +259,13 @@ test('browser documentation separates the clean popup from note taking', async (
         .toBe(true);
       captureWindow = async (name) => {
         const filename = testInfo.outputPath(name);
-        let previous;
-        let stable = 0;
-        await expect
-          .poll(
-            () => {
-              native(
-                'capture-browser',
-                filename,
-                'A smaller, slower web',
-                String(browserSpec.outputPixels.width),
-                String(browserSpec.outputPixels.height),
-              );
-              const bytes = fs.readFileSync(filename);
-              const hash = createHash('sha256').update(bytes).digest('hex');
-              stable = hash === previous ? stable + 1 : 0;
-              previous = hash;
-              images[name] = bytes;
-              return stable;
-            },
-            { timeout: 10000, intervals: [200] },
-          )
-          .toBeGreaterThanOrEqual(2);
+        images[name] = await captureDocumentationWindow({
+          helper: nativeHelper,
+          pid,
+          filename,
+          spec: browserSpec,
+          browserTitle: 'A smaller, slower web',
+        });
         await testInfo.attach(name, {
           body: images[name],
           contentType: 'image/png',
@@ -368,6 +349,11 @@ test('browser documentation separates the clean popup from note taking', async (
         locale,
         layoutPoints: documentationCaptureSpec.browser.layoutPoints,
         outputPixels: documentationCaptureSpec.browser.outputPixels,
+        paddingPoints: documentationCaptureSpec.browser.paddingPoints,
+        wallpaper: {
+          ...documentationWallpaper,
+          sha256: inputs[documentationWallpaper.file],
+        },
         seedSha256: hash(fs.readFileSync('scripts/lib/documentation-seed.mjs')),
         scenarioSha256: hash(fs.readFileSync(testInfo.file)),
         screenshots: Object.fromEntries(

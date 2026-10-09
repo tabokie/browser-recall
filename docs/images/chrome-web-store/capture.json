@@ -1,0 +1,21 @@
+{
+  "inputs": {
+    "docs/images/browser-popup-window.png": "22079e8d6ea4d785f7d8f6926709f3832a0ca64beb465b7df928379e996182f5",
+    "docs/images/browser-note-window.png": "eb52b3b85697ea9d4adfa565c990af19c2f9cc3c5e61e5936b4b4412836b4e46",
+    "scripts/export-chrome-web-store-screenshots.mjs": "60033dba68024906d765601b319378e097171ebbc9d49ea704cf694e8709b1f6",
+    "scripts/lib/store-screenshot.swift": "ed682f41a76d8d874a938c01c035a78e84db6c339c82f6034158310be4413ee5",
+    "scripts/lib/store-screenshots.mjs": "1d9d69a289cd9c25e3964d09bbd917d80bdf841efa7838ae5cec65a04827fec1"
+  },
+  "screenshots": {
+    "browser-popup-window.png": {
+      "sha256": "d9a1e202bbeef95d54706a49c9d85f9be73d9963d3d82ff9f4ce91e4ed065f68",
+      "width": 1280,
+      "height": 800
+    },
+    "browser-note-window.png": {
+      "sha256": "8534f927e1ffffd97c13eb882a5b33bb37c2d49f4891a694d8b6d8b687698176",
+      "width": 1280,
+      "height": 800
+    }
+  }
+}

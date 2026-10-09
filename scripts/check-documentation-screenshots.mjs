@@ -4,7 +4,15 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertCaptureInputs } from './lib/documentation-freshness.mjs';
-import { documentationImagePixels } from './lib/documentation-image-spec.mjs';
+import {
+  storeScreenshotNames,
+  assertStoreScreenshotInputs,
+  storeScreenshotRecord,
+} from './lib/store-screenshots.mjs';
+import {
+  documentationImagePixels,
+  documentationWallpaper,
+} from './lib/documentation-image-spec.mjs';
 
 const args = process.argv.slice(2);
 const imagesOnly = args.includes('--images-only');
@@ -38,6 +46,19 @@ for (const capture of captures) {
     const manifest = JSON.parse(
       readFileSync(path.join(root, 'docs/images', capture.manifest), 'utf8'),
     );
+    const wallpaperSha256 = createHash('sha256')
+      .update(readFileSync(path.join(root, documentationWallpaper.file)))
+      .digest('hex');
+    if (
+      manifest.wallpaper?.name !== documentationWallpaper.name ||
+      manifest.wallpaper?.file !== documentationWallpaper.file ||
+      manifest.wallpaper?.crop !== documentationWallpaper.crop ||
+      manifest.wallpaper?.sha256 !== wallpaperSha256
+    ) {
+      throw new Error(
+        'Documentation wallpaper does not match capture manifest',
+      );
+    }
     if (!imagesOnly) assertCaptureInputs(root, capture.kind, manifest.inputs);
     const names = Object.keys(manifest.screenshots).sort();
     if (JSON.stringify(names) !== JSON.stringify([...capture.names].sort()))
@@ -91,13 +112,50 @@ for (const capture of captures) {
   }
 }
 try {
-  const readme = readFileSync(path.join(root, 'README.md'), 'utf8');
-  if (/<img\b/i.test(readme)) {
-    throw new Error('README images must use standard Markdown image syntax');
-  }
-  const images = [...readme.matchAll(/!\[[^\]]*\]\(([^\s)]+)/g)].map(
-    (match) => match[1],
+  const folder = path.join(root, 'docs/images/chrome-web-store');
+  const manifest = JSON.parse(
+    readFileSync(path.join(folder, 'capture.json'), 'utf8'),
   );
+  assertStoreScreenshotInputs(root, manifest.inputs, imagesOnly);
+  if (
+    JSON.stringify(Object.keys(manifest.screenshots).sort()) !==
+    JSON.stringify([...storeScreenshotNames].sort())
+  ) {
+    throw new Error(
+      'Chrome Web Store export has an unexpected screenshot inventory',
+    );
+  }
+  for (const name of storeScreenshotNames) {
+    const bytes = readFileSync(path.join(folder, name));
+    const recorded = manifest.screenshots[name];
+    if (createHash('sha256').update(bytes).digest('hex') !== recorded.sha256) {
+      throw new Error(
+        `Chrome Web Store screenshot does not match capture manifest: ${name}`,
+      );
+    }
+    const current = storeScreenshotRecord(bytes, name);
+    if (
+      current.width !== recorded.width ||
+      current.height !== recorded.height
+    ) {
+      throw new Error(
+        `Chrome Web Store screenshot dimensions do not match capture manifest: ${name}`,
+      );
+    }
+  }
+} catch (error) {
+  errors.push(
+    `${error.message}\nRegenerate on macOS with node scripts/export-chrome-web-store-screenshots.mjs, then commit the images and manifest.`,
+  );
+}
+try {
+  const readme = readFileSync(path.join(root, 'README.md'), 'utf8');
+  const images = [
+    ...[...readme.matchAll(/!\[[^\]]*\]\(([^\s)]+)/g)].map((match) => match[1]),
+    ...[
+      ...readme.matchAll(/<img\b[^>]*\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')/gi),
+    ].map((match) => match[1] ?? match[2]),
+  ].filter((name) => name !== 'icons/browser-recall-default.svg');
   const expected = [
     'docs/images/timeline-styles.png',
     'docs/images/browser-popup-window.png',
@@ -105,11 +163,11 @@ try {
     'docs/images/book.png',
   ];
   if (
-    JSON.stringify(images) !== JSON.stringify(expected) ||
+    JSON.stringify(images.sort()) !== JSON.stringify(expected.sort()) ||
     images.some((name) => !available.has(name))
   )
     throw new Error(
-      'README must reference the four verified documentation images in order',
+      'README must reference each of the four verified documentation images exactly once',
     );
 } catch (error) {
   errors.push(error.message);
@@ -120,7 +178,7 @@ if (errors.length) {
 } else {
   console.log(
     imagesOnly
-      ? 'README image integrity verified; run the full check locally for source freshness.'
-      : 'README screenshots are current: source fingerprints, PNG hashes, dimensions, composition, and references verified.',
+      ? 'Documentation and Chrome Web Store image integrity verified; run the full check locally for source freshness.'
+      : 'Documentation and Chrome Web Store screenshots are current: source fingerprints, PNG hashes, dimensions, composition, formats, and references verified.',
   );
 }

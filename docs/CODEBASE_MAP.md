@@ -165,8 +165,12 @@ do not maintain a second production copy.
 | `scripts/capture-browser-documentation.mjs` | Native macOS browser documentation capture |
 | `scripts/lib/documentation-seed.mjs` | Fictional reading collection |
 | `scripts/lib/documentation-window.swift`, `scripts/lib/documentation-image-spec.mjs` | Operate native windows, capture screenshots, and define image dimensions |
+| `scripts/lib/documentation-native-capture.mjs` | Shared native helper compilation, capture arguments, and pixel-stability checks |
+| `scripts/assets/documentation-sonoma-light.png` | Fixed light Sonoma wallpaper, fingerprinted in documentation capture manifests |
 | `scripts/compose-documentation-hero.mjs` | Combined Amber/Mono Timeline image |
 | `scripts/lib/documentation-freshness.mjs`, `scripts/check-documentation-screenshots.mjs` | Check source-file hashes and saved documentation images |
+| `scripts/export-chrome-web-store-screenshots.mjs`, `scripts/lib/store-screenshot.swift` | Export opaque 1280 × 800 Chrome Web Store screenshots, staging on the destination volume |
+| `scripts/lib/store-screenshots.mjs` | Shared Chrome Web Store input fingerprints and PNG format validation for export and documentation checks |
 
 ## Verification map
 
@@ -175,6 +179,8 @@ do not maintain a second production copy.
 | Shared JavaScript and build rules | `tests/unit/` |
 | Pairing, command requests, events, and pending commands | `tests/integration/` |
 | Matching page identifiers in JavaScript and Rust | `tests/integration/page-identity-parity.test.js` |
+| Snapshot identity migration and CLI validation | `tests/integration/snapshot-identity-migration.test.js`, `tests/e2e/snapshot-slug-meta.spec.js` |
+| Screenshot provenance, store format, and export failure handling | `tests/integration/documentation-freshness.test.js`, `tests/integration/store-screenshot-export.test.js` |
 | Combined data reads and successful writes not yet saved to checkpoints | `crates/daemon/tests/read_projections.rs` |
 | Commands, write ordering, and change notifications | `crates/daemon/tests/commands.rs`, `crates/daemon/tests/command_authority.rs`, `crates/daemon/tests/runtime.rs` |
 | Replay schemas, idempotence, and verifier | `crates/replay/tests/` |

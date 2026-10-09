@@ -40,7 +40,7 @@ The desktop app holds your collection. The browser extension records visits and 
 
 ## Try Browser Recall
 
-Browser Recall currently has a [source-build setup](DEVELOPMENT.md#building). You need the desktop app and the [browser extension](DEVELOPMENT.md#loading-the-extension).
+Browser Recall currently has a [source-build setup](DEVELOPMENT.md#build-and-run). You need the desktop app and the [browser extension](DEVELOPMENT.md#connect-the-browser).
 
 Chrome, Edge, and Orion use the Chromium extension build. Firefox has a separate build.
 

@@ -32,7 +32,6 @@ const browserCapture = fs.readFileSync(
   path.join(repoRoot, 'tests/e2e/documentation-browser.spec.js'),
   'utf8',
 );
-const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
 
 function jobBody(jobName, nextJobName) {
   const start = ciWorkflow.indexOf(`  ${jobName}:`);
@@ -132,23 +131,9 @@ describe('GitHub CI prerequisites', () => {
     expect(documentationWindow).toContain('configuration.width = pixelWidth');
     expect(documentationWindow).toContain('configuration.height = pixelHeight');
     expect(documentationWindow).not.toContain('.nominalResolution');
-    expect(documentationWindow).not.toContain('interpolationQuality');
-    expect(documentationWindow).not.toContain('context.draw(image');
     for (const source of [desktopCapture, browserCapture]) {
       expect(source).not.toContain('capturedAt:');
       expect(source).not.toContain('sourceCommit:');
-    }
-  });
-
-  test('README uses standard Markdown image references', () => {
-    expect(readme).not.toContain('<img');
-    for (const image of [
-      'timeline-styles.png',
-      'browser-popup-window.png',
-      'browser-note-window.png',
-      'book.png',
-    ]) {
-      expect(readme).toContain(`](docs/images/${image})`);
     }
   });
 

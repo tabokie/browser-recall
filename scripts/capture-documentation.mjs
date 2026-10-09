@@ -25,7 +25,14 @@ import {
   captureInputs,
   assertCaptureInputs,
 } from './lib/documentation-freshness.mjs';
-import { documentationCaptureSpec } from './lib/documentation-image-spec.mjs';
+import {
+  documentationCaptureSpec,
+  documentationWallpaper,
+} from './lib/documentation-image-spec.mjs';
+import {
+  compileDocumentationWindow,
+  captureDocumentationWindow,
+} from './lib/documentation-native-capture.mjs';
 import {
   launchTestDaemon,
   waitForDaemonListening,
@@ -46,7 +53,7 @@ const work = realpathSync(
 const profile = path.join(work, 'profile');
 const output = path.join(work, 'images');
 const app = path.join(work, 'Browser Recall Documentation.app');
-const helper = path.join(work, 'documentation-window');
+let helper;
 let daemon;
 let pid;
 const run = (command, args, options = {}) =>
@@ -88,7 +95,7 @@ async function waitFor(description, check) {
   );
 }
 
-async function capture(name, includes, outputPixels, excludes = []) {
+async function capture(name, includes, spec, excludes = []) {
   const ready = () => {
     const tree = native('dump');
     return (
@@ -98,29 +105,14 @@ async function capture(name, includes, outputPixels, excludes = []) {
   };
   await waitFor(`${name} content`, ready);
   native('unfocus');
-  // Wait for actual pixels to settle, including native navigation transitions.
-  let previous;
-  let stable = 0;
   const filename = path.join(output, `${name}.png`);
-  await waitFor(`${name} paint`, () => {
-    // Output pixels are not source pixels. The shared ScreenCaptureKit helper
-    // uses the host window's backing scale and display color profile; a 1×
-    // virtual display can yield an upscaled, softer 2× PNG. Native font and
-    // browser rendering can also vary by OS, so these files are not suitable
-    // for byte-for-byte comparison across different machines.
-    native(
-      'capture',
-      filename,
-      String(outputPixels.width),
-      String(outputPixels.height),
-    );
-    const current = hash(readFileSync(filename));
-    stable = current === previous ? stable + 1 : 0;
-    previous = current;
-    return stable >= 3;
+  const bytes = await captureDocumentationWindow({
+    helper,
+    pid,
+    filename,
+    spec,
   });
   if (!ready()) throw new Error(`${name} changed during capture`);
-  const bytes = readFileSync(filename);
   console.log(
     `Captured ${name}: ${bytes.readUInt32BE(16)} × ${bytes.readUInt32BE(20)}`,
   );
@@ -141,12 +133,6 @@ try {
       JSON.stringify({
         identifier: 'app.browser-recall.documentation',
         productName: 'Browser Recall Documentation',
-        // Only this isolated documentation build permits a compact Timeline.
-        app: {
-          windows: JSON.parse(
-            readFileSync('apps/desktop/src-tauri/tauri.conf.json', 'utf8'),
-          ).app.windows.map((window) => ({ ...window, minHeight: 500 })),
-        },
       }),
     ],
     path.join(root, 'apps/desktop'),
@@ -226,16 +212,7 @@ try {
     path.join(app, 'Contents/Info.plist'),
   ]);
   run('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', app]);
-  const arch = { arm64: 'arm64', x64: 'x86_64' }[process.arch];
-  if (!arch) throw new Error(`Unsupported architecture: ${process.arch}`);
-  run('/usr/bin/swiftc', [
-    '-suppress-warnings',
-    '-target',
-    `${arch}-apple-macos14.0`,
-    path.join(root, 'scripts/lib/documentation-window.swift'),
-    '-o',
-    helper,
-  ]);
+  helper = compileDocumentationWindow(work);
   mkdirSync(output);
   run('/usr/bin/open', [
     '-n',
@@ -303,7 +280,7 @@ try {
     await capture(
       name('timeline'),
       [...labeledPages, 'exploreBtn'],
-      timelineSpec.outputPixels,
+      timelineSpec,
     );
     for (const title of labeledPages) {
       if (native('visible-text', title) !== 'true')
@@ -331,7 +308,7 @@ try {
         'Reading an old notebook is a conversation',
         'Some ideas need to be met twice.',
       ],
-      bookSpec.outputPixels,
+      bookSpec,
       ['searchDraftInput'],
     );
     for (const text of ['Leave the unfinished bits in.', 'matters to them.']) {
@@ -366,6 +343,11 @@ try {
           readFileSync(path.join(root, 'scripts/lib/documentation-seed.mjs')),
         ),
         colorSchemes: ['amber', 'mono'],
+        paddingPoints: documentationCaptureSpec.desktop.timeline.paddingPoints,
+        wallpaper: {
+          ...documentationWallpaper,
+          sha256: inputs[documentationWallpaper.file],
+        },
         layoutPoints: {
           timeline: documentationCaptureSpec.desktop.timeline.layoutPoints,
           book: documentationCaptureSpec.desktop.book.layoutPoints,
@@ -393,12 +375,13 @@ try {
     mkdirSync(failureDir, { recursive: true });
     try {
       writeFileSync(path.join(failureDir, 'accessibility.txt'), native('dump'));
-      native(
-        'capture',
-        path.join(failureDir, 'failure.png'),
-        String(documentationCaptureSpec.desktop.timeline.outputPixels.width),
-        String(documentationCaptureSpec.desktop.timeline.outputPixels.height),
-      );
+      await captureDocumentationWindow({
+        helper,
+        pid,
+        filename: path.join(failureDir, 'failure.png'),
+        spec: documentationCaptureSpec.desktop.timeline,
+        settle: false,
+      });
     } catch (captureError) {
       console.error(captureError.message);
     }

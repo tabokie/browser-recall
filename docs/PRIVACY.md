@@ -1,6 +1,6 @@
 # Browser Recall — Privacy Policy
 
-**Last updated:** October 2, 2026
+**Last updated:** October 9, 2026
 
 Browser Recall stores product data locally. Browser Recall does not send analytics
 or browsing data to a developer-operated service. Optional GitHub sync uses a
@@ -14,6 +14,10 @@ ratings, lists, rules, edited titles, and imported bookmarks or history.
 
 Explicit snapshot capture saves page HTML, embedded resources, and extracted text.
 Snapshot content can include information displayed on the captured page.
+Snapshot capture preserves non-password form values and can include personal
+information, health information, financial information, personal communications,
+or location information present on the page. Password and file input values are
+cleared during capture; other sensitive page content is not automatically redacted.
 
 Local configuration stores a device ID, approved browser installations, connection
 tokens, and recent connection activity. Settings control recording, excluded URLs,
@@ -52,10 +56,9 @@ the current session. Browser Recall does not provide a hosted sync service.
 | --- | --- |
 | `storage` | Desktop connection credentials, recording status, and pending commands |
 | `tabs` | Identify tabs and perform current-page actions |
-| `activeTab` | User-initiated actions on the current page |
 | `scripting` | Run highlight and snapshot scripts; read the original page URL from saved snapshots |
 | `webNavigation` | Page and same-document navigation detection |
-| `contextMenus` | Highlight and snapshot actions |
+| `contextMenus` | Highlight Selected right-click action |
 | `alarms` | Retry the desktop connection and send queued commands |
 | `declarativeNetRequestWithHostAccess` | Temporary rules allowing appropriate referrer headers when downloading snapshot resources |
 | `webRequest` | Snapshot redirect and response-header inspection |
@@ -74,6 +77,15 @@ Local deletion does not remove copies in backups or GitHub repository history.
 Delete those copies separately when removing all retained data. Desktop
 configuration and diagnostic logs must also be removed separately for a complete
 local uninstall.
+
+## Limited use
+
+Browser Recall's use and transfer of information received from Chrome APIs adheres
+to the Chrome Web Store User Data Policy, including the Limited Use requirements.
+Browser Recall uses browsing data only to provide the user's browsing library.
+Browser Recall does not sell user data or use user data for advertising,
+creditworthiness, or lending. Optional GitHub sync transfers data only to the
+repository configured by the user for the browsing library.
 
 ## Contact
 

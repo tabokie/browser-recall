@@ -1,3 +1,6 @@
+import { writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { test, expect } from './fixtures.js';
 import {
   resetAndSeed,
@@ -1376,4 +1379,139 @@ test.describe('extension navigation regressions', () => {
     await page.close();
     await helper.close();
   });
+});
+
+test('current-page actions and local snapshots work without activeTab', async ({
+  extContext,
+  extensionId,
+  setupDir,
+  localServer,
+}) => {
+  localServer.addPage('/permission-actions', {
+    title: 'Permission Actions',
+    body: '<main><p>Keep this passage in the desktop library.</p></main>',
+  });
+  const url = localServer.url('/permission-actions');
+  const slug = getSlugForUrl(url);
+  await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+  const helper = await openHelperPage(extContext, extensionId);
+  expect(
+    await helper.evaluate(() => chrome.runtime.getManifest().permissions),
+  ).not.toContain('activeTab');
+
+  const page = await extContext.newPage();
+  await page.goto(url);
+  await expect
+    .poll(() =>
+      helper.evaluate(async (pageUrl) => {
+        const [tab] = await chrome.tabs.query({ url: pageUrl });
+        return chrome.tabs.sendMessage(tab.id, { action: 'getPageIdentity' });
+      }, url),
+    )
+    .toMatchObject({ success: true, slug, url });
+
+  await page.locator('p').selectText();
+  await page.bringToFront();
+  expect(
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'triggerCommandForTest',
+        command: 'highlight-selection',
+      }),
+    ),
+  ).toEqual({ success: true });
+  await expect(page.locator('mark.browser-recall-highlight')).toHaveText(
+    'Keep this passage in the desktop library.',
+  );
+  await expect(page.locator('#browser-recall-highlight-overlay')).toBeVisible();
+  await page.keyboard.type('Permission regression note');
+  await page.keyboard.press('Control+Enter');
+  await expect(page.locator('#browser-recall-highlight-overlay')).toHaveCount(
+    0,
+  );
+  await expect
+    .poll(() =>
+      helper.evaluate(
+        (slug) => chrome.runtime.sendMessage({ action: 'loadPageNotes', slug }),
+        slug,
+      ),
+    )
+    .toMatchObject({
+      success: true,
+      notes: [{ note: 'Permission regression note' }],
+    });
+
+  expect(
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'triggerCommandForTest',
+        command: 'like-page',
+      }),
+    ),
+  ).toEqual({ success: true });
+  await expect
+    .poll(() =>
+      helper.evaluate(
+        (slug) => chrome.runtime.sendMessage({ action: 'getPageInfo', slug }),
+        slug,
+      ),
+    )
+    .toMatchObject({ success: true, entry: { url, likes: 1 } });
+
+  expect(
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'triggerCommandForTest',
+        command: 'capture-snapshot',
+      }),
+    ),
+  ).toEqual({ success: true });
+  const listed = await helper.evaluate(
+    (slug) => chrome.runtime.sendMessage({ action: 'listSnapshots', slug }),
+    slug,
+  );
+  expect(listed.success).toBe(true);
+  expect(listed.snapshots).toHaveLength(1);
+  const captured = await helper.evaluate(
+    ({ slug, timestamp }) =>
+      chrome.runtime.sendMessage({
+        action: 'getSnapshotHtml',
+        slug,
+        timestamp,
+      }),
+    { slug, timestamp: listed.snapshots[0].timestamp },
+  );
+  expect(captured.success).toBe(true);
+  expect(captured.html).toContain('Keep this passage in the desktop library.');
+
+  // Check actual local-file access and read the original identity from the
+  // captured HTML, rather than simulating scripting permission responses.
+  expect(
+    await helper.evaluate(
+      () =>
+        new Promise((resolve) =>
+          chrome.extension.isAllowedFileSchemeAccess(resolve),
+        ),
+    ),
+  ).toBe(true);
+  const filename = path.join(setupDir, 'permission-snapshot.html');
+  writeFileSync(filename, captured.html);
+  const snapshot = await extContext.newPage();
+  await snapshot.goto(pathToFileURL(filename).href);
+  const allowed = await helper.evaluate(async (snapshotUrl) => {
+    const [tab] = await chrome.tabs.query({ url: snapshotUrl });
+    return chrome.runtime.sendMessage({
+      action: 'preparePopupBootstrapForTest',
+      tabId: tab.id,
+    });
+  }, snapshot.url());
+  expect(allowed).toMatchObject({ success: true, mode: 'dashboard' });
+  const popup = await extContext.newPage();
+  await popup.goto(`chrome-extension://${extensionId}/${allowed.popupPath}`);
+  await expect(popup.locator('#pageTitle')).toHaveText('Permission Actions');
+
+  await popup.close();
+  await snapshot.close();
+  await page.close();
+  await helper.close();
 });

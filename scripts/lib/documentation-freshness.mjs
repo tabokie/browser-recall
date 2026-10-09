@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { documentationWallpaper } from './documentation-image-spec.mjs';
 
 const shared = [
+  documentationWallpaper.file,
   'package.json',
   'package-lock.json',
   'packages/core',
@@ -11,6 +13,7 @@ const shared = [
   'scripts/lib/documentation-seed.mjs',
   'scripts/lib/documentation-image-spec.mjs',
   'scripts/lib/documentation-window.swift',
+  'scripts/lib/documentation-native-capture.mjs',
   'scripts/lib/documentation-freshness.mjs',
   'scripts/lib/manual-seed.mjs',
   'scripts/lib/seed-builder.mjs',
@@ -22,6 +25,14 @@ const scopes = {
     ...shared,
     'apps/desktop/ui',
     'apps/desktop/package.json',
+    'apps/desktop/src-tauri/src',
+    'apps/desktop/src-tauri/build.rs',
+    'apps/desktop/src-tauri/build_support.rs',
+    'apps/desktop/src-tauri/Cargo.toml',
+    'apps/desktop/src-tauri/capabilities',
+    'Cargo.lock',
+    'Cargo.toml',
+    'rust-toolchain.toml',
     'apps/desktop/src-tauri/icons',
     'apps/desktop/src-tauri/tauri.conf.json',
     'scripts/capture-documentation.mjs',

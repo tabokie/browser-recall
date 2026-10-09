@@ -337,6 +337,12 @@ UTF-8 message before sending the snapshot.
 unavailable external stylesheets. Opening a snapshot requires valid URL and slug
 metadata. The snapshot viewer prepares embedded documents and blocks saved scripts.
 
+`scripts/migrate-snapshot-identity.mjs` repairs older embedded metadata using the
+shared page identity and snapshot HTML functions. The migration reads authoritative
+page checkpoints, validates URL/slug agreement and snapshot paths, and replaces
+affected files through temporary files. Runtime readers continue to reject invalid
+snapshot identity rather than repairing stored data during reads.
+
 Chrome file snapshots require **Allow access to file URLs**. If permission is
 missing, the popup explains how to enable permission. `blob:` content uses the
 extension viewer because Chrome cannot inject content scripts into `blob:` URLs.
@@ -396,5 +402,13 @@ of a second app instance. Browser-rendered UI tests do not provide complete cove
 of the native desktop interface.
 
 Local and hosted verification share `ci:*` scripts. Documentation captures are
-manual macOS workflows; CI checks committed images. See [DEVELOPMENT.md](../DEVELOPMENT.md)
+manual macOS workflows. Native window pixels are composited over a fixed light
+Sonoma wallpaper; capture manifests fingerprint the wallpaper asset and crop.
+Desktop freshness also covers native shell source and Cargo dependencies; desktop
+and browser workflows share native compilation and pixel-stability checks.
+Chrome Web Store screenshots derive from verified browser captures. The exporter
+records source-image, conversion-source, and output hashes in an export manifest.
+The same documentation checker verifies the export manifest, dimensions, and
+opaque RGB format. Export staging stays on the destination filesystem.
+CI checks committed images. See [DEVELOPMENT.md](../DEVELOPMENT.md)
 for commands, platform prerequisites, visual baselines, and capture instructions.

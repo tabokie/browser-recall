@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
+import ImageIO
 import ScreenCaptureKit
 
 func fail(_ message: String) -> Never {
@@ -81,7 +82,7 @@ case "frame", "frame-browser":
     guard args.count == dimensionIndex + 2,
           let width = Double(args[dimensionIndex]), let height = Double(args[dimensionIndex + 1]),
           width > 0, height > 0 else { fail("Expected positive window width and height") }
-    var position = CGPoint(x: 80, y: 50)
+    var position = CGPoint(x: 80, y: 80)
     var size = CGSize(width: width, height: height)
     guard AXUIElementSetAttributeValue(window, "AXPosition" as CFString, AXValueCreate(.cgPoint, &position)!) == .success,
           AXUIElementSetAttributeValue(window, "AXSize" as CFString, AXValueCreate(.cgSize, &size)!) == .success else {
@@ -146,10 +147,15 @@ case "capture", "capture-browser":
     helperApplication.setActivationPolicy(.prohibited)
     let browserCapture = args[2] == "capture-browser"
     let pixelIndex = browserCapture ? 5 : 4
-    guard args.count == pixelIndex + 2,
+    guard args.count == pixelIndex + 4,
           let pixelWidth = Int(args[pixelIndex]), let pixelHeight = Int(args[pixelIndex + 1]),
-          pixelWidth > 0, pixelHeight > 0 else {
-        fail("Expected output path, optional browser title, and positive output pixel dimensions")
+          let padding = Double(args[pixelIndex + 2]),
+          pixelWidth > 0, pixelHeight > 0, padding >= 0 else {
+        fail("Expected output path, optional browser title, positive pixel dimensions, nonnegative padding, and wallpaper PNG path")
+    }
+    guard let wallpaperSource = CGImageSourceCreateWithURL(URL(fileURLWithPath: args[pixelIndex + 3]) as CFURL, nil),
+          let wallpaper = CGImageSourceCreateImageAtIndex(wallpaperSource, 0, nil) else {
+        fail("Cannot read the fixed documentation wallpaper")
     }
     let contentSemaphore = DispatchSemaphore(value: 0)
     var shareableContent: SCShareableContent?
@@ -186,26 +192,26 @@ case "capture", "capture-browser":
     configuration.preservesAspectRatio = false
     configuration.showsCursor = false
     configuration.captureResolution = .best
-    let filter: SCContentFilter
-    if browserCapture {
-        guard let display = content.displays.first(where: {
-            $0.frame.intersects(selected.frame)
-        }) else { fail("Browser window is not on a capturable display") }
-        let visibleOwnedWindows = ownedWindows.filter {
-            $0.frame.intersects(selected.frame)
+    configuration.shouldBeOpaque = false
+    let captureFrame = selected.frame.insetBy(dx: -padding, dy: -padding)
+    guard let display = content.displays.first(where: {
+        $0.frame.contains(captureFrame)
+    }) else { fail("Documentation window and wallpaper padding must fit on one display") }
+    let capturedWindows = browserCapture
+        ? ownedWindows.filter {
+            $0.windowID == selected.windowID || selected.frame.contains($0.frame)
         }
-        filter = SCContentFilter(display: display, including: visibleOwnedWindows)
-        configuration.sourceRect = CGRect(
-            x: selected.frame.minX - display.frame.minX,
-            y: selected.frame.minY - display.frame.minY,
-            width: selected.frame.width,
-            height: selected.frame.height
-        )
-        configuration.ignoreShadowsDisplay = true
-    } else {
-        filter = SCContentFilter(desktopIndependentWindow: selected)
-        configuration.ignoreShadowsSingleWindow = true
-    }
+        : [selected]
+    // Capture only the selected window and its toolbar popup on transparency.
+    // The fixed Sonoma asset supplies the background independently of the desktop.
+    let filter = SCContentFilter(display: display, including: capturedWindows)
+    configuration.sourceRect = CGRect(
+        x: captureFrame.minX - display.frame.minX,
+        y: captureFrame.minY - display.frame.minY,
+        width: captureFrame.width,
+        height: captureFrame.height
+    )
+    configuration.ignoreShadowsDisplay = false
 
     let captureSemaphore = DispatchSemaphore(value: 0)
     var capturedImage: CGImage?
@@ -223,9 +229,29 @@ case "capture", "capture-browser":
     }
     guard let image = capturedImage,
           image.width == pixelWidth,
-          image.height == pixelHeight,
-          let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
+          image.height == pixelHeight else {
         fail("ScreenCaptureKit did not produce the requested documentation pixels")
+    }
+    guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+          let context = CGContext(data: nil, width: pixelWidth, height: pixelHeight,
+                                  bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+        fail("Cannot create the documentation image")
+    }
+    // Center-cover the fixed wallpaper, then draw native pixels at their captured
+    // dimensions. Only the wallpaper is resized; window pixels are not resampled.
+    let canvas = CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight)
+    let scale = max(canvas.width / CGFloat(wallpaper.width), canvas.height / CGFloat(wallpaper.height))
+    let wallpaperRect = CGRect(x: (canvas.width - CGFloat(wallpaper.width) * scale) / 2,
+                               y: (canvas.height - CGFloat(wallpaper.height) * scale) / 2,
+                               width: CGFloat(wallpaper.width) * scale, height: CGFloat(wallpaper.height) * scale)
+    context.interpolationQuality = .high
+    context.draw(wallpaper, in: wallpaperRect)
+    context.interpolationQuality = .none
+    context.draw(image, in: canvas)
+    guard let composed = context.makeImage(),
+          let png = NSBitmapImageRep(cgImage: composed).representation(using: .png, properties: [:]) else {
+        fail("Cannot encode the documentation image")
     }
     try png.write(to: URL(fileURLWithPath: args[3]))
 default:

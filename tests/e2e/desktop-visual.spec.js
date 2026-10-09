@@ -12,6 +12,9 @@ import { generateSlugFromUrl } from '../../packages/core/utils.js';
 import { VIRTUAL_SCROLLER_BUFFER } from '../../packages/core/virtual-scroller.js';
 import { pickSeeded, seededRandom } from './helpers.js';
 
+// Synthetic history fixtures use UTC date keys; render them in the same timezone.
+test.use({ timezoneId: 'UTC' });
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '../..');
 const VIRTUALIZED_ENTRY_COUNT = VIRTUAL_SCROLLER_BUFFER * 3 + 150;

@@ -1,6 +1,7 @@
 {
   "command": "npm run docs:screenshots",
   "inputs": {
+    "scripts/assets/documentation-sonoma-light.png": "79f724d2d36fe90251e32ef9cdc9b90575d419d81c240a9ecdc880780ba579d1",
     "package.json": "26c327527a52b18a9bdc76c140ef3ef0978e825289c053cc193db3238818a7a4",
     "package-lock.json": "90950dd6e3d95d1fdf490584466846dc4f642eff2f0f957af3c34130c70bae3c",
     "packages/core/attention-utils.js": "4f38498b8ae86274db4a9df56a90136c149357a0ed94d1933b95ffd8d25fa1be",
@@ -17,21 +18,21 @@
     "packages/core/highlight-lifecycle.js": "bfed16628cce668246e402c1a1446db4b8ace72333fcdd200dfbd86c02f3bdec",
     "packages/core/i18n.js": "ea06eeb88f0c68af6d26f96d6147dbf68867cad2b3c9aa794eab7083c897b27d",
     "packages/core/index.js": "ec9f8dabd019b0c6343e8fb68a599d7b16fbcdc8698e5125e6bef876f6962e18",
-    "packages/core/locales/ar/messages.json": "69a469052c038117bd14ca9fc854531d0cac79f07cab531771ec3fea6399bcc2",
-    "packages/core/locales/de/messages.json": "2ac9d44798044a1bd056fe5118fcee3fea97fc13c4f8b979964b8565b23752a8",
-    "packages/core/locales/en/messages.json": "dc1aba5c49ad5c61e8e11216dcbfde62911deec7d10a0d6415bfe8b255dfc1fa",
-    "packages/core/locales/es/messages.json": "2cfc28fc07f15007dbc0e92822cf7b2c1e07e44ac0864ceb50751709b585916f",
-    "packages/core/locales/fr/messages.json": "9e11c425dfe7ac1eb6b4b99c5bb6cce54b60f2d959ee62ee70c1c3f58f291dd0",
-    "packages/core/locales/hi/messages.json": "d5666a9a43923e13643e84d46d63c30d9828fb33e4e3813dd204dd81d0d74b4c",
-    "packages/core/locales/id/messages.json": "c503b3d7b8c48ad84e9327c6315670766f097159d736ac5ac17ab1dcfbaef380",
-    "packages/core/locales/it/messages.json": "db16e31f729ff48b5237677a14a8ab6b786194d8c2a74a15b10ff781f52b7b37",
-    "packages/core/locales/ja/messages.json": "80cd1e1418d2c369a4ca3d4e09438fec1b530dcfd46b2920589f7eaa7a3caab8",
-    "packages/core/locales/ko/messages.json": "80de44b8bb51dc0d210d9671821644f08666b124033ea653b475cd68b3e9f72a",
-    "packages/core/locales/pt-BR/messages.json": "b7b139eab2fa59006c11f15ece9fdc9ae3a021c4582672c24feba6a270fda80d",
-    "packages/core/locales/pt-PT/messages.json": "197c63b3485200657b0ed64cd8e780db90f5eca0506e610c7d6b577a10449ad7",
-    "packages/core/locales/ru/messages.json": "65aced6b8fe2fda1f9bbce6b92b41dcdbf2bf6485975fdda3544304be227d358",
-    "packages/core/locales/zh-CN/messages.json": "8c78b6c82e31594621733cda9a5bc3c563ad52ff8e68ed01fd8b29efe0aaca2c",
-    "packages/core/locales/zh-TW/messages.json": "e8119f39feb8b1906d49a4fb9f4c6fc9e1885a1f986e7859dd589954ade5b07b",
+    "packages/core/locales/ar/messages.json": "de47e29369a3ca18736b4049d6c25ebeebbf0f3d78d4a846f6949c9318238c69",
+    "packages/core/locales/de/messages.json": "c50a109d096662773a0f2aa5118bac2b8dbd87c50d1b0169ab2c0e752afd4748",
+    "packages/core/locales/en/messages.json": "c1aa19745a667b432b83d45a94ea855a2e26e6968deb65116a51ca2ccac4ccd7",
+    "packages/core/locales/es/messages.json": "46a074d349068102feb3338e8718d686bef9e703f2e10298ba7065c530a62ca5",
+    "packages/core/locales/fr/messages.json": "dfafe62d39655d9415d0f1a8cfc50bd1b3d39dd790c136cf91cda70911be83b6",
+    "packages/core/locales/hi/messages.json": "d0241bcef0e51ca7f15143f1e9d5f6f45af9eb75431d5f8ab6c1680ed65168ab",
+    "packages/core/locales/id/messages.json": "aa063ab255c7283eb2671850254b35d5e1ed1898475d39a7b8eb3f52a39e903c",
+    "packages/core/locales/it/messages.json": "670aed275f8b129f306ef313631f684240261c1d02278bcf14610b5c145b3e45",
+    "packages/core/locales/ja/messages.json": "7b72a923e84e5abcee55f91835b85fd5aaebff8843fdb85631facac49f9af600",
+    "packages/core/locales/ko/messages.json": "568e199a20d3830b88fa96cfeaf82fe4cddee05d002e6bb344cad0f05dddb153",
+    "packages/core/locales/pt-BR/messages.json": "f8987ad6f43d21889a4778cb52049db2960e27e6cf391f141c2ca54368ca58ce",
+    "packages/core/locales/pt-PT/messages.json": "07deebbb24608806aa1914f885f3b858fc728abd35597bbb611fe13080f5c530",
+    "packages/core/locales/ru/messages.json": "43feb831ef09023624a04d8f6cbec997b30ac8a5b9578ef02d2753c3b2f2f3d6",
+    "packages/core/locales/zh-CN/messages.json": "166121a53c7c731dda861a8cd3a705726516ef08a3645a2955ef57cf52837fd2",
+    "packages/core/locales/zh-TW/messages.json": "32c9fe7ffda78f1e30d16260e639301ad9f424f1a3397f0a5b729d3d01342740",
     "packages/core/logger.js": "cda2bf5c8fc8b9dc30d4d269cbc8944dac5908e1b7e6d31f90fd43713665755f",
     "packages/core/markdown-extractor.js": "7bb4f45a8ee96a348f6cb5bcd3edb79899c4e2b6ad54e69c643dc825e8ca9c81",
     "packages/core/package.json": "76bbe935fbfc3e14bf367eac111c5e920a7bec597c7d2f5f76ccaa7927ab7e9f",
@@ -49,9 +50,10 @@
     "apps/extension/utils.js": "eea5cc2425981454fde629445ca28c0f4eb3aa42f9b39a4f9de9ce4ba17e4ad0",
     "scripts/stage-app-assets.mjs": "4964ea5b7d48a596719d7a61a6b47b39dad29f7ba8773198ad42d7589a1e3cd2",
     "scripts/lib/documentation-seed.mjs": "30ede382fce3d4551e36a0e50cb9933507ae4d2bcec67f63f9ba32dca8a1c064",
-    "scripts/lib/documentation-image-spec.mjs": "26d03bdf9865736b007fa6419b8888b90be757979f00a0b40f94b34ed2c46459",
-    "scripts/lib/documentation-window.swift": "a1b831d3699112d8197dca2e96753a156359112c28c4d1a870ed1469d8086089",
-    "scripts/lib/documentation-freshness.mjs": "1aaeed7db46bdce8c32e528e9bfdfbfb7e438848028dbb60bf515c4c20006d49",
+    "scripts/lib/documentation-image-spec.mjs": "7a1de6de100b7db96fc50434547b940db2fe4d2cf0421dc3f3b9e69d935735c4",
+    "scripts/lib/documentation-window.swift": "7196cc821ffa6e0254b245aad1ecb2ed66dfb4276420b438cb8f3c1f947914b4",
+    "scripts/lib/documentation-native-capture.mjs": "13bf01e22d8affd2ba5aa7882cba0452a09d44f24f5742a308cc4ac705258049",
+    "scripts/lib/documentation-freshness.mjs": "ceebb1ca5ea8fc6bfddce8b9e4fe3d11e6184089181e961eb3f83d83834994be",
     "scripts/lib/manual-seed.mjs": "2495a12d302cbacaf866d71ea89ae20afd1269d4ab767e1139226642604a9e97",
     "scripts/lib/seed-builder.mjs": "d7ab1c2e8b939ed65ee7f6fd1223ab8a12f20d384bb4ac013cdda75016655e64",
     "scripts/lib/replay-store.mjs": "4d6cb0c15dc4d9cb45b59de44a115acb222b5e09bfc2a4e04b7d91d05f96d82b",
@@ -82,50 +84,71 @@
     "apps/desktop/ui/utils.js": "849e90e145e6bfad9af7d3751b34b966b39603bea57863dfce4e055ccca47100",
     "apps/desktop/ui/virtual-scroller.js": "dd6dc0601e86bec3e503451dd0cf37330dafb73d6994aafcc76f9acd85292407",
     "apps/desktop/package.json": "1643db18b0bd6e0cce510e3bab61e4889bc4a7beb37a1ec4eb679f7cef7a0612",
+    "apps/desktop/src-tauri/src/config.rs": "4cd5ecde08c61c41fcb5eb88110e4f85cc347c33a723b93d59cac8c155d23ae4",
+    "apps/desktop/src-tauri/src/logging.rs": "4e96947264d95534a12f69c0c53d9e8bde262ff6694a6e0d28527a2327704572",
+    "apps/desktop/src-tauri/src/login_item.rs": "aa9885e65b905fa3f0a6dfa57b1b84fb867ccb89f3d2429ee0fd34206808e7ca",
+    "apps/desktop/src-tauri/src/main.rs": "5a443060be02887150908564d1892554ad1a5a8e3afde76c6c750f60ae472382",
+    "apps/desktop/src-tauri/src/search.rs": "4707640e5fbf270f6982c9949c2ae7c4acea60db6742e35076eac9eb40632e2d",
+    "apps/desktop/src-tauri/src/shell_contract.rs": "f937210da4c8c43adac9c9db916c3e84b28cd22068502c61e1872fcc6852b2f1",
+    "apps/desktop/src-tauri/src/windows_icon.rs": "114c1dd99ab60d9d23eb7c88bc0ae435266222f6e8657a7db58bbfc99854ebd1",
+    "apps/desktop/src-tauri/build.rs": "13b6b01828d779bb27dc1a461fbcf75caf7bcfeafb7c3b287096cc54bf2290a7",
+    "apps/desktop/src-tauri/build_support.rs": "a3428b913d4e5557d61030c005533b75c78daef397e73cb7d0764d4321a47717",
+    "apps/desktop/src-tauri/Cargo.toml": "b6c6f553f5870ae2073c23e7305460f6f96fba353b10a7102d934eb33019eed1",
+    "apps/desktop/src-tauri/capabilities/main.json": "ad00db1db6a74b09e75e37fbeb63b4f2052b80b4f60fe8a0ec826a951c3338dc",
+    "Cargo.lock": "8989929725141c85499b7c754671c017714023e8228c180288678b0d85165e58",
+    "Cargo.toml": "575afa94419349bbda4e73e4287f56fb55453c17fa7052fe8ec6b775a03cf48c",
+    "rust-toolchain.toml": "f7cbfca0c3a394984b9eadf81df706d3a7c671ba479aecc12c154bf7c36d77db",
     "apps/desktop/src-tauri/icons/icon.icns": "27af23b25f93f42712fb5aaad2bd7edb437a0c5a056c4164b9d30ef524c493d6",
     "apps/desktop/src-tauri/icons/icon.ico": "a6544e3bee5cfd371bf321ae3df7f335859544c4cf1540950b8748095f84b9e0",
     "apps/desktop/src-tauri/icons/icon.png": "3a146dacc860f8de268cf6bb8615a0dca0232485a396d2c5ccba815522db10be",
     "apps/desktop/src-tauri/icons/tray-icon.png": "047da4fdb0b2cfdbf0511decfdea7cfe316f4ea2d2badc0149879ed0ba10c732",
     "apps/desktop/src-tauri/tauri.conf.json": "fb1e61058b7d989b461e6b117ca2205ab674c44b6ab551922815fac1dcdf3306",
-    "scripts/capture-documentation.mjs": "4f6e86dbb6a502bbc9b947d1e54ae326fb2459fb8e4861810d750c181dffda51",
-    "scripts/compose-documentation-hero.mjs": "3168eee474aea25567292c33043f9b18b1fd1a877e6c09d52d7a87018f392cdb"
+    "scripts/capture-documentation.mjs": "7679e196ea05daf9e5f27bfd12ef24ab4826d9c16c9b35863a61b3f82ef4dbb4",
+    "scripts/compose-documentation-hero.mjs": "4e735e9f9e61d8c07f3b4c14df0df56dd9e75c8d167b16fe2ad3ffb72464b394"
   },
   "platform": "macOS / native Tauri WKWebView",
   "seedSha256": "30ede382fce3d4551e36a0e50cb9933507ae4d2bcec67f63f9ba32dca8a1c064",
   "colorSchemes": ["amber", "mono"],
+  "paddingPoints": 40,
+  "wallpaper": {
+    "name": "Sonoma, Light (Still)",
+    "file": "scripts/assets/documentation-sonoma-light.png",
+    "crop": "center-cover",
+    "sha256": "79f724d2d36fe90251e32ef9cdc9b90575d419d81c240a9ecdc880780ba579d1"
+  },
   "layoutPoints": {
-    "timeline": { "width": 960, "height": 500 },
+    "timeline": { "width": 960, "height": 620 },
     "book": { "width": 960, "height": 620 }
   },
   "outputPixels": {
-    "timeline": { "width": 1920, "height": 1000 },
-    "book": { "width": 1920, "height": 1240 }
+    "timeline": { "width": 2080, "height": 1400 },
+    "book": { "width": 2080, "height": 1400 }
   },
   "screenshots": {
     "timeline.png": {
-      "sha256": "2fc2e219fd539c5f85faa313432d86b49c1a510561923f622f1ebaf7232706a1",
-      "width": 1920,
-      "height": 1000
+      "sha256": "dc7c432057bdaf7835e118fad7aa3ea09f7f93505cce6b4cf025e412bbd5eff8",
+      "width": 2080,
+      "height": 1400
     },
     "book.png": {
-      "sha256": "be53fbf6922f1aeb3c2ab46833e57b459e863e77f62a3aa7243a3fce7ea3219e",
-      "width": 1920,
-      "height": 1240
+      "sha256": "7b6653c203d96c372528b9c613acd189b58b7a90f316c2498f9b549e3a246821",
+      "width": 2080,
+      "height": 1400
     },
     "timeline-mono.png": {
-      "sha256": "ebed3eedee0453a25ed7355df8d260a887391d5d0d92ddbec12f11545d8e54bd",
-      "width": 1920,
-      "height": 1000
+      "sha256": "4f2db1888e17ca00884e42f01c68b1b765fd17119ef6e071f271a431f228a4ba",
+      "width": 2080,
+      "height": 1400
     },
     "timeline-styles.png": {
-      "sha256": "0bc58e0efa168d9c2f09f0b77c65510cb0524b7e09be5a4c2667b904607f5c45",
-      "width": 1920,
-      "height": 1000,
+      "sha256": "e522225e0dfc56387b29d2a787573a35755bb274806ec58be3b20ef7cf56bb30",
+      "width": 2080,
+      "height": 1400,
       "composition": {
         "sources": ["timeline.png", "timeline-mono.png"],
         "sourceSha256": [
-          "2fc2e219fd539c5f85faa313432d86b49c1a510561923f622f1ebaf7232706a1",
-          "ebed3eedee0453a25ed7355df8d260a887391d5d0d92ddbec12f11545d8e54bd"
+          "dc7c432057bdaf7835e118fad7aa3ea09f7f93505cce6b4cf025e412bbd5eff8",
+          "4f2db1888e17ca00884e42f01c68b1b765fd17119ef6e071f271a431f228a4ba"
         ],
         "split": { "top": 0.62, "bottom": 0.38 }
       }
