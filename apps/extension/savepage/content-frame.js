@@ -224,6 +224,11 @@ function frameScript()
 
         clone = sourceNode.cloneNode(false);
 
+        /* Preserve document fonts before DOMParser removes the rendering context. */
+
+        if (sourceNode == document.documentElement || sourceNode == document.body)
+            clone.style.setProperty("font-size",window.getComputedStyle(sourceNode).fontSize,"important");
+
         if (sourceNode.localName == "template")
         {
             for (i = 0; i < sourceNode.content.childNodes.length; i++)

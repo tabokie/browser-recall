@@ -250,6 +250,149 @@ test.describe('Snapshot slug meta tag', () => {
     await page.close();
   });
 
+  test('captured snapshots preserve inherited font sizes in the extension viewer', async ({
+    extContext,
+    extensionId,
+    localServer,
+  }) => {
+    const frameHtml = (
+      size,
+    ) => `<!doctype html><html style="color: rgb(20, 30, 40)"><head>
+      <style>html { font-size: ${size}% !important; } body { line-height: 1.6; }</style>
+      </head><body><p>Frame text keeps its captured size.</p></body></html>`;
+    localServer.addRawPage('/snapshot-font-same-origin', frameHtml(125));
+    localServer.addRawPage('/snapshot-font-cross-origin', frameHtml(150));
+    localServer.addRawPage(
+      '/snapshot-inherited-font',
+      `<!doctype html><html style="color: rgb(20, 30, 40)"><head>
+        <title>Snapshot inherited font size</title>
+        <style>body { line-height: 1.6; } h1 { font-size: 24px; }
+          #relative-copy { font-size: 1.25rem; } #fixed-copy { font-size: 10px; }</style>
+        </head><body><h1>Explicit heading size</h1><p id="inherited-copy">最近听了一</p>
+        <p id="relative-copy">Relative text size</p><p id="fixed-copy">Explicit text size</p>
+        <iframe id="same-origin" src="/snapshot-font-same-origin"></iframe>
+        <iframe id="cross-origin" src="http://localhost:${localServer.port}/snapshot-font-cross-origin"></iframe>
+        </body></html>`,
+    );
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+    const pageUrl = localServer.url('/snapshot-inherited-font');
+    const slug = getSlugForUrl(pageUrl);
+    const page = await extContext.newPage();
+    const helper = await openHelperPage(extContext, extensionId);
+    const preferences = await extContext.newPage();
+    let viewer;
+    let originalFontSize;
+    const setDefaultFontSize = (value) =>
+      preferences.evaluate(
+        (fontSize) =>
+          new Promise((resolve, reject) => {
+            chrome.settingsPrivate.setPref(
+              'webkit.webprefs.default_font_size',
+              fontSize,
+              '',
+              (success) => {
+                const error = chrome.runtime.lastError;
+                if (error || !success) {
+                  reject(
+                    new Error(error?.message || 'Could not set font size'),
+                  );
+                } else resolve();
+              },
+            );
+          }),
+        value,
+      );
+    try {
+      await preferences.goto('chrome://settings/fonts');
+      originalFontSize = await preferences.evaluate(
+        () =>
+          new Promise((resolve) => {
+            chrome.settingsPrivate.getPref(
+              'webkit.webprefs.default_font_size',
+              (pref) => resolve(pref.value),
+            );
+          }),
+      );
+      await setDefaultFontSize(16);
+      await page.goto(pageUrl);
+      await expect(page.locator('#inherited-copy')).toHaveCSS(
+        'font-size',
+        '16px',
+      );
+      await expect(page.frameLocator('#same-origin').locator('p')).toHaveCSS(
+        'font-size',
+        '20px',
+      );
+      await expect(page.frameLocator('#cross-origin').locator('p')).toHaveCSS(
+        'font-size',
+        '24px',
+      );
+      const originalRootStyle = await page
+        .locator('html')
+        .getAttribute('style');
+      await page.bringToFront();
+      const captured = await helper.evaluate(() =>
+        chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' }),
+      );
+      expect(captured, JSON.stringify(captured)).toMatchObject({
+        success: true,
+      });
+      await expect(page.locator('html')).toHaveAttribute(
+        'style',
+        originalRootStyle,
+      );
+
+      viewer = await extContext.newPage();
+      await viewer.goto(
+        `chrome-extension://${extensionId}/snapshot-viewer.html?slug=${slug}&ts=${captured.timestamp}`,
+      );
+      const frame = viewer.frameLocator('#frame');
+      await frame.locator('#inherited-copy').waitFor();
+      await expect(frame.locator('#inherited-copy')).toHaveCSS(
+        'font-size',
+        '16px',
+      );
+      await setDefaultFontSize(12);
+      await expect(page.locator('#inherited-copy')).toHaveCSS(
+        'font-size',
+        '12px',
+      );
+      await expect(frame.locator('#inherited-copy')).toHaveCSS(
+        'font-size',
+        '16px',
+      );
+      await expect(frame.locator('#inherited-copy')).toHaveCSS(
+        'line-height',
+        '25.6px',
+      );
+      await expect(frame.locator('#relative-copy')).toHaveCSS(
+        'font-size',
+        '20px',
+      );
+      await expect(frame.locator('#fixed-copy')).toHaveCSS('font-size', '10px');
+      await expect(frame.locator('h1')).toHaveCSS('font-size', '24px');
+      await expect(frame.locator('html')).toHaveCSS('color', 'rgb(20, 30, 40)');
+      await expect(frame.frameLocator('#same-origin').locator('p')).toHaveCSS(
+        'font-size',
+        '20px',
+      );
+      await expect(frame.frameLocator('#cross-origin').locator('p')).toHaveCSS(
+        'font-size',
+        '24px',
+      );
+      await frame
+        .locator('body')
+        .screenshot({ path: test.info().outputPath('snapshot-font.png') });
+    } finally {
+      if (originalFontSize !== undefined)
+        await setDefaultFontSize(originalFontSize);
+      await viewer?.close();
+      await preferences.close();
+      await helper.close();
+      await page.close();
+    }
+  });
+
   test('capture excludes Browser Recall transient page UI', async ({
     extContext,
     extensionId,
@@ -1471,7 +1614,7 @@ test.describe('Snapshot slug meta tag', () => {
     const captureResp = await helper.evaluate(() =>
       chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' }),
     );
-    expect(captureResp.success).toBe(true);
+    expect(captureResp).toMatchObject({ success: true });
 
     const urlResp = await helper.evaluate(
       ({ slug, timestamp }) =>
@@ -1537,7 +1680,7 @@ test.describe('Snapshot slug meta tag', () => {
     const captureResp = await helper.evaluate(() =>
       chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' }),
     );
-    expect(captureResp.success).toBe(true);
+    expect(captureResp).toMatchObject({ success: true });
 
     const markdown = readFileSync(
       join(setupDir, snapshotSidecarPath(slug, captureResp.timestamp, 'md')),
@@ -1592,7 +1735,7 @@ test.describe('Snapshot slug meta tag', () => {
     const captureResp = await helper.evaluate(() =>
       chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' }),
     );
-    expect(captureResp.success).toBe(true);
+    expect(captureResp).toMatchObject({ success: true });
     const timestamp = captureResp.timestamp;
 
     // Get generated snapshot HTML URL and decode its content.

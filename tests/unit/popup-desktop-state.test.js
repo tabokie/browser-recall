@@ -509,7 +509,6 @@ describe('popup desktop state rendering', () => {
       url: 'https://example.com/resume-from-paused-popup',
     };
     const identity = deferred();
-    const pageActivity = deferred();
     const pageSummary = deferred();
     installDom(
       'chrome-extension://abcdefghijklmnop/popup.html?bootstrap=resume-pending',
@@ -528,7 +527,6 @@ describe('popup desktop state rendering', () => {
             : { mode: 'default' };
           return { success: true };
         },
-        recordPageActivity: () => pageActivity.promise,
         getPageSummary: () => pageSummary.promise,
         getPopupLists: { success: true, lists: [] },
       },
@@ -565,27 +563,16 @@ describe('popup desktop state rendering', () => {
     });
     await waitFor(() =>
       chrome.runtime.sendMessage.mock.calls.some(
-        ([request]) => request.action === 'recordPageActivity',
-      ),
-    );
-
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      action: 'recordPageActivity',
-      url: effectiveTab.url,
-      title: effectiveTab.title,
-      slug: generateSlugFromUrl(effectiveTab.url),
-      isInitialLoad: true,
-      awaitCommit: true,
-    });
-    expect(document.getElementById('dashboardContent').style.display).toBe(
-      'none',
-    );
-
-    pageActivity.resolve({ success: true });
-    await waitFor(() =>
-      chrome.runtime.sendMessage.mock.calls.some(
         ([request]) => request.action === 'getPageSummary',
       ),
+    );
+    expect(
+      chrome.runtime.sendMessage.mock.calls.some(
+        ([request]) => request.action === 'recordPageActivity',
+      ),
+    ).toBe(false);
+    expect(document.getElementById('dashboardContent').style.display).toBe(
+      'none',
     );
 
     pageSummary.resolve(

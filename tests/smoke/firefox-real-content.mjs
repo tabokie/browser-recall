@@ -85,6 +85,26 @@ try {
     reportReject = reject;
   });
   server = http.createServer(async (request, response) => {
+    if (request.url.startsWith('/unrecorded?')) {
+      const url = canonicalizePageUrl(
+        new URL(request.url, 'http://localhost').searchParams.get('url'),
+      );
+      const captured = readVisitRecords(configDir).some(
+        (record) => record.url === url,
+      );
+      response.writeHead(captured ? 500 : 200, {
+        'content-type': 'application/json',
+      });
+      response.end(
+        JSON.stringify({
+          success: !captured,
+          error: captured
+            ? 'Paused document was recorded before refresh'
+            : undefined,
+        }),
+      );
+      return;
+    }
     if (request.url.startsWith('/visit?')) {
       try {
         const url = canonicalizePageUrl(
@@ -153,8 +173,11 @@ const waitForVisit = async (url) => {
 try {
   if (location.pathname === '/paused') {
     const recording = await chrome.runtime.sendMessage({ action: 'getRecordingState' });
-    if (recording?.mode !== 'private') throw new Error('Dormant tab did not load while recording was paused');
-    await chrome.runtime.sendMessage({ action: 'firefoxDormantReady' });
+    if (recording?.mode === 'private') {
+      await chrome.runtime.sendMessage({ action: 'firefoxDormantReady' });
+    } else if (recording?.mode === 'default') {
+      await waitForVisit(location.href);
+    } else { throw new Error('Paused tab recording state is invalid'); }
     return;
   }
   await waitForVisit(location.href);
@@ -181,12 +204,19 @@ try {
   const dormant = await chrome.runtime.sendMessage({ action: 'firefoxRealContentProbe', phase: 'openDormant' });
   const resumed = await chrome.runtime.sendMessage({ action: 'setRecordingPaused', paused: false });
   if (!resumed?.success) throw new Error(resumed?.error || 'Could not resume recording');
+  const excluded = await chrome.runtime.sendMessage({ action: 'firefoxRealContentProbe', tabId: dormant.tabId });
+  if (excluded.identity?.recordingEligible !== false) throw new Error('Resuming enabled a paused document');
+  const flushExcluded = await chrome.runtime.sendMessage({ action: 'flushDesktopQueue' });
+  if (!flushExcluded?.success) throw new Error(flushExcluded?.error || 'Could not flush capture queue');
+  const unrecorded = await fetch('http://127.0.0.1:${port}/unrecorded?url=' + encodeURIComponent('http://127.0.0.1:${port}/paused'));
+  if (!unrecorded.ok) throw new Error((await unrecorded.json()).error);
+  await chrome.runtime.sendMessage({ action: 'firefoxRealContentProbe', phase: 'refreshDormant', tabId: dormant.tabId });
   await waitForVisit('http://127.0.0.1:${port}/paused');
   const recovered = await chrome.runtime.sendMessage({ action: 'firefoxRealContentProbe', tabId: dormant.tabId });
   const flush = await chrome.runtime.sendMessage({ action: 'flushDesktopQueue' });
   if (!flush?.success) throw new Error(flush?.error || 'Could not flush captured visits');
   const options = await chrome.runtime.sendMessage({ action: 'firefoxRealContentProbe', phase: 'options' });
-  await report({ initial, destination, dormant, recovered, options, contentErrors: globalThis.firefoxRealContentErrors });
+  await report({ initial, destination, dormant, excluded, recovered, options, contentErrors: globalThis.firefoxRealContentErrors });
 } catch (error) {
   await report({ error: error.message, contentErrors: globalThis.firefoxRealContentErrors });
 }
@@ -226,19 +256,22 @@ chrome.runtime.onMessage.addListener((request, sender) => {
       await chrome.tabs.remove(optionsTab.id);
       return { preparedMode: prepared.mode, expectedTitle: chrome.i18n.getMessage('extensionNotAvailablePage'), ...snapshots };
     }
+    if (request.phase === 'refreshDormant') {
+      await chrome.tabs.reload(request.tabId);
+      return { success: true };
+    }
+    let tabId = request.tabId ?? sender.tab.id;
     if (request.phase === 'openDormant') {
       const tab = await chrome.tabs.create({ url: 'http://127.0.0.1:${port}/paused' });
       await dormantReady;
-      const identity = await chrome.tabs.sendMessage(tab.id, { action: 'getPageIdentity' }, { frameId: 0 });
-      return { tabId: tab.id, pageActionsInstalled: identity !== undefined };
+      tabId = tab.id;
     }
-    const tabId = request.tabId ?? sender.tab.id;
     let lastError;
     for (let attempt = 0; attempt < 50; attempt += 1) {
       try {
         const identity = await chrome.tabs.sendMessage(tabId, { action: 'getPageIdentity' }, { frameId: 0 });
         const tab = await chrome.tabs.get(tabId);
-        if (identity?.success && identity.url === tab.url) return { identity };
+        if (identity?.success && identity.url === tab.url) return { identity, ...(request.phase === 'openDormant' ? { tabId } : {}) };
         lastError = 'Production content receiver did not acknowledge delivery: ' + JSON.stringify({ identity });
       } catch (error) {
         lastError = error.message;
@@ -358,12 +391,18 @@ console.error = (...args) => {
   ]) {
     assert.deepEqual(
       result[phase]?.identity,
-      { success: true, embedded: false, url, slug: generateSlugFromUrl(url) },
+      {
+        success: true,
+        embedded: false,
+        url,
+        slug: generateSlugFromUrl(url),
+        recordingEligible: true,
+      },
       JSON.stringify(result),
     );
   }
   assert.equal(
-    result.dormant?.pageActionsInstalled,
+    result.dormant?.identity?.recordingEligible,
     false,
     JSON.stringify(result),
   );
@@ -399,7 +438,7 @@ console.error = (...args) => {
     );
   }
   console.log(
-    'Real Firefox verified page capture, navigation, URL normalization, daemon persistence, pause/resume, and options-page popup messages.',
+    'Real Firefox verified page capture, navigation, URL normalization, daemon persistence, paused-document exclusion until refresh, and options-page popup messages.',
   );
 } finally {
   clearTimeout(timeout);

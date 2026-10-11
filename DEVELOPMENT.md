@@ -93,6 +93,48 @@ bundle. Set `APPLE_SIGNING_IDENTITY` to an installed Apple signing identity for
 certificate signing. DMG builds require an Apple signing identity; distribution
 also requires notarization credentials.
 
+### Portable GitHub releases
+
+`.github/workflows/release-desktop.yml` runs only through GitHub Actions'
+`workflow_dispatch` trigger. Once the workflow is on the default branch, open
+**Actions → Release Portable Desktop → Run workflow**, select a commit's branch
+or tag, and choose whether to keep a draft or mark a prerelease. The default
+publishes a GitHub Release after every platform build and archive check succeeds.
+The selected commit should already have passed the regular CI workflow.
+
+The release tag is `v` followed by the desktop version. Keep the versions in
+`apps/desktop/package.json`, `apps/desktop/src-tauri/Cargo.toml`, and
+`apps/desktop/src-tauri/tauri.conf.json` aligned, and update both dependency
+lockfiles when changing the version. A version with a prerelease suffix is
+automatically marked as a prerelease. Existing releases are never overwritten;
+an existing tag must point to the selected commit. If an upload failure leaves
+an incomplete draft, delete that draft before rerunning the workflow on the same
+commit. The workflow serializes release runs and pins every build to the dispatch
+commit, even if the selected branch advances during the build.
+
+| Asset | Contents |
+| --- | --- |
+| `browser-recall-v<version>-windows-x64.zip` | `browser-recall-desktop.exe` |
+| `browser-recall-v<version>-macos-arm64.zip` | Apple Silicon `Browser Recall.app` |
+| `browser-recall-v<version>-macos-x64.zip` | Intel `Browser Recall.app` |
+| `SHA256SUMS` | SHA-256 checksums for the three ZIP archives |
+
+Builds use native Windows and macOS runners, Node.js 24, Rust 1.97.0, and the
+existing desktop build command. The Windows job runs the native single-instance
+test and verifies the extracted executable. The macOS jobs archive with `ditto`
+and verify the extracted bundle's signature. GitHub Actions keeps intermediate
+archives for seven days; GitHub Releases hosts the downloadable assets.
+
+Portable means no Browser Recall installer: extract the archive and run the
+executable or complete `.app` bundle. Preferences still use the operating system's
+app-data folder, and setup asks for the collection's data folder. Windows requires
+Microsoft Edge WebView2 Runtime. Browser extensions are installed separately.
+
+No signing secrets are required. Windows builds are unsigned; macOS builds use
+the existing ad-hoc signature and are not notarized. Downloads may need SmartScreen
+or macOS Privacy & Security approval. Apple Developer ID signing and notarization
+are a separate distribution setup; these archives do not claim that trust level.
+
 ### Connect the browser
 
 1. Start Browser Recall and complete folder/device setup.
@@ -248,8 +290,8 @@ npm run test:shortcut:native
 
 `test:firefox:real` uses `web-ext@10.5.0`, a headless Firefox browser, and an isolated
 real daemon. The check verifies production content-script startup, navigation,
-query normalization, persisted visits, and recording resume on a page opened while
-recording was paused. Visit persistence is checked before querying page identity,
+query normalization, persisted visits, and exclusion of a page opened while paused
+until that page is refreshed after recording resumes. Visit persistence is checked before querying page identity,
 so the check cannot rescue failed automatic navigation. Every setup allocation
 shares the cleanup boundary, including daemon startup. The check runs in
 `ci:test-extension-e2e`, in both local CI

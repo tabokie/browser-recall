@@ -1990,7 +1990,7 @@ async function handleRecordingToggleClick() {
     const transitionGeneration = nextCurrentPageGeneration();
     applyRecordingBarState();
 
-    // Resuming recording: record the current page visit and show details.
+    // Resuming recording: read the current page details.
     if (paused && !nextPaused && currentPage.tab) {
       const resumedTab = currentPage.tab;
       await resumeDashboard(resumedTab, transitionGeneration);
@@ -2007,7 +2007,7 @@ async function handleRecordingToggleClick() {
       renderBannerOnly();
     }
   } catch (error) {
-    // The background may have committed the global state before a page receiver
+    // The background may have committed the global state before a toolbar update
     // failed. Read the committed state so the toggle remains truthful.
     recordingUiState.hydrated = false;
     await loadRecordingState();
@@ -2427,22 +2427,8 @@ async function finishDashboardRender(tab, generation) {
   scheduleDelayedTitleCheck(tab, tab.title || '');
 }
 
-async function recordCurrentPageActivity(tab) {
-  const url = tab._effectiveUrl || tab.url;
-  const response = await chrome.runtime.sendMessage({
-    action: 'recordPageActivity',
-    url,
-    title: tab._effectiveTitle || tab.title || null,
-    slug: generateSlugFromUrl(url),
-    isInitialLoad: true,
-    awaitCommit: true,
-  });
-  requireSuccessfulResponse(response, 'recordPageActivity');
-}
-
 async function resumeDashboard(tab, generation) {
-  // Keep the paused surface until the visit is committed, then use the normal
-  // showDashboard path so resume never exposes tab-derived partial metadata.
+  // Recording policy belongs to the background. Resume only reads daemon data.
   try {
     await resolveEffectiveUrl(tab);
   } catch (error) {
@@ -2450,19 +2436,6 @@ async function resumeDashboard(tab, generation) {
       showDesktopDataUnavailable(error.message, {
         reason: 'popup-page-identity-failed',
         url: tab.url,
-      });
-    }
-    return;
-  }
-  if (generation !== currentPage.generation) return;
-  try {
-    await recordCurrentPageActivity(tab);
-  } catch (error) {
-    if (generation === currentPage.generation) {
-      showDesktopDataUnavailable(error.message, {
-        reason: 'popup-resume-visit-failed',
-        error: error.message || String(error),
-        url: tab._effectiveUrl || tab.url,
       });
     }
     return;

@@ -2,7 +2,7 @@
   "command": "npm run docs:screenshots",
   "inputs": {
     "scripts/assets/documentation-sonoma-light.png": "79f724d2d36fe90251e32ef9cdc9b90575d419d81c240a9ecdc880780ba579d1",
-    "package.json": "7f3762a50491771c107a40fdfe9477b6a57fc6c287bcd01ae2dc426a0d2f7f53",
+    "package.json": "9977fbd1e7e5fa4cd26cbcfe80ec3eda73e768104d60b189ffbe2959c163184a",
     "package-lock.json": "90950dd6e3d95d1fdf490584466846dc4f642eff2f0f957af3c34130c70bae3c",
     "packages/core/attention-utils.js": "4f38498b8ae86274db4a9df56a90136c149357a0ed94d1933b95ffd8d25fa1be",
     "packages/core/bounded-response.js": "4ddb18491943ee4b29073767480858af99cf93a2b647e69f51fcec0dfe79732f",
@@ -128,7 +128,7 @@
   },
   "screenshots": {
     "timeline.png": {
-      "sha256": "905022d18fbc241ed7535b7e4d3eea55c8e72780cb15f06df33725a5dfb17eea",
+      "sha256": "fac805f7e06d0bd295ead083bdbd2f2abe03a55e9b55ad5b29ad0e4e1e69889a",
       "width": 2080,
       "height": 1400
     },
@@ -138,19 +138,19 @@
       "height": 1400
     },
     "timeline-mono.png": {
-      "sha256": "398a2804f9f9400fec1d0458ae485d2bbf991508dccc693944a30fe96a9dc4da",
+      "sha256": "cc1dbfd22dbfc69e49cd8a88c755fcf3785ff33003a4a990cb5748d69b0f030b",
       "width": 2080,
       "height": 1400
     },
     "timeline-styles.png": {
-      "sha256": "b8c55e03e27ac8d76d0adcb2f24fdbd323c0c039012ea0f1843ad97dd2d2225a",
+      "sha256": "643aea571b1311732647708d3b248e3311f68f58b5e6e9fd695110b2795dd523",
       "width": 2080,
       "height": 1400,
       "composition": {
         "sources": ["timeline.png", "timeline-mono.png"],
         "sourceSha256": [
-          "905022d18fbc241ed7535b7e4d3eea55c8e72780cb15f06df33725a5dfb17eea",
-          "398a2804f9f9400fec1d0458ae485d2bbf991508dccc693944a30fe96a9dc4da"
+          "fac805f7e06d0bd295ead083bdbd2f2abe03a55e9b55ad5b29ad0e4e1e69889a",
+          "cc1dbfd22dbfc69e49cd8a88c755fcf3785ff33003a4a990cb5748d69b0f030b"
         ],
         "split": { "top": 0.62, "bottom": 0.38 }
       }

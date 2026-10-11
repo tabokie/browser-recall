@@ -189,6 +189,14 @@ WebSocket handlers do not keep a separate editable copy of configuration.
 
 ## Desktop app
 
+Portable desktop releases use a manual GitHub Actions workflow. Native Windows
+and macOS runners build the same selected commit through the normal desktop build
+command. Windows ships an executable in a ZIP archive; macOS ships separate
+Apple Silicon and Intel `.app` archives. Publishing waits for every build and
+archive verification, attaches SHA-256 checksums, and creates a GitHub Release
+without replacing an existing release. Installation requires no Browser Recall
+installer; configuration and collection storage follow the normal desktop setup.
+
 Closing the desktop window keeps the process and webview running. Tray actions,
 Dock actions, and deep links reopen and focus the same window. Single-instance
 handling registers before other plugins so launching the app again reaches the
@@ -240,15 +248,30 @@ and YouTube navigation. Browser history events detect navigation that bypasses t
 injected script. Both paths report leaving and visiting pages, reset highlights,
 and update the badge. Duplicate navigation reports do not repeat those actions.
 
-The background script owns the session recording state. The popup and content
-scripts read that state through `getRecordingState`. Content scripts receive
-`recordingStateChanged` messages when
-recording is paused or resumed. A page loaded while recording is paused keeps only
-the recording-state receiver until recording resumes. Content scripts do not read
-`storage.session`, which Firefox exposes only to trusted extension contexts.
-Recording-state delivery requires an acknowledgement and retries transient
-failures. Persistent failures in loaded content scripts produce a popup diagnostic;
-the popup reads the committed global state before updating the recording toggle.
+The background script owns session recording policy through `recording-controller.js`.
+Navigation starts, navigation commits, attention changes, pause changes, and admission
+of automatic commands share one operation queue. A pause can prevent a report that
+is still being prepared from entering the connector queue. Commands admitted before
+the pause remain accepted; connector delivery and daemon responses do not hold the
+recording operation queue open. Toolbar icons update without contacting content
+scripts, and recording changes do not broadcast messages to tabs.
+
+The background fixes each document's automatic recording eligibility at the main
+frame's navigation start, before the page response arrives. Documents opened while
+paused stay excluded after resume, including slow loads, same-document navigation,
+and popup opens. Refreshing while recording is active creates an eligible document.
+The document token binds activity to the sending tab and browser document ID. Page
+identity and explicit page actions initialize in both states. A document injected
+before navigation listeners registered can be adopted only before the session's
+first pause; missing navigation history after a pause produces an explicit error.
+
+Attention time uses a background clock that advances only while recording is active.
+Content scripts report foreground starts and leaves, rather than elapsed wall time;
+attention spanning pause and resume therefore excludes every paused interval.
+Recording policy, pending navigation starts, document tokens, and attention starts
+live in `storage.session`, survive background worker suspension, and are removed
+when their tab closes. Content scripts never read that storage directly. The popup
+reads complete daemon data after resume and does not synthesize visits.
 Shared page-availability classification excludes browser and extension pages,
 with explicit exceptions for snapshot viewers.
 
@@ -334,8 +357,10 @@ in-memory drafts are released.
 ### Snapshots
 
 `savepage-bridge.js` manages one snapshot capture per tab. Save Page WE saves frames
-and supported shadow roots in the snapshot HTML. Failed page resource requests can
-retry using the extension's host permissions. Temporary rules for exact URLs allow
+and supported shadow roots in the snapshot HTML. Capture preserves each document's
+computed root and body font sizes so inherited text and relative sizes remain
+unchanged by browser font defaults or the extension viewer's injected body style.
+Failed page resource requests can retry using the extension's host permissions. Temporary rules for exact URLs allow
 appropriate referrer headers during capture and are removed when capture ends.
 Redirects can further restrict which referrer information is sent.
 

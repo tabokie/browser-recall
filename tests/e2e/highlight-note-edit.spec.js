@@ -155,6 +155,23 @@ test.describe('Highlight note edit', () => {
     await page.goto(pageUrl);
     await page.waitForLoadState('domcontentloaded');
 
+    const helper = await openHelperPage(extContext, extensionId);
+    await expect
+      .poll(() =>
+        helper.evaluate(async (url) => {
+          const summary = await chrome.runtime.sendMessage({
+            action: 'getPageSummary',
+            url,
+          });
+          return summary.access?.hasVisitHistory;
+        }, pageUrl),
+      )
+      .toBe(true);
+    const flushed = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'flushDesktopQueue' }),
+    );
+    expect(flushed.success).toBe(true);
+
     // Construct a missing transient page projection deterministically. Timeline
     // retains the acknowledged visit, but selective checkpoints omit this page.
     await resetAndSeed(extContext, extensionId, [
@@ -178,7 +195,6 @@ test.describe('Highlight note edit', () => {
     ]);
 
     await page.locator('p').selectText();
-    const helper = await openHelperPage(extContext, extensionId);
     // Apply the test policy after recovery has replayed any reset-setting logs.
     for (const key of ['titleCleanupEnabled', 'titleTrimRules']) {
       const saved = await helper.evaluate(

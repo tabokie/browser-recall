@@ -35,6 +35,7 @@ async function handleResetForTest() {
   if (!resetResp?.success) return resetResp;
   const control = testControl();
   await control.clearDesktopBuffer();
+  await control.resetRecordingState();
   await control.resetEphemeralConnectorState();
   await globalThis.browserRecallPreparedPopupForTest?.reset?.();
   globalThis.browserRecallImmediateScriptNavigationsForTest.length = 0;

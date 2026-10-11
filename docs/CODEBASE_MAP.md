@@ -20,6 +20,7 @@ Use this map to find the files that implement a feature. See
 | `icons/` | SVG sources for generated runtime icons |
 | `docs/images/` | Documentation PNGs and capture manifests |
 | `.github/workflows/ci.yml` | GitHub Actions checks using the same `ci:*` scripts as local CI |
+| `.github/workflows/release-desktop.yml` | Manual native Windows/macOS builds, verified portable archives, and GitHub Releases publishing |
 | `package.json` | Build, test, formatting, and analysis commands |
 | `rust-toolchain.toml` | Rust compiler and component pin |
 | `.gitattributes` | LF checkout policy across platforms |
@@ -63,6 +64,7 @@ row. Data changes update affected rows without restarting the history search.
 | --- | --- |
 | `apps/extension/manifest.json` | Permissions, entry points, and default shortcuts |
 | `apps/extension/background.js` | Track page URLs per tab, prepare popups, deliver navigation messages, route commands, capture pages, and report errors |
+| `apps/extension/recording-controller.js` | Session recording policy, navigation-start eligibility, pause-aware attention, and serialized command admission |
 | `apps/extension/content.js` | Visit, time-on-page, and scroll-depth capture; highlight integration with live pages |
 | `apps/extension/spa-navigation-bridge.js` | Detect navigation in the page's JavaScript environment from document start |
 | `apps/extension/browser-api.js` | Browser APIs available to the calling script and shadow-root lookup |
@@ -79,7 +81,7 @@ row. Data changes update affected rows without restarting the history search.
 | `apps/extension/connector/command-buffer.js` | Size-limited pending-command queue and saved queue/byte counts |
 | `apps/extension/savepage-bridge.js` | Snapshot capture sessions and resource diagnostics |
 | `apps/extension/snapshot-resource-fetch.js` | Host-permission fetches, redirect/referrer policy, and temporary network rules |
-| `apps/extension/savepage/content.js` | Save Page WE code that saves page content as snapshot HTML |
+| `apps/extension/savepage/content.js`, `apps/extension/savepage/content-frame.js` | Save Page WE capture of page content, frames, shadow roots, and computed root and body font sizes |
 | `apps/extension/snapshot-viewer.js` | Saved-page preparation and highlight adapters |
 | `apps/extension/options-stub.html` | Link to the desktop app |
 | `apps/extension/background-test-control.js` | Test-only RPC handlers, omitted from production builds |
@@ -185,7 +187,8 @@ do not maintain a second production copy.
 | Combined data reads and successful writes not yet saved to checkpoints | `crates/daemon/tests/read_projections.rs` |
 | Commands, write ordering, and change notifications | `crates/daemon/tests/commands.rs`, `crates/daemon/tests/command_authority.rs`, `crates/daemon/tests/runtime.rs` |
 | Replay schemas, idempotence, and verifier | `crates/replay/tests/` |
-| Popup membership, prepared dashboard, and recording-resume delivery failures | `tests/e2e/popup-lists.spec.js` |
+| Background document eligibility at navigation start, pause-aware attention, and session recovery | `apps/extension/recording-controller.js`, `tests/e2e/recording-lifecycle.spec.js` |
+| Popup membership, prepared dashboard, recording toggles without tab notifications, and paused documents remaining excluded until refresh | `tests/e2e/popup-lists.spec.js` |
 | Live navigation and correct URLs in visit records | `tests/e2e/extension-navigation-regressions.spec.js`, `tests/e2e/url-tracking.spec.js` |
 | Highlight creation, editing, and PDF behavior | `tests/e2e/highlight-note-edit.spec.js` |
 | Save when an editor or popup closes | `tests/e2e/note-dismiss-save.spec.js` |
@@ -198,7 +201,7 @@ do not maintain a second production copy.
 | Windows icons, single instance, and teardown | `tests/smoke/windows-desktop-single-instance.mjs`, `tests/integration/windows-desktop-cleanup.test.js` |
 | Saved desktop language and right-to-left layout | `tests/e2e/desktop-locale-setting.spec.js` |
 | Native extension localization and system fonts | `tests/e2e/extension-localization.spec.js`, `tests/e2e/extension-font-fallback.spec.js` |
-| Real Firefox automatic capture and navigation, daemon persistence before identity probes, recording resume, and options-page popup messages | `tests/smoke/firefox-real-content.mjs` |
+| Real Firefox automatic capture and navigation, daemon persistence before identity probes, paused-document exclusion until refresh, and options-page popup messages | `tests/smoke/firefox-real-content.mjs` |
 | Native popup shortcut | `tests/smoke/native-extension-shortcut.mjs` |
 | Documentation images match the recorded source files and capture results | `tests/integration/documentation-freshness.test.js` |
 | Browser documentation capture | `tests/e2e/documentation-browser.spec.js` |

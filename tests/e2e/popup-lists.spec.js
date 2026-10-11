@@ -537,135 +537,238 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
-  for (const failure of ['transport', 'acknowledgement', 'persistent']) {
-    test(`popup resumes a paused tab with a ${failure} delivery failure`, async ({
-      extContext,
-      extensionId,
-      setupDir,
-      localServer,
-    }) => {
-      void setupDir;
-      localServer.addPage('/resume-paused-tab', {
-        title: 'Resume Paused Tab',
-        body: '<main>Loaded while Browser Recall recording was paused.</main>',
-      });
-      const url = localServer.url('/resume-paused-tab');
-
-      await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
-      const helper = await openHelperPage(extContext, extensionId);
-      await helper.evaluate(async () => {
+  test('a tab opened while paused stays unrecorded until manually refreshed', async ({
+    extContext,
+    extensionId,
+    localServer,
+  }) => {
+    localServer.addPage('/paused-document', {
+      title: 'Paused Document',
+      body: '<main>Opened while recording was paused.</main>',
+    });
+    localServer.addPage('/resume-other-tab', {
+      title: 'Resume Other Tab',
+      body: '<main>Resume recording from this tab.</main>',
+    });
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+    const helper = await openHelperPage(extContext, extensionId);
+    const other = await extContext.newPage();
+    const otherUrl = localServer.url('/resume-other-tab');
+    await other.goto(otherUrl);
+    await waitForContentScript(helper, other, otherUrl);
+    const popup = await openPopupForUrl(extContext, extensionId, {
+      url: otherUrl,
+      title: 'Resume Other Tab',
+    });
+    const pausedPage = await extContext.newPage();
+    const pausedUrl = localServer.url('/paused-document');
+    const readHistory = () =>
+      helper.evaluate(async () => {
+        const flush = await chrome.runtime.sendMessage({
+          action: 'flushDesktopQueue',
+        });
+        if (!flush?.success)
+          throw new Error(flush?.error || 'History flush failed');
+        const now = new Date();
+        const date = [
+          now.getFullYear(),
+          String(now.getMonth() + 1).padStart(2, '0'),
+          String(now.getDate()).padStart(2, '0'),
+        ].join('-');
         const response = await chrome.runtime.sendMessage({
-          action: 'setRecordingPaused',
-          paused: true,
+          action: 'readDesktopValue',
+          key: `log:${date}`,
         });
-        if (response?.success !== true) {
-          throw new Error(response?.error || 'Could not pause recording');
-        }
+        if (!response?.success || !Array.isArray(response.value))
+          throw new Error(response?.error || 'History read failed');
+        return response.value;
       });
-
-      const page = await extContext.newPage();
-      await page.goto(url);
-      const prepared = await helper.evaluate(async (pageUrl) => {
-        const [tab] = await chrome.tabs.query({ url: pageUrl });
-        if (!tab?.id) throw new Error('Paused page tab not found');
-        const pageActions = await chrome.tabs.sendMessage(tab.id, {
-          action: 'isPdfPage',
-        });
-        if (pageActions !== undefined) {
-          throw new Error('Paused page unexpectedly initialized page actions');
-        }
-
-        return chrome.runtime.sendMessage({
-          action: 'preparePopupBootstrapForTest',
-          tabId: tab.id,
-        });
-      }, url);
-      expect(prepared).toMatchObject({ success: true, mode: 'private' });
-
-      const popup = await extContext.newPage();
-      await popup.goto(
-        `chrome-extension://${extensionId}/${prepared.popupPath}`,
-      );
-      await expectPopupRevealed(popup);
-      await expect(popup.locator('#dashboardContent')).toBeHidden();
-      await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
+    try {
+      await popup.locator('#recordingToggle').click();
       await expect(popup.locator('#recordingToggle')).toHaveAttribute(
         'aria-pressed',
         'true',
       );
-
-      const worker = extContext.serviceWorkers()[0];
-      await worker.evaluate(
-        async ({ url, failure }) => {
-          const [tab] = await chrome.tabs.query({ url });
-          const send = chrome.tabs.sendMessage.bind(chrome.tabs);
-          globalThis.recordingResumeAttempts = 0;
-          globalThis.restoreRecordingResumeDelivery = () => {
-            chrome.tabs.sendMessage = send;
-          };
-          chrome.tabs.sendMessage = (tabId, request, ...args) => {
-            if (
-              tabId === tab.id &&
-              request.action === 'recordingStateChanged' &&
-              request.mode === 'default'
-            ) {
-              globalThis.recordingResumeAttempts += 1;
-              if (
-                globalThis.recordingResumeAttempts === 1 ||
-                failure === 'persistent'
-              ) {
-                return failure === 'transport'
-                  ? Promise.reject(
-                      new Error(
-                        'Could not establish connection. Receiving end does not exist.',
-                      ),
-                    )
-                  : Promise.resolve({
-                      success: false,
-                      error: 'Recording receiver temporarily unavailable',
-                    });
-              }
-            }
-            return send(tabId, request, ...args);
-          };
-        },
-        { url, failure },
+      await pausedPage.goto(pausedUrl);
+      await popup.locator('#recordingToggle').click();
+      await expect(popup.locator('#recordingToggle')).toHaveAttribute(
+        'aria-pressed',
+        'false',
       );
-
+      await waitForContentScript(helper, pausedPage, pausedUrl);
+      await pausedPage.bringToFront();
+      // Exercise the identity path that can otherwise initialize/report a page.
+      const identity = await helper.evaluate(async (url) => {
+        const [tab] = await chrome.tabs.query({ url });
+        return chrome.runtime.sendMessage({
+          action: 'resolvePopupPageIdentity',
+          tabId: tab.id,
+        });
+      }, pausedUrl);
+      expect(identity).toMatchObject({
+        success: true,
+        identity: { url: pausedUrl, slug: getSlugForUrl(pausedUrl) },
+      });
+      await pausedPage.evaluate(() =>
+        document.dispatchEvent(new Event('visibilitychange')),
+      );
+      expect(
+        (await readHistory()).filter((entry) => entry.url === pausedUrl),
+      ).toEqual([]);
+      // Resuming through the excluded document's own popup must not backfill it.
+      await helper.evaluate(() =>
+        chrome.runtime.sendMessage({
+          action: 'setRecordingPaused',
+          paused: true,
+        }),
+      );
+      const prepared = await helper.evaluate(async (url) => {
+        const [tab] = await chrome.tabs.query({ url });
+        return chrome.runtime.sendMessage({
+          action: 'preparePopupBootstrapForTest',
+          tabId: tab.id,
+        });
+      }, pausedUrl);
+      expect(prepared).toMatchObject({ success: true, mode: 'private' });
+      const excludedPopup = await extContext.newPage();
       try {
-        await popup.locator('#recordingToggle').click();
-        if (failure === 'persistent') {
-          await expect(popup.locator('#pageDiagnosticSection')).toBeVisible();
-          await expect(popup.locator('#pageDiagnosticMessage')).toContainText(
-            'Recording receiver temporarily unavailable',
-          );
-          await expect(popup.locator('#recordingToggle')).toHaveAttribute(
-            'aria-pressed',
-            'false',
-          );
-          expect(
-            await worker.evaluate(() => globalThis.recordingResumeAttempts),
-          ).toBe(3);
-        } else {
-          await expect(popup.locator('#pageTitle')).toHaveText(
-            'Resume Paused Tab',
-          );
-          await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
-          expect(
-            await worker.evaluate(() => globalThis.recordingResumeAttempts),
-          ).toBeGreaterThan(1);
-        }
-      } finally {
-        await worker.evaluate(() =>
-          globalThis.restoreRecordingResumeDelivery(),
+        await excludedPopup.goto(
+          `chrome-extension://${extensionId}/${prepared.popupPath}`,
         );
+        await expectPopupRevealed(excludedPopup);
+        await excludedPopup.locator('#recordingToggle').click();
+        await expect(excludedPopup.locator('#recordingToggle')).toHaveAttribute(
+          'aria-pressed',
+          'false',
+        );
+        await expect(excludedPopup.locator('#recordingToggle')).toBeEnabled();
+        expect(
+          (await readHistory()).filter((entry) => entry.url === pausedUrl),
+        ).toEqual([]);
+      } finally {
+        await excludedPopup.close();
       }
+      const routedUrl = `${pausedUrl}?route=excluded`;
+      await pausedPage.evaluate(
+        (url) => history.pushState({}, '', url),
+        routedUrl,
+      );
+      await expect
+        .poll(() =>
+          helper.evaluate(async (url) => {
+            const [tab] = await chrome.tabs.query({ url });
+            if (!tab) return null;
+            return chrome.tabs.sendMessage(tab.id, {
+              action: 'getPageIdentity',
+            });
+          }, routedUrl),
+        )
+        .toMatchObject({
+          success: true,
+          url: routedUrl,
+          recordingEligible: false,
+        });
+      expect(
+        (await readHistory()).filter((entry) =>
+          entry.url?.startsWith(pausedUrl),
+        ),
+      ).toEqual([]);
+      await pausedPage.reload();
+      await waitForContentScript(helper, pausedPage, routedUrl);
+      await expect
+        .poll(
+          async () =>
+            (await readHistory()).filter(
+              (entry) =>
+                entry.url === routedUrl && entry.action === 'visit_page',
+            ).length,
+        )
+        .toBe(1);
+    } finally {
+      await helper.evaluate(() =>
+        chrome.runtime.sendMessage({
+          action: 'setRecordingPaused',
+          paused: false,
+        }),
+      );
+      await popup.close();
+      await pausedPage.close();
+      await other.close();
+      await helper.close();
+    }
+  });
 
+  test('popup pause and resume do not notify content scripts', async ({
+    extContext,
+    extensionId,
+    localServer,
+  }) => {
+    localServer.addPage('/responsive-recording-toggle', {
+      title: 'Responsive Recording Toggle',
+      body: '<main>Current popup page.</main>',
+    });
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+    const url = localServer.url('/responsive-recording-toggle');
+    const page = await extContext.newPage();
+    const helper = await openHelperPage(extContext, extensionId);
+    await page.goto(url);
+    await waitForContentScript(helper, page, url);
+    const popup = await openPopupForUrl(extContext, extensionId, {
+      url,
+      title: 'Responsive Recording Toggle',
+    });
+    const worker = extContext.serviceWorkers()[0];
+    await worker.evaluate(() => {
+      const send = chrome.tabs.sendMessage.bind(chrome.tabs);
+      globalThis.recordingBroadcasts = 0;
+      globalThis.restoreRecordingDelivery = () => {
+        chrome.tabs.sendMessage = send;
+      };
+      chrome.tabs.sendMessage = (...args) => {
+        if (args[1]?.action === 'recordingStateChanged') {
+          globalThis.recordingBroadcasts += 1;
+          // Any attempted recording notification would never acknowledge.
+          return new Promise(() => {});
+        }
+        return send(...args);
+      };
+    });
+    try {
+      const toggle = popup.locator('#recordingToggle');
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-pressed', 'true', {
+        timeout: 1000,
+      });
+      await expect(toggle).toBeEnabled();
+      await expect(popup.locator('#dashboardContent')).toBeHidden();
+      expect(
+        await helper.evaluate(() =>
+          chrome.runtime.sendMessage({ action: 'getActionIconForTest' }),
+        ),
+      ).toMatchObject({ path: { 16: 'icons/icon16-stop-recording.png' } });
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-pressed', 'false', {
+        timeout: 1000,
+      });
+      await expect(toggle).toBeEnabled();
+      await expect(popup.locator('#dashboardContent')).toBeVisible();
+      expect(await worker.evaluate(() => globalThis.recordingBroadcasts)).toBe(
+        0,
+      );
+      await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
+    } finally {
+      await worker.evaluate(() => globalThis.restoreRecordingDelivery());
+      await helper.evaluate(() =>
+        chrome.runtime.sendMessage({
+          action: 'setRecordingPaused',
+          paused: false,
+        }),
+      );
       await popup.close();
       await helper.close();
       await page.close();
-    });
-  }
+    }
+  });
 
   test('popup hides applied highlight markup without deleting the saved note', async ({
     extContext,
@@ -885,6 +988,7 @@ test.describe('Popup list chip behavior', () => {
                   slug: 'popup-startup-stability',
                   url,
                   title: 'Popup Startup Stability',
+                  recordingEligible: true,
                 },
               };
             }
@@ -1725,7 +1829,7 @@ test.describe('Popup list chip behavior', () => {
     }
   });
 
-  test('private popup resume waits for its visit commit before showing page data', async ({
+  test('private popup resume reads complete page data without creating a visit', async ({
     extContext,
     extensionId,
     setupDir,
@@ -1777,6 +1881,19 @@ test.describe('Popup list chip behavior', () => {
     await page.goto(url);
     await page.waitForLoadState('domcontentloaded');
     const helper = await openHelperPage(extContext, extensionId);
+    // Establish a real automatic visit before pausing. Resume must read the
+    // existing visit rather than create the visit that this scenario expects.
+    await expect
+      .poll(() =>
+        helper.evaluate(async (url) => {
+          const summary = await chrome.runtime.sendMessage({
+            action: 'getPageSummary',
+            url,
+          });
+          return summary.access?.hasVisitHistory;
+        }, url),
+      )
+      .toBe(true);
     const prepared = await helper.evaluate(async (pageUrl) => {
       const [tab] = await chrome.tabs.query({ url: pageUrl });
       if (!tab?.id) return { success: false, error: 'Source tab not found' };
@@ -1802,23 +1919,25 @@ test.describe('Popup list chip behavior', () => {
         const originalSendMessage = chrome.runtime.sendMessage.bind(
           chrome.runtime,
         );
-        let releasePageActivity;
+        let releasePageSummary;
         globalThis.__resumeActionOrder = [];
-        globalThis.__resumePageActivityPending = false;
-        globalThis.__releaseResumePageActivity = () => releasePageActivity?.();
+        globalThis.__resumePageSummaryPending = false;
+        globalThis.__releaseResumePageSummary = () => releasePageSummary?.();
         chrome.runtime.sendMessage = async (request, ...args) => {
+          if (request?.action === 'recordPageActivity') {
+            throw new Error('Popup resume must not synthesize visits');
+          }
           let responseGate = null;
           if (
             request?.action === 'resolvePopupPageIdentity' ||
-            request?.action === 'recordPageActivity'
+            request?.action === 'getPageSummary'
           ) {
             globalThis.__resumeActionOrder.push(request.action);
           }
-          if (request?.action === 'recordPageActivity') {
-            globalThis.__resumePageActivityRequest = request;
+          if (request?.action === 'getPageSummary') {
             responseGate = new Promise((resolve) => {
-              releasePageActivity = resolve;
-              globalThis.__resumePageActivityPending = true;
+              releasePageSummary = resolve;
+              globalThis.__resumePageSummaryPending = true;
             });
           }
           if (responseGate) await responseGate;
@@ -1858,19 +1977,12 @@ test.describe('Popup list chip behavior', () => {
       await expect(popup.locator('#dashboardContent')).toBeHidden();
 
       await expect
-        .poll(() =>
-          popup.evaluate(() => globalThis.__resumePageActivityPending),
-        )
+        .poll(() => popup.evaluate(() => globalThis.__resumePageSummaryPending))
         .toBe(true);
       expect(
         await popup.evaluate(() => globalThis.__resumeActionOrder.slice(0, 2)),
-      ).toEqual(['resolvePopupPageIdentity', 'recordPageActivity']);
-      expect(
-        await popup.evaluate(
-          () => globalThis.__resumePageActivityRequest?.awaitCommit,
-        ),
-      ).toBe(true);
-      await popup.evaluate(() => globalThis.__releaseResumePageActivity());
+      ).toEqual(['resolvePopupPageIdentity', 'getPageSummary']);
+      await popup.evaluate(() => globalThis.__releaseResumePageSummary());
 
       await expect(popup.locator('#dashboardContent')).toBeVisible();
       await expect(popup.locator('#pageTitle')).toHaveText(
@@ -1906,18 +2018,18 @@ test.describe('Popup list chip behavior', () => {
     }
   });
 
-  test('resume visit failure renders a diagnostic instead of a blank popup', async ({
+  test('resume page-summary failure renders a diagnostic instead of a blank popup', async ({
     extContext,
     extensionId,
     setupDir,
     localServer,
   }) => {
     void setupDir;
-    localServer.addPage('/resume-visit-failure', {
-      title: 'Resume Visit Failure',
+    localServer.addPage('/resume-summary-failure', {
+      title: 'Resume Summary Failure',
       body: '<main>Resume visit failure</main>',
     });
-    const url = localServer.url('/resume-visit-failure');
+    const url = localServer.url('/resume-summary-failure');
     await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
 
     const page = await extContext.newPage();
@@ -1950,10 +2062,10 @@ test.describe('Popup list chip behavior', () => {
           chrome.runtime,
         );
         chrome.runtime.sendMessage = async (request, ...args) => {
-          if (request?.action === 'recordPageActivity') {
+          if (request?.action === 'getPageSummary') {
             return {
               success: false,
-              error: 'Resume visit commit failed',
+              error: 'Resume page summary failed',
             };
           }
           return originalSendMessage(request, ...args);
@@ -1981,7 +2093,7 @@ test.describe('Popup list chip behavior', () => {
       await expect(popup.locator('#dashboardContent')).toBeVisible();
       await expect(popup.locator('#pageDiagnosticSection')).toBeVisible();
       await expect(popup.locator('#pageDiagnosticMessage')).toHaveText(
-        'Resume visit commit failed',
+        'Resume page summary failed',
       );
       await expect(popup.locator('#pageHeader')).toBeHidden();
       await expect(popup.locator('#fatalReloadBtn')).toHaveCount(0);

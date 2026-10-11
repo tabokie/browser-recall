@@ -2534,9 +2534,18 @@ function extractHTML(depth,frame,element,crossframe,nosrcframe,framekey,parentpr
     
     /* External images referenced in any element's style attribute */
     
-    if (element.hasAttribute("style"))
+    if (element.hasAttribute("style") || ((element == element.ownerDocument.documentElement || element == element.ownerDocument.body) && !crossframe))
     {
         csstext = element.getAttribute("style");
+
+        /* Preserve document fonts across browser defaults and extension body styles. */
+
+        if ((element == element.ownerDocument.documentElement || element == element.ownerDocument.body) && !crossframe)
+        {
+            dupelement = element.cloneNode(false);
+            dupelement.style.setProperty("font-size",frame.getComputedStyle(element).fontSize,"important");
+            csstext = dupelement.getAttribute("style");
+        }
         
         baseuri = element.ownerDocument.baseURI;
         
@@ -2544,7 +2553,8 @@ function extractHTML(depth,frame,element,crossframe,nosrcframe,framekey,parentpr
         
         csstext = replaceCSSImageURLs(csstext,baseuri,documenturi,framekey);
         
-        startTag = startTag.replace(/ style="(?:\\"|[^"])*"/," style=\"" + csstext.replace(/"/g,"&quot;") + "\"");
+        if (element.hasAttribute("style")) startTag = startTag.replace(/ style="(?:\\"|[^"])*"/," style=\"" + csstext.replace(/"/g,"&quot;") + "\"");
+        else startTag = startTag.replace(/>$/," style=\"" + csstext.replace(/"/g,"&quot;") + "\">");
     }
     
     /* Remove or Rehide elements */

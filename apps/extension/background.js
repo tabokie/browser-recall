@@ -17,6 +17,7 @@ import {
   mutatePopupNoteSession,
 } from './popup-note-session.js';
 import { createBadgeController } from './badge-controller.js';
+import { createRecordingController } from './recording-controller.js';
 import { getBrowserCapabilities } from './browser-capabilities.js';
 import {
   DEFAULT_ICON_PATHS,
@@ -110,6 +111,51 @@ function createPopupPreparationGateForTest(holdPreparation) {
 // Used by popup to avoid slug mismatch when tab.url drifts (SPA pushState, etc.).
 const tabReportedUrls = new Map();
 const pendingNavigations = new Map();
+const recordingController = createRecordingController();
+
+async function sendReadyContentMessage(tabId, request) {
+  const originalTab = await chrome.tabs.get(tabId);
+  for (const delay of [0, 100, 300]) {
+    if (delay) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      const currentTab = await chrome.tabs.get(tabId);
+      if (currentTab.url !== originalTab.url) {
+        throw new Error('Page navigated while its content script was starting');
+      }
+    }
+    try {
+      return await chrome.tabs.sendMessage(tabId, request, { frameId: 0 });
+    } catch (error) {
+      if (
+        delay === 300 ||
+        !/receiving end does not exist|could not establish connection/i.test(
+          error.message,
+        )
+      ) {
+        throw error;
+      }
+    }
+  }
+}
+
+function observeRecordingNavigation(event, operation) {
+  event.addListener((details) => {
+    if (details.frameId !== 0) return;
+    void recordingController[operation](details).catch((error) => {
+      logError(`[recording] ${operation} failed:`, error);
+    });
+  });
+}
+
+observeRecordingNavigation(
+  chrome.webNavigation.onBeforeNavigate,
+  'beforeNavigate',
+);
+observeRecordingNavigation(chrome.webNavigation.onCommitted, 'committed');
+observeRecordingNavigation(
+  chrome.webNavigation.onErrorOccurred,
+  'navigationFailed',
+);
 
 function requireNavigationDelivery(tabId, url) {
   const pending = pendingNavigations.get(tabId);
@@ -480,18 +526,12 @@ function startConnectorBridge(reason) {
 
 // High-level: enqueue an observed browser command for Desktop. The connector
 // queue is the only durable extension-side command queue; snapshots use the live bridge.
-async function enqueueReportCommand(action, request, { flush = false } = {}) {
+async function enqueueReportCommand(action, request) {
   if (hasLocalFailure()) {
     throw new Error(`Service paused [${localFailure.code}]`);
   }
   observeLogTimestamp(request.timestamp);
   await enqueueCommand(action, request);
-  if (flush) {
-    const connector = await flushInteractiveWrites();
-    if (connector?.pendingCommands !== 0) {
-      throw new Error('Desktop command queue did not drain');
-    }
-  }
   return { success: true };
 }
 
@@ -622,6 +662,9 @@ const getReferrer = (() => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabReportedUrls.delete(tabId);
   pendingNavigations.delete(tabId);
+  void recordingController.removeTab(tabId).catch((error) => {
+    logError('[recording] tab cleanup failed:', error);
+  });
 });
 
 async function forwardSameDocumentNavigation(details) {
@@ -780,14 +823,14 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
     }
     // Also check the page capability because Chrome's PDF viewer URL is not a
     // reliable indicator of its embedded native plugin.
-    const pdfCheck = await chrome.tabs.sendMessage(tabId, {
+    const pdfCheck = await sendReadyContentMessage(tabId, {
       action: 'isPdfPage',
     });
     if (!pdfCheck || typeof pdfCheck.isPdf !== 'boolean') {
       throw new Error('PDF capability response is invalid');
     }
     if (pdfCheck.isPdf) throw new Error(cannotCapturePdfMessage);
-    const mdResp = await chrome.tabs.sendMessage(tabId, {
+    const mdResp = await sendReadyContentMessage(tabId, {
       action: 'extractMarkdown',
     });
     if (
@@ -1292,11 +1335,6 @@ async function handleRecordPageActivity(request, sender) {
       throw new Error('recordPageActivity awaitCommit must be a boolean');
     }
 
-    const recordingState = await getWorkspaceState();
-    if (recordingState && recordingState.mode === 'private') {
-      return { success: true };
-    }
-
     if (request.isInitialLoad) {
       // Track the URL the content script reported for this tab.
       if (sender.tab?.id != null) {
@@ -1314,20 +1352,30 @@ async function handleRecordPageActivity(request, sender) {
         request.bodyPreview,
         request.bypassBlacklist,
       );
-      const response = await enqueueReportCommand('reportVisit', report, {
-        flush: request.awaitCommit === true,
-      });
-
+      const response = await recordingController.admit(request, sender, () =>
+        enqueueReportCommand('reportVisit', report),
+      );
+      if (request.awaitCommit === true) {
+        const connector = await flushInteractiveWrites();
+        if (connector?.pendingCommands !== 0) {
+          throw new Error('Desktop command queue did not drain');
+        }
+      }
       return response;
     } else if (request.isLeaving) {
-      const report = await buildLeaveReport(
-        url,
-        request.title || '',
-        request.scrollDepth,
-        request.timeOnPage,
+      return await recordingController.admit(
+        request,
+        sender,
+        async (timeOnPage) => {
+          const report = await buildLeaveReport(
+            url,
+            request.title || '',
+            request.scrollDepth,
+            timeOnPage,
+          );
+          return enqueueReportCommand('reportLeave', report);
+        },
       );
-      const response = await enqueueReportCommand('reportLeave', report);
-      return response;
     } else if (request.user_title !== undefined) {
       const renameResp = await runDesktopCommand('renamePage', {
         url,
@@ -1752,7 +1800,7 @@ async function resolveTabPageIdentity(tab, navigationRetries = 0) {
         effectiveTitle = loadingIdentity.currentTab.title;
       }
     } else {
-      identity = await chrome.tabs.sendMessage(tab.id, {
+      identity = await sendReadyContentMessage(tab.id, {
         action: 'getPageIdentity',
       });
     }
@@ -2399,6 +2447,7 @@ globalThis.browserRecallBackgroundTestControl = {
   flushDesktopBuffer,
   getConnectorBridgeState,
   resetEphemeralConnectorState: resetEphemeralConnectorStateForTest,
+  resetRecordingState: () => recordingController.resetForTest(),
 };
 
 function handleRuntimeMutation(request) {
@@ -2417,77 +2466,14 @@ function handleRuntimeMutation(request) {
   return { success: true };
 }
 
-async function notifyRecordingState(tab, mode) {
-  let lastError;
-  let receivedResponse = false;
-  for (const delay of [0, 100, 500]) {
-    if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
-    try {
-      const response = await chrome.tabs.sendMessage(
-        tab.id,
-        { action: 'recordingStateChanged', mode },
-        { frameId: 0 },
-      );
-      receivedResponse ||= response !== undefined;
-      if (response?.success !== true) {
-        throw new Error(
-          response?.error || 'Recording receiver did not acknowledge delivery',
-        );
-      }
-      return;
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  if (!receivedResponse) {
-    // Closed, restricted, and not-yet-injected tabs have no content receiver.
-    // Distinguish those tabs from a loaded receiver whose delivery has failed.
-    let currentTab;
-    try {
-      currentTab = await chrome.tabs.get(tab.id);
-    } catch {
-      return;
-    }
-    if (currentTab.url !== tab.url || isUnavailablePageUrl(currentTab.url))
-      return;
-    try {
-      const [execution] = await chrome.scripting.executeScript({
-        target: { tabId: tab.id, frameIds: [0] },
-        func: () => typeof globalThis.browserRecallPageIdentity === 'object',
-      });
-      if (execution?.result === false) return;
-    } catch (error) {
-      logDebug('[recording] tab cannot run content scripts:', error.message);
-      return;
-    }
-  }
-  throw new Error(
-    `Could not update recording state for ${tab.url}: ${lastError.message}`,
-  );
-}
-
 async function handleSetRecordingPaused(request) {
   if (typeof request.paused !== 'boolean') {
     throw new Error('setRecordingPaused requires a boolean paused value');
   }
   const paused = request.paused;
-  await chrome.storage.session.set({
-    workspace: {
-      mode: paused ? 'private' : 'default',
-    },
-  });
+  await recordingController.setPaused(paused);
   popupBootstrapMutationRevision += 1;
   await badgeController.setRecordingPaused(paused);
-  const tabs = await chrome.tabs.query({});
-  const results = await Promise.allSettled(
-    tabs
-      .filter((tab) => !isUnavailablePageUrl(tab.url))
-      .map((tab) => notifyRecordingState(tab, paused ? 'private' : 'default')),
-  );
-  const failures = results.filter((result) => result.status === 'rejected');
-  if (failures.length) {
-    throw new Error(failures.map((result) => result.reason.message).join('\n'));
-  }
   return { success: true };
 }
 
@@ -2546,10 +2532,15 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
           sendResponse(await handleSetRecordingPaused(request));
           break;
         case 'getRecordingState':
-          sendResponse({
-            success: true,
-            mode: (await getWorkspaceState())?.mode ?? 'default',
-          });
+          sendResponse(await recordingController.getState());
+          break;
+        case 'initializePageRecording':
+          sendResponse(await recordingController.initialize(sender));
+          break;
+        case 'startPageAttention':
+          sendResponse(
+            await recordingController.startAttention(request, sender),
+          );
           break;
         // Page lifecycle
         case 'recordPageActivity':

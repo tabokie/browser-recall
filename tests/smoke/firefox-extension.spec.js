@@ -315,7 +315,9 @@ function createFirefoxWebExtensionApi({
       },
     },
     webNavigation: {
+      onBeforeNavigate: createEvent(),
       onCommitted: createEvent(),
+      onErrorOccurred: createEvent(),
       onCreatedNavigationTarget: createEvent(),
       onHistoryStateUpdated: createEvent(),
     },
@@ -921,7 +923,7 @@ test.describe('Firefox extension smoke', () => {
             0,
           );
           expect(api.browserApi.webNavigation.onCommitted.listenerCount()).toBe(
-            1,
+            2,
           );
         },
       );

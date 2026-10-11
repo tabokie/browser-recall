@@ -1,0 +1,36 @@
+- Why is this page ([https://zhuanlan.zhihu.com/p/1979878710841741653](https://zhuanlan.zhihu.com/p/1979878710841741653)) gets a smaller font size when converted to snapshot?
+- Continue
+- > When you compare the Zhihu article with the snapshot, is only the article text smaller, or are the title and other page elements smaller too? Which browser are you using?
+Only main text. Edge browser. You can check out the snapshot file under \~/browser-data, slug=zhuanlan-zhihu-p-1979878710841-yamo3j&ts=1791551283639
+- {
+    "articleSize": "16px",
+    "bodySize": "16px",
+    "constructedStyles": []
+}
+- {
+    "font": "16px / 25.6px -apple-system, \"system-ui\", \"Helvetica Neue\", \"PingFang SC\", \"Microsoft YaHei\", \"Source Han Sans SC\", \"Noto Sans CJK SC\", \"WenQuanYi Micro Hei\", \"MiSans L3\", \"Segoe UI\", sans-serif",
+    "text": "最近听了一",
+    "textWidth": 80,
+    "textHeight": 19,
+    "devicePixelRatio": 2
+}
+{
+    "font": "12px / 19.2px -apple-system, \"system-ui\", \"Helvetica Neue\", \"PingFang SC\", \"Microsoft YaHei\", \"Source Han Sans SC\", \"Noto Sans CJK SC\", \"WenQuanYi Micro Hei\", \"MiSans L3\", \"Segoe UI\", sans-serif",
+    "text": "最近听了一",
+    "textWidth": 60,
+    "textHeight": 14,
+    "devicePixelRatio": 2
+}
+- Fix it
+- I want to build portable releases of desktop app and host them on GitHub. Provide Windows and MacOS variants. Is it idiomatic to build them in a manual CI job? If so, implement the pipeline.
+- There's a regression with extension: when I click pause on the popup, the popup UI doesn't change immediately (even though the icon changes immediately), and the stale UI doesn't respond to me clicking the pause button a second time.
+- Track down what caused the regression, and why tests didn't catch it.
+- > waits for every tab to acknowledge the change before replying to the popup
+
+Why is that necessary? Explain to me.
+- I don't mean the ordering of events, I mean why we need all tabs to acknowledge at all, that sounds inefficient and not practical.
+- There's a background worker that is responsible to actually sending updates to desktop right? It is a single place where we can atomically pause the service without communicating with all tabs. As for individual tabs, we only need to make sure their extension icon is up-to-date after the pause. Opening the popup would require going through the central background worker which has the latest recording state. Correct me if my recollection of the system is wrong.
+- If a tab A is opened while paused, and we resume the service in another tab B, then A shouldn't be recorded unless we refresh A manually.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) 
+- Fix them all thoroughly
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) co-author=GPT-6.1 Sol

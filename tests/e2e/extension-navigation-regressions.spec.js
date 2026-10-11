@@ -1412,7 +1412,15 @@ test('current-page actions and local snapshots work without activeTab', async ({
     .poll(() =>
       helper.evaluate(async (pageUrl) => {
         const [tab] = await chrome.tabs.query({ url: pageUrl });
-        return chrome.tabs.sendMessage(tab.id, { action: 'getPageIdentity' });
+        try {
+          return await chrome.tabs.sendMessage(tab.id, {
+            action: 'getPageIdentity',
+          });
+        } catch (error) {
+          if (!error.message.includes('Receiving end does not exist'))
+            throw error;
+          return null;
+        }
       }, url),
     )
     .toMatchObject({ success: true, slug, url });

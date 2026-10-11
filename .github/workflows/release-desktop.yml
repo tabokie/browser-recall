@@ -1,0 +1,213 @@
+name: Release Portable Desktop
+
+on:
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: Keep the release as a draft
+        type: boolean
+        default: false
+      prerelease:
+        description: Mark the release as a prerelease
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-portable-desktop
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Validate release version and destination
+        id: release
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('node:fs');
+            const { execFileSync, spawnSync } = require('node:child_process');
+            const config = JSON.parse(fs.readFileSync('apps/desktop/src-tauri/tauri.conf.json', 'utf8'));
+            const desktopPackage = JSON.parse(fs.readFileSync('apps/desktop/package.json', 'utf8'));
+            const cargo = fs.readFileSync('apps/desktop/src-tauri/Cargo.toml', 'utf8');
+            const cargoVersion = cargo.match(/^version\s*=\s*"([^"]+)"\s*$/m)?.[1];
+            const version = config.version;
+            if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+              throw new Error('The desktop version must be an explicit semantic version');
+            }
+            if (desktopPackage.version !== version || cargoVersion !== version) {
+              throw new Error('Desktop package.json, Cargo.toml, and tauri.conf.json versions must agree');
+            }
+            const tag = `v${version}`;
+            const ref = `refs/tags/${tag}`;
+            const exists = spawnSync('git', ['show-ref', '--verify', '--quiet', ref]);
+            if (exists.status === 0) {
+              const commit = execFileSync('git', ['rev-parse', `${ref}^{commit}`], { encoding: 'utf8' }).trim();
+              if (commit !== context.sha) throw new Error(`${tag} already points to a different commit`);
+            } else if (exists.status !== 1) {
+              throw new Error('Could not check the existing release tag');
+            }
+            try {
+              await github.rest.repos.getReleaseByTag({ ...context.repo, tag });
+              throw new Error(`${tag} already has a release; existing releases are never overwritten`);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            core.setOutput('tag', tag);
+
+  build:
+    name: Build ${{ matrix.platform }} ${{ matrix.arch }}
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            platform: windows
+            arch: x64
+          - runner: macos-15
+            platform: macos
+            arch: arm64
+          - runner: macos-15-intel
+            platform: macos
+            arch: x64
+    env:
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      RELEASE_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@1.97.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: portable-${{ matrix.platform }}-${{ matrix.arch }}
+
+      - name: Check native build architecture
+        run: node -e "if (process.arch !== process.env.RELEASE_ARCH) throw new Error('Runner architecture does not match the release asset')"
+
+      - run: npm ci
+
+      - run: npm run build --workspace @browser-recall/desktop
+
+      - name: Verify dependency lockfiles stayed unchanged
+        run: git diff --exit-code -- Cargo.lock package-lock.json
+
+      - name: Verify the Windows executable starts and handles relaunch
+        if: matrix.platform == 'windows'
+        run: npm run test:desktop-single-instance
+
+      - name: Archive the Windows executable and verify extraction
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $executable = 'dist/desktop/windows/bin/browser-recall-desktop.exe'
+          $archive = "release-assets/browser-recall-$env:RELEASE_TAG-windows-$env:RELEASE_ARCH.zip"
+          New-Item -ItemType Directory -Path release-assets | Out-Null
+          Compress-Archive -LiteralPath $executable -DestinationPath $archive
+          $extracted = Join-Path $env:RUNNER_TEMP 'portable-release-check'
+          Expand-Archive -LiteralPath $archive -DestinationPath $extracted
+          $actual = Get-FileHash (Join-Path $extracted 'browser-recall-desktop.exe') -Algorithm SHA256
+          $expected = Get-FileHash $executable -Algorithm SHA256
+          if ($actual.Hash -ne $expected.Hash) { throw 'Archived executable differs from the build' }
+
+      - name: Archive the macOS application and verify its extracted signature
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          archive="release-assets/browser-recall-$RELEASE_TAG-macos-$RELEASE_ARCH.zip"
+          ditto -c -k --sequesterRsrc --keepParent \
+            'dist/desktop/macos/app/Browser Recall.app' "$archive"
+          extracted="$RUNNER_TEMP/portable-release-check"
+          ditto -x -k "$archive" "$extracted"
+          architecture=arm64
+          if [[ "$RELEASE_ARCH" == x64 ]]; then architecture=x86_64; fi
+          lipo "$extracted/Browser Recall.app/Contents/MacOS/browser-recall-desktop" -verify_arch "$architecture"
+          node scripts/verify-macos-app-bundle.mjs "$extracted/Browser Recall.app"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: portable-${{ matrix.platform }}-${{ matrix.arch }}
+          path: release-assets/*.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_DRAFT: ${{ inputs.draft }}
+      RELEASE_PRERELEASE: ${{ inputs.prerelease || contains(needs.prepare.outputs.tag, '-') }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: portable-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Verify the complete archive set and generate checksums
+        shell: bash
+        working-directory: release-assets
+        run: |
+          expected=(
+            "browser-recall-$RELEASE_TAG-windows-x64.zip"
+            "browser-recall-$RELEASE_TAG-macos-arm64.zip"
+            "browser-recall-$RELEASE_TAG-macos-x64.zip"
+          )
+          files=(*.zip)
+          test "${#files[@]}" -eq "${#expected[@]}"
+          for archive in "${expected[@]}"; do
+            test -s "$archive"
+            unzip -t "$archive"
+          done
+          sha256sum "${expected[@]}" > SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - name: Create the release with all portable assets
+        shell: bash
+        run: |
+          cat > release-notes.md <<EOF
+          Portable desktop builds from commit $GITHUB_SHA.
+
+          - **Windows x64:** extract the ZIP and run browser-recall-desktop.exe. Microsoft Edge WebView2 Runtime must be installed.
+          - **macOS Apple Silicon:** use the macos-arm64 ZIP.
+          - **macOS Intel:** use the macos-x64 ZIP.
+          - **macOS:** extract the ZIP and open Browser Recall.app; keep the complete app bundle together. The app uses ad-hoc signing and is not notarized. macOS may require approval in Privacy & Security. Windows builds are unsigned and may show a SmartScreen warning.
+
+          These archives require no Browser Recall installer. Preferences remain in the operating system's app-data folder; choose the collection's data folder during setup. Browser extensions are installed separately.
+
+          SHA256SUMS contains SHA-256 checksums for all three archives.
+          EOF
+          gh release create "$RELEASE_TAG" release-assets/*.zip release-assets/SHA256SUMS \
+            --repo "$GH_REPO" --target "$GITHUB_SHA" \
+            --title "Browser Recall $RELEASE_TAG" --notes-file release-notes.md \
+            --draft="$RELEASE_DRAFT" --prerelease="$RELEASE_PRERELEASE"

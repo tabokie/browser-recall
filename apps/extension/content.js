@@ -52,63 +52,67 @@ if (!markdownExtractorModule?.extractMarkdown) {
   );
 }
 
-let contentScriptInitialized = false;
-
-function readRecordingMode(workspace) {
-  if (
-    !workspace ||
-    typeof workspace !== 'object' ||
-    Array.isArray(workspace) ||
-    (workspace.mode !== 'default' && workspace.mode !== 'private')
-  ) {
-    throw new Error('Stored recording state must have mode default or private');
-  }
-  return workspace.mode;
-}
-
-function ensureContentScriptInitialized() {
-  if (contentScriptInitialized) return;
-  contentScriptInitialized = true;
-  initContentScript();
-}
-
-// Firefox does not expose session storage to content scripts. Read recording
-// state through the background and keep a receiver available on dormant pages
-// so resuming recording does not require reloading those pages.
+// Register the receiver before asynchronous document registration. Popup and
+// capture requests wait for the same initialization result instead of racing it.
+const contentMessageActions = new Set([
+  'extractMarkdown',
+  'getPageIdentity',
+  'sameDocumentNavigation',
+  'getStructuredSelectionText',
+  'highlightSelection',
+  'removeHighlightMark',
+  'hideHighlightMarkup',
+  'showHighlightMarkup',
+  'getHighlightMarkupState',
+  'showHighlightsPanel',
+  'isPdfPage',
+  'showCaptureSpinner',
+  'hideCaptureSpinner',
+  'showCaptureNotification',
+  'showErrorNotification',
+  'showLikeNotification',
+]);
+let resolveContentHandler;
+const contentHandlerReady = new Promise((resolve) => {
+  resolveContentHandler = resolve;
+});
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action !== 'recordingStateChanged') return false;
-  try {
-    if (readRecordingMode(request) === 'default') {
-      ensureContentScriptInitialized();
-    }
-    sendResponse({ success: true });
-  } catch (error) {
-    console.error('[content] Invalid recording state:', error);
-    sendResponse({ success: false, error: error.message });
-  }
-  return false;
+  if (!contentMessageActions.has(request.action)) return false;
+  contentHandlerReady
+    .then((handler) => handler(request, sender, sendResponse))
+    .catch((error) => {
+      sendResponse({ success: false, error: error.message });
+    });
+  return true;
 });
 
+// The background fixes eligibility at navigation start and owns the attention
+// clock. Page identity and explicit actions initialize even for excluded pages.
 chrome.runtime
-  .sendMessage({ action: 'getRecordingState' })
+  .sendMessage({ action: 'initializePageRecording' })
   .then((result) => {
-    if (result?.success !== true) {
-      throw new Error(result?.error || 'Recording state is unavailable');
+    if (
+      result?.success !== true ||
+      typeof result.recordingEligible !== 'boolean' ||
+      typeof result.recordingDocumentToken !== 'string'
+    ) {
+      throw new Error(
+        result?.error || 'Document recording state is unavailable',
+      );
     }
-    if (readRecordingMode(result) === 'private') {
-      console.log('[content] Recording paused — all tracking disabled');
-      return;
-    }
-    ensureContentScriptInitialized();
+    resolveContentHandler(initContentScript(result));
   })
   .catch((error) => {
     console.error('[content] Could not initialize page capture:', error);
+    resolveContentHandler((_request, _sender, sendResponse) => {
+      sendResponse({ success: false, error: error.message });
+    });
   });
 
-function initContentScript() {
+function initContentScript({ recordingEligible, recordingDocumentToken }) {
   let currentHistoryId = null;
   let maxScrollDepth = 0;
-  let lastActiveTime = Date.now(); // reset on visibility→visible; null after leave report
+  let attentionActive = document.visibilityState === 'visible';
   let _panelDismissed = false;
   let markupHidden = false;
 
@@ -323,10 +327,21 @@ function initContentScript() {
   // ─── Page Reporting ───────────────────────────────────────────────────
 
   function reportForUrl(url, delta) {
+    if (!recordingEligible) return;
     if (getEmbeddedPageSlug()) return;
     if (pageIdentity.isUnavailablePageUrl(url)) return;
     chrome.runtime
-      .sendMessage({ action: 'recordPageActivity', url, ...delta })
+      .sendMessage({
+        action: 'recordPageActivity',
+        recordingDocumentToken,
+        url,
+        ...delta,
+      })
+      .then((response) => {
+        if (response?.success !== true) {
+          throw new Error(response?.error || 'Page activity report failed');
+        }
+      })
       .catch((error) => {
         console.debug('[content] passive page activity report failed:', error);
       });
@@ -340,13 +355,11 @@ function initContentScript() {
 
   function onLeavePage(url = activePageUrl) {
     if (!hasReportedVisit) return;
-    if (lastActiveTime === null) return; // already reported, skip no-op
-    const timeOnPage = Math.min(Date.now() - lastActiveTime, 3600000); // cap at 1h
-    lastActiveTime = null; // prevent double-counting on subsequent fires
+    if (!attentionActive) return;
+    attentionActive = false;
     reportForUrl(url, {
       title: latestTitle,
       scrollDepth: Math.round(maxScrollDepth),
-      timeOnPage,
       isLeaving: true,
     });
   }
@@ -356,6 +369,7 @@ function initContentScript() {
       title: document.title,
       slug: slugFromUrl(url),
       isInitialLoad: true,
+      attentionActive,
     };
     // Capture first N words of page text for rule matching.
     // Must match BODY_WORD_LIMIT in utils.js (can't import — content scripts are non-module).
@@ -373,11 +387,12 @@ function initContentScript() {
   }
 
   function reportInitialVisit(url = window.location.href, referrerUrl) {
-    hasReportedVisit = true;
+    hasReportedVisit = recordingEligible;
     currentHistoryId = url;
     activePageUrl = url;
     latestTitle = document.title;
-    reportForUrl(url, buildInitialVisitDelta(url, referrerUrl));
+    if (recordingEligible)
+      reportForUrl(url, buildInitialVisitDelta(url, referrerUrl));
   }
 
   // Initial visit report
@@ -392,19 +407,18 @@ function initContentScript() {
       return;
     }
     if (
-      hasReportedVisit &&
+      (hasReportedVisit || !recordingEligible) &&
       pageIdentity.isSameDocumentPageUrl(activePageUrl, nextUrl)
     ) {
-      if (lastActiveTime === null && document.visibilityState === 'visible') {
-        lastActiveTime = Date.now();
-      }
+      if (!attentionActive && document.visibilityState === 'visible')
+        startAttention();
       return;
     }
 
     const previousUrl = hasReportedVisit ? activePageUrl : undefined;
     if (hasReportedVisit) onLeavePage(previousUrl);
     maxScrollDepth = 0;
-    lastActiveTime = Date.now();
+    attentionActive = document.visibilityState === 'visible';
     reportInitialVisit(nextUrl, previousUrl);
     markupHidden = false;
     reapplyHighlights({ clearExisting: true });
@@ -449,12 +463,29 @@ function initContentScript() {
     headObs.observe(document.head, { childList: true });
   }
 
+  function startAttention() {
+    attentionActive = true;
+    if (!recordingEligible) return;
+    chrome.runtime
+      .sendMessage({
+        action: 'startPageAttention',
+        recordingDocumentToken,
+      })
+      .then((response) => {
+        if (response?.success !== true)
+          throw new Error(response?.error || 'Attention start failed');
+      })
+      .catch((error) =>
+        console.debug('[content] attention start failed:', error),
+      );
+  }
+
   // Page leave/return: track foreground time only
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
       onLeavePage();
     } else {
-      lastActiveTime = Date.now(); // reset foreground timer on return
+      startAttention();
     }
   });
 
@@ -463,7 +494,7 @@ function initContentScript() {
   });
 
   document.addEventListener('resume', () => {
-    lastActiveTime = Date.now(); // reset foreground timer after unfreeze
+    startAttention();
   });
 
   // ─── Notification bubble factory ─────────────────────────────────────
@@ -859,7 +890,7 @@ function initContentScript() {
   }
 
   // Listen for messages from background script
-  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  function handleContentMessage(request, sender, sendResponse) {
     // Skip Save Page WE messages (use `type` field, handled by savepage/content.js)
     if (!request.action) return false;
 
@@ -869,7 +900,11 @@ function initContentScript() {
       sendResponse({ success: true, markdown });
     } else if (request.action === 'getPageIdentity') {
       handleSameDocumentNavigation(window.location.href);
-      sendResponse({ success: true, ...getPageIdentity() });
+      sendResponse({
+        success: true,
+        ...getPageIdentity(),
+        recordingEligible,
+      });
     } else if (request.action === 'sameDocumentNavigation') {
       if (typeof request.url !== 'string' || !request.url) {
         sendResponse({
@@ -1068,7 +1103,7 @@ function initContentScript() {
     }
 
     return true; // Keep channel open for async sendResponse
-  });
+  }
 
   // Re-apply highlights on page load, unless this is a PDF viewer page.
   if (!isPdfPage()) {
@@ -1148,4 +1183,5 @@ function initContentScript() {
   window.addEventListener('beforeunload', () => {
     onLeavePage();
   });
+  return handleContentMessage;
 } // end initContentScript
