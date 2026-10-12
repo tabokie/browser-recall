@@ -1422,6 +1422,12 @@ async function flushBufferedMessages(expectedSession = runtime.session) {
         await syncBufferStats();
         if (!isCurrentSession(expectedSession)) return false;
         await setConnectionFailure(null);
+        if (!isCurrentSession(expectedSession)) return false;
+        // Enqueues during the final state write join this drain. Consume them
+        // before reporting success, rather than leaving them waiting for a retry.
+        const pending = await peekBufferedMessage();
+        if (!isCurrentSession(expectedSession)) return false;
+        if (pending) continue;
         return true;
       }
       try {
@@ -1671,16 +1677,28 @@ export async function enqueueDesktopCommand(action, request = {}) {
   return stats;
 }
 
+async function drainBufferedCommands() {
+  while (true) {
+    const drained = await flushBufferedMessages();
+    if (!drained) {
+      const failure = runtime.connection.failure;
+      const error = new Error(
+        failure?.message || 'Desktop command queue did not drain',
+      );
+      error.code = failure?.code || 'desktop_queue_not_drained';
+      throw error;
+    }
+    const stats = await bufferStats();
+    if (stats.pendingCommands === 0 && stats.pendingBytes === 0) return;
+    // A command may arrive after a successful drain. Wait for that command too;
+    // a failed drain above must remain an error rather than entering this retry.
+  }
+}
+
 async function prepareSnapshotRequest() {
   await ensureBridgeReadyForRequest();
   const maxMessageBytes = await requireDesktopSnapshotMessageLimit();
-  await flushBufferedMessages();
-  const stats = await bufferStats();
-  if (stats.pendingCommands > 0) {
-    const error = new Error('Desktop command queue did not drain');
-    error.code = 'desktop_queue_not_drained';
-    throw error;
-  }
+  await drainBufferedCommands();
   return maxMessageBytes;
 }
 
@@ -1963,13 +1981,7 @@ export async function requestDesktopHistoryBatch(files) {
 export async function requestDesktopCommand(action, request = {}) {
   const canonicalRequest = canonicalizePageRequest(request);
   await ensureBridgeReadyForRequest();
-  await flushBufferedMessages();
-  const stats = await bufferStats();
-  if (stats.pendingCommands !== 0 || stats.pendingBytes !== 0) {
-    throw new Error(
-      'Desktop command queue did not drain before direct command',
-    );
-  }
+  await drainBufferedCommands();
   const payload = await requestDesktopPayload(
     {
       type: 'run_command',

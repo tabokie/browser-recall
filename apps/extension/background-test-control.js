@@ -1,7 +1,10 @@
 import {
+  enqueueDesktopCommand,
+  requestDesktopCommand,
   requestDesktopEntity,
   requestDesktopHistoryBatch,
   requestDesktopHistoryFiles,
+  requestDesktopSnapshotCaptureBudget,
   requestDesktopSetDeviceId,
   requestDesktopTestReset,
   requestDesktopTestSeed,
@@ -10,6 +13,12 @@ import {
 import { BACKGROUND_TEST_ACTIONS } from './background-test-actions.js';
 import { getBrowserCapabilities } from './browser-capabilities.js';
 import { logDebug } from './logger.js';
+
+Object.assign(testControl(), {
+  enqueueDesktopCommand,
+  requestDesktopCommand,
+  requestDesktopSnapshotCaptureBudget,
+});
 
 const originalIsAllowedFileSchemeAccess =
   chrome.extension?.isAllowedFileSchemeAccess?.bind(chrome.extension) ?? null;

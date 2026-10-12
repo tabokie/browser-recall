@@ -75,7 +75,7 @@ row. Data changes update affected rows without restarting the history search.
 | `apps/extension/popup-note-session.js` | In-memory note drafts and transfer of unsaved commands when the popup closes |
 | `apps/extension/extension-surface.js` | Shared highlight entries, editors, icons, and overlays isolated by shadow DOM |
 | `apps/extension/extension-surface.css`, `apps/extension/extension-ui-tokens.js` | Shared extension styles and error displays |
-| `apps/extension/connector/ws-client.js` | WebSocket sessions, message validation, requests, and sending queued commands |
+| `apps/extension/connector/ws-client.js` | WebSocket sessions, message validation, requests, and draining queued commands before snapshots and direct commands |
 | `apps/extension/connector/state.js` | Read and validate saved connection status and errors |
 | `apps/extension/connector/pairing.js` | Pairing and authentication helpers |
 | `apps/extension/connector/command-buffer.js` | Size-limited pending-command queue and saved queue/byte counts |
@@ -84,7 +84,7 @@ row. Data changes update affected rows without restarting the history search.
 | `apps/extension/savepage/content.js`, `apps/extension/savepage/content-frame.js` | Save Page WE capture of page content, frames, shadow roots, and computed root and body font sizes |
 | `apps/extension/snapshot-viewer.js` | Saved-page preparation and highlight adapters |
 | `apps/extension/options-stub.html` | Link to the desktop app |
-| `apps/extension/background-test-control.js` | Test-only RPC handlers, omitted from production builds |
+| `apps/extension/background-test-control.js` | Test-only RPC handlers and extensions to the background test controls, omitted from production builds |
 
 Opening from the toolbar determines the page URL and fetches the complete page
 summary from the daemon. Toolbar opens and direct opens use the same display code.
@@ -131,7 +131,7 @@ crash recovery, history reads, ordering highlights by creation time, and sync.
 | File | Implements |
 | --- | --- |
 | `packages/core/page-identity.js` | Normalize URLs, generate file identifiers, classify unavailable browser pages, and distinguish URL changes from full page loads |
-| `packages/core/highlight-lifecycle.js` | Save selected text and locations, restore highlights, and repair marks after page content changes |
+| `packages/core/highlight-lifecycle.js` | Save selected text with explicit line breaks and text-node offsets, restore highlights, and repair marks after page content changes |
 | `packages/core/markdown-extractor.js` | Live DOM-to-Markdown conversion for searchable snapshots |
 | `packages/core/snapshot-html.js` | Validate saved URL/slug metadata, clean highlight markup, and prepare snapshots for reopening |
 | `packages/core/bounded-response.js` | Streamed resource byte limits |

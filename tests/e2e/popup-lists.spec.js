@@ -1890,7 +1890,9 @@ test.describe('Popup list chip behavior', () => {
             action: 'getPageSummary',
             url,
           });
-          return summary.access?.hasVisitHistory;
+          // A seeded pinned page already satisfies hasVisitHistory. Wait for
+          // the automatic visit's actual page metadata before pausing.
+          return summary.page?.visitDates?.length > 0;
         }, url),
       )
       .toBe(true);

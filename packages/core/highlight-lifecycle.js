@@ -409,19 +409,20 @@ export function createHighlightLifecycle(options) {
 
   function textAnchorRange(root, text, anchor) {
     const index = buildTextIndex(root, { includeOwnedMarks: true });
-    if (
-      anchor.end > index.text.length ||
-      index.text.slice(anchor.start, anchor.end) !== text
-    ) {
-      return null;
-    }
+    if (anchor.end > index.text.length) return null;
     const range = rangeFromOffsets(
       index.textNodes,
       index.offsets,
       anchor.start,
       anchor.end,
     );
-    if (!range || selectionIntersectsExistingMark(range)) return null;
+    if (
+      !range ||
+      (range.toString() !== text && rangeTextWithLineBreaks(range) !== text) ||
+      selectionIntersectsExistingMark(range)
+    ) {
+      return null;
+    }
     return range;
   }
 
@@ -434,7 +435,11 @@ export function createHighlightLifecycle(options) {
     }
     const start = index.offsets[startNodeIndex] + range.startOffset;
     const end = index.offsets[endNodeIndex] + range.endOffset;
-    if (end <= start || index.text.slice(start, end) !== text) {
+    if (
+      end <= start ||
+      index.text.slice(start, end) !== range.toString() ||
+      rangeTextWithLineBreaks(range) !== text
+    ) {
       throw new Error('Highlight selection offsets do not match selected text');
     }
     return { start, end };
@@ -555,6 +560,23 @@ export function createHighlightLifecycle(options) {
     return last ? { node: last.node, offset: last.end } : null;
   }
 
+  function rangeTextWithLineBreaks(range) {
+    // Anchor offsets count literal text-node characters. Explicit BR elements
+    // contribute newlines to the excerpt without changing those offsets.
+    const fragment = range.cloneContents();
+    const walker = doc.createTreeWalker(
+      fragment,
+      NodeFilterType.SHOW_TEXT | NodeFilterType.SHOW_ELEMENT,
+    );
+    let text = '';
+    let node;
+    while ((node = walker.nextNode())) {
+      if (node.nodeType === NodeType.TEXT_NODE) text += node.textContent;
+      else if (node.tagName === 'BR') text += '\n';
+    }
+    return text;
+  }
+
   function selectionChunk(range, block, nodes) {
     const segments = nodes.flatMap((node) => {
       const start = node === range.startContainer ? range.startOffset : 0;
@@ -575,7 +597,7 @@ export function createHighlightLifecycle(options) {
     chunkRange.setStart(start.node, start.offset);
     chunkRange.setEnd(end.node, end.offset);
     return {
-      text: rawText.slice(leadingWhitespace, trailingBoundary),
+      text: rangeTextWithLineBreaks(chunkRange),
       block,
       range: chunkRange,
     };

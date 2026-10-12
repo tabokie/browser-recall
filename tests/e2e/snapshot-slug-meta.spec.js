@@ -743,11 +743,11 @@ test.describe('Snapshot slug meta tag', () => {
     await page.waitForLoadState('load');
 
     const helper = await openHelperPage(extContext, extensionId);
+    await page.bringToFront();
+
     await helper.evaluate(() =>
       chrome.storage.local.set({ connectorState: 'offline' }),
     );
-    await page.bringToFront();
-
     const captureResp = await helper.evaluate(() =>
       chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' }),
     );
@@ -773,6 +773,106 @@ test.describe('Snapshot slug meta tag', () => {
     await helper.close();
     await page.close();
   });
+
+  for (const operation of ['snapshot budget', 'direct command']) {
+    test(`${operation} waits for commands arriving during and after drain completion`, async ({
+      extContext,
+      extensionId,
+      localServer,
+    }) => {
+      localServer.addPage('/capture-concurrent-commands', {
+        title: 'Capture Concurrent Commands',
+        body: '<p>Snapshot content survives concurrent page activity.</p>',
+      });
+      const url = localServer.url('/capture-concurrent-commands');
+      const slug = getSlugForUrl(url);
+      await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+      const page = await extContext.newPage();
+      await page.goto(url);
+      const helper = await openHelperPage(extContext, extensionId);
+      await page.bringToFront();
+      const worker = extContext.serviceWorkers()[0];
+      const outcomes = await worker.evaluate(
+        async ({ operation, url, slug }) => {
+          const control = globalThis.browserRecallBackgroundTestControl;
+          await control.flushDesktopBuffer();
+          const originalSet = chrome.storage.local.set.bind(
+            chrome.storage.local,
+          );
+          const outcomes = [];
+          // null enqueues during the final state write. Microtask delays exercise
+          // arrivals between drain completion and the caller's queue inspection.
+          for (const delay of [
+            null,
+            ...Array.from({ length: 25 }, (_, i) => i),
+          ]) {
+            let injection = null;
+            chrome.storage.local.set = async (patch) => {
+              const finalState =
+                Object.keys(patch).length === 1 &&
+                patch.connectorState === 'connected';
+              if (!injection && finalState && delay === null) {
+                injection = control.enqueueDesktopCommand('saveSettingsKey', {
+                  key: 'theme',
+                  value: 'dark',
+                });
+                await injection;
+              }
+              const result = await originalSet(patch);
+              if (!injection && finalState) {
+                injection = (async () => {
+                  for (let i = 0; i < delay; i++) await Promise.resolve();
+                  await control.enqueueDesktopCommand('saveSettingsKey', {
+                    key: 'theme',
+                    value: 'dark',
+                  });
+                })();
+              }
+              return result;
+            };
+            let outcome;
+            try {
+              if (operation === 'snapshot budget') {
+                await control.requestDesktopSnapshotCaptureBudget({
+                  url,
+                  slug,
+                  ts: Date.now(),
+                  title: 'Capture Concurrent Commands',
+                  markdown: null,
+                });
+              } else {
+                await control.requestDesktopCommand('saveSettingsKey', {
+                  key: 'theme',
+                  value: 'light',
+                });
+              }
+              outcome = { success: true };
+            } catch (error) {
+              outcome = { success: false, error: error.message };
+            } finally {
+              chrome.storage.local.set = originalSet;
+              await injection;
+              await control.flushDesktopBuffer();
+            }
+            outcomes.push({ delay, injected: injection !== null, ...outcome });
+          }
+          return outcomes;
+        },
+        { operation, url, slug },
+      );
+      expect(outcomes, JSON.stringify(outcomes)).toEqual(
+        outcomes.map(({ delay }) => ({ delay, injected: true, success: true })),
+      );
+      const capture = await helper.evaluate(() =>
+        chrome.runtime.sendMessage({
+          action: 'captureCurrentPageFromPopup',
+        }),
+      );
+      expect(capture, JSON.stringify(capture)).toMatchObject({ success: true });
+      await helper.close();
+      await page.close();
+    });
+  }
 
   // Content script resolves slug from x-browser-recall-slug meta tag and reapplies highlights.
   // Simulates the snapshot viewer scenario: the page URL doesn't match the original,

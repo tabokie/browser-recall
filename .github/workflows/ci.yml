@@ -189,6 +189,15 @@ jobs:
           BROWSER_RECALL_ISOLATED_MACOS_SESSION: '1'
         run: node tests/smoke/macos-desktop-window-lifecycle.mjs
 
+      - name: Preserve native lifecycle failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-native-lifecycle-failure
+          path: test-results/native-lifecycle/
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Verify documentation builds preserve app URL routing
         run: node tests/smoke/macos-documentation-url-routing.mjs
 

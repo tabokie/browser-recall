@@ -246,6 +246,8 @@ The macOS window lifecycle test checks visible startup errors, relaunch after
 storage repair, tray activation, window reopening, focus, and saved window size and
 position. Failure screenshots and logs remain under
 `test-results/native-lifecycle/` before the temporary app is removed.
+The Desktop Native Lifecycle CI job uploads that directory on failure and retains
+the diagnostics for seven days.
 
 On Windows, close any running Browser Recall process before the single-instance
 test:

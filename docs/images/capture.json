@@ -15,7 +15,7 @@
     "packages/core/fonts/fraunces-regular.woff2": "533efccd81345ccb4da3e483661855964c575fda7e21205e494075e88fe052d6",
     "packages/core/fonts/nunito.woff2": "f85212b2392aff6c178df5c0c6176fe341785ba641e6ec4ab0c80fb10dc38e0c",
     "packages/core/highlight-format.js": "710f2313423198b50df60be5105e6783f158ea760720ebdfd44dc05a58f9505f",
-    "packages/core/highlight-lifecycle.js": "bfed16628cce668246e402c1a1446db4b8ace72333fcdd200dfbd86c02f3bdec",
+    "packages/core/highlight-lifecycle.js": "c1ccb99e9e7c5e1bc243c5411e9abebdfc90ebc7208c6f9e5a85ea4a37f9e9d3",
     "packages/core/i18n.js": "ea06eeb88f0c68af6d26f96d6147dbf68867cad2b3c9aa794eab7083c897b27d",
     "packages/core/index.js": "ec9f8dabd019b0c6343e8fb68a599d7b16fbcdc8698e5125e6bef876f6962e18",
     "packages/core/locales/ar/messages.json": "05794cac8c61f8584d72290a6f367f42e59efb4cd70fc72c306a6b301b62514e",
@@ -73,7 +73,7 @@
     "apps/desktop/ui/fonts/fraunces-regular.woff2": "533efccd81345ccb4da3e483661855964c575fda7e21205e494075e88fe052d6",
     "apps/desktop/ui/fonts/nunito.woff2": "f85212b2392aff6c178df5c0c6176fe341785ba641e6ec4ab0c80fb10dc38e0c",
     "apps/desktop/ui/highlight-format.js": "9e5be7cc41e99dbfa9f5262aebacfe77da0cbca58416e6e53536cb01abd6f00d",
-    "apps/desktop/ui/index.html": "3c421d47aa6ab1f38a5ce3a1adb9bf540001852876faa030002522ada7becd9b",
+    "apps/desktop/ui/index.html": "b2e1cbbac07df2d21e8dddc8ab70aaeaa9d98ab2918b0307a9a7681e5bec975e",
     "apps/desktop/ui/index.js": "7770835cec535a66bb265d5fa59bbafa1e960a46f24abded5bdc9896c83b0820",
     "apps/desktop/ui/logger.js": "73939f96285999acfd96bf693d081955a6be4cb6929f17b2aeea59774b632f8c",
     "apps/desktop/ui/search-runtime.d.ts": "4c41e73480a780bc85d7e8f8279c87ba00e8b0753a52ca82375aca32baa1d797",
@@ -87,7 +87,7 @@
     "apps/desktop/src-tauri/src/config.rs": "4cd5ecde08c61c41fcb5eb88110e4f85cc347c33a723b93d59cac8c155d23ae4",
     "apps/desktop/src-tauri/src/logging.rs": "4e96947264d95534a12f69c0c53d9e8bde262ff6694a6e0d28527a2327704572",
     "apps/desktop/src-tauri/src/login_item.rs": "aa9885e65b905fa3f0a6dfa57b1b84fb867ccb89f3d2429ee0fd34206808e7ca",
-    "apps/desktop/src-tauri/src/main.rs": "5a443060be02887150908564d1892554ad1a5a8e3afde76c6c750f60ae472382",
+    "apps/desktop/src-tauri/src/main.rs": "527d52e4bd1480262283935a61c106efc855a1ab190e3fdfaf9a990f747adbf0",
     "apps/desktop/src-tauri/src/search.rs": "4707640e5fbf270f6982c9949c2ae7c4acea60db6742e35076eac9eb40632e2d",
     "apps/desktop/src-tauri/src/shell_contract.rs": "f937210da4c8c43adac9c9db916c3e84b28cd22068502c61e1872fcc6852b2f1",
     "apps/desktop/src-tauri/src/windows_icon.rs": "114c1dd99ab60d9d23eb7c88bc0ae435266222f6e8657a7db58bbfc99854ebd1",
@@ -128,7 +128,7 @@
   },
   "screenshots": {
     "timeline.png": {
-      "sha256": "fac805f7e06d0bd295ead083bdbd2f2abe03a55e9b55ad5b29ad0e4e1e69889a",
+      "sha256": "cb398f50da12d7da3d13723f107a5245f25af2ff530921fc58255b949d98299c",
       "width": 2080,
       "height": 1400
     },
@@ -138,19 +138,19 @@
       "height": 1400
     },
     "timeline-mono.png": {
-      "sha256": "cc1dbfd22dbfc69e49cd8a88c755fcf3785ff33003a4a990cb5748d69b0f030b",
+      "sha256": "804893ce5ed6d82a2ca1737bc255491e6b9217b68169a2e80c8121ebf168ce8c",
       "width": 2080,
       "height": 1400
     },
     "timeline-styles.png": {
-      "sha256": "643aea571b1311732647708d3b248e3311f68f58b5e6e9fd695110b2795dd523",
+      "sha256": "774f235b7007b1e4c94e9b50e0507a8cd52f471f40d60fabf39c0f1e1372be17",
       "width": 2080,
       "height": 1400,
       "composition": {
         "sources": ["timeline.png", "timeline-mono.png"],
         "sourceSha256": [
-          "fac805f7e06d0bd295ead083bdbd2f2abe03a55e9b55ad5b29ad0e4e1e69889a",
-          "cc1dbfd22dbfc69e49cd8a88c755fcf3785ff33003a4a990cb5748d69b0f030b"
+          "cb398f50da12d7da3d13723f107a5245f25af2ff530921fc58255b949d98299c",
+          "804893ce5ed6d82a2ca1737bc255491e6b9217b68169a2e80c8121ebf168ce8c"
         ],
         "split": { "top": 0.62, "bottom": 0.38 }
       }

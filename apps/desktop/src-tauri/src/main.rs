@@ -98,13 +98,19 @@ struct DesktopState {
     logging: logging::LoggingHandle,
     quit_requested: Mutex<bool>,
     main_window_focus_pending: AtomicBool,
-    main_window_frame: Mutex<Option<WindowFrame>>,
+    main_window_frame: Mutex<Option<RetainedWindowFrame>>,
 }
 
 #[derive(Clone, Copy)]
 struct WindowFrame {
     position: PhysicalPosition<i32>,
     size: PhysicalSize<u32>,
+}
+
+#[derive(Clone, Copy)]
+struct RetainedWindowFrame {
+    outer: WindowFrame,
+    inner_size: PhysicalSize<u32>,
 }
 
 #[derive(Default)]
@@ -315,10 +321,13 @@ fn log_window_error(result: tauri::Result<()>, action: &str) {
     }
 }
 
-fn capture_window_frame(window: &WebviewWindow) -> Option<WindowFrame> {
-    Some(WindowFrame {
-        position: window.outer_position().ok()?,
-        size: window.outer_size().ok()?,
+fn capture_window_frame(window: &WebviewWindow) -> Option<RetainedWindowFrame> {
+    Some(RetainedWindowFrame {
+        outer: WindowFrame {
+            position: window.outer_position().ok()?,
+            size: window.outer_size().ok()?,
+        },
+        inner_size: window.inner_size().ok()?,
     })
 }
 
@@ -367,12 +376,18 @@ fn retained_window_frame_is_visible(window: &WebviewWindow, frame: WindowFrame) 
     }
 }
 
-fn restore_window_frame(window: &WebviewWindow, frame: WindowFrame) {
-    log_window_error(window.set_size(frame.size), "restore retained size");
-    log_window_error(
-        window.set_position(frame.position),
-        "restore retained position",
-    );
+fn restore_window_frame(window: &WebviewWindow, frame: RetainedWindowFrame) {
+    // Hidden windows usually retain their frame. Avoid an unnecessary resize:
+    // Tauri's size setter takes the inner size, not the outer frame dimensions.
+    if window.outer_size().ok() != Some(frame.outer.size) {
+        log_window_error(window.set_size(frame.inner_size), "restore retained size");
+    }
+    if window.outer_position().ok() != Some(frame.outer.position) {
+        log_window_error(
+            window.set_position(frame.outer.position),
+            "restore retained position",
+        );
+    }
 }
 
 fn show_main_window(app: &AppHandle) {
@@ -395,7 +410,7 @@ fn show_main_window(app: &AppHandle) {
     log_window_error(window.unminimize(), "unminimize");
     log_window_error(window.show(), "show");
     match retained_frame {
-        Some(frame) if retained_window_frame_is_visible(&window, frame) => {
+        Some(frame) if retained_window_frame_is_visible(&window, frame.outer) => {
             restore_window_frame(&window, frame);
         }
         Some(_) => {

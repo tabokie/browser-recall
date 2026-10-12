@@ -1234,7 +1234,9 @@ test.describe('Highlight note edit', () => {
       const [tab] = await chrome.tabs.query({ url });
       return chrome.tabs.sendMessage(tab.id, { action: 'highlightSelection' });
     }, pageUrl);
-    expect(highlightResp.success).toBe(true);
+    expect(highlightResp, JSON.stringify(highlightResp)).toMatchObject({
+      success: true,
+    });
     await expect(page.locator('mark.browser-recall-highlight')).toHaveCount(1);
 
     const notesResp = await helper.evaluate(
@@ -1259,6 +1261,89 @@ test.describe('Highlight note edit', () => {
     await helper.close();
     await page.close();
   });
+
+  for (const action of ['highlightSelection', 'contextMenuHighlight']) {
+    test(`${action} preserves explicit comment line breaks through save and reload`, async ({
+      extContext,
+      extensionId,
+      localServer,
+    }) => {
+      const title = 'Comment Line Breaks';
+      localServer.addPage('/hl-comment-line-breaks', {
+        title,
+        body: '<div class="CommentContent css-va72p6"><br>sentence 1<br>sentence 2<br><br>sentence 3</div>',
+      });
+      const url = localServer.url('/hl-comment-line-breaks');
+      const slug = getSlugForUrl(url);
+      await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+      const page = await extContext.newPage();
+      const helper = await openHelperPage(extContext, extensionId);
+      await page.goto(url);
+      const selectedText = await page.evaluate(() => {
+        const range = document.createRange();
+        range.selectNodeContents(document.querySelector('.CommentContent'));
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        return selection.toString().trim();
+      });
+      const expectedExcerpt = 'sentence 1\nsentence 2\n\nsentence 3';
+      expect(selectedText).toBe(expectedExcerpt);
+      const response = await helper.evaluate(
+        async ({ action, url, title, selectedText }) => {
+          if (action === 'contextMenuHighlight') {
+            return chrome.runtime.sendMessage({
+              action,
+              url,
+              title,
+              selectionText: selectedText,
+            });
+          }
+          const [tab] = await chrome.tabs.query({ url });
+          return chrome.tabs.sendMessage(tab.id, { action });
+        },
+        { action, url, title, selectedText },
+      );
+      expect(response, JSON.stringify(response)).toMatchObject({
+        success: true,
+      });
+      const notes = await helper.evaluate(
+        (slug) => chrome.runtime.sendMessage({ action: 'loadPageNotes', slug }),
+        slug,
+      );
+      expect(notes.success).toBe(true);
+      expect(notes.notes).toHaveLength(1);
+      expect(notes.notes[0].excerpt).toEqual([expectedExcerpt]);
+      expect(notes.notes[0].cssPath).toEqual([
+        'browser-recall-text-anchor:v1:{"selector":"body > div","start":0,"end":30}',
+      ]);
+      const mark = page.locator(
+        '.CommentContent mark.browser-recall-highlight',
+      );
+      if (action === 'highlightSelection') {
+        await expect(mark).toHaveCount(1);
+        await expect(mark).toHaveAttribute(
+          'data-highlight-text',
+          expectedExcerpt,
+        );
+        await expect(mark.locator('br')).toHaveCount(3);
+      } else {
+        await expect(
+          page.locator('#browser-recall-highlights-panel .highlight-excerpt'),
+        ).toHaveText(expectedExcerpt.split('\n'));
+      }
+      await page.reload();
+      await expect(mark).toHaveCount(1);
+      await expect(mark).toHaveAttribute('data-note-slug', notes.notes[0].slug);
+      await expect(mark).toHaveAttribute(
+        'data-highlight-text',
+        expectedExcerpt,
+      );
+      await expect(mark.locator('br')).toHaveCount(3);
+      await helper.close();
+      await page.close();
+    });
+  }
 
   test('reapplies saved highlight using exact comment part paths after reload', async ({
     extContext,

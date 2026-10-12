@@ -1174,6 +1174,25 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(store.connectorLastDiagnostic).toMatchObject({
       code: 'invalid_buffer_item',
     });
+    // Concurrent-enqueue retries must not retry an invalid queued command:
+    // both snapshot preparation and direct commands must reject and retain it.
+    await expect(
+      wsClient.requestDesktopSnapshotCaptureBudget({
+        url: 'https://example.com/blocked-snapshot',
+        slug: generateSlugFromUrl('https://example.com/blocked-snapshot'),
+        ts: 1710000002725,
+        title: null,
+        markdown: null,
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_buffer_item' });
+    await expect(
+      wsClient.requestDesktopCommand('saveSettingsKey', {
+        key: 'theme',
+        value: 'dark',
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_buffer_item' });
+    expect(store.desktopPendingCommands).toBe(2);
+    expect(store.desktopCommandBuffer[0].kind).toBe('unknown');
   }, 30_000);
 
   it('does not let a running status erase a post-ready blocked outbox', async () => {

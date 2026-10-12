@@ -1635,7 +1635,7 @@ test.describe('desktop visual regression', () => {
       const firefoxStore = page.getByRole('link', { name: 'Firefox Add-ons' });
       await expect(chromeStore).toHaveAttribute(
         'href',
-        'https://chromewebstore.google.com/detail/browser-recall/BROWSER_RECALL_CHROME_WEB_STORE_ID',
+        'https://chromewebstore.google.com/detail/bgghgkobpfgcinpjjeeconciefclpdgp',
       );
       await expect(firefoxStore).toHaveAttribute(
         'href',

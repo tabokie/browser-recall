@@ -1,0 +1,19 @@
+- Chrome extension has been published, use [https://chromewebstore.google.com/detail/bgghgkobpfgcinpjjeeconciefclpdgp](https://chromewebstore.google.com/detail/bgghgkobpfgcinpjjeeconciefclpdgp) to replace existing dummy links of the extension, they currently use BROWSER_RECALL_CHROME_WEB_STORE_ID as placeholder.
+- Investigate how [https://github.com/philffm/ai-summary-helper](https://github.com/philffm/ai-summary-helper) implement sentence highlighting, compare that to our approach.
+- Among these differences, what do you consider to be valuable and practical improvements over our current implementation?
+- Explain 2 and 4 for me, they sound similar. I also want to learn about the ten-second retry, why is it necessary?
+- I think both cases are rare. And it is a massive hurdle to try to let user adjust highlight using UI. Let's focus on the CSS Custom Highlight API proposal. What is the API's underlying mechanism? Do we know whether a hit is found or not? And what's the fallback plan when the API fails?
+- It's a bit complicated, and I don't see clear improvement at least on the sites where I visit. Please summarize the improvement into a GitHub issue format, in succinct words.
+- I found a bug with current highlight collection. Consider this CSS element:
+
+> \<div class="CommentContent css-va72p6">\<br>sentence 1\<br>sentence 2\<br>\<br>sentence 3\</div>
+
+When I highlight it, the highlight doesn't contain any newline.
+
+
+
+This is a bug we've fixed month ago, please figure out where the regression comes from, and why tests didn't catch it back then.
+- CI for commit [df16360](https://github.com/tabokie/browser-recall/commit/df1636018ee557fbe943c08aa6c47e99835c3965) is failing on two jobs: [https://github.com/tabokie/browser-recall/actions/runs/38135105513/job/114457261708](https://github.com/tabokie/browser-recall/actions/runs/38135105513/job/114457261708) and [https://github.com/tabokie/browser-recall/actions/runs/38135105513/job/114457261696](https://github.com/tabokie/browser-recall/actions/runs/38135105513/job/114457261696) . Fix the issues if not already fixed in the latest code.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them all
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) co-author=GPT-6.1 Sol

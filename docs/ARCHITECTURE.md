@@ -299,6 +299,10 @@ success. An invalid command blocks the queue and produces an error. Snapshot HTM
 is sent directly to a ready daemon connection, with the page URL and slug, and is
 never saved in extension storage.
 
+Snapshot preparation and direct commands share a drain-wait operation. Commands
+arriving during or immediately after a successful drain are flushed before the
+operation proceeds. A failed drain returns an error without retrying invalid data.
+
 Protocol version 4 is the only supported extension connection format. Pairing and
 authentication require matching versions, the detected browser name, and a
 `browserProfile` field even when the value is `null`. Status supplies the device ID, daemon state, and the
@@ -342,6 +346,10 @@ a block selector and exact UTF-16 text offsets. Anchors inside shadow DOM also
 record the sequence of host elements needed to reach the text. Restoring a highlight
 checks the excerpt at the saved offsets; the code never silently moves the highlight
 to another matching passage.
+
+Anchor offsets count literal text-node characters. Excerpts preserve explicit
+`<br>` elements as newlines, including consecutive breaks; restoration checks the
+range's literal text or its text with those explicit breaks.
 
 Older anchors containing only a CSS selector remain explicitly supported.
 Selections overlapping an existing Browser Recall highlight are rejected before
