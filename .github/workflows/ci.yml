@@ -184,6 +184,9 @@ jobs:
 
       - run: npm run build --workspace @browser-recall/desktop
 
+      - name: Verify native window frame restoration
+        run: cargo test --locked --release -p browser-recall-desktop --test macos_window_frame
+
       - name: Exercise native startup and tray lifecycle
         env:
           BROWSER_RECALL_ISOLATED_MACOS_SESSION: '1'

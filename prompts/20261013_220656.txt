@@ -1,0 +1,99 @@
+- CI is still failing, the first failure:
+❯ tests/integration/windows-desktop-cleanup.test.js (5 tests | 2 failed) 20432ms \
+✓ teardown preserves the original failure and completes cleanup after an error \
+✓ cleanup recognizes a process that has already exited after a signal \
+✓ cleanup removes nested read-only profile files \
+× cleanup handles an exclusive descendant lock: terminate 10240ms \
+&#x20;    → The operation was aborted \
+× cleanup handles an exclusive descendant lock: release 10092ms \
+&#x20;    → The operation was aborted \
+⎯⎯⎯⎯⎯⎯⎯**&#x20;Failed Tests 2&#x20;**⎯⎯⎯⎯⎯⎯⎯ \&#xA;**&#x20;FAIL&#x20;**&#x20;tests/integration/windows-desktop-cleanup.test.js > cleanup handles an exclusive descendant lock: terminate \&#xA;**&#x20;FAIL&#x20;**&#x20;tests/integration/windows-desktop-cleanup.test.js > cleanup handles an exclusive descendant lock: release \
+**AbortError**: The operation was aborted \
+&#x20;Test Files  **1 failed** (1) \
+&#x20;     Tests  **2 failed** | **3 passed** (5) \
+**Caused by: TimeoutError**: The operation was aborted due to timeout \
+&#x20;  Start at  12:05:13 \
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯ \
+&#x20;  Duration  21.11s (transform 42ms, setup 0ms, collect 351ms, tests 20.43s, environment 0ms, prepare 110ms) \
+**Serialized Error:** { code: 23, INDEX_SIZE_ERR: 1, DOMSTRING_SIZE_ERR: 2, HIERARCHY_REQUEST_ERR: 3, WRONG_DOCUMENT_ERR: 4, INVALID_CHARACTER_ERR: 5, NO_DATA_ALLOWED_ERR: 6, NO_MODIFICATION_ALLOWED_ERR: 7, NOT_FOUND_ERR: 8, NOT_SUPPORTED_ERR: 9, INUSE_ATTRIBUTE_ERR: 10, INVALID_STATE_ERR: 11, SYNTAX_ERR: 12, INVALID_MODIFICATION_ERR: 13, NAMESPACE_ERR: 14, INVALID_ACCESS_ERR: 15, VALIDATION_ERR: 16, TYPE_MISMATCH_ERR: 17, SECURITY_ERR: 18, NETWORK_ERR: 19, ABORT_ERR: 20, URL_MISMATCH_ERR: 21, QUOTA_EXCEEDED_ERR: 22, TIMEOUT_ERR: 23, INVALID_NODE_TYPE_ERR: 24, DATA_CLONE_ERR: 25 } \
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯ \
+25h
+- The second failure (Verify documentation builds preserve app URL routing):
+
+failed to scan /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/browser-recall-url-routing-OIqsVX/Browser Recall URL Test.app: -10814
+ from spotlightnode:internal/errors:986
+  const err = new Error(message);
+              ^
+
+Error: Command failed: /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/browser-recall-url-routing-OIqsVX/Browser Recall URL Test.app
+failed to scan /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/browser-recall-url-routing-OIqsVX/Browser Recall URL Test.app: -10814
+ from spotlight
+    at genericNodeError (node:internal/errors:986:15)
+    at wrappedFn (node:internal/errors:540:14)
+    at checkExecSyncError (node:child_process:942:11)
+    at execFileSync (node:child_process:978:15)
+    at file:///Users/runner/work/browser-recall/browser-recall/tests/smoke/macos-documentation-url-routing.mjs:144:5
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  status: 1,
+  signal: null,
+  output: [
+    null,
+    Buffer(0) [Uint8Array] [],
+    Buffer(149) [Uint8Array] [
+      102,  97, 105, 108, 101, 100,  32, 116, 111,  32, 115,  99,
+       97, 110,  32,  47, 118,  97, 114,  47, 102, 111, 108, 100,
+      101, 114, 115,  47,  51,  54,  47, 116, 106, 100, 112, 104,
+       50, 116,  57,  54,  53, 106,  56, 115, 110, 122,  57,  95,
+      118, 107, 100, 110, 119,  48, 114,  48,  48,  48,  48, 103,
+      110,  47,  84,  47,  98, 114, 111, 119, 115, 101, 114,  45,
+      114, 101,  99,  97, 108, 108,  45, 117, 114, 108,  45, 114,
+      111, 117, 116, 105, 110, 103,  45,  79,  73, 113, 115,  86,
+       88,  47,  66, 114,
+      ... 49 more items
+    ]
+  ],
+  pid: 15196,
+  stdout: Buffer(0) [Uint8Array] [],
+  stderr: Buffer(149) [Uint8Array] [
+    102,  97, 105, 108, 101, 100,  32, 116, 111,  32, 115,  99,
+     97, 110,  32,  47, 118,  97, 114,  47, 102, 111, 108, 100,
+    101, 114, 115,  47,  51,  54,  47, 116, 106, 100, 112, 104,
+     50, 116,  57,  54,  53, 106,  56, 115, 110, 122,  57,  95,
+    118, 107, 100, 110, 119,  48, 114,  48,  48,  48,  48, 103,
+    110,  47,  84,  47,  98, 114, 111, 119, 115, 101, 114,  45,
+    114, 101,  99,  97, 108, 108,  45, 117, 114, 108,  45, 114,
+    111, 117, 116, 105, 110, 103,  45,  79,  73, 113, 115,  86,
+     88,  47,  66, 114,
+    ... 49 more items
+  ]
+}
+
+Node.js v24.20.0
+- One job is still failing: [https://github.com/tabokie/browser-recall/actions/runs/38261136653/job/114851624963](https://github.com/tabokie/browser-recall/actions/runs/38261136653/job/114851624963) , use my browser to check
+- So? How do we proceed?
+- Another failure:
+  1) tests/e2e/snapshot-slug-meta.spec.js:1476:3 › Snapshot slug meta tag › snapshot and live-page highlight editors render from the same surface 
+
+    Error: expect(received).toBe(expected) // Object.is equality
+
+    Expected: true
+    Received: false
+
+      1553 |     const snapshotEditorPixels = await snapshotEditor.screenshot();
+      1554 |
+    > 1555 |     expect(snapshotEditorPixels.equals(liveEditorPixels)).toBe(true);
+           |                                                           ^
+      1556 |
+      1557 |     await viewer.close();
+      1558 |     await livePage.close();
+        at /home/runner/work/browser-recall/browser-recall/tests/e2e/snapshot-slug-meta.spec.js:1555:59
+
+    Error Context: test-results/snapshot-slug-meta-Snapsho-5330a-ender-from-the-same-surface/error-context.md
+
+  1 failed
+    tests/e2e/snapshot-slug-meta.spec.js:1476:3 › Snapshot slug meta tag › snapshot and live-page highlight editors render from the same surface 
+  94 passed (1.9m)
+- Trying to highlight on PDF yields "page returned an empty structured selection" error
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) 
+- Fix them all
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) co-author=GPT-6.1 Sol

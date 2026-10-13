@@ -16,8 +16,8 @@ import {
   waitForExit,
   stopTestProcess,
   removeTestProfile,
-  withCleanup,
 } from './windows-desktop-process.mjs';
+import { withCleanup } from './desktop-test-cleanup.mjs';
 
 import {
   isolatedDesktopEnvironment,

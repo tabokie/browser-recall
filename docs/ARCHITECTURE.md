@@ -203,6 +203,11 @@ handling registers before other plugins so launching the app again reaches the
 existing process. If a saved window position is off-screen after a display change,
 the app centers the window on an available display.
 
+On macOS, `NSWindow` is the AppKit window that owns the webview. Closing saves the
+complete `NSWindow` frame; reopening restores that frame on the main thread if
+the frame changed while hidden. The webview's inner size can differ from the
+window's content size, so restoring from the webview size can shrink the window.
+
 A daemon startup failure leaves the window open with a visible error. Resume can
 start the daemon after storage is repaired. Simultaneous start requests share one
 startup attempt; reading storage never starts a second daemon. Rust errors are
@@ -346,6 +351,14 @@ a block selector and exact UTF-16 text offsets. Anchors inside shadow DOM also
 record the sequence of host elements needed to reach the text. Restoring a highlight
 checks the excerpt at the saved offsets; the code never silently moves the highlight
 to another matching passage.
+
+Native PDF viewers do not expose the selected PDF text as a DOM range.
+One `captureContextMenuSelection` request returns the selection source and
+structured text locations together. A PDF document MIME type identifies native
+PDF selections, which use the browser's context-menu text. An empty CSS path
+records the absence of a DOM anchor; PDF highlights remain available in the
+highlights panel. HTML selections require matching structured DOM text and retain
+their anchors even when the HTML page contains a PDF embed.
 
 Anchor offsets count literal text-node characters. Excerpts preserve explicit
 `<br>` elements as newlines, including consecutive breaks; restoration checks the

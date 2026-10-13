@@ -249,6 +249,14 @@ position. Failure screenshots and logs remain under
 The Desktop Native Lifecycle CI job uploads that directory on failure and retains
 the diagnostics for seven days.
 
+The macOS window frame regression uses an invisible AppKit window and forces size
+and position changes while the content view has an inset. The regression calls
+production frame restoration directly and runs before the tray lifecycle test:
+
+```bash
+cargo test --locked --release -p browser-recall-desktop --test macos_window_frame
+```
+
 On Windows, close any running Browser Recall process before the single-instance
 test:
 

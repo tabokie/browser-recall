@@ -40,6 +40,7 @@ Use this map to find the files that implement a feature. See
 | `apps/desktop/src-tauri/src/shell_contract.rs` | Shell response types and route state |
 | `apps/desktop/src-tauri/src/login_item.rs` | Check and change launch-at-login registration; undo changes if saving fails |
 | `apps/desktop/src-tauri/src/windows_icon.rs` | Windows window and taskbar icons matched to display scale |
+| `apps/desktop/src-tauri/src/macos_window_frame.rs` | Capture and restore the exact macOS AppKit window frame independently of webview insets |
 | `apps/desktop/src-tauri/src/search.rs` | Desktop search adapters |
 | `apps/desktop/src-tauri/src/logging.rs` | Native log output and retention |
 | `apps/desktop/src-tauri/capabilities/main.json` | Main webview permissions |
@@ -93,6 +94,10 @@ The popup processes pin changes and list updates one at a time.
 Live pages, snapshots, the PDF panel, and the popup use shared highlight/editor
 implementations. Each page type supplies callbacks for saving data. Selection,
 saved text locations, saving, and deletion use shared code.
+Native PDF context-menu highlights use the browser-supplied selected text with an
+empty DOM location. `captureContextMenuSelection` returns the document's selection
+source and text locations in one response; PDF embeds do not change HTML selection
+validation.
 
 ## Daemon and replay
 
@@ -198,7 +203,9 @@ do not maintain a second production copy.
 | Native WKWebView chart layout | `tests/smoke/macos-wkwebview-chart-layout.mjs` |
 | Documentation bundles preserve macOS app URL routing and URL activation reuses the running process | `tests/smoke/macos-documentation-url-routing.mjs` |
 | macOS startup, tray, and window lifecycle | `tests/smoke/macos-desktop-window-lifecycle.mjs` |
+| macOS frame restoration after hidden size and position changes with an inset content view | `apps/desktop/src-tauri/tests/macos_window_frame.rs` |
 | Windows icons, single instance, and teardown | `tests/smoke/windows-desktop-single-instance.mjs`, `tests/integration/windows-desktop-cleanup.test.js` |
+| Native desktop cleanup preserves setup errors and completes teardown after failures | `tests/smoke/desktop-test-cleanup.mjs`, `tests/smoke/macos-desktop-process.mjs`, `tests/integration/macos-desktop-cleanup.test.js` |
 | Saved desktop language and right-to-left layout | `tests/e2e/desktop-locale-setting.spec.js` |
 | Native extension localization and system fonts | `tests/e2e/extension-localization.spec.js`, `tests/e2e/extension-font-fallback.spec.js` |
 | Real Firefox automatic capture and navigation, daemon persistence before identity probes, paused-document exclusion until refresh, and options-page popup messages | `tests/smoke/firefox-real-content.mjs` |

@@ -58,7 +58,7 @@ const contentMessageActions = new Set([
   'extractMarkdown',
   'getPageIdentity',
   'sameDocumentNavigation',
-  'getStructuredSelectionText',
+  'captureContextMenuSelection',
   'highlightSelection',
   'removeHighlightMark',
   'hideHighlightMarkup',
@@ -194,12 +194,18 @@ function initContentScript({ recordingEligible, recordingDocumentToken }) {
     reapplyDisabled: () => isPdfPage() || markupHidden,
   });
 
-  function getStructuredSelectionPayload() {
+  function captureContextMenuSelection() {
+    // A PDF embed does not change the source of text selected in its HTML
+    // parent. Only the native PDF document lacks a structured DOM selection.
+    if (document.contentType === 'application/pdf') {
+      return { source: 'native-pdf' };
+    }
     const prepared = highlightLifecycle.prepareSelection(window.getSelection());
     return {
-      selectionText: prepared?.text || '',
-      selectionExcerpt: prepared?.excerpt || [],
-      selectionCssPath: prepared?.cssPath || [],
+      source: 'dom',
+      text: prepared?.text || '',
+      excerpt: prepared?.excerpt || [],
+      cssPath: prepared?.cssPath || [],
     };
   }
 
@@ -882,10 +888,17 @@ function initContentScript({ recordingEligible, recordingDocumentToken }) {
     }
   }
 
+  function hasNativePdfViewer() {
+    return (
+      document.contentType === 'application/pdf' ||
+      !!document.querySelector('embed[type="application/pdf"]')
+    );
+  }
+
   function isPdfPage() {
     return (
-      /\.pdf(\?|#|$)/i.test(new URL(window.location.href).pathname) ||
-      !!document.querySelector('embed[type="application/pdf"]')
+      hasNativePdfViewer() ||
+      /\.pdf(\?|#|$)/i.test(new URL(window.location.href).pathname)
     );
   }
 
@@ -915,9 +928,9 @@ function initContentScript({ recordingEligible, recordingDocumentToken }) {
         handleSameDocumentNavigation(request.url);
         sendResponse({ success: true });
       }
-    } else if (request.action === 'getStructuredSelectionText') {
+    } else if (request.action === 'captureContextMenuSelection') {
       try {
-        const payload = getStructuredSelectionPayload();
+        const payload = captureContextMenuSelection();
         sendResponse({
           success: true,
           ...payload,
@@ -1078,7 +1091,7 @@ function initContentScript({ recordingEligible, recordingDocumentToken }) {
       sendResponse({ success: true });
     } else if (request.action === 'isPdfPage') {
       sendResponse({
-        isPdf: !!document.querySelector('embed[type="application/pdf"]'),
+        isPdf: hasNativePdfViewer(),
       });
     } else if (request.action === 'showCaptureSpinner') {
       showCaptureSpinner();

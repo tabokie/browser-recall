@@ -2,7 +2,7 @@
   "command": "npm run docs:screenshots",
   "inputs": {
     "scripts/assets/documentation-sonoma-light.png": "79f724d2d36fe90251e32ef9cdc9b90575d419d81c240a9ecdc880780ba579d1",
-    "package.json": "9977fbd1e7e5fa4cd26cbcfe80ec3eda73e768104d60b189ffbe2959c163184a",
+    "package.json": "acf8e9eea68425cfe58f1d7ff287331ff0abaabd952e13d12453567786a2bd5e",
     "package-lock.json": "90950dd6e3d95d1fdf490584466846dc4f642eff2f0f957af3c34130c70bae3c",
     "packages/core/attention-utils.js": "4f38498b8ae86274db4a9df56a90136c149357a0ed94d1933b95ffd8d25fa1be",
     "packages/core/bounded-response.js": "4ddb18491943ee4b29073767480858af99cf93a2b647e69f51fcec0dfe79732f",
@@ -87,15 +87,16 @@
     "apps/desktop/src-tauri/src/config.rs": "4cd5ecde08c61c41fcb5eb88110e4f85cc347c33a723b93d59cac8c155d23ae4",
     "apps/desktop/src-tauri/src/logging.rs": "4e96947264d95534a12f69c0c53d9e8bde262ff6694a6e0d28527a2327704572",
     "apps/desktop/src-tauri/src/login_item.rs": "aa9885e65b905fa3f0a6dfa57b1b84fb867ccb89f3d2429ee0fd34206808e7ca",
-    "apps/desktop/src-tauri/src/main.rs": "527d52e4bd1480262283935a61c106efc855a1ab190e3fdfaf9a990f747adbf0",
+    "apps/desktop/src-tauri/src/macos_window_frame.rs": "8b3257ad179a000a8811843fbbabf903c980aba692e9fcc6f1306ec39548efb5",
+    "apps/desktop/src-tauri/src/main.rs": "83af7fd8130bae9a4131fdfd8231a8a5355d18b87db1745c6b921f9e42fe4581",
     "apps/desktop/src-tauri/src/search.rs": "4707640e5fbf270f6982c9949c2ae7c4acea60db6742e35076eac9eb40632e2d",
     "apps/desktop/src-tauri/src/shell_contract.rs": "f937210da4c8c43adac9c9db916c3e84b28cd22068502c61e1872fcc6852b2f1",
     "apps/desktop/src-tauri/src/windows_icon.rs": "114c1dd99ab60d9d23eb7c88bc0ae435266222f6e8657a7db58bbfc99854ebd1",
     "apps/desktop/src-tauri/build.rs": "13b6b01828d779bb27dc1a461fbcf75caf7bcfeafb7c3b287096cc54bf2290a7",
     "apps/desktop/src-tauri/build_support.rs": "a3428b913d4e5557d61030c005533b75c78daef397e73cb7d0764d4321a47717",
-    "apps/desktop/src-tauri/Cargo.toml": "b6c6f553f5870ae2073c23e7305460f6f96fba353b10a7102d934eb33019eed1",
+    "apps/desktop/src-tauri/Cargo.toml": "c3b9f78f3e0816fcb4cfff8e7470dec42ce3504ae553196e74330b655d6a5854",
     "apps/desktop/src-tauri/capabilities/main.json": "ad00db1db6a74b09e75e37fbeb63b4f2052b80b4f60fe8a0ec826a951c3338dc",
-    "Cargo.lock": "8989929725141c85499b7c754671c017714023e8228c180288678b0d85165e58",
+    "Cargo.lock": "1e08d332dfaab7c64becc22fe2bce9e787460178cb44e1439b56b8a1ada86cf2",
     "Cargo.toml": "575afa94419349bbda4e73e4287f56fb55453c17fa7052fe8ec6b775a03cf48c",
     "rust-toolchain.toml": "f7cbfca0c3a394984b9eadf81df706d3a7c671ba479aecc12c154bf7c36d77db",
     "apps/desktop/src-tauri/icons/icon.icns": "27af23b25f93f42712fb5aaad2bd7edb437a0c5a056c4164b9d30ef524c493d6",
@@ -128,7 +129,7 @@
   },
   "screenshots": {
     "timeline.png": {
-      "sha256": "cb398f50da12d7da3d13723f107a5245f25af2ff530921fc58255b949d98299c",
+      "sha256": "99acc3665403d2961c31a672431a9776f67ebe514b042f66fec8807aa04e81bf",
       "width": 2080,
       "height": 1400
     },
@@ -138,19 +139,19 @@
       "height": 1400
     },
     "timeline-mono.png": {
-      "sha256": "804893ce5ed6d82a2ca1737bc255491e6b9217b68169a2e80c8121ebf168ce8c",
+      "sha256": "f3a8fa91ebd9828fd0d78d1d15284acab05b3826ac6cf13f1087f34b29bf51b2",
       "width": 2080,
       "height": 1400
     },
     "timeline-styles.png": {
-      "sha256": "774f235b7007b1e4c94e9b50e0507a8cd52f471f40d60fabf39c0f1e1372be17",
+      "sha256": "e961af5ef2848c4945b4c689275c1bbc8583d106163ee2a3f9ef279d15772315",
       "width": 2080,
       "height": 1400,
       "composition": {
         "sources": ["timeline.png", "timeline-mono.png"],
         "sourceSha256": [
-          "cb398f50da12d7da3d13723f107a5245f25af2ff530921fc58255b949d98299c",
-          "804893ce5ed6d82a2ca1737bc255491e6b9217b68169a2e80c8121ebf168ce8c"
+          "99acc3665403d2961c31a672431a9776f67ebe514b042f66fec8807aa04e81bf",
+          "f3a8fa91ebd9828fd0d78d1d15284acab05b3826ac6cf13f1087f34b29bf51b2"
         ],
         "split": { "top": 0.62, "bottom": 0.38 }
       }

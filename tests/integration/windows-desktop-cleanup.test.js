@@ -5,20 +5,21 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { rm, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createInterface } from 'node:readline';
+import { setTimeout as delay } from 'node:timers/promises';
 import { expect, test } from 'vitest';
 import {
   removeTestProfile,
   stopTestProcess,
   waitForExit,
-  withCleanup,
 } from '../smoke/windows-desktop-process.mjs';
+import { withCleanup } from '../smoke/desktop-test-cleanup.mjs';
 
 test('teardown preserves the original failure and completes cleanup after an error', async () => {
   const workDir = mkdtempSync(path.join(tmpdir(), 'browser-recall-cleanup-'));
@@ -80,50 +81,101 @@ test.skipIf(process.platform !== 'win32').each(['terminate', 'release'])(
   'cleanup handles an exclusive descendant lock: %s',
   async (mode) => {
     const workDir = mkdtempSync(path.join(tmpdir(), 'browser-recall-cleanup-'));
-    const lockFile = path.join(workDir, 'locked-profile');
+    const profileDir = path.join(workDir, 'profile');
+    mkdirSync(profileDir);
+    const lockFile = path.join(profileDir, 'locked-profile');
+    const readyFile = path.join(workDir, 'ready');
+    const releaseFile = path.join(workDir, 'release');
     const lockScript = [
+      '$ErrorActionPreference = "Stop"',
       '$file = [IO.File]::Open($env:BROWSER_RECALL_LOCK_FILE, "OpenOrCreate", "ReadWrite", "None")',
-      '[Console]::WriteLine($PID)',
-      '[Console]::ReadLine() | Out-Null',
-      '$file.Dispose()',
+      'try {',
+      '[IO.File]::WriteAllText($env:BROWSER_RECALL_READY_FILE + ".tmp", [string]$PID)',
+      '[IO.File]::Move($env:BROWSER_RECALL_READY_FILE + ".tmp", $env:BROWSER_RECALL_READY_FILE)',
+      'while (-not [IO.File]::Exists($env:BROWSER_RECALL_RELEASE_FILE)) { Start-Sleep -Milliseconds 25 }',
+      '} finally { $file.Dispose() }',
     ].join('; ');
+    // Keep PowerShell's startup input closed. Readiness and release must not
+    // depend on console I/O through inherited Node pipes on Windows. Encoding
+    // also keeps PowerShell syntax out of Windows command-line quote parsing.
+    const encodedScript = Buffer.from(lockScript, 'utf16le').toString('base64');
     const parent = spawn(
       process.execPath,
       [
         '-e',
-        `require('node:child_process').spawn('powershell.exe',
-          ['-NoProfile', '-NonInteractive', '-Command', ${JSON.stringify(lockScript)}],
-          {stdio: ['inherit', 'inherit', 'inherit']});
-         setInterval(() => {}, 1000);`,
+        `const child = require('node:child_process').spawn('powershell.exe',
+          ['-NoProfile', '-NonInteractive', '-EncodedCommand', ${JSON.stringify(encodedScript)}],
+          {stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true});
+         child.stdout.pipe(process.stdout);
+         child.stderr.pipe(process.stderr);
+         const keepAlive = setInterval(() => {}, 1000);
+         child.on('error', (error) => {
+           console.error(error);
+           process.exitCode = 1;
+           clearInterval(keepAlive);
+         });
+         child.on('exit', (code) => {
+           if (code !== 0) {
+             process.exitCode = code ?? 1;
+             clearInterval(keepAlive);
+           }
+         });`,
       ],
-      { env: { ...process.env, BROWSER_RECALL_LOCK_FILE: lockFile } },
+      {
+        env: {
+          ...process.env,
+          BROWSER_RECALL_LOCK_FILE: lockFile,
+          BROWSER_RECALL_READY_FILE: readyFile,
+          BROWSER_RECALL_RELEASE_FILE: releaseFile,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      },
     );
-    const lines = createInterface({ input: parent.stdout });
+    let output = '';
+    let startupError;
+    parent.stdout.on('data', (chunk) => (output += chunk));
+    parent.stderr.on('data', (chunk) => (output += chunk));
+    parent.on('error', (error) => (startupError = error));
     let descendant;
     try {
-      const [line] = await once(lines, 'line', {
-        signal: AbortSignal.timeout(10_000),
-      });
-      descendant = Number(line);
-      expect(descendant).toBeGreaterThan(0);
-      expect(() => rmSync(workDir, { recursive: true, force: true })).toThrow();
+      const deadline = Date.now() + 10_000;
+      while (!existsSync(readyFile)) {
+        if (
+          startupError ||
+          parent.exitCode !== null ||
+          parent.signalCode !== null ||
+          Date.now() >= deadline
+        ) {
+          throw new Error(
+            `PowerShell lock holder did not become ready (exit ${parent.exitCode}, signal ${parent.signalCode}): ${output}`,
+            { cause: startupError },
+          );
+        }
+        await delay(25);
+      }
+      const ready = readFileSync(readyFile, 'utf8');
+      expect(ready).toMatch(/^[1-9]\d*$/);
+      descendant = Number(ready);
+      expect(() =>
+        rmSync(profileDir, { recursive: true, force: true }),
+      ).toThrow();
       if (mode === 'terminate') {
         await stopTestProcess(parent);
       }
       let retries = 0;
       await removeTestProfile(
-        workDir,
+        profileDir,
         mode === 'release'
           ? (error) => {
               expect(['EPERM', 'EBUSY']).toContain(error.code);
-              if (++retries === 1) parent.stdin.write('release\n');
+              if (++retries === 1) writeFileSync(releaseFile, 'release');
             }
           : undefined,
       );
       if (mode === 'release') expect(retries).toBeGreaterThan(0);
-      expect(existsSync(workDir)).toBe(false);
+      expect(existsSync(profileDir)).toBe(false);
     } finally {
-      lines.close();
       for (const pid of [parent.pid, descendant].filter(Boolean)) {
         try {
           execFileSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {

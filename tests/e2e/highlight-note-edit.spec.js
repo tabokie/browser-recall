@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures.js';
+import { fileURLToPath } from 'node:url';
 import {
   resetAndSeed,
   settingsCheckpoint,
@@ -732,6 +733,225 @@ test.describe('Highlight note edit', () => {
       )
       .toEqual([noteSlug, noteSlug, noteSlug, noteSlug, noteSlug]);
 
+    await page.close();
+  });
+
+  test('HTML context-menu highlights retain validation and anchors alongside PDF embeds', async ({
+    extContext,
+    extensionId,
+    localServer,
+  }) => {
+    const url = localServer.url('/html-with-pdf');
+    const title = 'HTML With PDF';
+    localServer.addPage('/html-with-pdf', {
+      title,
+      body: '<p>Actual DOM selection</p><embed type="application/pdf" src="about:blank" />',
+    });
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+    const page = await extContext.newPage();
+    await page.goto(url);
+    const helper = await openHelperPage(extContext, extensionId);
+    const highlight = (selectionText) =>
+      helper.evaluate(
+        ({ url, title, selectionText }) =>
+          chrome.runtime.sendMessage({
+            action: 'contextMenuHighlight',
+            url,
+            title,
+            selectionText,
+          }),
+        { url, title, selectionText },
+      );
+    expect(await highlight('Earlier selection')).toMatchObject({
+      success: false,
+      error: 'Page returned an empty structured selection',
+    });
+    await page.locator('p').selectText();
+    expect(await highlight('Different selection')).toMatchObject({
+      success: false,
+      error: 'Page selection changed before the highlight was captured',
+    });
+    expect(await highlight('Actual DOM selection')).toMatchObject({
+      success: true,
+    });
+    const notes = await helper.evaluate(
+      (slug) => chrome.runtime.sendMessage({ action: 'loadPageNotes', slug }),
+      getSlugForUrl(url),
+    );
+    expect(notes).toMatchObject({
+      success: true,
+      notes: [{ excerpt: ['Actual DOM selection'] }],
+    });
+    expect(notes.notes).toHaveLength(1);
+    expect(notes.notes[0].cssPath[0]).toMatch(/^browser-recall-text-anchor:/);
+    await helper.close();
+    await page.close();
+  });
+
+  test('HTML context-menu highlights reject missing and changed DOM selections even at a PDF URL', async ({
+    extContext,
+    extensionId,
+    localServer,
+  }) => {
+    const url = localServer.url('/html-selection.pdf');
+    const title = 'HTML Selection Validation';
+    localServer.addPage('/html-selection.pdf', {
+      title,
+      body: '<p>Current DOM selection</p>',
+    });
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+    const page = await extContext.newPage();
+    await page.goto(url);
+    const helper = await openHelperPage(extContext, extensionId);
+    const highlight = () =>
+      helper.evaluate(
+        ({ url, title }) =>
+          chrome.runtime.sendMessage({
+            action: 'contextMenuHighlight',
+            url,
+            title,
+            selectionText: 'Earlier context-menu selection',
+          }),
+        { url, title },
+      );
+    expect(await highlight()).toMatchObject({
+      success: false,
+      error: 'Page returned an empty structured selection',
+    });
+    await page.locator('p').selectText();
+    expect(await highlight()).toMatchObject({
+      success: false,
+      error: 'Page selection changed before the highlight was captured',
+    });
+    const notes = await helper.evaluate(
+      (slug) => chrome.runtime.sendMessage({ action: 'loadPageNotes', slug }),
+      getSlugForUrl(url),
+    );
+    expect(notes).toMatchObject({ success: true, notes: [] });
+    await helper.close();
+    await page.close();
+  });
+
+  test('native PDF context-menu highlights persist without a DOM selection', async ({
+    extContext,
+    extensionId,
+    localServer,
+  }) => {
+    // Serve a real PDF at a download URL without a .pdf suffix. The native
+    // viewer supplies context-menu selectionText, but no DOM text range.
+    const url = localServer.url('/native-pdf-download');
+    const excerpt =
+      'Native PDF highlight first line\nNative PDF highlight second line';
+    const slug = getSlugForUrl(url);
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+    const page = await extContext.newPage();
+    await page.route(url, (route) =>
+      route.fulfill({
+        contentType: 'application/pdf',
+        path: fileURLToPath(
+          new URL('../fixtures/highlight-selection.pdf', import.meta.url),
+        ),
+      }),
+    );
+    const viewerNavigation = page.waitForEvent('framenavigated', {
+      predicate: (frame) => frame.url().startsWith('chrome-extension://'),
+    });
+    await page.goto(url);
+    const pdfViewer = await viewerNavigation;
+    await pdfViewer.waitForFunction(
+      () => document.querySelector('pdf-viewer')?.documentDimensions,
+    );
+    // Read an actual native plugin selection rather than manufacturing the
+    // context-menu text. Chromium's pinned viewer exposes this controller.
+    const selectedText = await pdfViewer.evaluate(async () => {
+      const controller = document.querySelector('pdf-viewer').currentController;
+      controller.selectAll();
+      return (await controller.getSelectedText()).selectedText;
+    });
+    expect(selectedText).toBe(excerpt);
+    expect(await page.evaluate(() => document.contentType)).toBe(
+      'application/pdf',
+    );
+    expect(await page.evaluate(() => window.getSelection().toString())).toBe(
+      '',
+    );
+    const helper = await openHelperPage(extContext, extensionId);
+    const selection = await helper.evaluate(async (url) => {
+      const [tab] = await chrome.tabs.query({ url });
+      return chrome.tabs.sendMessage(tab.id, {
+        action: 'captureContextMenuSelection',
+      });
+    }, url);
+    expect(selection).toEqual({ success: true, source: 'native-pdf' });
+
+    const sourceTab = await helper.evaluate(async (url) => {
+      const [tab] = await chrome.tabs.query({ url });
+      return tab;
+    }, url);
+    await page.bringToFront();
+    const background = extContext.serviceWorkers()[0];
+    const dispatchMenu = (title) =>
+      background.evaluate(
+        async ({ title, selectedText, viewerUrl }) => {
+          const listeners = globalThis.browserRecallContextMenuListenersForTest;
+          if (listeners?.length !== 1)
+            throw new Error('Expected one context-menu listener');
+          await listeners[0](
+            {
+              menuItemId: 'browser-recall-highlight',
+              selectionText: selectedText,
+            },
+            {
+              id: -123,
+              url: viewerUrl,
+              title,
+            },
+          );
+        },
+        { title, selectedText, viewerUrl: pdfViewer.url() },
+      );
+    // Exercise the registered native-event listener, including PDF callback
+    // metadata that differs from the real active tab and the title guard.
+    // Helper commands alone do not cover browser event routing; use the real
+    // PDF selection and the registered listener together.
+    await dispatchMenu('Wrong callback title');
+    const ignored = await helper.evaluate(
+      (slug) => chrome.runtime.sendMessage({ action: 'loadPageNotes', slug }),
+      slug,
+    );
+    expect(ignored).toMatchObject({ success: true, notes: [] });
+    await dispatchMenu(sourceTab.title);
+    const panel = page.locator('#browser-recall-highlights-panel');
+    await expect(panel.locator('.highlight-excerpt')).toHaveText(
+      excerpt.split('\n'),
+    );
+    await panel.locator('.note-action-btn.edit').click();
+    await panel.locator('.highlight-note-editor').fill('PDF annotation');
+    await panel.locator('.note-action-btn.confirm').click();
+    await expect(panel.locator('.highlight-note-text')).toHaveText(
+      'PDF annotation',
+    );
+    await page.screenshot({
+      path: test.info().outputPath('pdf-highlight.png'),
+    });
+    await page.reload();
+    await expect(panel.locator('.highlight-note-text')).toHaveText(
+      'PDF annotation',
+    );
+    await expect(page.locator('mark.browser-recall-highlight')).toHaveCount(0);
+    const notes = await helper.evaluate(
+      (slug) => chrome.runtime.sendMessage({ action: 'loadPageNotes', slug }),
+      slug,
+    );
+    expect(notes.success).toBe(true);
+    expect(notes.notes).toHaveLength(1);
+    expect(notes.notes[0]).toMatchObject({
+      excerpt: [excerpt],
+      cssPath: [''],
+      note: 'PDF annotation',
+      url,
+    });
+    await helper.close();
     await page.close();
   });
 

@@ -48,7 +48,7 @@
     "test:visual:chromium": "playwright test tests/e2e/desktop-visual.spec.js",
     "test:visual:webkit": "playwright test --config playwright.webkit.config.js tests/e2e/desktop-visual.spec.js --browser=webkit --grep @webkit",
     "test:cold-scripts": "npm run build:test-daemon && playwright test tests/e2e/manual-seed-workflow.spec.js",
-    "test:desktop-native": "npm run build --workspace @browser-recall/desktop && node tests/smoke/macos-desktop-window-lifecycle.mjs",
+    "test:desktop-native": "npm run build --workspace @browser-recall/desktop && cargo test --locked --release -p browser-recall-desktop --test macos_window_frame && node tests/smoke/macos-desktop-window-lifecycle.mjs",
     "test:desktop-single-instance": "node tests/smoke/windows-desktop-single-instance.mjs",
     "coverage": "npm run coverage:js && npm run coverage:rust && npm run coverage:monitor",
     "coverage:js": "vitest run --config vitest.coverage.config.js --coverage",

@@ -925,12 +925,27 @@ async function getContextMenuSelectionPayload(tabId, menuSelectionText) {
   }
 
   const response = await chrome.tabs.sendMessage(tabId, {
-    action: 'getStructuredSelectionText',
+    action: 'captureContextMenuSelection',
   });
-  if (!response || typeof response !== 'object') {
-    throw new Error('Page returned no structured selection');
+  if (response?.success !== true) {
+    throw new Error(response?.error || 'Page returned no selection capture');
   }
-  const structured = String(response.selectionText || '').trim();
+  if (response.source === 'native-pdf') {
+    if (!menuSelection) {
+      throw new Error('Select text before creating a highlight');
+    }
+    // Native PDF selections are supplied by the context-menu event rather
+    // than a DOM range. An empty CSS path explicitly records no DOM anchor.
+    return { excerpt: [menuSelection], cssPath: [''] };
+  }
+
+  if (response.source !== 'dom') {
+    throw new Error('Page selection source is invalid');
+  }
+  if (typeof response.text !== 'string') {
+    throw new Error('Page selection text must be a string');
+  }
+  const structured = response.text.trim();
   if (!structured) {
     throw new Error('Page returned an empty structured selection');
   }
@@ -941,20 +956,20 @@ async function getContextMenuSelectionPayload(tabId, menuSelectionText) {
     throw new Error('Page selection changed before the highlight was captured');
   }
   if (
-    !Array.isArray(response.selectionExcerpt) ||
-    !response.selectionExcerpt.every((part) => typeof part === 'string')
+    !Array.isArray(response.excerpt) ||
+    !response.excerpt.every((part) => typeof part === 'string')
   ) {
     throw new Error('Page selection excerpt must be a string array');
   }
   if (
-    !Array.isArray(response.selectionCssPath) ||
-    !response.selectionCssPath.every((part) => typeof part === 'string')
+    !Array.isArray(response.cssPath) ||
+    !response.cssPath.every((part) => typeof part === 'string')
   ) {
     throw new Error('Page selection CSS path must be a string array');
   }
   return {
-    excerpt: response.selectionExcerpt,
-    cssPath: response.selectionCssPath,
+    excerpt: response.excerpt,
+    cssPath: response.cssPath,
   };
 }
 

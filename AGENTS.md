@@ -102,6 +102,8 @@ Read [ARCHITECTURE.md](docs/ARCHITECTURE.md) for how Browser Recall works,
 - Saved text anchors record a highlight's location. Anchors need exact text offsets
   and the sequence of host elements leading into shadow DOM. A document-only CSS
   selector cannot distinguish repeated text or reach content inside a shadow root.
+- Classify native PDF selections by the PDF document itself. A PDF embed must not
+  bypass structured selection validation or remove anchors from surrounding HTML text.
 - Concurrent note replacements from different devices remain valid and visible
   in Book after sync.
 

@@ -39,6 +39,7 @@ if (originalSetIcon && !globalThis.browserRecallActionIconStateForTest) {
 globalThis.browserRecallActionIconStateForTest = actionIconState;
 
 globalThis.browserRecallCommandListenersForTest = [];
+globalThis.browserRecallContextMenuListenersForTest = [];
 globalThis.browserRecallTabMessageFailuresForTest = [];
 globalThis.browserRecallImmediateScriptNavigationsForTest = [];
 
@@ -116,5 +117,16 @@ if (originalOnCommandAddListener) {
   chrome.commands.onCommand.addListener = (listener) => {
     globalThis.browserRecallCommandListenersForTest.push(listener);
     return originalOnCommandAddListener(listener);
+  };
+}
+
+const originalOnContextMenuAddListener =
+  chrome.contextMenus?.onClicked?.addListener?.bind(
+    chrome.contextMenus.onClicked,
+  );
+if (originalOnContextMenuAddListener) {
+  chrome.contextMenus.onClicked.addListener = (listener) => {
+    globalThis.browserRecallContextMenuListenersForTest.push(listener);
+    return originalOnContextMenuAddListener(listener);
   };
 }

@@ -1489,6 +1489,19 @@ test.describe('Snapshot slug meta tag', () => {
     const highlightText = `shared highlight editor excerpt ${caseSeed}`;
     const noteText = `shared editor note ${caseSeed}`;
     const pageBody = `<main><p>${highlightText}</p></main>`;
+    const captureEditor = async (editor, filename) => {
+      // Playwright cannot hide a caret inside this closed shadow root. Compare
+      // the editor surfaces with the document body focused so caret blink timing
+      // cannot change the captured pixels. Keep the complete image comparison.
+      const bodyFocused = await editor.evaluate((host) => {
+        const body = host.ownerDocument.body;
+        body.tabIndex = -1;
+        body.focus({ preventScroll: true });
+        return host.ownerDocument.activeElement === body;
+      });
+      expect(bodyFocused).toBe(true);
+      return editor.screenshot({ path: test.info().outputPath(filename) });
+    };
 
     localServer.addPage(path, {
       title: 'Highlight Editor Parity',
@@ -1538,7 +1551,7 @@ test.describe('Snapshot slug meta tag', () => {
     await liveMark.click();
     const liveEditor = livePage.locator('#browser-recall-highlight-overlay');
     await expect(liveEditor).toBeVisible();
-    const liveEditorPixels = await liveEditor.screenshot();
+    const liveEditorPixels = await captureEditor(liveEditor, 'live-editor.png');
 
     const viewer = await extContext.newPage();
     await viewer.goto(
@@ -1550,7 +1563,10 @@ test.describe('Snapshot slug meta tag', () => {
     await snapshotMark.click();
     const snapshotEditor = frame.locator('#browser-recall-highlight-overlay');
     await expect(snapshotEditor).toBeVisible();
-    const snapshotEditorPixels = await snapshotEditor.screenshot();
+    const snapshotEditorPixels = await captureEditor(
+      snapshotEditor,
+      'snapshot-editor.png',
+    );
 
     expect(snapshotEditorPixels.equals(liveEditorPixels)).toBe(true);
 

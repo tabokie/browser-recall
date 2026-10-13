@@ -12,6 +12,8 @@
 mod config;
 mod logging;
 mod login_item;
+#[cfg(target_os = "macos")]
+mod macos_window_frame;
 mod search;
 mod shell_contract;
 #[cfg(target_os = "windows")]
@@ -110,7 +112,10 @@ struct WindowFrame {
 #[derive(Clone, Copy)]
 struct RetainedWindowFrame {
     outer: WindowFrame,
+    #[cfg(not(target_os = "macos"))]
     inner_size: PhysicalSize<u32>,
+    #[cfg(target_os = "macos")]
+    native: macos_window_frame::RetainedFrame,
 }
 
 #[derive(Default)]
@@ -285,11 +290,6 @@ fn tray_menu_shows_on_left_click() -> bool {
     false
 }
 
-#[cfg(test)]
-fn tray_menu_shows_on_right_click() -> bool {
-    true
-}
-
 fn tray_event_opens_main_window(event: &TrayIconEvent) -> bool {
     matches!(
         event,
@@ -322,12 +322,26 @@ fn log_window_error(result: tauri::Result<()>, action: &str) {
 }
 
 fn capture_window_frame(window: &WebviewWindow) -> Option<RetainedWindowFrame> {
+    #[cfg(target_os = "macos")]
+    if objc2::MainThreadMarker::new().is_none() {
+        warn!("cannot capture native main window frame outside the main thread");
+        return None;
+    }
     Some(RetainedWindowFrame {
         outer: WindowFrame {
             position: window.outer_position().ok()?,
             size: window.outer_size().ok()?,
         },
+        #[cfg(not(target_os = "macos"))]
         inner_size: window.inner_size().ok()?,
+        #[cfg(target_os = "macos")]
+        native: {
+            // CloseRequested captures the frame on the main thread while the
+            // Tauri window still owns the native NSWindow.
+            let native = window.ns_window().ok()?;
+            let native = unsafe { native.cast::<objc2_app_kit::NSWindow>().as_ref() }?;
+            macos_window_frame::capture(native)
+        },
     })
 }
 
@@ -376,6 +390,7 @@ fn retained_window_frame_is_visible(window: &WebviewWindow, frame: WindowFrame) 
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn restore_window_frame(window: &WebviewWindow, frame: RetainedWindowFrame) {
     // Hidden windows usually retain their frame. Avoid an unnecessary resize:
     // Tauri's size setter takes the inner size, not the outer frame dimensions.
@@ -388,6 +403,30 @@ fn restore_window_frame(window: &WebviewWindow, frame: RetainedWindowFrame) {
             "restore retained position",
         );
     }
+}
+
+#[cfg(target_os = "macos")]
+fn restore_window_frame(window: &WebviewWindow, frame: RetainedWindowFrame) {
+    let retained_window = window.clone();
+    log_window_error(
+        window.run_on_main_thread(move || {
+            let native = match retained_window.ns_window() {
+                Ok(native) => native,
+                Err(error) => {
+                    warn!(%error, "failed to obtain native main window for frame restoration");
+                    return;
+                }
+            };
+            // The closure runs on the main thread and retained_window owns the
+            // NSWindow throughout the native frame restoration.
+            if let Some(native) = unsafe { native.cast::<objc2_app_kit::NSWindow>().as_ref() } {
+                macos_window_frame::restore(native, frame.native);
+            } else {
+                warn!("native main window is absent during frame restoration");
+            }
+        }),
+        "restore retained frame",
+    );
 }
 
 fn show_main_window(app: &AppHandle) {
@@ -520,6 +559,10 @@ mod tests {
     use super::*;
     use browser_recall_daemon::pairing::static_approver;
     use std::sync::atomic::AtomicUsize;
+
+    fn tray_menu_shows_on_right_click() -> bool {
+        true
+    }
 
     fn shell_state(service_state: ServiceState) -> ShellState {
         ShellState {

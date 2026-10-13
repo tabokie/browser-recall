@@ -2,28 +2,6 @@ import { execFileSync } from 'node:child_process';
 import { rm } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 
-export async function withCleanup(run, cleanups) {
-  const errors = [];
-  try {
-    await run();
-  } catch (error) {
-    errors.push(error);
-  }
-  for (const cleanup of cleanups) {
-    try {
-      await cleanup();
-    } catch (error) {
-      errors.push(error);
-    }
-  }
-  if (errors.length === 1) throw errors[0];
-  if (errors.length > 1) {
-    throw new AggregateError(errors, 'Desktop smoke or teardown failed', {
-      cause: errors[0],
-    });
-  }
-}
-
 export function waitForExit(child, timeoutMs) {
   if (child.exitCode !== null || child.signalCode !== null) {
     return Promise.resolve({ code: child.exitCode, signal: child.signalCode });

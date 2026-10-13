@@ -6,6 +6,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { compileDocumentationWindow } from '../../scripts/lib/documentation-native-capture.mjs';
 import { verifyMacosDocumentationApp } from '../../scripts/verify-macos-documentation-app.mjs';
+import { withCleanup } from './desktop-test-cleanup.mjs';
+import {
+  macosAppRegistrar,
+  unregisterMacosTestApp,
+} from './macos-desktop-process.mjs';
 
 if (process.platform !== 'darwin') {
   console.log('macOS documentation URL routing check skipped');
@@ -18,12 +23,10 @@ const app = path.join(
   'target/release/bundle/macos/Browser Recall Documentation.app',
 );
 const work = mkdtempSync(path.join(tmpdir(), 'browser-recall-url-routing-'));
-const registrar =
-  '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister';
 let registered = false;
 const testApp = path.join(work, 'Browser Recall URL Test.app');
 let pid;
-try {
+await withCleanup(async () => {
   const helper = compileDocumentationWindow(work);
   const handler = () =>
     execFileSync(helper, ['url-handler', 'browser-recall://open'], {
@@ -53,7 +56,7 @@ try {
   // Exclude production URL schemes from the retained documentation bundle too:
   // changing only a temporary capture copy leaves macOS URL routing vulnerable.
   verifyMacosDocumentationApp(app);
-  execFileSync(registrar, ['-f', app]);
+  execFileSync(macosAppRegistrar, ['-f', app]);
   registered = true;
   assert.equal(
     handler(),
@@ -121,10 +124,16 @@ try {
   console.log(
     'Retained documentation bundle preserves Browser Recall URL routing.',
   );
-} finally {
-  try {
+}, [
+  async () => {
     if (pid) {
-      process.kill(pid, 'SIGTERM');
+      try {
+        process.kill(pid, 'SIGTERM');
+      } catch (error) {
+        if (error.code !== 'ESRCH') throw error;
+        pid = null;
+        return;
+      }
       for (let attempt = 0; attempt < 50; attempt += 1) {
         try {
           process.kill(pid, 0);
@@ -139,9 +148,10 @@ try {
       }
       if (pid) throw new Error('Isolated URL test app did not exit');
     }
-  } finally {
-    if (registered) execFileSync(registrar, ['-u', app]);
-    execFileSync(registrar, ['-u', testApp]);
-    rmSync(work, { recursive: true, force: true });
-  }
-}
+  },
+  () => {
+    if (registered) unregisterMacosTestApp(app);
+  },
+  () => unregisterMacosTestApp(testApp),
+  () => rmSync(work, { recursive: true, force: true }),
+]);
