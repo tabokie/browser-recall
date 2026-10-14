@@ -1604,5 +1604,32 @@
   "extensionStoreFirefox": {
     "message": "Firefox Add-ons",
     "description": "Browser extension store link label."
+  },
+  "desktopUpdates": {
+    "message": "Pembaruan"
+  },
+  "desktopUpdatesAutomatic": {
+    "message": "Memeriksa pembaruan secara otomatis"
+  },
+  "desktopUpdateChecking": {
+    "message": "Memeriksa pembaruan…"
+  },
+  "desktopUpdateCurrent": {
+    "message": "Browser Recall sudah terbaru"
+  },
+  "desktopUpdateAvailable": {
+    "message": "Pembaruan tersedia"
+  },
+  "desktopUpdateDownloading": {
+    "message": "Mengunduh pembaruan…"
+  },
+  "desktopUpdateInstalling": {
+    "message": "Memasang pembaruan dan memulai ulang…"
+  },
+  "desktopUpdateCheck": {
+    "message": "Periksa pembaruan"
+  },
+  "desktopUpdateInstall": {
+    "message": "Perbarui dan mulai ulang"
   }
 }

@@ -30,10 +30,9 @@ if (process.platform !== 'win32') {
 }
 
 const root = path.resolve(import.meta.dirname, '../..');
-const executable = path.join(
-  root,
-  'dist/desktop/windows/bin/browser-recall-desktop.exe',
-);
+const executable =
+  process.env.BROWSER_RECALL_DESKTOP_TEST_EXECUTABLE ||
+  path.join(root, 'dist/desktop/windows/bin/browser-recall-desktop.exe');
 if (!existsSync(executable)) {
   throw new Error(
     `Desktop executable is missing at ${executable}; build the desktop app first`,

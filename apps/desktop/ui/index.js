@@ -26,6 +26,7 @@ import {
   sendAction,
 } from './desktop-bridge.js';
 import { formatHighlightExcerpt } from './highlight-format.js';
+import { createDesktopUpdates } from './desktop-updates.js';
 import { attentionStrength, aggregateAttention } from './attention-utils.js';
 import {
   initCharts,
@@ -95,6 +96,7 @@ async function initializeDesktopLocalization({
     selectedOverride !== 'system' ? selectedOverride : desktopSystemLocale;
   await initializeCatalogI18n({ locale: effectiveLocale });
   localizeDocument();
+  desktopUpdatesUi.render();
   const select = document.getElementById('localeSelect');
   populateLocaleSelect(select);
   if (select) select.value = selectedOverride;
@@ -6230,6 +6232,15 @@ initMarqueeForElements(
 );
 
 // --- Settings modal ---
+const desktopUpdatesUi = createDesktopUpdates({
+  tr,
+  openSettings: openSettingsModal,
+  showError: (message) => showErrorBubble(message, { suffix: '' }),
+});
+desktopUpdatesUi
+  .start()
+  .catch((error) => showErrorBubble(error.message, { suffix: '' }));
+
 document.getElementById('settingsBtn').addEventListener('click', async () => {
   await openSettingsModal();
 });
@@ -6255,6 +6266,7 @@ async function openSettingsModal() {
       renderBlacklist(),
       renderTrimRules(),
       refreshDesktopShellSettings(),
+      desktopUpdatesUi.refresh(),
     ]);
   } catch (error) {
     showErrorBubble(error.message, { suffix: '' });

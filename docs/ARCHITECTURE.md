@@ -189,13 +189,40 @@ WebSocket handlers do not keep a separate editable copy of configuration.
 
 ## Desktop app
 
-Portable desktop releases use a manual GitHub Actions workflow. Native Windows
-and macOS runners build the same selected commit through the normal desktop build
-command. Windows ships an executable in a ZIP archive; macOS ships separate
-Apple Silicon and Intel `.app` archives. Publishing waits for every build and
-archive verification, attaches SHA-256 checksums, and creates a GitHub Release
-without replacing an existing release. Installation requires no Browser Recall
-installer; configuration and collection storage follow the normal desktop setup.
+Desktop and browser extension releases use a manual GitHub Actions workflow.
+Browser Recall uses one product version across desktop and extension manifests,
+desktop and extension npm packages, desktop Cargo metadata, and GitHub Release tags. Release preparation
+validates every product version against root `package.json` before building.
+`scripts/lib/product-version.mjs` supplies the same validation to local release
+builds and update manifest generation, including both lockfiles.
+Native Windows and macOS runners and a Linux extension runner build the dispatch
+commit. Windows ships a current-user Nullsoft Scriptable Install System (NSIS) installer;
+macOS ships Apple Silicon and Intel disk images containing Browser Recall.app.
+The release includes signed update packages and a Tauri update manifest hosted
+on GitHub Releases. Publishing waits for package, signature, and native
+installation checks, attaches SHA-256 checksums, and never replaces a release.
+Chrome and Firefox ship as separate ZIP archives with a manifest at the archive
+root. The workflow compares extracted archives with the production build output
+and requires both extension archives before publishing the combined release.
+
+`apps/desktop/src-tauri/src/updates.rs` owns update state and serializes checking,
+downloading, and installation through the Tauri updater. Release builds check
+GitHub's latest stable release on startup and every twelve hours. Users explicitly
+choose Update and restart. The updater verifies the package signature before
+stopping the daemon. The native command/sync gate excludes concurrent operations;
+daemon shutdown closes connector sessions, waits for accepted commands, and saves
+checkpoints. The update coordinator holds its operation lock through daemon
+recovery or restart, and publishes retryable failures only after recovery finishes.
+App updates do not depend on GitHub sync configuration. Update errors and
+progress appear in Settings; available updates also have a sidebar action.
+Application updates preserve configuration and collection storage.
+Release CI runs an older native app through a signed update and relaunch on both
+operating systems, retaining an authenticated connector, accepted note edits,
+settings, and the selected collection. The connector must reconnect and write
+successfully after relaunch.
+`ServerStartOptions::with_environment_ports` applies the same strict port override
+to desktop and standalone daemon startup; isolated native tests use a dedicated
+port instead of the browser-discoverable default ports.
 
 Closing the desktop window keeps the process and webview running. Tray actions,
 Dock actions, and deep links reopen and focus the same window. Single-instance

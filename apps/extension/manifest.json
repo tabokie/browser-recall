@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionPackageName__",
-  "version": "1.0",
+  "version": "1.0.1",
   "description": "__MSG_extensionDescription__",
   "permissions": [
     "storage",
@@ -72,19 +72,27 @@
   },
   "commands": {
     "open-popup": {
-      "suggested_key": { "default": "Alt+R" },
+      "suggested_key": {
+        "default": "Alt+R"
+      },
       "description": "__MSG_commandOpenPopup__"
     },
     "highlight-selection": {
-      "suggested_key": { "default": "Alt+H" },
+      "suggested_key": {
+        "default": "Alt+H"
+      },
       "description": "__MSG_commandHighlightSelection__"
     },
     "capture-snapshot": {
-      "suggested_key": { "default": "Alt+S" },
+      "suggested_key": {
+        "default": "Alt+S"
+      },
       "description": "__MSG_commandCaptureSnapshot__"
     },
     "like-page": {
-      "suggested_key": { "default": "Alt+L" },
+      "suggested_key": {
+        "default": "Alt+L"
+      },
       "description": "__MSG_commandLikePage__"
     },
     "dislike-page": {

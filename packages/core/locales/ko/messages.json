@@ -1604,5 +1604,32 @@
   "extensionStoreFirefox": {
     "message": "Firefox Add-ons",
     "description": "Browser extension store link label."
+  },
+  "desktopUpdates": {
+    "message": "업데이트"
+  },
+  "desktopUpdatesAutomatic": {
+    "message": "업데이트를 자동으로 확인합니다"
+  },
+  "desktopUpdateChecking": {
+    "message": "업데이트 확인 중…"
+  },
+  "desktopUpdateCurrent": {
+    "message": "Browser Recall이 최신 버전입니다"
+  },
+  "desktopUpdateAvailable": {
+    "message": "업데이트가 있습니다"
+  },
+  "desktopUpdateDownloading": {
+    "message": "업데이트 다운로드 중…"
+  },
+  "desktopUpdateInstalling": {
+    "message": "업데이트 설치 및 재시작 중…"
+  },
+  "desktopUpdateCheck": {
+    "message": "업데이트 확인"
+  },
+  "desktopUpdateInstall": {
+    "message": "업데이트 및 재시작"
   }
 }

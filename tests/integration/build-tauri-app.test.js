@@ -19,6 +19,7 @@ describe('Tauri build launcher', () => {
     )?.[1];
 
     expect(commonDependencies).toContain('tauri-plugin-autostart');
+    expect(commonDependencies).toContain('tauri-plugin-updater');
 
     const schemaDirectory = new URL(
       '../../apps/desktop/src-tauri/gen/schemas/',
@@ -33,6 +34,7 @@ describe('Tauri build launcher', () => {
       readFileSync(new URL('acl-manifests.json', schemaDirectory), 'utf8'),
     );
     expect(aclManifests).toHaveProperty('autostart');
+    expect(aclManifests).toHaveProperty('updater');
   });
 
   it('normalizes platform build and artifact policy once', () => {

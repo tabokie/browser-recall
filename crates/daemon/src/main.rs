@@ -31,13 +31,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         std::process::exit(2);
     }
     let mut options =
-        ServerStartOptions::phase1_defaults(config_store, static_approver(args.approve_mode));
-    if let Some(port_candidates) = port_candidates_from_env().unwrap_or_else(|message| {
-        eprintln!("{message}");
-        std::process::exit(2);
-    }) {
-        options.port_candidates = port_candidates;
-    }
+        ServerStartOptions::phase1_defaults(config_store, static_approver(args.approve_mode))
+            .with_environment_ports()
+            .unwrap_or_else(|message| {
+                eprintln!("{message}");
+                std::process::exit(2);
+            });
     options.test_control_enabled = args.test_control_enabled;
     let handle = start_server(options).await?;
     println!("listening on {}", handle.port());
@@ -142,37 +141,6 @@ fn configure_data_directory(
         })
         .map_err(|error| error.to_string())?;
     Ok(())
-}
-
-fn port_candidates_from_env() -> Result<Option<Vec<u16>>, String> {
-    let raw = match env::var("BROWSER_RECALL_PORTS") {
-        Ok(raw) => raw,
-        Err(env::VarError::NotPresent) => return Ok(None),
-        Err(error) => return Err(format!("BROWSER_RECALL_PORTS is not valid UTF-8: {error}")),
-    };
-    let ports = raw
-        .split(',')
-        .map(str::trim)
-        .map(|value| {
-            if value.is_empty() {
-                return Err("BROWSER_RECALL_PORTS contains an empty port".to_string());
-            }
-            value
-                .parse::<u16>()
-                .map_err(|_| format!("BROWSER_RECALL_PORTS contains invalid port `{value}`"))
-                .and_then(|port| {
-                    if port == 0 {
-                        Err("BROWSER_RECALL_PORTS must not contain port 0".to_string())
-                    } else {
-                        Ok(port)
-                    }
-                })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    if ports.is_empty() {
-        return Err("BROWSER_RECALL_PORTS must contain at least one port".to_string());
-    }
-    Ok(Some(ports))
 }
 
 #[cfg(test)]

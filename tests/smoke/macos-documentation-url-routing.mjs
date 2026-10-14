@@ -5,12 +5,9 @@ import { setTimeout } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { compileDocumentationWindow } from '../../scripts/lib/documentation-native-capture.mjs';
-import { verifyMacosDocumentationApp } from '../../scripts/verify-macos-documentation-app.mjs';
+import { buildAndRegisterMacosDocumentationApp } from './macos-documentation-app.mjs';
 import { withCleanup } from './desktop-test-cleanup.mjs';
-import {
-  macosAppRegistrar,
-  unregisterMacosTestApp,
-} from './macos-desktop-process.mjs';
+import { unregisterMacosTestApp } from './macos-desktop-process.mjs';
 
 if (process.platform !== 'darwin') {
   console.log('macOS documentation URL routing check skipped');
@@ -23,7 +20,6 @@ const app = path.join(
   'target/release/bundle/macos/Browser Recall Documentation.app',
 );
 const work = mkdtempSync(path.join(tmpdir(), 'browser-recall-url-routing-'));
-let registered = false;
 const testApp = path.join(work, 'Browser Recall URL Test.app');
 let pid;
 await withCleanup(async () => {
@@ -32,37 +28,33 @@ await withCleanup(async () => {
     execFileSync(helper, ['url-handler', 'browser-recall://open'], {
       encoding: 'utf8',
     }).trim();
-  const previousHandler = handler();
-  await new Promise((resolve, reject) => {
-    const build = spawn(
-      process.execPath,
-      [
-        path.join(root, 'node_modules/@tauri-apps/cli/tauri.js'),
-        'build',
-        '--bundles',
-        'app',
-        '--config',
-        path.join(root, 'scripts/documentation-tauri.conf.json'),
-      ],
-      { cwd: path.join(root, 'apps/desktop'), stdio: 'inherit' },
-    );
-    build.once('error', reject);
-    build.once('exit', (code, signal) =>
-      code === 0
-        ? resolve()
-        : reject(new Error(`Documentation build failed: ${signal || code}`)),
-    );
+  const previousHandler = await buildAndRegisterMacosDocumentationApp({
+    app,
+    readHandler: handler,
+    build: () =>
+      new Promise((resolve, reject) => {
+        const build = spawn(
+          process.execPath,
+          [
+            path.join(root, 'node_modules/@tauri-apps/cli/tauri.js'),
+            'build',
+            '--bundles',
+            'app',
+            '--config',
+            path.join(root, 'scripts/documentation-tauri.conf.json'),
+          ],
+          { cwd: path.join(root, 'apps/desktop'), stdio: 'inherit' },
+        );
+        build.once('error', reject);
+        build.once('exit', (code, signal) =>
+          code === 0
+            ? resolve()
+            : reject(
+                new Error(`Documentation build failed: ${signal || code}`),
+              ),
+        );
+      }),
   });
-  // Exclude production URL schemes from the retained documentation bundle too:
-  // changing only a temporary capture copy leaves macOS URL routing vulnerable.
-  verifyMacosDocumentationApp(app);
-  execFileSync(macosAppRegistrar, ['-f', app]);
-  registered = true;
-  assert.equal(
-    handler(),
-    previousHandler,
-    'Registering the retained documentation app changed Browser Recall URL routing',
-  );
   cpSync(app, testApp, { recursive: true });
   renameSync(
     path.join(testApp, 'Contents/MacOS/browser-recall-desktop'),
@@ -149,9 +141,7 @@ await withCleanup(async () => {
       if (pid) throw new Error('Isolated URL test app did not exit');
     }
   },
-  () => {
-    if (registered) unregisterMacosTestApp(app);
-  },
+  () => unregisterMacosTestApp(app),
   () => unregisterMacosTestApp(testApp),
   () => rmSync(work, { recursive: true, force: true }),
 ]);

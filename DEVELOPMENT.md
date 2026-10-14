@@ -75,7 +75,11 @@ npm run dev:desktop
 ```
 
 `npm run build` produces a macOS `.app` and executables on other platforms.
-Installer packaging is a separate release step:
+Installer packaging uses the separate signed release command described below.
+Windows release builds produce a current-user NSIS installer; macOS release
+builds produce a disk image and updater archive in `release-assets/`.
+
+The separate Apple certificate packaging command remains available:
 
 ```bash
 npm run build:dmg --workspace @browser-recall/desktop
@@ -83,57 +87,128 @@ npm run build:dmg --workspace @browser-recall/desktop
 
 `build:dmg` collects macOS disk images (`.dmg` files) into
 `dist/desktop/macos/dmg/`, where the Tauri bundle type is `dmg`. The command replaces
-the macOS output directory with the executable and disk images. Windows and Linux
-local builds produce executables; the repository does not provide installer
-packaging commands for those platforms.
+the macOS output directory with the executable and disk images. Regular Windows
+and Linux local builds produce executables. Linux installer packaging is not
+provided by the release workflow.
 
 macOS local builds use ad-hoc signing, which does not require an Apple certificate.
 The signature uses a stable app identifier, and the build verifies the complete
 bundle. Set `APPLE_SIGNING_IDENTITY` to an installed Apple signing identity for
-certificate signing. DMG builds require an Apple signing identity; distribution
-also requires notarization credentials.
+certificate signing. `build:dmg` requires an Apple signing identity. The release
+command creates disk images with the existing ad-hoc app signature; updater
+signing uses its own key. Apple Developer ID distribution and notarization require
+separate Apple credentials.
 
-### Portable GitHub releases
+### GitHub releases and desktop updates
 
-`.github/workflows/release-desktop.yml` runs only through GitHub Actions'
-`workflow_dispatch` trigger. Once the workflow is on the default branch, open
-**Actions → Release Portable Desktop → Run workflow**, select a commit's branch
-or tag, and choose whether to keep a draft or mark a prerelease. The default
-publishes a GitHub Release after every platform build and archive check succeeds.
-The selected commit should already have passed the regular CI workflow.
+`.github/workflows/release.yml` runs through `workflow_dispatch`.
+Open **Actions → Release → Run workflow**, select a tested commit's
+branch or tag, and choose whether to keep a draft or mark a prerelease. Every
+build uses the dispatch commit. Existing releases are never overwritten.
 
-The release tag is `v` followed by the desktop version. Keep the versions in
-`apps/desktop/package.json`, `apps/desktop/src-tauri/Cargo.toml`, and
-`apps/desktop/src-tauri/tauri.conf.json` aligned, and update both dependency
-lockfiles when changing the version. A version with a prerelease suffix is
-automatically marked as a prerelease. Existing releases are never overwritten;
-an existing tag must point to the selected commit. If an upload failure leaves
-an incomplete draft, delete that draft before rerunning the workflow on the same
-commit. The workflow serializes release runs and pins every build to the dispatch
-commit, even if the selected branch advances during the build.
+Browser Recall uses one product version, defined in root `package.json`. Keep
+`apps/desktop/package.json`, `apps/desktop/src-tauri/Cargo.toml`,
+`apps/desktop/src-tauri/tauri.conf.json`, `apps/extension/package.json`, and
+`apps/extension/manifest.json` aligned, and update both lockfiles when changing
+the version. `scripts/lib/product-version.mjs` validates these files and both
+lockfiles for CI release preparation, local release builds, and update manifest
+generation. Every release entry point rejects a mismatch. Both browser extension
+archives retain the same version as the desktop installers and release tag.
+Use three numeric components, each at most 65535, to satisfy browser manifest
+requirements. Use the workflow's prerelease input for preview releases; browser
+manifest versions cannot contain semantic-version prerelease suffixes. The release
+tag is `v` followed by the product version.
 
-| Asset | Contents |
+| Asset | Purpose |
 | --- | --- |
-| `browser-recall-v<version>-windows-x64.zip` | `browser-recall-desktop.exe` |
-| `browser-recall-v<version>-macos-arm64.zip` | Apple Silicon `Browser Recall.app` |
-| `browser-recall-v<version>-macos-x64.zip` | Intel `Browser Recall.app` |
-| `SHA256SUMS` | SHA-256 checksums for the three ZIP archives |
+| `browser-recall-v<version>-windows-x64-setup.exe` | Current-user Windows installer and update package |
+| `browser-recall-v<version>-macos-arm64.dmg` | Apple Silicon installation; drag Browser Recall.app into Applications |
+| `browser-recall-v<version>-macos-x64.dmg` | Intel installation; drag Browser Recall.app into Applications |
+| `browser-recall-v<version>-macos-<arch>.app.tar.gz` | macOS update package, consumed by Browser Recall |
+| `browser-recall-v<version>-extension-chrome.zip` | Chrome/Chromium extension; extract and load the folder unpacked |
+| `browser-recall-v<version>-extension-firefox.zip` | Firefox extension; extract and temporarily load `manifest.json` through `about:debugging` |
+| `*.sig` | Update-package signatures |
+| `latest.json` | Tauri update manifest for Windows x64 and both macOS architectures |
+| `SHA256SUMS` | Checksums for installers, extension archives, and update packages |
 
-Builds use native Windows and macOS runners, Node.js 24, Rust 1.97.0, and the
-existing desktop build command. The Windows job runs the native single-instance
-test and verifies the extracted executable. The macOS jobs archive with `ditto`
-and verify the extracted bundle's signature. GitHub Actions keeps intermediate
-archives for seven days; GitHub Releases hosts the downloadable assets.
+Release builds use Node.js 24 and Rust 1.97.0 on native Windows and macOS runners.
+Run the release build locally with a signing key in the environment:
 
-Portable means no Browser Recall installer: extract the archive and run the
-executable or complete `.app` bundle. Preferences still use the operating system's
-app-data folder, and setup asks for the collection's data folder. Windows requires
-Microsoft Edge WebView2 Runtime. Browser extensions are installed separately.
+```bash
+TAURI_SIGNING_PRIVATE_KEY="/absolute/path/to/updater.key" \
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
+npm run build:release --workspace @browser-recall/desktop
+```
 
-No signing secrets are required. Windows builds are unsigned; macOS builds use
-the existing ad-hoc signature and are not notarized. Downloads may need SmartScreen
-or macOS Privacy & Security approval. Apple Developer ID signing and notarization
-are a separate distribution setup; these archives do not claim that trust level.
+Set the GitHub Actions repository secret `TAURI_SIGNING_PRIVATE_KEY` to the
+private key's **contents**, and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` when the key
+has a password. The public key in `tauri.conf.json` must match. Keep a durable,
+secure backup of the private key: replacing the public key strands installed
+versions that trust the old key. Never commit a private key.
+
+The release build signs the final package after macOS bundle finalization. A Rust
+check downloads the package through the production Tauri updater and verifies
+that the embedded public key accepts its signature. On macOS, the check also
+installs the package into a temporary application bundle and runs the production
+bundle verifier. CI verifies the disk image's application bundle. Windows CI
+checks installation, the installed executable, native single-instance behavior,
+and uninstallation. Both native platforms also run the real app at version 0.0.1,
+check a local update manifest, install the signed release package through the
+native Update and restart control, and verify a different process running the new
+version. A connector session remains open until shutdown; accepted note edits,
+settings, the selected data folder, and the pairing token must survive. The
+connector reconnects and successfully writes another note edit after relaunch.
+Windows runs this installer test only in a disposable session. CI retains native
+update logs and accessibility text on failure. Release artifacts are kept for
+seven days before publication.
+
+Run the native update check after building a signed release package:
+
+```bash
+node tests/smoke/desktop-update-lifecycle.mjs
+```
+
+On macOS, quit Browser Recall first. The check refuses to stop a user's running
+app and uses a temporary application, configuration, and collection. On Windows,
+use a disposable session and set `BROWSER_RECALL_ISOLATED_WINDOWS_SESSION=1`.
+The check builds an older fixture with a local HTTP endpoint; released binaries
+retain the production HTTPS endpoint. No test updater endpoint is added to the
+production runtime.
+Desktop and standalone daemon startup share strict `BROWSER_RECALL_PORTS`
+parsing. The native update check uses a dedicated port throughout the update, so
+installed browser extensions cannot discover and pair with the test daemon.
+
+To upgrade manually on macOS, quit Browser Recall using Quit, open the new disk
+image for the Mac's architecture, drag Browser Recall.app into Applications, choose
+Replace, eject the disk image, and reopen Browser Recall from Applications. Closing
+the window only hides the app. On Windows, quit Browser Recall and run the new setup
+executable. Collections, preferences, and browser pairing are preserved. An older
+installation without self-update needs this manual upgrade once.
+
+The release workflow builds both production extensions once on Ubuntu 24.04 with
+Node.js 24. Extension ZIP archives contain `manifest.json` at the archive root.
+The workflow extracts each archive and compares its complete contents with the
+build output, then includes both archives in release checksums. Publication waits
+for every desktop and extension build to pass. The archives contain production
+code; test control handlers are omitted by the normal extension build.
+
+Browser Recall checks for updates five seconds after release-build startup and
+every twelve hours while running. GitHub's latest-release endpoint selects stable
+published releases. Development builds and isolated native/documentation profiles
+do not check automatically. Settings provides manual checking, progress, errors,
+and **Update and restart**; an available update also appears in the sidebar.
+Downloads are authenticated before installation. Installation waits for native
+commands and sync, closes daemon connector sessions, and saves accepted checkpoint
+writes. The update coordinator retains its operation lock through daemon recovery
+or restart. Errors become retryable only after recovery finishes. Update
+installation does not depend on GitHub sync form validation or credentials.
+
+Update-package signatures are separate from operating-system code signing.
+The default release still uses ad-hoc macOS signing without notarization and
+unsigned Windows binaries. macOS installation approval and Windows SmartScreen
+behavior are unchanged. The Windows installer installs WebView2 Runtime when
+needed. Preferences and the selected collection remain outside the application.
+Browser extensions are installed separately.
 
 ### Connect the browser
 
@@ -409,11 +484,15 @@ The documentation build uses `scripts/documentation-tauri.conf.json` to disable
 URL schemes in the retained bundle and temporary capture copy. The capture
 verifies the retained bundle before launching the copy. Native macOS CI also
 checks that registering the retained bundle preserves Browser Recall URL routing
-and that app URL activation reopens a hidden window in the same process. The check
+and that app URL activation reopens a hidden window in the same process. The URL
+routing baseline is read after the build, immediately before registration, so
+production app discovery during the build cannot produce a false failure. A native
+regression forces production routing to become available during the build. The check
 uses a temporary app and profile, and targets the app explicitly to preserve the
 user's default URL handler:
 
 ```bash
+npx vitest run tests/integration/macos-documentation-url-routing.test.js
 node tests/smoke/macos-documentation-url-routing.mjs
 ```
 
@@ -442,7 +521,11 @@ combined Timeline image keeps the wallpaper outside the diagonal color-scheme di
 
 The capture scripts operate the real app and browser. The scripts check content,
 window dimensions, language, and whether rendering has finished before saving
-images and capture manifests. Both commands share native helper compilation,
+images and capture manifests. Before each Timeline capture, the desktop script
+scrolls the time chart to the beginning of the fixed fixture's activity. The script
+verifies the fixture's month label inside the chart viewport before and after
+capture, so advancing machine dates cannot leave the screenshot showing empty
+recent days. Both commands share native helper compilation,
 capture arguments, and pixel-stability checks. Browser capture uses
 English and verifies note persistence. Capture failures retain evidence in
 `test-results/documentation/`.

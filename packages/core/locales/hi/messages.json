@@ -1604,5 +1604,32 @@
   "extensionStoreFirefox": {
     "message": "Firefox Add-ons",
     "description": "Browser extension store link label."
+  },
+  "desktopUpdates": {
+    "message": "अपडेट"
+  },
+  "desktopUpdatesAutomatic": {
+    "message": "अपडेट अपने आप जाँचता है"
+  },
+  "desktopUpdateChecking": {
+    "message": "अपडेट जाँचे जा रहे हैं…"
+  },
+  "desktopUpdateCurrent": {
+    "message": "Browser Recall अप टू डेट है"
+  },
+  "desktopUpdateAvailable": {
+    "message": "अपडेट उपलब्ध है"
+  },
+  "desktopUpdateDownloading": {
+    "message": "अपडेट डाउनलोड हो रहा है…"
+  },
+  "desktopUpdateInstalling": {
+    "message": "अपडेट इंस्टॉल हो रहा है और पुनः शुरू हो रहा है…"
+  },
+  "desktopUpdateCheck": {
+    "message": "अपडेट जाँचें"
+  },
+  "desktopUpdateInstall": {
+    "message": "अपडेट करें और पुनः शुरू करें"
   }
 }

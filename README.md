@@ -26,7 +26,7 @@ All data collected by the app are stored using plain, readable formats such as J
       <p align="center">
         <img src="docs/images/book.png" alt="Browser Recall Book showing collected highlights and notes grouped by day">
         <br>
-        <strong>Book</strong> — highlights and notes, gathered by day
+        <strong>Book</strong> — highlights gathered by day
       </p>
     </td>
   </tr>

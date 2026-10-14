@@ -122,7 +122,9 @@ case "reuse-url":
     }
     print("App URL reopened the existing process \(pid)")
 case "dump":
-    print(descendants(window).map(label).joined(separator: "\n"))
+    print(descendants(window).map { element in
+        "\(label(element)) | \(String(describing: attribute(element, "AXPosition"))) | \(String(describing: attribute(element, "AXSize")))"
+    }.joined(separator: "\n"))
 case "frame", "frame-browser":
     let dimensionIndex = args[2] == "frame-browser" ? 4 : 3
     guard args.count == dimensionIndex + 2,
@@ -158,6 +160,33 @@ case "search":
     guard AXUIElementSetAttributeValue(field, "AXValue" as CFString, args[3] as CFString) == .success else {
         fail("Cannot enter search text through Accessibility")
     }
+case "scroll-start":
+    guard args.count == 4 else { fail("Expected horizontal scrolling control") }
+    let target = control(args[3])
+    guard let targetApplication = NSRunningApplication(processIdentifier: pid) else {
+        fail("Browser Recall application unavailable")
+    }
+    targetApplication.activate(options: [.activateIgnoringOtherApps])
+    let activationDeadline = Date().addingTimeInterval(2)
+    while !targetApplication.isActive && Date() < activationDeadline {
+        Thread.sleep(forTimeInterval: 0.02)
+    }
+    guard targetApplication.isActive else { fail("Cannot activate Browser Recall") }
+    let center = point(target)
+    CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+            mouseCursorPosition: center, mouseButton: .left)?.post(tap: .cghidEventTap)
+    // Let WindowServer route the pointer into the chart before sending a wheel
+    // event; the previous capture parks the pointer outside the window.
+    Thread.sleep(forTimeInterval: 0.1)
+    // Scroll the real viewport, including when years of empty days follow the
+    // fixed fixture. The caller verifies the fixture label inside the viewport.
+    guard let scroll = CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+                               wheelCount: 2, wheel1: 0, wheel2: 4096, wheel3: 0) else {
+        fail("Cannot create horizontal scroll event")
+    }
+    scroll.location = center
+    scroll.post(tap: .cghidEventTap)
+    Thread.sleep(forTimeInterval: 0.1)
 case "unfocus":
     guard let rawPosition = attribute(window, "AXPosition") else { fail("No window position") }
     var position = CGPoint.zero
@@ -168,14 +197,15 @@ case "unfocus":
     CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
             mouseCursorPosition: CGPoint(x: position.x - 10, y: position.y - 10), mouseButton: .left)?.post(tap: .cghidEventTap)
 case "visible-text":
-    guard args.count == 4 else { fail("Expected text to verify in the window") }
+    guard args.count == 4 || args.count == 5 else { fail("Expected text and optional containing control") }
+    let container = args.count == 5 ? control(args[4]) : window
     var origin = CGPoint.zero
     var size = CGSize.zero
-    guard let rawPosition = attribute(window, "AXPosition"), let rawSize = attribute(window, "AXSize"),
+    guard let rawPosition = attribute(container, "AXPosition"), let rawSize = attribute(container, "AXSize"),
           AXValueGetValue(rawPosition as! AXValue, .cgPoint, &origin),
           AXValueGetValue(rawSize as! AXValue, .cgSize, &size) else { fail("No window frame") }
     let frame = CGRect(origin: origin, size: size)
-    let visible = descendants(window).filter { label($0).contains(args[3]) }.contains { element in
+    let visible = descendants(container).filter { label($0).contains(args[3]) }.contains { element in
         guard let rawPosition = attribute(element, "AXPosition"), let rawSize = attribute(element, "AXSize") else { return false }
         var origin = CGPoint.zero
         var size = CGSize.zero

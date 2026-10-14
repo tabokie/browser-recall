@@ -4757,6 +4757,14 @@
         </button>
       </div>
 
+      <button
+        id="desktopUpdateNotice"
+        class="btn btn-secondary btn-sm"
+        style="display: none; margin: 0 16px 12px"
+        data-i18n="desktopUpdateAvailable"
+      >
+        Update available
+      </button>
       <div class="sidebar-hero-nav">
         <button
           class="sidebar-hero-button timeline-btn explore-btn"
@@ -4987,10 +4995,18 @@
         </div>
         <div id="listQueryBuilder" style="display: none"></div>
         <div class="time-chart" id="relatedChart">
-          <div class="chart-label" data-i18n="desktopResults">Results</div>
+          <div
+            class="chart-label"
+            id="relatedChartLabel"
+            data-i18n="desktopResults"
+          >
+            Results
+          </div>
           <div
             class="chart-bars scroll-boundary-contained-x"
             id="relatedChartBars"
+            role="group"
+            aria-labelledby="relatedChartLabel"
           ></div>
           <div class="chart-tooltip" id="relatedChartTooltip"></div>
         </div>
@@ -5727,6 +5743,45 @@
             </div>
           </div>
 
+          <div class="modal-group">
+            <div
+              class="modal-group-label"
+              data-i18n="desktopUpdates"
+              id="desktopUpdatesSection"
+            >
+              Updates
+            </div>
+            <div class="modal-section">
+              <div class="option">
+                <div class="option-row">
+                  <span data-i18n="extensionName">Browser Recall</span
+                  ><span id="desktopUpdateVersion"></span>
+                </div>
+                <p
+                  id="desktopUpdateStatus"
+                  role="status"
+                  aria-live="polite"
+                ></p>
+                <div class="option-row">
+                  <button
+                    id="desktopUpdateCheck"
+                    class="btn btn-secondary btn-sm"
+                    data-i18n="desktopUpdateCheck"
+                  >
+                    Check for updates
+                  </button>
+                  <button
+                    id="desktopUpdateInstall"
+                    class="btn btn-primary btn-sm"
+                    data-i18n="desktopUpdateInstall"
+                    hidden
+                  >
+                    Update and restart
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
           <div class="modal-group">
             <div class="modal-group-label" data-i18n="desktopAdvanced">
               Advanced

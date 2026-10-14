@@ -15,12 +15,15 @@ Use this map to find the files that implement a feature. See
 | `crates/replay/` | Apply logged events, define data formats, select saved page files, and verify stored data |
 | `crates/search/` | Native search implementation |
 | `packages/core/` | Shared JavaScript, CSS, localization, and generated bridge factories |
+| `apps/desktop/src-tauri/src/updates.rs`, `apps/desktop/ui/desktop-updates.js` | Native update checks, authenticated installation, and desktop update controls |
+| `scripts/build-release-desktop.mjs`, `scripts/create-update-manifest.mjs` | Package installers, sign finalized updates, and create the GitHub-hosted update manifest |
+| `scripts/lib/product-version.mjs` | Shared product and lockfile version validation for CI and local releases |
 | `scripts/` | Builds, migrations, manual workflows, coverage, and documentation capture |
 | `tests/` | JavaScript unit/integration tests, Playwright scenarios, and native app tests |
 | `icons/` | SVG sources for generated runtime icons |
 | `docs/images/` | Documentation PNGs and capture manifests |
 | `.github/workflows/ci.yml` | GitHub Actions checks using the same `ci:*` scripts as local CI |
-| `.github/workflows/release-desktop.yml` | Manual native Windows/macOS builds, verified portable archives, and GitHub Releases publishing |
+| `.github/workflows/release.yml` | Manual native Windows/macOS and Chrome/Firefox builds, verified installers and extension archives, signed update packages, and GitHub Releases publishing |
 | `package.json` | Build, test, formatting, and analysis commands |
 | `rust-toolchain.toml` | Rust compiler and component pin |
 | `.gitattributes` | LF checkout policy across platforms |
@@ -200,8 +203,12 @@ do not maintain a second production copy.
 | Snapshot URL/slug metadata, resources, frames, and shadow roots | `tests/e2e/snapshot-slug-meta.spec.js`, `tests/e2e/snapshot-resource-timeout.spec.js` |
 | Seeded cross-feature workflows | `tests/e2e/seeded-combination-workflows.spec.js`, `tests/e2e/manual-seed-workflow.spec.js` |
 | Desktop layout, navigation, search, and scroll retention | `tests/e2e/desktop-visual.spec.js` |
+| Update signature validation, checkpoint failure, and native macOS update installation | `apps/desktop/src-tauri/tests/desktop_updates.rs`, `tests/e2e/desktop-visual.spec.js` |
+| Running native app upgrades, relaunch, retained configuration/data/pairing, and connector reconnection | `tests/smoke/desktop-update-lifecycle.mjs`, `tests/smoke/windows-desktop-update-ui.ps1` |
+| Release CI checks matching desktop/extension versions, packages production Chrome/Firefox extensions, and requires complete checksummed assets before publishing | `tests/integration/extension-release-workflow.test.js` |
+| Daemon shutdown closes connector sessions and saves accepted notes | `crates/daemon/tests/shutdown.rs` |
 | Native WKWebView chart layout | `tests/smoke/macos-wkwebview-chart-layout.mjs` |
-| Documentation bundles preserve macOS app URL routing and URL activation reuses the running process | `tests/smoke/macos-documentation-url-routing.mjs` |
+| Documentation bundles preserve macOS app URL routing, including production app discovery during the build, and URL activation reuses the running process | `tests/smoke/macos-documentation-url-routing.mjs`, `tests/smoke/macos-documentation-app.mjs`, `tests/integration/macos-documentation-url-routing.test.js` |
 | macOS startup, tray, and window lifecycle | `tests/smoke/macos-desktop-window-lifecycle.mjs` |
 | macOS frame restoration after hidden size and position changes with an inset content view | `apps/desktop/src-tauri/tests/macos_window_frame.rs` |
 | Windows icons, single instance, and teardown | `tests/smoke/windows-desktop-single-instance.mjs`, `tests/integration/windows-desktop-cleanup.test.js` |

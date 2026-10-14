@@ -1,0 +1,293 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: Keep the release as a draft
+        type: boolean
+        default: false
+      prerelease:
+        description: Mark the release as a prerelease
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Validate release version and destination
+        id: release
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { execFileSync, spawnSync } = require('node:child_process');
+            const version = execFileSync(process.execPath, ['scripts/lib/product-version.mjs'], { encoding: 'utf8' }).trim();
+            const tag = `v${version}`;
+            const ref = `refs/tags/${tag}`;
+            const exists = spawnSync('git', ['show-ref', '--verify', '--quiet', ref]);
+            if (exists.status === 0) {
+              const commit = execFileSync('git', ['rev-parse', `${ref}^{commit}`], { encoding: 'utf8' }).trim();
+              if (commit !== context.sha) throw new Error(`${tag} already points to a different commit`);
+            } else if (exists.status !== 1) {
+              throw new Error('Could not check the existing release tag');
+            }
+            try {
+              await github.rest.repos.getReleaseByTag({ ...context.repo, tag });
+              throw new Error(`${tag} already has a release; existing releases are never overwritten`);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            core.setOutput('tag', tag);
+
+  build-extensions:
+    name: Build Chrome and Firefox extensions
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build production browser extensions
+        run: npm run build:extension
+
+      - name: Archive and verify browser extensions
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          for browser in chrome firefox; do
+            source="$GITHUB_WORKSPACE/dist/extension/$browser"
+            archive="$GITHUB_WORKSPACE/release-assets/browser-recall-$RELEASE_TAG-extension-$browser.zip"
+            (cd "$source" && zip -qr "$archive" .)
+            unzip -t "$archive"
+            extracted="$RUNNER_TEMP/extension-$browser"
+            unzip -q "$archive" -d "$extracted"
+            test -f "$extracted/manifest.json"
+            diff -r "$source" "$extracted"
+          done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-extensions
+          path: release-assets/*.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  build:
+    name: Build ${{ matrix.platform }} ${{ matrix.arch }}
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            platform: windows
+            arch: x64
+          - runner: macos-15
+            platform: macos
+            arch: arm64
+          - runner: macos-15-intel
+            platform: macos
+            arch: x64
+    env:
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      RELEASE_ARCH: ${{ matrix.arch }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@1.97.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: desktop-release-${{ matrix.platform }}-${{ matrix.arch }}
+
+      - name: Check native build architecture
+        run: node -e "if (process.arch !== process.env.RELEASE_ARCH) throw new Error('Runner architecture does not match the release asset')"
+
+      - run: npm ci
+
+      - run: npm run build:release --workspace @browser-recall/desktop
+
+      - name: Verify dependency lockfiles stayed unchanged
+        run: git diff --exit-code -- Cargo.lock package-lock.json
+
+      - name: Verify the Windows executable starts and handles relaunch
+        if: matrix.platform == 'windows'
+        run: npm run test:desktop-single-instance
+
+      - name: Verify Windows installation and installed application
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $installer = (Get-Item "release-assets/browser-recall-$env:RELEASE_TAG-windows-x64-setup.exe").FullName
+          $installed = Join-Path $env:RUNNER_TEMP 'browser-recall-installed-test'
+          $process = Start-Process -FilePath $installer -ArgumentList '/S', "/D=$installed" -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw 'Desktop installer failed' }
+          try {
+            $env:BROWSER_RECALL_DESKTOP_TEST_EXECUTABLE = Join-Path $installed 'browser-recall-desktop.exe'
+            $expected = (Get-FileHash 'dist/desktop/windows/bin/browser-recall-desktop.exe').Hash
+            $actual = (Get-FileHash $env:BROWSER_RECALL_DESKTOP_TEST_EXECUTABLE).Hash
+            if ($actual -ne $expected) { throw 'Installed executable differs from the release build' }
+            node tests/smoke/windows-desktop-single-instance.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Installed application smoke test failed' }
+          } finally {
+            Remove-Item Env:BROWSER_RECALL_DESKTOP_TEST_EXECUTABLE
+            $uninstaller = Join-Path $installed 'uninstall.exe'
+            if (!(Test-Path $uninstaller)) { throw 'Desktop uninstaller is missing' }
+            $process = Start-Process -FilePath $uninstaller -ArgumentList '/S' -PassThru -Wait
+            if ($process.ExitCode -ne 0) { throw 'Desktop uninstall failed' }
+          }
+
+      - name: Verify the macOS disk image and update archive
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          extracted="$RUNNER_TEMP/release-check"
+          mkdir -p "$extracted"
+          tar -xzf "release-assets/browser-recall-$RELEASE_TAG-macos-$RELEASE_ARCH.app.tar.gz" -C "$extracted"
+          node scripts/verify-macos-app-bundle.mjs "$extracted/Browser Recall.app"
+          mount="$RUNNER_TEMP/dmg-check"
+          mkdir -p "$mount"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount" "release-assets/browser-recall-$RELEASE_TAG-macos-$RELEASE_ARCH.dmg"
+          trap 'hdiutil detach "$mount"' EXIT
+          node scripts/verify-macos-app-bundle.mjs "$mount/Browser Recall.app"
+          test -L "$mount/Applications"
+
+      - name: Verify native update, relaunch, and retained collection
+        run: node tests/smoke/desktop-update-lifecycle.mjs
+        env:
+          BROWSER_RECALL_ISOLATED_WINDOWS_SESSION: '1'
+
+      - name: Preserve native update failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-update-failure-${{ matrix.platform }}-${{ matrix.arch }}
+          path: test-results/native-update/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.platform }}-${{ matrix.arch }}
+          path: release-assets/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    needs: [prepare, build, build-extensions]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_DRAFT: ${{ inputs.draft }}
+      RELEASE_PRERELEASE: ${{ inputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Verify the complete archive set and generate checksums
+        shell: bash
+        working-directory: release-assets
+        run: |
+          expected=(
+            "browser-recall-$RELEASE_TAG-windows-x64-setup.exe"
+            "browser-recall-$RELEASE_TAG-macos-arm64.dmg"
+            "browser-recall-$RELEASE_TAG-macos-x64.dmg"
+            "browser-recall-$RELEASE_TAG-macos-arm64.app.tar.gz"
+            "browser-recall-$RELEASE_TAG-macos-x64.app.tar.gz"
+            "browser-recall-$RELEASE_TAG-extension-chrome.zip"
+            "browser-recall-$RELEASE_TAG-extension-firefox.zip"
+          )
+          files=(*.dmg *-setup.exe *.app.tar.gz *.zip)
+          test "${#files[@]}" -eq "${#expected[@]}"
+          for archive in "${expected[@]}"; do
+            test -s "$archive"
+          done
+          for archive in *.zip; do
+            unzip -t "$archive"
+          done
+          sha256sum "${files[@]}" > SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - name: Generate the signed update manifest
+        run: node scripts/create-update-manifest.mjs
+
+      - name: Create the release with installers, extensions, and signed updates
+        shell: bash
+        run: |
+          cat > release-notes.md <<EOF
+          Desktop installers, browser extensions, and signed updates from commit $GITHUB_SHA.
+
+          - **Windows x64:** run the setup executable. The installer checks Microsoft Edge WebView2 Runtime and installs it when needed.
+          - **macOS Apple Silicon:** use the macos-arm64 disk image.
+          - **macOS Intel:** use the macos-x64 disk image.
+          - **macOS:** open the disk image and drag Browser Recall.app into Applications. The app uses ad-hoc signing and is not notarized. macOS may require approval in Privacy & Security. Windows builds are unsigned and may show a SmartScreen warning.
+          - **Chrome/Chromium:** extract the extension-chrome ZIP, enable Developer mode in chrome://extensions, and use Load unpacked to select the extracted folder.
+          - **Firefox:** extract the extension-firefox ZIP, open about:debugging#/runtime/this-firefox, and use Load Temporary Add-on to select manifest.json.
+
+          **Manual upgrades:** quit Browser Recall completely; closing the window only hides it. On macOS, open the new disk image, drag Browser Recall.app into Applications, choose Replace, eject the disk image, and reopen Browser Recall from Applications. On Windows, run the new setup executable. Existing collections, preferences, and browser pairing are preserved. Older installations without self-update need this manual upgrade once.
+
+          Browser Recall checks for updates automatically; click Update and restart to install. Preferences remain in the operating system's app-data folder; choose the collection's data folder during setup. Browser extensions are installed separately.
+
+          SHA256SUMS contains SHA-256 checksums for the installers, extension archives, and update packages.
+          EOF
+          gh release create "$RELEASE_TAG" release-assets/*.dmg release-assets/*-setup.exe release-assets/*.app.tar.gz release-assets/*.zip release-assets/*.sig release-assets/latest.json release-assets/SHA256SUMS \
+            --repo "$GH_REPO" --target "$GITHUB_SHA" \
+            --title "Browser Recall $RELEASE_TAG" --notes-file release-notes.md \
+            --draft="$RELEASE_DRAFT" --prerelease="$RELEASE_PRERELEASE"

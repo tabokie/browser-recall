@@ -66,6 +66,15 @@ const run = (command, args, options = {}) =>
   }).trim();
 const native = (...args) => run(helper, [String(pid), ...args]);
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
+// The fixture dates stay fixed even when the capture machine's clock advances.
+const firstActivityMonth = new Date(
+  Math.min(
+    ...documentationSeed()
+      .events.filter((event) => event.action === 'visit_page')
+      .map((event) => event.timestamp),
+  ),
+);
+const activityMonthLabel = `${firstActivityMonth.getFullYear()}-${String(firstActivityMonth.getMonth() + 1).padStart(2, '0')}`;
 
 async function build(command, args, cwd = root) {
   await new Promise((resolve, reject) => {
@@ -105,6 +114,16 @@ async function capture(name, includes, spec, excludes = []) {
     );
   };
   await waitFor(`${name} content`, ready);
+  const chartReady = () =>
+    !name.startsWith('timeline') ||
+    native('visible-text', activityMonthLabel, 'relatedChartBars') === 'true';
+  if (name.startsWith('timeline')) {
+    await waitFor(`${name} time chart fixture activity`, () => {
+      if (chartReady()) return true;
+      native('scroll-start', 'relatedChartBars');
+      return false;
+    });
+  }
   native('unfocus');
   const filename = path.join(output, `${name}.png`);
   const bytes = await captureDocumentationWindow({
@@ -114,6 +133,7 @@ async function capture(name, includes, spec, excludes = []) {
     spec,
   });
   if (!ready()) throw new Error(`${name} changed during capture`);
+  if (!chartReady()) throw new Error(`${name} time chart moved during capture`);
   console.log(
     `Captured ${name}: ${bytes.readUInt32BE(16)} × ${bytes.readUInt32BE(20)}`,
   );

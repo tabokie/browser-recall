@@ -11,6 +11,7 @@ import { listKey, pageKey } from '../../packages/core/entity-types.js';
 import { generateSlugFromUrl } from '../../packages/core/utils.js';
 import { VIRTUAL_SCROLLER_BUFFER } from '../../packages/core/virtual-scroller.js';
 import { pickSeeded, seededRandom } from './helpers.js';
+import { documentationSeed } from '../../scripts/lib/documentation-seed.mjs';
 
 // Synthetic history fixtures use UTC date keys; render them in the same timezone.
 test.use({ timezoneId: 'UTC' });
@@ -352,9 +353,19 @@ async function installDesktopBridgeMock(page, options = {}) {
       systemLocale,
       loginItemError,
       previewRuleMatchesByPattern,
+      desktopUpdateFailure,
     }) => {
       if (initialRoute) window.__BR_STATE__ = { route: initialRoute };
       const listeners = new Map();
+      let desktopUpdate = {
+        currentVersion: '0.1.0',
+        phase: 'idle',
+        version: null,
+        notes: null,
+        downloadedBytes: 0,
+        totalBytes: null,
+        error: null,
+      };
       const stores = {
         session: new Map(Object.entries(seed.session)),
         local: new Map(Object.entries(seed.local)),
@@ -880,6 +891,10 @@ async function installDesktopBridgeMock(page, options = {}) {
       }
 
       window.__desktopVisualHarness = {
+        updateDesktopUpdate(update) {
+          desktopUpdate = { ...desktopUpdate, ...clone(update) };
+          emitTauriEvent('desktop-update-state', desktopUpdate);
+        },
         updatePairedBrowsers(browsers) {
           pairedBrowsers = clone(browsers);
           window.__BR_STATE__ = { route: null };
@@ -986,6 +1001,28 @@ async function installDesktopBridgeMock(page, options = {}) {
               lastErrorCode: seed.session.serviceError?.code ?? null,
               dataFolder: setupComplete ? '/tmp/browser-recall-visual' : null,
             };
+          case 'getDesktopUpdateState':
+            return { success: true, update: clone(desktopUpdate) };
+          case 'checkDesktopUpdate':
+            desktopUpdate = {
+              ...desktopUpdate,
+              phase: 'current',
+              version: null,
+            };
+            return { success: true, update: clone(desktopUpdate) };
+          case 'installDesktopUpdate':
+            if (desktopUpdateFailure) {
+              desktopUpdate = {
+                ...desktopUpdate,
+                phase: 'error',
+                error: desktopUpdateFailure,
+              };
+              emitTauriEvent('desktop-update-state', desktopUpdate);
+              throw new Error(desktopUpdateFailure);
+            }
+            desktopUpdate = { ...desktopUpdate, phase: 'installing' };
+            emitTauriEvent('desktop-update-state', desktopUpdate);
+            return { success: true };
           case 'getDesktopShellState':
             return {
               success: true,
@@ -1430,6 +1467,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       initialRoute: options.initialRoute || '',
       systemLocale: options.systemLocale || 'en',
       loginItemError: options.loginItemError || null,
+      desktopUpdateFailure: options.desktopUpdateFailure || null,
       previewRuleMatchesByPattern: options.previewRuleMatchesByPattern || {},
     },
   );
@@ -4774,6 +4812,92 @@ test.describe('desktop visual regression', () => {
     });
   });
 
+  test('desktop updates proceed with incomplete GitHub sync settings', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, { setupComplete: true });
+      await page.evaluate(() =>
+        window.__desktopVisualHarness.updateDesktopUpdate({
+          phase: 'available',
+          version: '1.0.2',
+        }),
+      );
+      await page.locator('#desktopUpdateNotice').click();
+      await page.evaluate(() => {
+        document.getElementById('syncEnabled').checked = true;
+        document.getElementById('syncRepoUrl').value = '';
+      });
+      await page.locator('#desktopUpdateInstall').click();
+      await expect(page.locator('#desktopUpdateStatus')).toHaveText(
+        'Installing update and restarting…',
+      );
+      expect(
+        await page.evaluate(() =>
+          window.__desktopVisualHarness
+            .bridgeActionInvocations()
+            .filter((request) => request.action === 'installDesktopUpdate'),
+        ),
+      ).toHaveLength(1);
+    });
+  });
+
+  for (const failure of [null, 'Update signature verification failed']) {
+    test(`desktop updates require an explicit install click and handle ${failure ? 'download failure' : 'installation'}`, async ({
+      page,
+    }) => {
+      await serveDesktopUi(async (desktopUrl) => {
+        await openDesktopUi(page, desktopUrl, {
+          setupComplete: true,
+          desktopUpdateFailure: failure,
+        });
+        await page.evaluate(() =>
+          window.__desktopVisualHarness.updateDesktopUpdate({
+            phase: 'available',
+            version: '0.2.0',
+          }),
+        );
+        await expect(page.locator('#desktopUpdateNotice')).toBeVisible();
+        expect(
+          await page.evaluate(() =>
+            window.__desktopVisualHarness
+              .bridgeActionInvocations()
+              .filter((request) => request.action === 'installDesktopUpdate'),
+          ),
+        ).toHaveLength(0);
+        await page.locator('#desktopUpdateNotice').click();
+        await expect(page.locator('#desktopUpdateStatus')).toHaveText(
+          'Update available (0.2.0)',
+        );
+        await expect(page.locator('#desktopUpdateInstall')).toBeInViewport({
+          ratio: 1,
+        });
+        await page.screenshot({
+          path: `test-results/desktop-updates-${failure ? 'error' : 'available'}.png`,
+        });
+        await page.locator('#desktopUpdateInstall').click();
+        if (failure) {
+          await expect(page.locator('#desktopUpdateStatus')).toHaveText(
+            failure,
+          );
+          await expect(page.locator('#desktopUpdateInstall')).toBeEnabled();
+        } else {
+          await expect(page.locator('#desktopUpdateStatus')).toHaveText(
+            'Installing update and restarting…',
+          );
+          await expect(page.locator('#desktopUpdateInstall')).toBeDisabled();
+        }
+        expect(
+          await page.evaluate(() =>
+            window.__desktopVisualHarness
+              .bridgeActionInvocations()
+              .filter((request) => request.action === 'installDesktopUpdate'),
+          ),
+        ).toHaveLength(1);
+      });
+    });
+  }
+
   test('settings renders a nonfatal launch-at-login diagnostic next to its toggle', async ({
     page,
   }) => {
@@ -7753,6 +7877,49 @@ test.describe('desktop visual regression', () => {
           title: 'Drag from badge',
         },
       ]);
+    });
+  });
+
+  test('fixed documentation activity can be scrolled into view years later without filtering Timeline @webkit', async ({
+    page,
+  }) => {
+    await page.clock.setFixedTime(Date.UTC(2036, 9, 14, 12));
+    const seed = documentationSeed();
+    const historyEntries = seed.events
+      .filter((event) => event.action === 'visit_page')
+      .map((event) => ({
+        url: event.url,
+        title: event.title,
+        timestamp: event.timestamp,
+        deviceId: seed.deviceId,
+      }));
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        historyEntries,
+      });
+      const chart = page.locator('#relatedChartBars');
+      await expect(chart).toBeVisible();
+      await expect(chart).toHaveRole('group');
+      const visibleActivity = () =>
+        chart.evaluate((element) => {
+          const viewport = element.getBoundingClientRect();
+          return [...element.querySelectorAll('.chart-bar-group.has-data')]
+            .filter((bar) => {
+              const rect = bar.getBoundingClientRect();
+              return rect.left >= viewport.left && rect.right <= viewport.right;
+            })
+            .map((bar) => bar.dataset.date);
+        });
+      await expect.poll(visibleActivity).toEqual([]);
+      const rowsBefore = await page.locator('#relatedResults').innerText();
+      await chart.hover();
+      await page.mouse.wheel(-1_000_000, 0);
+      await expect.poll(visibleActivity).toContain('2026-09-16');
+      await expect.poll(visibleActivity).toContain('2026-08-12');
+      await expect(chart.locator('.chart-bar-group.active')).toHaveCount(0);
+      await expect(page.locator('#relatedResults')).toHaveText(rowsBefore);
     });
   });
 

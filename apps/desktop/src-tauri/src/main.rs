@@ -16,6 +16,7 @@ mod login_item;
 mod macos_window_frame;
 mod search;
 mod shell_contract;
+mod updates;
 #[cfg(target_os = "windows")]
 mod windows_icon;
 
@@ -92,6 +93,7 @@ struct ShellState {
 struct DesktopState {
     server: Mutex<Option<ServerHandle>>,
     server_start: StartGate,
+    operations: Arc<tokio::sync::RwLock<()>>,
     config_store: ConfigStore,
     shell: Mutex<ShellState>,
     sync: SyncController,
@@ -1074,7 +1076,8 @@ async fn start_shell_server(app: &AppHandle) -> Result<ServerSnapshot, String> {
                 let options = ServerStartOptions::phase1_defaults(
                     config_store,
                     pairing_approver(app.clone()),
-                );
+                )
+                .with_environment_ports()?;
                 let (server, config) = start_configured_shell_server(options).await?;
                 let snapshot_rx = server.subscribe();
                 let change_rx = server.subscribe_changes();
@@ -1235,6 +1238,8 @@ fn emit_sync_refresh_mutations(app: &AppHandle) {
 }
 
 async fn run_background_sync_once(app: AppHandle) {
+    let state = app.state::<DesktopState>();
+    let _operation = state.operations.read().await;
     let storage = match storage_for_app(&app) {
         Ok(storage) => storage,
         Err(error) => {
@@ -1421,6 +1426,48 @@ async fn complete_desktop_setup(app: &AppHandle, request: &Value) -> Result<Valu
     }))
 }
 
+async fn prepare_desktop_update(
+    app: &AppHandle,
+) -> Result<tokio::sync::OwnedRwLockWriteGuard<()>, String> {
+    let state = app.state::<DesktopState>();
+    // Wait for native commands and background sync, then close connector sessions
+    // and wait for all accepted checkpoint writes before replacing the application.
+    let guard = state.operations.clone().write_owned().await;
+    state.sync.cancel();
+    let server = state.server.lock().take();
+    if let Some(server) = server {
+        let storage = server.storage();
+        server.shutdown().await;
+        storage
+            .flush_checkpoints()
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(guard)
+}
+
+struct DesktopUpdateLifecycle<'a>(&'a AppHandle);
+
+impl updates::UpdateLifecycle for DesktopUpdateLifecycle<'_> {
+    type Guard = tokio::sync::OwnedRwLockWriteGuard<()>;
+
+    async fn prepare(&self) -> Result<Self::Guard, String> {
+        prepare_desktop_update(self.0).await
+    }
+
+    async fn recover(&self) -> Result<(), String> {
+        if shell_setup_complete(self.0) {
+            start_shell_server(self.0).await?;
+        }
+        Ok(())
+    }
+
+    fn restart(&self) {
+        *self.0.state::<DesktopState>().quit_requested.lock() = true;
+        self.0.restart();
+    }
+}
+
 #[tauri::command]
 async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> {
     let request_object = request
@@ -1430,6 +1477,28 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
         .get("action")
         .and_then(Value::as_str)
         .ok_or_else(|| "bridge action missing `action`".to_string())?;
+    if matches!(
+        action,
+        "getDesktopUpdateState" | "checkDesktopUpdate" | "installDesktopUpdate"
+    ) {
+        validate_desktop_bridge_fields(action, request_object)?;
+        let updates = app.state::<updates::DesktopUpdates>();
+        return match action {
+            "getDesktopUpdateState" => Ok(json!({ "success": true, "update": updates.snapshot() })),
+            "checkDesktopUpdate" => {
+                Ok(json!({ "success": true, "update": updates.check(&app).await? }))
+            }
+            _ => {
+                updates.install(&app, &DesktopUpdateLifecycle(&app)).await?;
+                Ok(json!({ "success": true }))
+            }
+        };
+    }
+    let state = app.state::<DesktopState>();
+    let _operation = state.operations.read().await;
+    if app.state::<updates::DesktopUpdates>().snapshot().phase == "installing" {
+        return Err("Browser Recall is installing an update".to_string());
+    }
     if CommandAuthority::supports(action) {
         if let Some(server) = server_control_for_app(&app) {
             let mut daemon_request = request_object.clone();
@@ -1947,6 +2016,9 @@ fn validate_desktop_bridge_fields(
         | "getDesktopConnectorState"
         | "triggerDesktopPairing"
         | "getDesktopShellState"
+        | "getDesktopUpdateState"
+        | "checkDesktopUpdate"
+        | "installDesktopUpdate"
         | "startWindowDrag"
         | "toggleWindowFullscreen"
         | "chooseDesktopDataFolder"
@@ -2143,6 +2215,7 @@ fn main() -> tauri::Result<()> {
     let builder = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_deep_link::init());
     #[cfg(target_os = "linux")]
     let builder = builder.plugin(tauri_plugin_autostart::init(
@@ -2165,6 +2238,9 @@ fn main() -> tauri::Result<()> {
             bridge_storage_broadcast
         ])
         .setup(|app| {
+            app.manage(updates::DesktopUpdates::new(
+                app.package_info().version.to_string(),
+            ));
             #[cfg(target_os = "windows")]
             if let Some(window) = app.get_webview_window("main") {
                 windows_icon::install_webview(&window).map_err(std::io::Error::other)?;
@@ -2187,7 +2263,9 @@ fn main() -> tauri::Result<()> {
                         ServerStartOptions::phase1_defaults(
                             bootstrap.config_store.clone(),
                             pairing_approver(app_handle.clone()),
-                        ),
+                        )
+                        .with_environment_ports()
+                        .map_err(std::io::Error::other)?,
                     ));
                     match server_result {
                         Ok(server) => {
@@ -2219,6 +2297,7 @@ fn main() -> tauri::Result<()> {
             app.manage(DesktopState {
                 server: Mutex::new(server_handle),
                 server_start: StartGate::default(),
+                operations: Arc::new(tokio::sync::RwLock::new(())),
                 config_store: bootstrap.config_store.clone(),
                 shell: Mutex::new(ShellState {
                     snapshot: initial_snapshot,
@@ -2265,6 +2344,26 @@ fn main() -> tauri::Result<()> {
                 app.state::<DesktopState>().sync.request_worker();
             }
             show_main_window(app.handle());
+            // Documentation and native test profiles must never contact releases.
+            if !cfg!(debug_assertions)
+                && std::env::var_os("BROWSER_RECALL_DESKTOP_TEST_PROFILE_DIR").is_none()
+                && cfg!(any(target_os = "macos", target_os = "windows"))
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    loop {
+                        if let Err(error) = handle
+                            .state::<updates::DesktopUpdates>()
+                            .check(&handle)
+                            .await
+                        {
+                            warn!(%error, "desktop update check failed");
+                        }
+                        tokio::time::sleep(std::time::Duration::from_secs(12 * 60 * 60)).await;
+                    }
+                });
+            }
             Ok(())
         })
         .on_window_event(|window, event| match event {

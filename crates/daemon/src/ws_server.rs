@@ -160,6 +160,7 @@ pub struct ServerSnapshot {
 
 #[derive(Clone)]
 struct SharedState {
+    stopping: watch::Sender<bool>,
     snapshot: Arc<RwLock<ServerSnapshot>>,
     snapshot_tx: watch::Sender<ServerSnapshot>,
     change_message_tx: broadcast::Sender<Vec<MutationPayload>>,
@@ -281,6 +282,37 @@ impl ServerStartOptions {
             test_control_enabled: false,
         }
     }
+    pub fn with_environment_ports(mut self) -> Result<Self, String> {
+        let raw = match std::env::var("BROWSER_RECALL_PORTS") {
+            Ok(raw) => raw,
+            Err(std::env::VarError::NotPresent) => return Ok(self),
+            Err(error) => return Err(format!("BROWSER_RECALL_PORTS is not valid UTF-8: {error}")),
+        };
+        let ports = raw
+            .split(',')
+            .map(str::trim)
+            .map(|value| {
+                if value.is_empty() {
+                    return Err("BROWSER_RECALL_PORTS contains an empty port".to_string());
+                }
+                value
+                    .parse::<u16>()
+                    .map_err(|_| format!("BROWSER_RECALL_PORTS contains invalid port `{value}`"))
+                    .and_then(|port| {
+                        if port == 0 {
+                            Err("BROWSER_RECALL_PORTS must not contain port 0".to_string())
+                        } else {
+                            Ok(port)
+                        }
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if ports.is_empty() {
+            return Err("BROWSER_RECALL_PORTS must contain at least one port".to_string());
+        }
+        self.port_candidates = ports;
+        Ok(self)
+    }
 }
 
 pub async fn start_server(options: ServerStartOptions) -> Result<ServerHandle, WsServerError> {
@@ -318,6 +350,7 @@ pub async fn start_server(options: ServerStartOptions) -> Result<ServerHandle, W
     let (revoke_tx, _) = broadcast::channel(128);
     let read_projections = crate::read_projections::ReadProjections::new(storage.clone());
     let shared = SharedState {
+        stopping: watch::channel(false).0,
         snapshot: Arc::new(RwLock::new(snapshot)),
         snapshot_tx,
         change_message_tx,
@@ -337,9 +370,15 @@ pub async fn start_server(options: ServerStartOptions) -> Result<ServerHandle, W
     let task = tokio::spawn(async move {
         let pause_shared = task_shared.clone();
         let accept_loop = AssertUnwindSafe(async move {
+            let mut connections = tokio::task::JoinSet::new();
             loop {
                 tokio::select! {
                     _ = &mut shutdown_rx => break,
+                    Some(result) = connections.join_next(), if !connections.is_empty() => {
+                        if let Err(error) = result {
+                            warn!(%error, "connector task failed");
+                        }
+                    }
                     accept_result = listener.accept() => {
                         let (stream, _) = match accept_result {
                             Ok(connection) => connection,
@@ -349,7 +388,7 @@ pub async fn start_server(options: ServerStartOptions) -> Result<ServerHandle, W
                             }
                         };
                         let shared = task_shared.clone();
-                        tokio::spawn(async move {
+                        connections.spawn(async move {
                             let connection_id = shared.next_connection_id.fetch_add(1, Ordering::Relaxed);
                             let result = AssertUnwindSafe(handle_connection(stream, shared.clone(), connection_id))
                                 .catch_unwind()
@@ -368,6 +407,14 @@ pub async fn start_server(options: ServerStartOptions) -> Result<ServerHandle, W
                             }
                         });
                     }
+                }
+            }
+            // Let an accepted command finish, then close the connection at the
+            // next read boundary. Never abort a task while appending a log event.
+            task_shared.stopping.send_replace(true);
+            while let Some(result) = connections.join_next().await {
+                if let Err(error) = result {
+                    warn!(%error, "connector task failed during shutdown");
                 }
             }
         });
@@ -413,7 +460,11 @@ async fn handle_connection(
 ) -> Result<(), WsServerError> {
     let origin_slot = Arc::new(parking_lot::Mutex::new(None::<String>));
     let origin_slot_clone = origin_slot.clone();
-    let ws_stream = accept_hdr_async_with_config(
+    let mut stopping = shared.stopping.subscribe();
+    if *stopping.borrow() {
+        return Ok(());
+    }
+    let handshake = accept_hdr_async_with_config(
         stream,
         move |request: &Request, response: Response| {
             let origin = request
@@ -425,9 +476,11 @@ async fn handle_connection(
             Ok(response)
         },
         Some(websocket_config()),
-    )
-    .await
-    .map_err(|error| WsServerError::Handshake(error.to_string()))?;
+    );
+    let ws_stream = tokio::select! {
+        _ = stopping.changed() => return Ok(()),
+        result = handshake => result.map_err(|error| WsServerError::Handshake(error.to_string()))?,
+    };
 
     let origin = origin_slot.lock().clone();
     info!(?origin, "accepted websocket connection");
@@ -437,7 +490,16 @@ async fn handle_connection(
     let mut connected_connector = None::<ConnectedConnector>;
     let mut authenticated = false;
     loop {
+        if *stopping.borrow() {
+            write
+                .send(Message::Close(None))
+                .await
+                .map_err(|error| WsServerError::Handshake(error.to_string()))?;
+            break;
+        }
         let message = tokio::select! {
+            biased;
+            _ = stopping.changed() => continue,
             revoked = revoke_rx.recv(), if authenticated => {
                 match revoked {
                     Ok(key) => {

@@ -1604,5 +1604,32 @@
   "extensionStoreFirefox": {
     "message": "Firefox Add-ons",
     "description": "Browser extension store link label."
+  },
+  "desktopUpdates": {
+    "message": "Actualizaciones"
+  },
+  "desktopUpdatesAutomatic": {
+    "message": "Busca actualizaciones automáticamente"
+  },
+  "desktopUpdateChecking": {
+    "message": "Buscando actualizaciones…"
+  },
+  "desktopUpdateCurrent": {
+    "message": "Browser Recall está actualizado"
+  },
+  "desktopUpdateAvailable": {
+    "message": "Actualización disponible"
+  },
+  "desktopUpdateDownloading": {
+    "message": "Descargando actualización…"
+  },
+  "desktopUpdateInstalling": {
+    "message": "Instalando actualización y reiniciando…"
+  },
+  "desktopUpdateCheck": {
+    "message": "Buscar actualizaciones"
+  },
+  "desktopUpdateInstall": {
+    "message": "Actualizar y reiniciar"
   }
 }

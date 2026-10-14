@@ -202,7 +202,9 @@ jobs:
           retention-days: 7
 
       - name: Verify documentation builds preserve app URL routing
-        run: node tests/smoke/macos-documentation-url-routing.mjs
+        run: |
+          npx vitest run tests/integration/macos-documentation-url-routing.test.js
+          node tests/smoke/macos-documentation-url-routing.mjs
 
   test-desktop-single-instance:
     name: Desktop Windows Single Instance

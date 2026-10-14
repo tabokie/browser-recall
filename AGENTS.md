@@ -158,6 +158,8 @@ Read [ARCHITECTURE.md](docs/ARCHITECTURE.md) for how Browser Recall works,
 - For site-specific highlight failures, inspect the live page, source DOM, and saved
   note and page IDs before blaming page-content replacement, CSS paths, or text matching.
 - After renames, search old names, casing, strings, comments, tests, and docs.
+  When a workflow's scope changes, update the display name, workflow filename,
+  concurrency group, tests, and documentation together.
   Data-format changes require finding every reader and testing each reader with
   non-empty data. Check multiline object construction separately.
 - Verifiers must call production code rather than copy the rules into another

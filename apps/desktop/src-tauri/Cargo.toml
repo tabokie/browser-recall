@@ -1,6 +1,6 @@
 [package]
 name = "browser-recall-desktop"
-version = "0.1.0"
+version = "1.0.1"
 edition = "2021"
 
 [build-dependencies]
@@ -24,6 +24,7 @@ tauri-plugin-deep-link = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-autostart = "2"
+tauri-plugin-updater = "=2.12.0"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
@@ -47,4 +48,5 @@ name = "macos_window_frame"
 harness = false
 
 [dev-dependencies]
+tauri = { version = "2", features = ["test"] }
 tempfile = "3"

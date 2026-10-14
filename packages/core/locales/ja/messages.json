@@ -1604,5 +1604,32 @@
   "extensionStoreFirefox": {
     "message": "Firefox Add-ons",
     "description": "Browser extension store link label."
+  },
+  "desktopUpdates": {
+    "message": "更新"
+  },
+  "desktopUpdatesAutomatic": {
+    "message": "更新を自動的に確認します"
+  },
+  "desktopUpdateChecking": {
+    "message": "更新を確認中…"
+  },
+  "desktopUpdateCurrent": {
+    "message": "Browser Recall は最新です"
+  },
+  "desktopUpdateAvailable": {
+    "message": "更新があります"
+  },
+  "desktopUpdateDownloading": {
+    "message": "更新をダウンロード中…"
+  },
+  "desktopUpdateInstalling": {
+    "message": "更新をインストールして再起動中…"
+  },
+  "desktopUpdateCheck": {
+    "message": "更新を確認"
+  },
+  "desktopUpdateInstall": {
+    "message": "更新して再起動"
   }
 }

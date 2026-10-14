@@ -33,3 +33,6 @@ seeds/
 .DS_Store
 ._*
 Thumbs.db
+
+# Desktop release packages
+/release-assets/
