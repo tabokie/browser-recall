@@ -94,7 +94,7 @@
     "apps/desktop/src-tauri/src/shell_contract.rs": "f937210da4c8c43adac9c9db916c3e84b28cd22068502c61e1872fcc6852b2f1",
     "apps/desktop/src-tauri/src/updates.rs": "a3ef80bc4006ce67ef9ab29ab756adb780f6188b9c4fa14a6131aa0269351336",
     "apps/desktop/src-tauri/src/windows_icon.rs": "114c1dd99ab60d9d23eb7c88bc0ae435266222f6e8657a7db58bbfc99854ebd1",
-    "apps/desktop/src-tauri/build.rs": "13b6b01828d779bb27dc1a461fbcf75caf7bcfeafb7c3b287096cc54bf2290a7",
+    "apps/desktop/src-tauri/build.rs": "a243e40d9c2faa063094a5644b325f9d52e54b71074e6014f2eaafd76c2cc9cc",
     "apps/desktop/src-tauri/build_support.rs": "a3428b913d4e5557d61030c005533b75c78daef397e73cb7d0764d4321a47717",
     "apps/desktop/src-tauri/Cargo.toml": "7c24547f0ece8cf2cdf84d148f2f4d95fd5815eb26d212bf9163079567cef540",
     "apps/desktop/src-tauri/capabilities/main.json": "ad00db1db6a74b09e75e37fbeb63b4f2052b80b4f60fe8a0ec826a951c3338dc",
@@ -133,7 +133,7 @@
   },
   "screenshots": {
     "timeline.png": {
-      "sha256": "651f9a73b74e392dac65c2120ad4a8d04ce571cbc5c748fe6df81a4c7786a4f5",
+      "sha256": "84ccb8a51331534143d63298d41b98683875d38284f9906fa6f1ec154f32d95e",
       "width": 2080,
       "height": 1400
     },
@@ -148,13 +148,13 @@
       "height": 1400
     },
     "timeline-styles.png": {
-      "sha256": "b8f52206b7a2bd05503739b09ff361963aafbf17171f39761a417f8edd97b083",
+      "sha256": "c55d1a46660f4ba9d2698b738922f723fc9a4d42af86545af5197d670ab93e7b",
       "width": 2080,
       "height": 1400,
       "composition": {
         "sources": ["timeline.png", "timeline-mono.png"],
         "sourceSha256": [
-          "651f9a73b74e392dac65c2120ad4a8d04ce571cbc5c748fe6df81a4c7786a4f5",
+          "84ccb8a51331534143d63298d41b98683875d38284f9906fa6f1ec154f32d95e",
           "28d077f2642b3e52eee712589e123a8fbeed6eb45d30349aa000d24c9ff63a25"
         ],
         "split": { "top": 0.62, "bottom": 0.38 }

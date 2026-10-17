@@ -11,6 +11,8 @@ Help browser remember things.
 
 All data collected by the app are stored using plain, readable formats such as JSON and Markdown, in a directory of your choosing. You can inspect the files directly, search them with file tools, or ask an agent to analyze them. An AGENTS.md file in the data directory explains the layout and conventions. Nothing in the collection depends on Browser Recall to remain readable. You own your data.
 
+<img src='icons/browser-recall-icons-40px-gap-12px.svg' align='right'/>
+
 ## Gallery
 
 <table>

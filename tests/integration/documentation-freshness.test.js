@@ -242,6 +242,10 @@ test('screenshot CI checks actual files, capture provenance, and README referenc
 
     const gallery = [
       '<img src="icons/browser-recall-default.svg" alt="Browser Recall">',
+      '<img src="apps/extension/icons/icon128-special-lists.png" alt="Lists">',
+      '<img src="apps/extension/icons/icon128-special-notes.png" alt="Notes or snapshots">',
+      '<img src="apps/extension/icons/icon128-special-mixed.png" alt="Lists and notes or snapshots">',
+      '<img src="apps/extension/icons/icon128-stop-recording.png" alt="Recording paused">',
       '<table><tr><td>',
       '<img src="docs/images/book.png" alt="Book">',
       ...readmeImages

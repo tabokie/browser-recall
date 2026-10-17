@@ -241,6 +241,9 @@ jobs:
 
       - run: npm run ci:test-windows-artifacts -- tests/integration/desktop-artifact-collection.test.js
 
+      - name: Verify Windows updater download authentication and shutdown recovery
+        run: cargo test --locked -p browser-recall-desktop --test desktop_updates
+
       - name: Install Playwright Chromium
         run: npm run ci:install-playwright
 

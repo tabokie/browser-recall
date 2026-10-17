@@ -24,6 +24,7 @@ import { unregisterMacosTestApp } from './macos-desktop-process.mjs';
 import { isolatedDesktopEnvironment } from './windows-desktop-test-profile.mjs';
 import { removeTestProfile } from './windows-desktop-process.mjs';
 import { requireIsolatedMacosSession } from '../../scripts/lib/macos-native-session.mjs';
+import { frameNativeUpdateWindow } from './native-update-window.mjs';
 
 if (!['darwin', 'win32'].includes(process.platform))
   throw new Error('Native update lifecycle requires macOS or Windows');
@@ -313,7 +314,7 @@ try {
     });
   pid = await waitFor('Old Browser Recall process', runningPid);
   if (process.platform === 'darwin') {
-    run(helper, [String(pid), 'frame', '960', '620']);
+    await frameNativeUpdateWindow(helper, pid);
   }
   socket = await waitFor('Old daemon authentication', () => connect(port));
   await command('saveSettingsKey', { key: 'localeOverride', value: 'en' });

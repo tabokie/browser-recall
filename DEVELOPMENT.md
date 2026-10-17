@@ -173,12 +173,19 @@ On macOS, use a disposable macOS user account or CI runner, set
 refuses to stop a user's running app and uses a temporary application,
 configuration, and collection. On Windows, use a disposable session and set
 `BROWSER_RECALL_ISOLATED_WINDOWS_SESSION=1`.
+The macOS check waits for the Accessibility window before positioning the window;
+process registration alone does not establish window readiness. A readiness
+timeout retains the native helper's error, including Accessibility failures.
 The check builds an older fixture with a local HTTP endpoint; released binaries
 retain the production HTTPS endpoint. No test updater endpoint is added to the
 production runtime.
 Desktop and standalone daemon startup share strict `BROWSER_RECALL_PORTS`
 parsing. The native update check uses a dedicated port throughout the update, so
 installed browser extensions cannot discover and pair with the test daemon.
+Windows MSVC integration-test executables embed a Common Controls version 6
+manifest separately from the packaged application. Routine Windows CI runs the
+updater download-authentication and shutdown-recovery test, so test-executable
+startup is checked before release packaging verifies the signed release package.
 
 To upgrade manually on macOS, quit Browser Recall using Quit, open the new disk
 image for the Mac's architecture, drag Browser Recall.app into Applications, choose
@@ -233,6 +240,9 @@ Rust changes, rebuild and restart the relevant desktop or daemon process.
 `npm run generate:icons` renders root SVG sources into desktop ICO/ICNS slots,
 extension icons, and tray assets. Inspect actual target sizes and commit generated
 assets with source changes.
+`npm run generate:icons -- --readme` regenerates only the README icon strip:
+`icons/browser-recall-icons-40px-gap-12px.svg` (196 × 40 pixels). The strip preserves
+the visible order of the four right-aligned extension icons in the README.
 
 Add locales to `SUPPORTED_LOCALES` in `packages/core/i18n.js` and create a complete
 `packages/core/locales/<code>/messages.json`. Run `npm run locales:check`.
@@ -338,7 +348,9 @@ applications' permissions.
 
 The macOS window lifecycle test checks visible startup errors, relaunch after
 storage repair, tray activation, window reopening, focus, and saved window size and
-position. Failure screenshots and logs remain under
+position. The test places the baseline window inside the display's usable area
+before checking exact frame preservation across five tray reopen cycles. Failure
+screenshots, display bounds, baseline geometry, and logs remain under
 `test-results/native-lifecycle/` before the temporary app is removed.
 The Desktop Native Lifecycle CI job uploads that directory on failure and retains
 the diagnostics for seven days.
@@ -400,6 +412,9 @@ so the check cannot rescue failed automatic navigation. Every setup allocation
 shares the cleanup boundary, including daemon startup. The check runs in
 `ci:test-extension-e2e`, in both local CI
 and hosted CI, and verifies options-page messages in prepared and direct popups.
+On macOS and Linux, the launcher owns a separate process group so cleanup can
+terminate Firefox descendants even after `npx` exits. Cleanup closes HTTP
+connections and finishes before the check prints its success message.
 `test:firefox:smoke` uses simulated browser APIs and does not launch
 Firefox. `test:shortcut:native` sends Option+R to a temporary Chromium window on
 macOS.
