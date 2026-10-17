@@ -16,7 +16,7 @@
     "description": "Extension store and browser management description."
   },
   "commandOpenPopup": {
-    "message": "Browser Recall पॉपअप खोलें",
+    "message": "पेज का विवरण खोलें",
     "description": "ब्राउज़र कमांड का विवरण।"
   },
   "commandHighlightSelection": {

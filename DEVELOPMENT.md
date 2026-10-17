@@ -86,18 +86,99 @@ npm run build:dmg --workspace @browser-recall/desktop
 ```
 
 `build:dmg` collects macOS disk images (`.dmg` files) into
-`dist/desktop/macos/dmg/`, where the Tauri bundle type is `dmg`. The command replaces
-the macOS output directory with the executable and disk images. Regular Windows
+`dist/desktop/macos/dmg/`. The command uses the same signed app build and disk-image
+packager as Release, and retains the verified app and executable beside the disk
+image. Signing, verification, and disk-image creation finish in staging before
+replacing the previous macOS output. Regular Windows
 and Linux local builds produce executables. Linux installer packaging is not
 provided by the release workflow.
 
-macOS local builds use ad-hoc signing, which does not require an Apple certificate.
-The signature uses a stable app identifier, and the build verifies the complete
-bundle. Set `APPLE_SIGNING_IDENTITY` to an installed Apple signing identity for
-certificate signing. `build:dmg` requires an Apple signing identity. The release
-command creates disk images with the existing ad-hoc app signature; updater
-signing uses its own key. Apple Developer ID distribution and notarization require
-separate Apple credentials.
+### Local builds with or without a developer certificate
+
+After installing the prerequisites and running `npm ci`, build without a developer
+certificate:
+
+```bash
+npm run build:unsigned --workspace @browser-recall/desktop
+```
+
+On macOS, `build:unsigned` means **ad-hoc signing**: a local signature that uses no
+Apple certificate or Apple account. The signature uses a stable app identifier,
+and the build verifies the complete bundle. Windows and Linux builds produce
+executables without a developer certificate. The explicit command ignores Apple
+certificate, notarization, and update-package credentials inherited from the shell.
+
+To sign a macOS build with your own developer certificate:
+
+1. In **Xcode → Settings → Accounts**, select your Apple account and team, open
+   **Manage Certificates**, and create an **Apple Development** certificate for
+   local development. The certificate and corresponding private key must be in
+   your Mac's Keychain. See Apple's [certificate setup instructions](https://developer.apple.com/documentation/xcode/sharing-your-teams-signing-certificates).
+2. List valid code-signing identities:
+
+   ```bash
+   security find-identity -v -p codesigning
+   ```
+
+3. Copy the full quoted certificate name, or the certificate's SHA-1 hash, and run:
+
+   ```bash
+   APPLE_SIGNING_IDENTITY="Apple Development: Your Name (TEAMID)" \
+     npm run build:signed --workspace @browser-recall/desktop
+   ```
+
+On macOS, `build:signed` requires exactly one valid installed signing identity.
+Missing or ambiguous identities fail before compilation; use the SHA-1 hash to
+distinguish certificates with identical names. The build verifies that the collected
+app was signed with the selected certificate. The explicit local commands do not
+import certificates, notarize the app, or sign update packages. No repository
+signing secrets or tracked configuration edits are needed.
+
+On Windows, install your code-signing certificate and private key in
+`Cert:\CurrentUser\My`. List code-signing certificates and select a SHA-1
+thumbprint in PowerShell:
+
+```powershell
+Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Select-Object Subject, Thumbprint, NotAfter
+$env:WINDOWS_SIGNING_CERTIFICATE = "YOUR_40_CHARACTER_CERTIFICATE_THUMBPRINT"
+npm run build:signed --workspace @browser-recall/desktop
+```
+
+Windows signing uses [PowerShell Authenticode signing](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/set-authenticodesignature)
+and needs no additional signing SDK. The build checks certificate validity and
+private-key availability before compilation, then signs with SHA-256 and verifies
+the staged executable's signature and selected certificate. Set
+`WINDOWS_SIGNING_TIMESTAMP_URL` to your certificate provider's timestamp service
+when timestamping is needed. `build:unsigned` ignores both Windows signing variables.
+The environment-based regular and release builds also honor
+`WINDOWS_SIGNING_CERTIFICATE`; the release build signs both the installer payload
+and the installer through Tauri's custom signing command. Linux builds support
+the unsigned mode.
+
+Both commands write `dist/desktop/macos/app/Browser Recall.app` on macOS, replacing
+the previous macOS output. Inspect the signature with:
+
+```bash
+codesign -dvvv "dist/desktop/macos/app/Browser Recall.app"
+npm run verify:macos-bundle --workspace @browser-recall/desktop
+```
+
+The regular `npm run build` preserves the existing environment-based behavior:
+ad-hoc signing by default, or certificate signing when `APPLE_SIGNING_IDENTITY` is
+set. Use the explicit commands to choose a local signing mode independently of
+release credentials. [Tauri's macOS signing guide](https://v2.tauri.app/distribute/sign/macos/)
+describes ad-hoc signing and Apple certificate configuration.
+
+`build:dmg` requires an Apple signing identity. The release command uses the
+configured macOS app identity, defaulting to ad-hoc signing, and signs update
+packages with a separate key. Distributing a macOS app with **Developer ID
+Application** signing and notarization requires separate Apple credentials;
+an Apple Development signature is intended for local development.
+
+Local, release, and disk-image builds share `scripts/build-desktop.mjs`. Certificate
+checks run on staged output before replacing a previous verified build. Build
+phase timings appear in the console and GitHub Actions step summaries; compare
+hosted cache-hit and cache-miss runs before assessing runtime improvements.
 
 ### GitHub releases and desktop updates
 
@@ -132,6 +213,13 @@ tag is `v` followed by the product version.
 | `SHA256SUMS` | Checksums for installers, extension archives, and update packages |
 
 Release builds use Node.js 24 and Rust 1.97.0 on native Windows and macOS runners.
+Regular CI and Release call `.github/workflows/desktop-release-validation.yml`
+with the same Windows x64, macOS arm64, and macOS x64 matrix. Regular CI generates
+a disposable signing key and embeds its public key only in that runner's checkout;
+CI packages are never uploaded for publication. Release uses the repository's
+signing secrets and uploads the verified packages. Signature verification uses
+Cargo's release profile so the native job does not rebuild the desktop dependency
+tree in the debug profile.
 Run the release build locally with a signing key in the environment:
 
 ```bash
@@ -152,7 +240,11 @@ that the embedded public key accepts its signature. On macOS, the check also
 installs the package into a temporary application bundle and runs the production
 bundle verifier. CI verifies the disk image's application bundle. Windows CI
 checks installation, the installed executable, native single-instance behavior,
-and uninstallation. Both native platforms also run the real app at version 0.0.1,
+and uninstallation. Windows verification requires `7z` on `PATH` (provided by
+the Windows CI runner) and compares the executable with the payload extracted
+from the NSIS installer. Tauri patches the packaged executable's bundle type
+and restores the raw build executable afterward, so those two files differ.
+Both native platforms also run the real app at version 0.0.1,
 check a local update manifest, install the signed release package through the
 native Update and restart control, and verify a different process running the new
 version. A connector session remains open until shutdown; accepted note edits,
@@ -173,12 +265,19 @@ On macOS, use a disposable macOS user account or CI runner, set
 refuses to stop a user's running app and uses a temporary application,
 configuration, and collection. On Windows, use a disposable session and set
 `BROWSER_RECALL_ISOLATED_WINDOWS_SESSION=1`.
+The macOS check waits for the Accessibility window before positioning the window;
+process registration alone does not establish window readiness. A readiness
+timeout retains the native helper's error, including Accessibility failures.
 The check builds an older fixture with a local HTTP endpoint; released binaries
 retain the production HTTPS endpoint. No test updater endpoint is added to the
 production runtime.
 Desktop and standalone daemon startup share strict `BROWSER_RECALL_PORTS`
 parsing. The native update check uses a dedicated port throughout the update, so
 installed browser extensions cannot discover and pair with the test daemon.
+Windows MSVC integration-test executables embed a Common Controls version 6
+manifest separately from the packaged application. Routine CI and Release start
+the Windows integration-test harness during release-package signature verification,
+so missing native startup dependencies fail before installation tests.
 
 To upgrade manually on macOS, quit Browser Recall using Quit, open the new disk
 image for the Mac's architecture, drag Browser Recall.app into Applications, choose
@@ -233,6 +332,9 @@ Rust changes, rebuild and restart the relevant desktop or daemon process.
 `npm run generate:icons` renders root SVG sources into desktop ICO/ICNS slots,
 extension icons, and tray assets. Inspect actual target sizes and commit generated
 assets with source changes.
+`npm run generate:icons -- --readme` regenerates only the README icon strip:
+`icons/browser-recall-icons-40px-gap-12px.svg` (196 × 40 pixels). The strip preserves
+the visible order of the four right-aligned extension icons in the README.
 
 Add locales to `SUPPORTED_LOCALES` in `packages/core/i18n.js` and create a complete
 `packages/core/locales/<code>/messages.json`. Run `npm run locales:check`.
@@ -254,7 +356,7 @@ windows, tray actions, and process startup run separately.
 | `npm run test:visual` | Build UI assets; run native WKWebView, Chromium, and selected WebKit tests |
 | `npm run ci:test-rust` | Build UI assets and run Rust workspace tests |
 | `npm run test:cold-scripts` | Run manual test-data generation against the daemon |
-| `npm run coverage` | JavaScript/Rust coverage and uncovered-line monitor |
+| `npm run coverage` | All JavaScript tests and Rust workspace tests with coverage, then uncovered-line monitor |
 | `npm run ci` | Documentation check, tests, browser installation, coverage, and lint |
 
 Focused examples:
@@ -271,6 +373,23 @@ Playwright uses one worker and the Chromium version installed by Playwright. Bui
 the daemon before starting tests that use the daemon; compiling Rust during test
 setup can exceed the startup timeout. To test a build without cached Rust output,
 set `CARGO_TARGET_DIR` to a temporary directory and run the same `ci:*` command.
+
+Regular CI has six runner jobs: one Linux tests/coverage/lint job, extension E2E,
+macOS visual regression, and three native release-validation jobs. Native packaging
+starts in parallel with the Linux checks. The Linux job validates release versions,
+README images, and JavaScript formatting before installing desktop build tooling.
+Pinned actionlint 1.7.12 validates workflow syntax and reusable-workflow inputs.
+JavaScript tests run once with V8 coverage. Rust workspace tests run once under
+`cargo llvm-cov`; both Rust reports reuse that execution. A newer push cancels the
+older regular CI run for the same branch. Release publication remains serialized.
+
+Native platform scenarios remain in regular CI: Windows installed-app
+single-instance/deep-link behavior, cleanup and replacement, and extension font
+fallback; macOS startup recovery, five tray reopen cycles, session guards, and
+documentation URL routing. Shared macOS window and routing scenarios run on arm64;
+both macOS architectures run signed-package installation and real update/relaunch.
+Timings must be measured on hosted runners; removing duplicate builds and test
+executions does not establish a new wall-clock duration by itself.
 
 ### Product coverage
 
@@ -338,10 +457,12 @@ applications' permissions.
 
 The macOS window lifecycle test checks visible startup errors, relaunch after
 storage repair, tray activation, window reopening, focus, and saved window size and
-position. Failure screenshots and logs remain under
+position. The test places the baseline window inside the display's usable area
+before checking exact frame preservation across five tray reopen cycles. Failure
+screenshots, display bounds, baseline geometry, and logs remain under
 `test-results/native-lifecycle/` before the temporary app is removed.
-The Desktop Native Lifecycle CI job uploads that directory on failure and retains
-the diagnostics for seven days.
+The shared Desktop Release Validation workflow uploads that directory on failure
+and retains the diagnostics for seven days.
 
 The macOS window frame regression uses an invisible AppKit window and forces size
 and position changes while the content view has an inset. The regression calls
@@ -400,6 +521,9 @@ so the check cannot rescue failed automatic navigation. Every setup allocation
 shares the cleanup boundary, including daemon startup. The check runs in
 `ci:test-extension-e2e`, in both local CI
 and hosted CI, and verifies options-page messages in prepared and direct popups.
+On macOS and Linux, the launcher owns a separate process group so cleanup can
+terminate Firefox descendants even after `npx` exits. Cleanup closes HTTP
+connections and finishes before the check prints its success message.
 `test:firefox:smoke` uses simulated browser APIs and does not launch
 Firefox. `test:shortcut:native` sends Option+R to a temporary Chromium window on
 macOS.
@@ -589,8 +713,10 @@ to the combined image, Chrome Web Store export freshness and RGB format, and REA
 image links. `--images-only` still checks that Chrome Web Store exports match their
 browser source images, but skips capture and conversion source-code fingerprints.
 Linux CI checks image integrity;
-local CI also checks whether source files have changed since capture. Prose-only
-and daemon-only source edits do not require new screenshots. Desktop freshness
+local CI also checks whether source files have changed since capture. Package
+manifest fingerprints include product versions, dependencies, runtime exports,
+and toolchain fields; package scripts and descriptive metadata are excluded.
+Prose-only, package-command-only, and daemon-only edits do not require new screenshots. Desktop freshness
 includes native shell source, capabilities, build scripts, and Cargo dependency
 and toolchain files. Never update capture manifests without a successful capture.
 

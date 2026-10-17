@@ -4851,6 +4851,17 @@ test.describe('desktop visual regression', () => {
           setupComplete: true,
           desktopUpdateFailure: failure,
         });
+        if (!failure) {
+          // Match native upgrade automation: check manually while Settings is
+          // already open, rather than entering through the toolbar notice.
+          await page.locator('#settingsBtn').click();
+          await page
+            .getByRole('button', { name: 'Check for updates', exact: true })
+            .click();
+          await expect(page.locator('#desktopUpdateStatus')).toHaveText(
+            'Browser Recall is up to date',
+          );
+        }
         await page.evaluate(() =>
           window.__desktopVisualHarness.updateDesktopUpdate({
             phase: 'available',
@@ -4865,17 +4876,20 @@ test.describe('desktop visual regression', () => {
               .filter((request) => request.action === 'installDesktopUpdate'),
           ),
         ).toHaveLength(0);
-        await page.locator('#desktopUpdateNotice').click();
+        if (failure) await page.locator('#desktopUpdateNotice').click();
         await expect(page.locator('#desktopUpdateStatus')).toHaveText(
           'Update available (0.2.0)',
         );
-        await expect(page.locator('#desktopUpdateInstall')).toBeInViewport({
-          ratio: 1,
-        });
+        if (failure)
+          await expect(page.locator('#desktopUpdateInstall')).toBeInViewport({
+            ratio: 1,
+          });
         await page.screenshot({
           path: `test-results/desktop-updates-${failure ? 'error' : 'available'}.png`,
         });
-        await page.locator('#desktopUpdateInstall').click();
+        await page
+          .getByRole('button', { name: 'Update and restart', exact: true })
+          .click();
         if (failure) {
           await expect(page.locator('#desktopUpdateStatus')).toHaveText(
             failure,

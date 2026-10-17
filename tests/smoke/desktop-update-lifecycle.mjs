@@ -24,6 +24,8 @@ import { unregisterMacosTestApp } from './macos-desktop-process.mjs';
 import { isolatedDesktopEnvironment } from './windows-desktop-test-profile.mjs';
 import { removeTestProfile } from './windows-desktop-process.mjs';
 import { requireIsolatedMacosSession } from '../../scripts/lib/macos-native-session.mjs';
+import { frameNativeUpdateWindow } from './native-update-window.mjs';
+import { verifyWindowsInstalledExecutable } from '../../scripts/verify-windows-installed-executable.mjs';
 
 if (!['darwin', 'win32'].includes(process.platform))
   throw new Error('Native update lifecycle requires macOS or Windows');
@@ -313,7 +315,7 @@ try {
     });
   pid = await waitFor('Old Browser Recall process', runningPid);
   if (process.platform === 'darwin') {
-    run(helper, [String(pid), 'frame', '960', '620']);
+    await frameNativeUpdateWindow(helper, pid);
   }
   socket = await waitFor('Old daemon authentication', () => connect(port));
   await command('saveSettingsKey', { key: 'localeOverride', value: 'en' });
@@ -341,10 +343,6 @@ try {
     ui('dump').includes(`Update available (${version})`),
   );
   assert.equal(downloads, 0, 'Checking must never download or install');
-  await waitFor(
-    'Scroll to update controls',
-    () => ui('click', 'Update available') || true,
-  );
   // Leave a connector session open and accept another write immediately before installation.
   const edited = await command('updateNote', {
     noteSlug: note.noteSlug,
@@ -357,7 +355,12 @@ try {
   socket.once('close', () => {
     disconnected = true;
   });
-  ui('click', 'Update and restart');
+  // The Settings modal hides the toolbar notice, and the versioned status is
+  // not an actionable control. Press the actual install button directly.
+  await waitFor(
+    'Update and restart button',
+    () => ui('click', 'Update and restart') || true,
+  );
   await waitFor('Connector shutdown', () => disconnected);
   await waitFor(
     'Native relaunch',
@@ -387,18 +390,7 @@ try {
       ]),
       version,
     );
-  else
-    assert.equal(
-      readFileSync(executable).compare(
-        readFileSync(
-          path.join(
-            root,
-            'dist/desktop/windows/bin/browser-recall-desktop.exe',
-          ),
-        ),
-      ),
-      0,
-    );
+  else verifyWindowsInstalledExecutable(packagePath, executable);
   socket = await waitFor('Connector reconnect using retained token', () =>
     connect(port),
   );

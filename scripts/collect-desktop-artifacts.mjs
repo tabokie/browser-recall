@@ -47,7 +47,13 @@ function copyReleaseExecutable(cargoReleaseDir, platformOutDir, platformName) {
   }
 }
 
-function copyBundles(cargoReleaseDir, platformOutDir, platformName, bundles) {
+function copyBundles(
+  cargoReleaseDir,
+  platformOutDir,
+  platformName,
+  bundles,
+  bundleFiles,
+) {
   const bundleDir = path.join(cargoReleaseDir, 'bundle');
   for (const bundleName of bundles) {
     let source = path.join(
@@ -58,6 +64,17 @@ function copyBundles(cargoReleaseDir, platformOutDir, platformName, bundles) {
     if (platformName === 'macos' && bundleName === 'app') {
       source = path.join(source, 'Browser Recall.app');
       destination = path.join(destination, 'Browser Recall.app');
+    }
+    if (bundleFiles[bundleName]) {
+      for (const name of bundleFiles[bundleName]) {
+        if (path.basename(name) !== name)
+          throw new Error('Bundle file must be a filename');
+        if (
+          !copyIfExists(path.join(source, name), path.join(destination, name))
+        )
+          throw new Error(`Missing ${bundleName} bundle file: ${name}`);
+      }
+      continue;
     }
     if (!copyIfExists(source, destination)) {
       throw new Error(`Missing ${bundleName} bundle output: ${source}`);
@@ -348,13 +365,16 @@ export function collectDesktopArtifacts({
   platformName = defaultPlatformName(),
   bundles = [],
   warn = console.warn,
+  verify = () => {},
+  bundleFiles = {},
 } = {}) {
   fs.mkdirSync(outDir, { recursive: true });
   const platformOutDir = path.join(outDir, platformName);
   const stagedDir = fs.mkdtempSync(`${platformOutDir}.staging-`);
   try {
     copyReleaseExecutable(cargoReleaseDir, stagedDir, platformName);
-    copyBundles(cargoReleaseDir, stagedDir, platformName, bundles);
+    copyBundles(cargoReleaseDir, stagedDir, platformName, bundles, bundleFiles);
+    verify(stagedDir);
     replacePlatformOutput(platformOutDir, stagedDir, platformName, warn);
   } catch (error) {
     fs.rmSync(stagedDir, { recursive: true, force: true });

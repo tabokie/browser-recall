@@ -4,12 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:release": "npm run build:ui && node ../../scripts/build-release-desktop.mjs",
+    "build:release": "node ../../scripts/build-release-desktop.mjs",
     "build:ui": "node ../../scripts/stage-app-assets.mjs desktop-ui",
     "dev": "node ../../scripts/dev-desktop.mjs",
-    "build": "npm run build:ui && node ../../scripts/build-tauri-app.mjs && node ../../scripts/finalize-desktop-build.mjs",
+    "build": "node ../../scripts/build-desktop.mjs",
+    "build:unsigned": "node ../../scripts/build-desktop.mjs unsigned",
+    "build:signed": "node ../../scripts/build-desktop.mjs signed",
     "verify:macos-bundle": "node ../../scripts/verify-macos-app-bundle.mjs '../../dist/desktop/macos/app/Browser Recall.app'",
-    "build:dmg": "npm run build:ui && node ../../scripts/finalize-macos-app-bundle.mjs --require-apple-identity && tauri build --bundles dmg && node ../../scripts/verify-macos-app-bundle.mjs '../../target/release/bundle/macos/Browser Recall.app' && node ../../scripts/collect-desktop-artifacts.mjs --bundles dmg"
+    "build:dmg": "node ../../scripts/build-desktop.mjs dmg"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0"

@@ -17,7 +17,7 @@ function run(command, args) {
   return `${result.stdout || ''}${result.stderr || ''}`.trim();
 }
 
-export function finalizeMacosAppBundle(appPath) {
+export function finalizeMacosAppBundle(appPath, environment = process.env) {
   if (process.platform !== 'darwin') return;
   if (!appPath || !existsSync(appPath)) {
     throw new Error(
@@ -25,8 +25,8 @@ export function finalizeMacosAppBundle(appPath) {
     );
   }
   if (
-    process.env.APPLE_SIGNING_IDENTITY &&
-    process.env.APPLE_SIGNING_IDENTITY !== '-'
+    environment.APPLE_SIGNING_IDENTITY &&
+    environment.APPLE_SIGNING_IDENTITY !== '-'
   ) {
     return;
   }
@@ -54,20 +54,6 @@ export function finalizeMacosAppBundle(appPath) {
   ]);
 }
 
-export function requireAppleSigningIdentity() {
-  if (process.platform !== 'darwin') return;
-  const identity = process.env.APPLE_SIGNING_IDENTITY;
-  if (!identity || identity === '-') {
-    throw new Error(
-      'DMG builds require APPLE_SIGNING_IDENTITY with an installed Apple signing certificate',
-    );
-  }
-}
-
 if (import.meta.url === new URL(process.argv[1], 'file:').href) {
-  if (process.argv[2] === '--require-apple-identity') {
-    requireAppleSigningIdentity();
-  } else {
-    finalizeMacosAppBundle(process.argv[2]);
-  }
+  finalizeMacosAppBundle(process.argv[2]);
 }

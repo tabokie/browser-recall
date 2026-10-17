@@ -11,6 +11,19 @@ fn try_build() -> Result<(), String> {
     println!("cargo:rerun-if-changed=icons/icon.png");
     println!("cargo:rerun-if-changed=icons/icon.ico");
     println!("cargo:rerun-if-changed=icons/icon.icns");
+    // Tauri embeds the application's manifest only in binary targets. MSVC
+    // integration tests also need Common Controls v6 before their harness starts.
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
+        && env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc")
+    {
+        let test_manifest = manifest_dir.join("tests/windows-app.manifest");
+        println!("cargo:rerun-if-changed={}", test_manifest.display());
+        println!("cargo:rustc-link-arg-tests=/MANIFEST:EMBED");
+        println!(
+            "cargo:rustc-link-arg-tests=/MANIFESTINPUT:{}",
+            test_manifest.display()
+        );
+    }
     build_support::require_frontend_dist(&config_path)?;
     tauri_build::try_build(tauri_build::Attributes::default())
         .map_err(|error| format!("failed to generate the Tauri build context: {error:#}"))

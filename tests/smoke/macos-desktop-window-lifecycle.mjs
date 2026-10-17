@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { requireIsolatedMacosSession } from '../../scripts/lib/macos-native-session.mjs';
+import { lifecycleWindowFrame } from './macos-window-placement.mjs';
 
 if (process.platform !== 'darwin') {
   console.log('macOS desktop window lifecycle smoke test skipped');
@@ -96,6 +97,23 @@ try {
     `import AppKit
 import CoreGraphics
 import Foundation
+
+if CommandLine.arguments[1] == "work-area" {
+  guard let screen = NSScreen.screens.first else {
+    fatalError("No macOS display available for the lifecycle test")
+  }
+  let visible = screen.visibleFrame
+  // Accessibility uses a top-left origin; AppKit uses a bottom-left origin.
+  let workArea = [
+    "x": Int(ceil(visible.minX)),
+    "y": Int(ceil(screen.frame.maxY - visible.maxY)),
+    "width": Int(floor(visible.width)),
+    "height": Int(floor(visible.height))
+  ]
+  let json = try JSONSerialization.data(withJSONObject: workArea, options: [.sortedKeys])
+  print(String(data: json, encoding: .utf8)!)
+  exit(0)
+}
 
 let ownerPid = Int32(CommandLine.arguments[1])!
 let output = URL(fileURLWithPath: CommandLine.arguments[2])
@@ -197,6 +215,22 @@ print("\\(bounds.origin.x),\\(bounds.origin.y),\\(bounds.width),\\(bounds.height
   launchTestApp();
   pid = waitForAppPid();
 
+  const workArea = JSON.parse(run(captureExecutable, ['work-area']));
+  const windowConfig = JSON.parse(
+    readFileSync(
+      path.join(root, 'apps/desktop/src-tauri/tauri.conf.json'),
+      'utf8',
+    ),
+  ).app.windows.find((window) => window.label === 'main');
+  const frame = lifecycleWindowFrame(workArea, {
+    width: windowConfig.minWidth,
+    height: windowConfig.minHeight,
+  });
+  writeFileSync(
+    path.join(workDir, 'window-placement.json'),
+    JSON.stringify({ workArea, frame }, null, 2),
+  );
+
   appleScript(`
     tell application "System Events"
       set targetProcess to missing value
@@ -214,8 +248,8 @@ print("\\(bounds.origin.x),\\(bounds.origin.y),\\(bounds.width),\\(bounds.height
         delay 0.05
       end repeat
       if (count of windows of targetProcess) is 0 then error "initial window unavailable"
-      set size of window 1 of targetProcess to {980, 680}
-      set position of window 1 of targetProcess to {170, 160}
+      set size of window 1 of targetProcess to {${frame.width}, ${frame.height}}
+      set position of window 1 of targetProcess to {${frame.x}, ${frame.y}}
       set frontmost of targetProcess to true
       repeat 100 times
         if name of window 1 of targetProcess is "Browser Recall - Error" then exit repeat
@@ -273,12 +307,13 @@ print("\\(bounds.origin.x),\\(bounds.origin.y),\\(bounds.width),\\(bounds.height
       end repeat
       if name of window 1 of targetProcess is not "Browser Recall" then error "desktop did not recover after storage repair"
 
-      set size of window 1 of targetProcess to {980, 680}
-      set position of window 1 of targetProcess to {170, 160}
+      set size of window 1 of targetProcess to {${frame.width}, ${frame.height}}
+      set position of window 1 of targetProcess to {${frame.x}, ${frame.y}}
       set frontmost of targetProcess to true
       delay 1
       set baselinePosition to position of window 1 of targetProcess
       set baselineSize to size of window 1 of targetProcess
+      if baselinePosition is not equal to {${frame.x}, ${frame.y}} or baselineSize is not equal to {${frame.width}, ${frame.height}} then error "desktop did not accept the baseline frame inside the usable display area"
 
       repeat with cycle from 1 to 5
         click button 1 of window 1 of targetProcess
@@ -358,9 +393,13 @@ print("\\(bounds.origin.x),\\(bounds.origin.y),\\(bounds.width),\\(bounds.height
     path.basename(workDir),
   );
   mkdirSync(artifacts, { recursive: true });
-  for (const screenshot of [pausedStartupScreenshot, pausedStartupBitmap]) {
-    if (existsSync(screenshot))
-      cpSync(screenshot, path.join(artifacts, path.basename(screenshot)));
+  for (const artifact of [
+    pausedStartupScreenshot,
+    pausedStartupBitmap,
+    path.join(workDir, 'window-placement.json'),
+  ]) {
+    if (existsSync(artifact))
+      cpSync(artifact, path.join(artifacts, path.basename(artifact)));
   }
   const logDir = path.join(testHome, 'Library/Logs/browser-recall');
   if (existsSync(logDir))

@@ -16,7 +16,7 @@
     "description": "Extension store and browser management description."
   },
   "commandOpenPopup": {
-    "message": "打开 Browser Recall 弹出窗口",
+    "message": "打开页面详情",
     "description": "浏览器命令说明。"
   },
   "commandHighlightSelection": {

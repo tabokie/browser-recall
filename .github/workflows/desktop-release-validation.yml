@@ -1,0 +1,169 @@
+name: Desktop Release Validation
+
+on:
+  workflow_call:
+    inputs:
+      production:
+        default: false
+        type: boolean
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Package, install and update (${{ matrix.platform }} ${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            platform: windows
+            arch: x64
+          - runner: macos-15
+            platform: macos
+            arch: arm64
+          - runner: macos-15-intel
+            platform: macos
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      RELEASE_ARCH: ${{ matrix.arch }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@1.97.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: desktop-release-${{ matrix.platform }}-${{ matrix.arch }}
+
+      - name: Check native build architecture
+        run: node -e "if (process.arch !== process.env.RELEASE_ARCH) throw new Error('Runner architecture does not match the release asset')"
+
+      - run: npm ci
+
+      - name: Select release version
+        shell: bash
+        run: |
+          release_version=$(node scripts/lib/product-version.mjs)
+          echo "RELEASE_TAG=v$release_version" >> "$GITHUB_ENV"
+
+      - name: Prepare disposable CI signing key
+        if: ${{ !inputs.production }}
+        run: node scripts/prepare-ci-release.mjs
+
+      - name: Verify Windows signing, cleanup and artifacts
+        if: matrix.platform == 'windows'
+        run: npx vitest run tests/integration/windows-desktop-cleanup.test.js tests/integration/desktop-artifact-collection.test.js tests/integration/windows-installed-executable.test.js tests/integration/desktop-signing.test.js tests/integration/windows-code-signing.test.js tests/unit/stage-app-assets.test.js
+
+      - name: Verify macOS signing and native session guards
+        if: matrix.platform == 'macos' && matrix.arch == 'arm64'
+        run: npx vitest run tests/integration/macos-native-session.test.js tests/integration/desktop-signing.test.js
+
+      - run: npm run build:release --workspace @browser-recall/desktop
+
+      - name: Verify dependency lockfiles stayed unchanged
+        run: git diff --exit-code -- Cargo.lock package-lock.json
+
+      - name: Verify Windows installation and installed application
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $installer = (Get-Item "release-assets/browser-recall-$env:RELEASE_TAG-windows-x64-setup.exe").FullName
+          $installed = Join-Path $env:RUNNER_TEMP 'browser-recall-installed-test'
+          $process = Start-Process -FilePath $installer -ArgumentList '/S', "/D=$installed" -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw 'Desktop installer failed' }
+          try {
+            $env:BROWSER_RECALL_DESKTOP_TEST_EXECUTABLE = Join-Path $installed 'browser-recall-desktop.exe'
+            node scripts/verify-windows-installed-executable.mjs $installer $env:BROWSER_RECALL_DESKTOP_TEST_EXECUTABLE
+            if ($LASTEXITCODE -ne 0) { throw 'Installed executable differs from the installer payload' }
+            node tests/smoke/windows-desktop-single-instance.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Installed application smoke test failed' }
+          } finally {
+            Remove-Item Env:BROWSER_RECALL_DESKTOP_TEST_EXECUTABLE
+            $uninstaller = Join-Path $installed 'uninstall.exe'
+            if (!(Test-Path $uninstaller)) { throw 'Desktop uninstaller is missing' }
+            $process = Start-Process -FilePath $uninstaller -ArgumentList '/S' -PassThru -Wait
+            if ($process.ExitCode -ne 0) { throw 'Desktop uninstall failed' }
+          }
+
+      - name: Verify the macOS disk image and update archive
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          extracted="$RUNNER_TEMP/release-check"
+          mkdir -p "$extracted"
+          tar -xzf "release-assets/browser-recall-$RELEASE_TAG-macos-$RELEASE_ARCH.app.tar.gz" -C "$extracted"
+          node scripts/verify-macos-app-bundle.mjs "$extracted/Browser Recall.app"
+          mount="$RUNNER_TEMP/dmg-check"
+          mkdir -p "$mount"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount" "release-assets/browser-recall-$RELEASE_TAG-macos-$RELEASE_ARCH.dmg"
+          trap 'hdiutil detach "$mount"' EXIT
+          node scripts/verify-macos-app-bundle.mjs "$mount/Browser Recall.app"
+          test -L "$mount/Applications"
+
+      - name: Verify native update, relaunch, and retained collection
+        run: node tests/smoke/desktop-update-lifecycle.mjs
+        env:
+          BROWSER_RECALL_ISOLATED_MACOS_SESSION: '1'
+          BROWSER_RECALL_ISOLATED_WINDOWS_SESSION: '1'
+
+      - name: Verify native window frame restoration
+        if: matrix.platform == 'macos' && matrix.arch == 'arm64'
+        run: cargo test --locked --release -p browser-recall-desktop --test macos_window_frame
+
+      - name: Exercise native startup and tray lifecycle
+        if: matrix.platform == 'macos' && matrix.arch == 'arm64'
+        env:
+          BROWSER_RECALL_ISOLATED_MACOS_SESSION: '1'
+        run: node tests/smoke/macos-desktop-window-lifecycle.mjs
+
+      - name: Verify documentation builds preserve app URL routing
+        if: matrix.platform == 'macos' && matrix.arch == 'arm64'
+        run: |
+          npx vitest run tests/integration/macos-documentation-url-routing.test.js
+          node tests/smoke/macos-documentation-url-routing.mjs
+
+      - name: Install Playwright Chromium for Windows font regression
+        if: matrix.platform == 'windows'
+        run: npm run ci:install-playwright
+
+      - name: Verify Windows extension system-font fallback
+        if: matrix.platform == 'windows'
+        run: npm run ci:test-windows-extension-font
+
+      - name: Preserve native release failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-release-failure-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            test-results/native-update/
+            test-results/native-lifecycle/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v7
+        if: inputs.production
+        with:
+          name: release-${{ matrix.platform }}-${{ matrix.arch }}
+          path: release-assets/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7

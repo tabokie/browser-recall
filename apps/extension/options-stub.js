@@ -14,6 +14,7 @@ const shortcutsList = document.getElementById('shortcutsList');
 const customizeShortcuts = document.getElementById('customizeShortcuts');
 
 const SHORTCUT_ORDER = [
+  'open-popup',
   'highlight-selection',
   'capture-snapshot',
   'like-page',

@@ -101,118 +101,14 @@ jobs:
           retention-days: 7
 
   build:
-    name: Build ${{ matrix.platform }} ${{ matrix.arch }}
+    name: Build desktop packages
     needs: prepare
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: windows-2025
-            platform: windows
-            arch: x64
-          - runner: macos-15
-            platform: macos
-            arch: arm64
-          - runner: macos-15-intel
-            platform: macos
-            arch: x64
-    env:
-      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
-      RELEASE_ARCH: ${{ matrix.arch }}
+    uses: ./.github/workflows/desktop-release-validation.yml
+    with:
+      production: true
+    secrets:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.sha }}
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
-
-      - uses: dtolnay/rust-toolchain@1.97.0
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: desktop-release-${{ matrix.platform }}-${{ matrix.arch }}
-
-      - name: Check native build architecture
-        run: node -e "if (process.arch !== process.env.RELEASE_ARCH) throw new Error('Runner architecture does not match the release asset')"
-
-      - run: npm ci
-
-      - run: npm run build:release --workspace @browser-recall/desktop
-
-      - name: Verify dependency lockfiles stayed unchanged
-        run: git diff --exit-code -- Cargo.lock package-lock.json
-
-      - name: Verify the Windows executable starts and handles relaunch
-        if: matrix.platform == 'windows'
-        run: npm run test:desktop-single-instance
-
-      - name: Verify Windows installation and installed application
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          $installer = (Get-Item "release-assets/browser-recall-$env:RELEASE_TAG-windows-x64-setup.exe").FullName
-          $installed = Join-Path $env:RUNNER_TEMP 'browser-recall-installed-test'
-          $process = Start-Process -FilePath $installer -ArgumentList '/S', "/D=$installed" -PassThru -Wait
-          if ($process.ExitCode -ne 0) { throw 'Desktop installer failed' }
-          try {
-            $env:BROWSER_RECALL_DESKTOP_TEST_EXECUTABLE = Join-Path $installed 'browser-recall-desktop.exe'
-            $expected = (Get-FileHash 'dist/desktop/windows/bin/browser-recall-desktop.exe').Hash
-            $actual = (Get-FileHash $env:BROWSER_RECALL_DESKTOP_TEST_EXECUTABLE).Hash
-            if ($actual -ne $expected) { throw 'Installed executable differs from the release build' }
-            node tests/smoke/windows-desktop-single-instance.mjs
-            if ($LASTEXITCODE -ne 0) { throw 'Installed application smoke test failed' }
-          } finally {
-            Remove-Item Env:BROWSER_RECALL_DESKTOP_TEST_EXECUTABLE
-            $uninstaller = Join-Path $installed 'uninstall.exe'
-            if (!(Test-Path $uninstaller)) { throw 'Desktop uninstaller is missing' }
-            $process = Start-Process -FilePath $uninstaller -ArgumentList '/S' -PassThru -Wait
-            if ($process.ExitCode -ne 0) { throw 'Desktop uninstall failed' }
-          }
-
-      - name: Verify the macOS disk image and update archive
-        if: matrix.platform == 'macos'
-        shell: bash
-        run: |
-          extracted="$RUNNER_TEMP/release-check"
-          mkdir -p "$extracted"
-          tar -xzf "release-assets/browser-recall-$RELEASE_TAG-macos-$RELEASE_ARCH.app.tar.gz" -C "$extracted"
-          node scripts/verify-macos-app-bundle.mjs "$extracted/Browser Recall.app"
-          mount="$RUNNER_TEMP/dmg-check"
-          mkdir -p "$mount"
-          hdiutil attach -readonly -nobrowse -mountpoint "$mount" "release-assets/browser-recall-$RELEASE_TAG-macos-$RELEASE_ARCH.dmg"
-          trap 'hdiutil detach "$mount"' EXIT
-          node scripts/verify-macos-app-bundle.mjs "$mount/Browser Recall.app"
-          test -L "$mount/Applications"
-
-      - name: Verify native update, relaunch, and retained collection
-        run: node tests/smoke/desktop-update-lifecycle.mjs
-        env:
-          BROWSER_RECALL_ISOLATED_MACOS_SESSION: '1'
-          BROWSER_RECALL_ISOLATED_WINDOWS_SESSION: '1'
-
-      - name: Preserve native update failure diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: native-update-failure-${{ matrix.platform }}-${{ matrix.arch }}
-          path: test-results/native-update/
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-${{ matrix.platform }}-${{ matrix.arch }}
-          path: release-assets/*
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
 
   publish:
     name: Publish GitHub Release

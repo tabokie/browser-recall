@@ -16,7 +16,7 @@
     "description": "Extension store and browser management description."
   },
   "commandOpenPopup": {
-    "message": "Browser Recall 팝업 열기",
+    "message": "페이지 세부정보 열기",
     "description": "브라우저 명령 설명."
   },
   "commandHighlightSelection": {

@@ -155,7 +155,17 @@ try {
     ...[
       ...readme.matchAll(/<img\b[^>]*\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')/gi),
     ].map((match) => match[1] ?? match[2]),
-  ].filter((name) => name !== 'icons/browser-recall-default.svg');
+  ].filter(
+    (name) =>
+      ![
+        'icons/browser-recall-default.svg',
+        'icons/browser-recall-icons-40px-gap-12px.svg',
+        'apps/extension/icons/icon128-special-lists.png',
+        'apps/extension/icons/icon128-special-notes.png',
+        'apps/extension/icons/icon128-special-mixed.png',
+        'apps/extension/icons/icon128-stop-recording.png',
+      ].includes(name),
+  );
   const expected = [
     'docs/images/timeline-styles.png',
     'docs/images/browser-popup-window.png',

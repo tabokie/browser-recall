@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="196" height="40" viewBox="0 0 196 40" role="img" aria-label="Browser Recall: recording paused, lists with notes or snapshots, notes or snapshots, and lists">
+  <svg x="0" width="40" height="40" viewBox="0 0 128 128">
+<rect width="128" height="128" rx="28" fill="#f4f0df" />
+  <g transform="translate(64 64) scale(1.16) translate(-64 -64) translate(0 -6) translate(64 64) scale(1.34) translate(-64 -64)">
+    <g transform="translate(64 64) scale(1.105263) translate(-64 -64) translate(0 -2)">
+      <path d="M34 61c0 9 4.4 14 11 14s11 -5 11 -14" fill="none" stroke="#000000" stroke-width="6" stroke-linecap="round" />
+      <path d="M72 61c0 9 4.4 14 11 14s11 -5 11 -14" fill="none" stroke="#000000" stroke-width="6" stroke-linecap="round" />
+    </g>
+  </g>
+  </svg>
+  <svg x="52" width="40" height="40" viewBox="0 0 128 128">
+<rect width="128" height="128" rx="28" fill="#6932e6" />
+  <g transform="translate(64 64) scale(1.16) translate(-64 -64) translate(0 -6) translate(64 64) scale(1.34) translate(-64 -64)">
+    <path fill="#000000" fill-rule="evenodd" d="M43 46a18 18 0 1 0 0 36a18 18 0 1 0 0-36ZM43 52a12 12 0 1 1 0 24a12 12 0 1 1 0-24ZM85 46a18 18 0 1 0 0 36a18 18 0 1 0 0-36ZM85 52a12 12 0 1 1 0 24a12 12 0 1 1 0-24Z" />
+    <circle cx="43" cy="64" r="12" fill="#f4f0df" />
+    <circle cx="85" cy="64" r="12" fill="#f4f0df" />
+    <circle cx="41.5" cy="69" r="8" fill="#000000" />
+    <circle cx="83.5" cy="69" r="8" fill="#000000" />
+  </g>
+  </svg>
+  <svg x="104" width="40" height="40" viewBox="0 0 128 128">
+<rect width="128" height="128" rx="28" fill="#4969F6" />
+  <g transform="translate(64 64) scale(1.16) translate(-64 -64) translate(0 -6) translate(64 64) scale(1.34) translate(-64 -64)">
+    <path fill="#000000" fill-rule="evenodd" d="M43 46a18 18 0 1 0 0 36a18 18 0 1 0 0-36ZM43 52a12 12 0 1 1 0 24a12 12 0 1 1 0-24ZM85 46a18 18 0 1 0 0 36a18 18 0 1 0 0-36ZM85 52a12 12 0 1 1 0 24a12 12 0 1 1 0-24Z" />
+    <circle cx="43" cy="64" r="12" fill="#f4f0df" />
+    <circle cx="85" cy="64" r="12" fill="#f4f0df" />
+    <circle cx="41.5" cy="69" r="8" fill="#000000" />
+    <circle cx="83.5" cy="69" r="8" fill="#000000" />
+  </g>
+  </svg>
+  <svg x="156" width="40" height="40" viewBox="0 0 128 128">
+<rect width="128" height="128" rx="28" fill="#ff5f19" />
+  <g transform="translate(64 64) scale(1.16) translate(-64 -64) translate(0 -6) translate(64 64) scale(1.34) translate(-64 -64)">
+    <path fill="#000000" fill-rule="evenodd" d="M43 46a18 18 0 1 0 0 36a18 18 0 1 0 0-36ZM43 52a12 12 0 1 1 0 24a12 12 0 1 1 0-24ZM85 46a18 18 0 1 0 0 36a18 18 0 1 0 0-36ZM85 52a12 12 0 1 1 0 24a12 12 0 1 1 0-24Z" />
+    <circle cx="43" cy="64" r="12" fill="#f4f0df" />
+    <circle cx="85" cy="64" r="12" fill="#f4f0df" />
+    <circle cx="41.5" cy="69" r="8" fill="#000000" />
+    <circle cx="83.5" cy="69" r="8" fill="#000000" />
+  </g>
+  </svg>
+</svg>

@@ -91,13 +91,14 @@ describe('Tauri build launcher', () => {
     finalizeDesktopBuild({
       platform: 'win32',
       finalizeMacosApp: () => calls.push('finalize-macos'),
-      collect: (options) => calls.push(['collect', options]),
+      collect: (options) => {
+        calls.push(['collect', options.platformName, options.bundles]);
+        options.verify('/stage');
+      },
       verifyMacosApp: () => calls.push('verify-macos'),
     });
 
-    expect(calls).toEqual([
-      ['collect', { bundles: [], platformName: 'windows' }],
-    ]);
+    expect(calls).toEqual([['collect', 'windows', []]]);
   });
 
   it('encodes PNG images into a Windows ICO resource', () => {

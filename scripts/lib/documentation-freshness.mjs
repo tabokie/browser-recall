@@ -67,9 +67,47 @@ export function captureInputs(root, kind) {
         visit(`${relative}/${name}`);
       }
     } else if (entry.isFile()) {
-      files[relative] = createHash('sha256')
-        .update(readFileSync(absolute))
-        .digest('hex');
+      let contents = readFileSync(absolute);
+      if (path.basename(relative) === 'package.json') {
+        const manifest = JSON.parse(contents.toString('utf8'));
+        // Commands and descriptive metadata do not change rendered pixels.
+        // Runtime exports and dependency/toolchain changes remain capture inputs.
+        const fields = [
+          'name',
+          'version',
+          'type',
+          'dependencies',
+          'devDependencies',
+          'optionalDependencies',
+          'peerDependencies',
+          'overrides',
+          'imports',
+          'exports',
+          'main',
+          'module',
+          'browser',
+          'engines',
+          'packageManager',
+          'workspaces',
+        ];
+        const selected = Object.fromEntries(
+          fields
+            .filter((key) => Object.hasOwn(manifest, key))
+            .map((key) => [key, manifest[key]]),
+        );
+        const canonical = (value) =>
+          Array.isArray(value)
+            ? value.map(canonical)
+            : value && typeof value === 'object'
+              ? Object.fromEntries(
+                  Object.keys(value)
+                    .sort()
+                    .map((key) => [key, canonical(value[key])]),
+                )
+              : value;
+        contents = JSON.stringify(canonical(selected));
+      }
+      files[relative] = createHash('sha256').update(contents).digest('hex');
     } else {
       throw new Error(`Unsupported screenshot input: ${relative}`);
     }

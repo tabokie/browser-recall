@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import net from 'node:net';
+import { stopFirefoxProcess } from './firefox-process.mjs';
 import {
   canonicalizePageUrl,
   generateSlugFromUrl,
@@ -355,7 +356,10 @@ console.error = (...args) => {
       '--no-config-discovery',
       '--no-reload',
     ],
-    { stdio: ['ignore', 'pipe', 'pipe'] },
+    {
+      detached: process.platform !== 'win32',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
   );
   firefox.stdout.on('data', (chunk) => {
     firefoxOutput += chunk;
@@ -437,33 +441,21 @@ console.error = (...args) => {
       'Firefox did not persist the visit: ' + url,
     );
   }
-  console.log(
-    'Real Firefox verified page capture, navigation, URL normalization, daemon persistence, paused-document exclusion until refresh, and options-page popup messages.',
-  );
 } finally {
   clearTimeout(timeout);
   // Every allocation, including staging and daemon startup, is inside this boundary.
   const cleanup = await Promise.allSettled([
-    (async () => {
-      if (!firefox || firefox.exitCode !== null || firefox.signalCode !== null)
-        return;
-      const exited = new Promise((resolve) => firefox.once('exit', resolve));
-      firefox.kill('SIGTERM');
-      const force = setTimeout(() => firefox.kill('SIGKILL'), 2000);
-      try {
-        await exited;
-      } finally {
-        clearTimeout(force);
-      }
-    })(),
+    stopFirefoxProcess(firefox),
     stopTestDaemon(daemon),
     ...[server, portReservation]
       .filter((entry) => entry?.listening)
       .map(
         (entry) =>
-          new Promise((resolve, reject) =>
-            entry.close((error) => (error ? reject(error) : resolve())),
-          ),
+          new Promise((resolve, reject) => {
+            entry.close((error) => (error ? reject(error) : resolve()));
+            // A browser request must not hold cleanup open after the probe.
+            entry.closeAllConnections?.();
+          }),
       ),
   ]);
   cleanupStagedAssets(extensionDir);
@@ -475,3 +467,6 @@ console.error = (...args) => {
       'Firefox check cleanup failed',
     );
 }
+console.log(
+  'Real Firefox verified page capture, navigation, URL normalization, daemon persistence, paused-document exclusion until refresh, and options-page popup messages; process cleanup completed.',
+);

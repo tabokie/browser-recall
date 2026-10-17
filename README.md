@@ -1,4 +1,4 @@
-<img src='icons/browser-recall-default.svg' width=100 height=100 align='right'/>
+<img src='icons/browser-recall-default.svg' width=120 height=120 align='right'/>
 
 # Browser Recall
 
@@ -9,7 +9,9 @@ Help browser remember things.
 - Add highlights and **notes** directly on the webpage and find them again in context.
 - **Search** across titles, URLs, highlights, notes, and snapshots from one place.
 
-All data collected by the app are stored using plain, readable formats such as JSON and Markdown, in a directory of your choosing. You can inspect the files directly, search them with file tools, or ask an agent to analyze them. An AGENTS.md file in the data directory explains the layout and conventions. Nothing in the collection depends on Browser Recall to remain readable. You own your data.
+Data collected by the app are stored using readable formats such as JSON and Markdown. You can read the files, search them with file tools, or ask an agent to analyze them. An AGENTS.md file in the data directory explains the layout and conventions. Nothing in the collection depends on Browser Recall to remain readable. You own your data.
+
+<img src='icons/browser-recall-icons-40px-gap-12px.svg' align='right'/>
 
 ## Gallery
 
@@ -19,14 +21,14 @@ All data collected by the app are stored using plain, readable formats such as J
       <p align="center">
         <img src="docs/images/timeline-styles.png" alt="Browser Recall Timeline showing browsing history in Amber and Mono color schemes">
         <br>
-        <strong>Timeline</strong> — browsing history and search
+        Timeline, search the history
       </p>
     </td>
     <td>
       <p align="center">
         <img src="docs/images/book.png" alt="Browser Recall Book showing collected highlights and notes grouped by day">
         <br>
-        <strong>Book</strong> — highlights gathered by day
+        Book, read highlights gathered by day
       </p>
     </td>
   </tr>
@@ -35,19 +37,18 @@ All data collected by the app are stored using plain, readable formats such as J
       <p align="center">
         <img src="docs/images/browser-popup-window.png" alt="Browser extension popup showing page details, lists, and saved snapshots">
         <br>
-        Browser extension popup window
+        Details for each browser page
       </p>
     </td>
     <td>
       <p align="center">
         <img src="docs/images/browser-note-window.png" alt="Browser extension note editor beneath a highlighted passage on a webpage">
         <br>
-        Highlight text and add a note on the page
+        Highlight and take notes
       </p>
     </td>
   </tr>
 </table>
-
 
 ## Install
 

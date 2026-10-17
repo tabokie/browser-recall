@@ -1,62 +1,44 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = process.cwd();
-const outputDir = path.join(ROOT, 'coverage/rust');
-const outputPath = path.join(outputDir, 'coverage-summary.json');
-const missingPath = path.join(outputDir, 'missing.txt');
-
-fs.mkdirSync(outputDir, { recursive: true });
-
-const summaryArgs = [
-  'llvm-cov',
-  '--workspace',
-  '--all-targets',
-  '--summary-only',
-  '--json',
-  '--output-path',
-  outputPath,
-];
-
-const missingArgs = [
-  'llvm-cov',
-  '--workspace',
-  '--all-targets',
-  '--text',
-  '--show-missing-lines',
-  '--output-path',
-  missingPath,
-];
-
-function runCoverage(args) {
-  return spawnSync('cargo', args, {
-    cwd: ROOT,
-    stdio: 'inherit',
-  });
+export function generateRustCoverage(root, run = spawnSync) {
+  const outputDir = path.join(root, 'coverage/rust');
+  fs.mkdirSync(outputDir, { recursive: true });
+  const commands = [
+    ['llvm-cov', 'clean', '--workspace'],
+    ['llvm-cov', '--locked', '--workspace', '--all-targets', '--no-report'],
+  ];
+  for (const [format, name] of [
+    [['--summary-only', '--json'], 'coverage-summary.json'],
+    [['--text', '--show-missing-lines'], 'missing.txt'],
+  ]) {
+    commands.push([
+      'llvm-cov',
+      'report',
+      ...format,
+      '--output-path',
+      path.join(outputDir, name),
+    ]);
+  }
+  for (const args of commands) {
+    const result = run('cargo', args, { cwd: root, stdio: 'inherit' });
+    if (result.error) throw result.error;
+    if (result.status !== 0)
+      throw new Error(`Rust coverage failed with exit code ${result.status}`);
+  }
 }
 
-let result = runCoverage(summaryArgs);
-
-if (result.status === 0) {
-  result = runCoverage(missingArgs);
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  try {
+    generateRustCoverage(process.cwd());
+    console.log('Rust coverage reports written to coverage/rust');
+  } catch (error) {
+    console.error(error.message);
+    console.error(
+      'Install cargo-llvm-cov and llvm-tools-preview, then rerun npm run coverage:rust.',
+    );
+    process.exitCode = 1;
+  }
 }
-
-if (result.error?.code === 'ENOENT') {
-  console.error('cargo was not found. Install Rust before running coverage.');
-  process.exit(1);
-}
-
-if (result.status !== 0) {
-  console.error(
-    '\nRust coverage failed. Ensure `cargo-llvm-cov` and the `llvm-tools-preview` rustup component are installed, then rerun `npm run coverage:rust`.',
-  );
-  process.exit(result.status || 1);
-}
-
-console.log(
-  `Rust coverage summary written to ${path.relative(ROOT, outputPath)}`,
-);
-console.log(
-  `Rust missing line report written to ${path.relative(ROOT, missingPath)}`,
-);

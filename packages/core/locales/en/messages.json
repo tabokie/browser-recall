@@ -16,7 +16,7 @@
     "description": "Extension store and browser management description."
   },
   "commandOpenPopup": {
-    "message": "Open the Browser Recall popup",
+    "message": "Open page details",
     "description": "Browser command description."
   },
   "commandHighlightSelection": {

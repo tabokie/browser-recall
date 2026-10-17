@@ -125,6 +125,52 @@ async function countReloadWarnings(page, reloadMessage) {
 }
 
 test.describe('extension navigation regressions', () => {
+  test('options shows the page-details shortcut and opens browser shortcut settings', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }, testInfo) => {
+    void setupDir;
+    const options = await extContext.newPage();
+    let settings;
+    try {
+      await options.goto(`chrome-extension://${extensionId}/options-stub.html`);
+      const { commands, notSet } = await options.evaluate(async () => ({
+        commands: await chrome.commands.getAll(),
+        notSet: chrome.i18n.getMessage('extensionNotSet'),
+      }));
+      const order = [
+        'open-popup',
+        'highlight-selection',
+        'capture-snapshot',
+        'like-page',
+        'dislike-page',
+      ];
+      const ordered = order.map((name) =>
+        commands.find((command) => command.name === name),
+      );
+      expect(ordered.every(Boolean)).toBe(true);
+      await expect(options.locator('.shortcut-desc')).toHaveText(
+        ordered.map((command) => command.description),
+      );
+      await expect(options.locator('.shortcut-key')).toHaveText(
+        ordered.map((command) => command.shortcut || notSet),
+      );
+      await options.screenshot({
+        path: testInfo.outputPath('options-shortcuts.png'),
+      });
+      const opened = extContext.waitForEvent('page');
+      await options.locator('#customizeShortcuts').click();
+      settings = await opened;
+      await expect(settings).toHaveURL(
+        /^(chrome|edge):\/\/extensions\/shortcuts/,
+      );
+    } finally {
+      await settings?.close();
+      await options.close();
+    }
+  });
+
   test('reconciles navigation before content capture is ready without replaying superseded DOM', async ({
     extContext,
     extensionId,

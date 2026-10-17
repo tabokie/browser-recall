@@ -9,11 +9,11 @@ import {
   readFileSync,
   renameSync,
   rmSync,
-  symlinkSync,
 } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { finalizeDesktopBuild } from './finalize-desktop-build.mjs';
+import { buildDesktop } from './build-desktop.mjs';
+import { createDesktopDiskImage } from './lib/desktop-disk-image.mjs';
 import { verifyMacosAppBundle } from './verify-macos-app-bundle.mjs';
 import {
   readProductVersion,
@@ -28,6 +28,7 @@ export function packageDesktopRelease({
   arch = process.arch,
   version,
   outDir,
+  artifacts,
 }) {
   validateProductVersion(version);
   if (
@@ -46,27 +47,10 @@ export function packageDesktopRelease({
   try {
     let update;
     if (platform === 'darwin') {
-      const app = path.join(root, 'dist/desktop/macos/app/Browser Recall.app');
+      const app = artifacts.app;
       verifyMacosAppBundle(app);
-      const source = path.join(work, 'disk-image');
-      mkdirSync(source);
-      cpSync(app, path.join(source, 'Browser Recall.app'), { recursive: true });
-      symlinkSync('/Applications', path.join(source, 'Applications'));
       const diskImage = path.join(work, `${prefix}.dmg`);
-      execFileSync(
-        '/usr/bin/hdiutil',
-        [
-          'create',
-          '-volname',
-          'Browser Recall',
-          '-srcfolder',
-          source,
-          '-format',
-          'UDZO',
-          diskImage,
-        ],
-        { stdio: 'pipe' },
-      );
+      createDesktopDiskImage(app, diskImage);
       renameSync(diskImage, path.join(outDir, `${prefix}.dmg`));
       update = path.join(work, `${prefix}.app.tar.gz`);
       execFileSync(
@@ -82,7 +66,7 @@ export function packageDesktopRelease({
         { stdio: 'pipe' },
       );
     } else {
-      const directory = path.join(root, 'target/release/bundle/nsis');
+      const directory = path.join(artifacts.outDir, 'windows/nsis');
       const installers = readdirSync(directory).filter(
         (name) =>
           name.includes(`_${version}_x64`) && name.endsWith('-setup.exe'),
@@ -116,6 +100,7 @@ export function packageDesktopRelease({
       [
         'test',
         '--locked',
+        '--release',
         '-p',
         'browser-recall-desktop',
         '--test',
@@ -141,14 +126,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const version = readProductVersion(root);
   if (!process.env.TAURI_SIGNING_PRIVATE_KEY)
     throw new Error('TAURI_SIGNING_PRIVATE_KEY is required for release builds');
-  execFileSync(
-    process.execPath,
-    [cli, 'build', '--bundles', process.platform === 'darwin' ? 'app' : 'nsis'],
-    { cwd: path.join(root, 'apps/desktop'), stdio: 'inherit' },
-  );
-  finalizeDesktopBuild();
+  const artifacts = buildDesktop({ purpose: 'release' });
   packageDesktopRelease({
     version,
     outDir: path.join(root, 'release-assets'),
+    artifacts,
   });
 }

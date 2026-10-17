@@ -22,7 +22,8 @@ Use this map to find the files that implement a feature. See
 | `tests/` | JavaScript unit/integration tests, Playwright scenarios, and native app tests |
 | `icons/` | SVG sources for generated runtime icons |
 | `docs/images/` | Documentation PNGs and capture manifests |
-| `.github/workflows/ci.yml` | GitHub Actions checks using the same `ci:*` scripts as local CI |
+| `.github/workflows/ci.yml` | Six regular CI runner jobs: Linux tests/coverage/lint, extension E2E, desktop visuals, and three native release validations |
+| `.github/workflows/desktop-release-validation.yml` | Shared native packaging, installation, update/relaunch, and platform regression checks used by CI and Release |
 | `.github/workflows/release.yml` | Manual native Windows/macOS and Chrome/Firefox builds, verified installers and extension archives, signed update packages, and GitHub Releases publishing |
 | `package.json` | Build, test, formatting, and analysis commands |
 | `rust-toolchain.toml` | Rust compiler and component pin |
@@ -87,7 +88,7 @@ row. Data changes update affected rows without restarting the history search.
 | `apps/extension/snapshot-resource-fetch.js` | Host-permission fetches, redirect/referrer policy, and temporary network rules |
 | `apps/extension/savepage/content.js`, `apps/extension/savepage/content-frame.js` | Save Page WE capture of page content, frames, shadow roots, and computed root and body font sizes |
 | `apps/extension/snapshot-viewer.js` | Saved-page preparation and highlight adapters |
-| `apps/extension/options-stub.html` | Link to the desktop app |
+| `apps/extension/options-stub.html`, `apps/extension/options-stub.js` | Desktop app link and assigned browser shortcuts, including Open page details |
 | `apps/extension/background-test-control.js` | Test-only RPC handlers and extensions to the background test controls, omitted from production builds |
 
 Opening from the toolbar determines the page URL and fetches the complete page
@@ -162,11 +163,16 @@ do not maintain a second production copy.
 | `scripts/stage-app-assets.mjs` | Check translations and prepare extension/desktop assets |
 | `scripts/desktop-build-plan.mjs` | Select platform-specific desktop artifacts and build steps |
 | `scripts/dev-desktop.mjs` | Guard desktop development launches before starting Tauri |
+| `scripts/build-desktop.mjs` | Shared local, release, and disk-image builds; sign and verify staging before publishing artifacts; record phase timings |
+| `scripts/lib/desktop-signing.mjs`, `scripts/windows-code-signing.ps1` | Explicit macOS and Windows certificate selection, credential isolation, and signature verification |
+| `scripts/lib/desktop-disk-image.mjs` | Package verified macOS apps into disk images for local builds and Release |
 | `scripts/build-tauri-app.mjs` | Run the standard desktop build |
-| `scripts/collect-desktop-artifacts.mjs` | Replace build output, restore previous output on failure, and clean up locked Windows files |
+| `scripts/collect-desktop-artifacts.mjs` | Verify staged output before replacement, restore previous output on failure, and clean up locked Windows files |
 | `scripts/finalize-desktop-build.mjs` | Desktop build finalization |
 | `scripts/finalize-macos-app-bundle.mjs` | Sign local macOS builds with a stable app identifier |
 | `scripts/verify-macos-app-bundle.mjs` | Bundle signature verification |
+| `scripts/prepare-ci-release.mjs` | Generate disposable updater signing keys and configure only a CI runner's checkout |
+| `scripts/verify-windows-installed-executable.mjs` | Compare installed executable bytes with the actual NSIS installer payload |
 | `scripts/generate-icons.mjs` | Native-size desktop slots, toolbar icons, and tray assets |
 | `scripts/manual-test-browser.mjs`, `scripts/lib/manual-seed.mjs` | Isolated manual browser/daemon workflow |
 | `scripts/lib/seed-builder.mjs` | Generate test data by applying log events |

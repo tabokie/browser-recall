@@ -4,7 +4,7 @@
 
 - **Unit tests**: `npm test` (vitest). Config: `vitest.config.js`, files: `tests/**/*.test.js`.
 - **E2E tests**: `npx playwright test`. Config: `playwright.config.js`, files: `tests/e2e/*.spec.js`. Single worker, chromium channel, 30s per-test timeout.
-- **Coverage monitor**: `npm run coverage:monitor` reports uncovered JS and Rust production line ranges plus test LoC by suite type, and fails if JS or inline Rust unit-test LoC grows above the current baseline. `npm run coverage` first generates Vitest V8 line data for the stable unit/protocol subset and Rust llvm-cov data for the workspace.
+- **Coverage monitor**: `npm run coverage:monitor` reports uncovered JS and Rust production line ranges plus test LoC by suite type, and fails if JS or inline Rust unit-test LoC grows above the current baseline. `npm run coverage` first runs all JavaScript tests with Vitest V8 coverage and Rust workspace tests once with llvm-cov; both Rust reports reuse the same execution.
 - The two suites are independent — run either without the other.
 
 ## Test Investment Policy

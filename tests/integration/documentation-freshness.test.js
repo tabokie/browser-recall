@@ -162,6 +162,36 @@ test('screenshot CI checks actual files, capture provenance, and README referenc
     );
     expect(run().status).toBe(0);
 
+    for (const manifest of ['package.json', 'apps/desktop/package.json']) {
+      const original = readFileSync(file(manifest), 'utf8');
+      const content = JSON.parse(original);
+      write(
+        manifest,
+        JSON.stringify({
+          ...content,
+          scripts: {
+            ...content.scripts,
+            'build:contributor': 'node example.mjs',
+          },
+        }),
+      );
+      expect(run().status).toBe(0);
+      write(manifest, JSON.stringify({ ...content, version: '99.0.0' }));
+      fails('screenshot inputs changed', manifest);
+      write(
+        manifest,
+        JSON.stringify({
+          ...content,
+          dependencies: {
+            ...content.dependencies,
+            'capture-renderer': '2.0.0',
+          },
+        }),
+      );
+      fails('screenshot inputs changed', manifest);
+      write(manifest, original);
+    }
+
     const storeImage = 'docs/images/chrome-web-store/browser-popup-window.png';
     const originalStoreImage = readFileSync(file(storeImage));
     rmSync(file(storeImage));
@@ -242,6 +272,11 @@ test('screenshot CI checks actual files, capture provenance, and README referenc
 
     const gallery = [
       '<img src="icons/browser-recall-default.svg" alt="Browser Recall">',
+      '<img src="icons/browser-recall-icons-40px-gap-12px.svg" alt="Browser Recall icons">',
+      '<img src="apps/extension/icons/icon128-special-lists.png" alt="Lists">',
+      '<img src="apps/extension/icons/icon128-special-notes.png" alt="Notes or snapshots">',
+      '<img src="apps/extension/icons/icon128-special-mixed.png" alt="Lists and notes or snapshots">',
+      '<img src="apps/extension/icons/icon128-stop-recording.png" alt="Recording paused">',
       '<table><tr><td>',
       '<img src="docs/images/book.png" alt="Book">',
       ...readmeImages

@@ -12,6 +12,124 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { expect, test, vi } from 'vitest';
 import { collectDesktopArtifacts } from '../../scripts/collect-desktop-artifacts.mjs';
+import { finalizeDesktopBuild } from '../../scripts/finalize-desktop-build.mjs';
+
+test('disk-image creation follows signature verification and cannot discard previous output on failure', () => {
+  const work = mkdtempSync(path.join(tmpdir(), 'browser-recall-dmg-rollback-'));
+  try {
+    const cargoReleaseDir = path.join(work, 'release');
+    const app = path.join(cargoReleaseDir, 'bundle/macos/Browser Recall.app');
+    mkdirSync(app, { recursive: true });
+    writeFileSync(path.join(app, 'Contents'), 'fixture app');
+    writeFileSync(
+      path.join(cargoReleaseDir, 'browser-recall-desktop'),
+      'new executable',
+    );
+    const outDir = path.join(work, 'dist');
+    mkdirSync(path.join(outDir, 'macos'), { recursive: true });
+    const previous = path.join(outDir, 'macos/previous.dmg');
+    writeFileSync(previous, 'previous disk image');
+    const calls = [];
+    expect(() =>
+      finalizeDesktopBuild({
+        platform: 'darwin',
+        cargoReleaseDir,
+        outDir,
+        finalizeMacosApp: () => {},
+        verifyMacosApp: () => calls.push('bundle'),
+        verifySignature: () => calls.push('certificate'),
+        packageArtifacts: (staged) => {
+          expect(
+            readFileSync(
+              path.join(staged, 'app/Browser Recall.app/Contents'),
+              'utf8',
+            ),
+          ).toBe('fixture app');
+          expect(calls).toEqual(['bundle', 'certificate']);
+          throw new Error('Disk image creation failed');
+        },
+      }),
+    ).toThrow('Disk image creation failed');
+    expect(readFileSync(previous, 'utf8')).toBe('previous disk image');
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test('Windows release collection excludes older installer versions before signature verification', () => {
+  const work = mkdtempSync(
+    path.join(tmpdir(), 'browser-recall-installer-selection-'),
+  );
+  try {
+    const cargoReleaseDir = path.join(work, 'release');
+    const nsis = path.join(cargoReleaseDir, 'bundle/nsis');
+    mkdirSync(nsis, { recursive: true });
+    writeFileSync(
+      path.join(cargoReleaseDir, 'browser-recall-desktop.exe'),
+      'executable',
+    );
+    writeFileSync(path.join(nsis, 'old-setup.exe'), 'old certificate');
+    writeFileSync(path.join(nsis, 'new-setup.exe'), 'new certificate');
+    collectDesktopArtifacts({
+      cargoReleaseDir,
+      outDir: path.join(work, 'dist'),
+      platformName: 'windows',
+      bundles: ['nsis'],
+      bundleFiles: { nsis: ['new-setup.exe'] },
+      verify: (staged) =>
+        expect(readdirSync(path.join(staged, 'nsis'))).toEqual([
+          'new-setup.exe',
+        ]),
+    });
+    expect(
+      readFileSync(path.join(work, 'dist/windows/nsis/new-setup.exe'), 'utf8'),
+    ).toBe('new certificate');
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test.each(['macos', 'windows'])(
+  'rejected %s signature preserves the complete previous output',
+  (platformName) => {
+    const work = mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-signature-rollback-'),
+    );
+    const cargoReleaseDir = path.join(work, 'release');
+    const outDir = path.join(work, 'dist');
+    const name =
+      platformName === 'windows'
+        ? 'browser-recall-desktop.exe'
+        : 'browser-recall-desktop';
+    const previous = path.join(outDir, platformName, 'bin', name);
+    try {
+      mkdirSync(cargoReleaseDir, { recursive: true });
+      mkdirSync(path.dirname(previous), { recursive: true });
+      writeFileSync(path.join(cargoReleaseDir, name), 'new build');
+      writeFileSync(previous, 'previous verified build');
+      const companion = path.join(outDir, platformName, 'keep.txt');
+      writeFileSync(companion, 'previous companion');
+      expect(() =>
+        collectDesktopArtifacts({
+          cargoReleaseDir,
+          outDir,
+          platformName,
+          verify: (staged) => {
+            expect(readFileSync(path.join(staged, 'bin', name), 'utf8')).toBe(
+              'new build',
+            );
+            throw new Error('Certificate does not match');
+          },
+        }),
+      ).toThrow('Certificate does not match');
+      expect(readFileSync(previous, 'utf8')).toBe('previous verified build');
+      expect(readFileSync(companion, 'utf8')).toBe('previous companion');
+      expect(readdirSync(outDir)).toEqual([platformName]);
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  },
+);
 
 test.each([true, false])(
   'macOS artifact collection with a leftover documentation bundle and production app present=%s',

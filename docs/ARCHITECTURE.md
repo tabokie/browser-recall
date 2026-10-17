@@ -189,6 +189,16 @@ WebSocket handlers do not keep a separate editable copy of configuration.
 
 ## Desktop app
 
+Local, release, and disk-image builds share desktop build orchestration: stage UI
+assets, compile with Tauri, sign, and verify staged artifacts before replacing
+previous output. Release packaging consumes the verified artifacts. Explicit
+unsigned builds use ad-hoc signing on macOS without an Apple certificate. Explicit
+signed builds resolve an installed Apple signing identity or Windows code-signing
+certificate before compilation and verify staged output against the selected
+certificate. Windows signing uses Authenticode for executables and installers.
+Both explicit local modes exclude notarization and update-package credentials;
+release packaging manages those credentials separately.
+
 Desktop and browser extension releases use a manual GitHub Actions workflow.
 Browser Recall uses one product version across desktop and extension manifests,
 desktop and extension npm packages, desktop Cargo metadata, and GitHub Release tags. Release preparation
@@ -494,6 +504,14 @@ commands and desktop integration.
 Native tests separately check macOS tray and window behavior and Windows handling
 of a second app instance. Browser-rendered UI tests do not provide complete coverage
 of the native desktop interface.
+
+Regular CI and Release use one reusable native release-validation workflow on
+Windows x64 and both macOS architectures. The workflow builds signed packages,
+verifies installation, and exercises updates, relaunch, collection retention, and
+connector reconnection. Regular CI uses temporary signing keys in disposable
+runner checkouts; only Release uses production signing keys and publishes assets.
+Linux tests, lint, and coverage share one job. Each JavaScript and Rust suite runs
+once with coverage, and Rust coverage reports reuse the same execution.
 
 Local and hosted verification share `ci:*` scripts. Documentation captures are
 manual macOS workflows. Native window pixels are composited over a fixed light

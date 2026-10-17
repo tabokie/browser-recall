@@ -6,32 +6,67 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
-    name: Unit Tests
-    runs-on: ubuntu-latest
+  checks:
+    name: Linux Tests, Coverage and Lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v6
-
       - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
-
       - uses: dtolnay/rust-toolchain@1.97.0
-
+        with:
+          components: clippy, rustfmt, llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
-
+        with:
+          key: linux-checks
       - run: npm ci
 
+      - name: Validate release versions before expensive builds
+        run: node scripts/lib/product-version.mjs
       - name: Verify committed README image integrity
         run: npm run ci:check-docs -- --images-only
+      - name: Validate GitHub workflows with actionlint 1.7.12
+        run: |
+          curl --fail --location --silent --show-error \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz \
+            -o "$RUNNER_TEMP/actionlint.tar.gz"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -shellcheck= -pyflakes=
+      - run: npm run ci:lint-js
+      - name: Run JavaScript tests once with coverage
+        run: npm run coverage:js
 
-      - run: npm run ci:test
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: Install Rust coverage tooling
+        run: cargo install cargo-llvm-cov --version 0.8.5 --locked
+      - run: npm run ci:lint-rust
+      - name: Install Playwright Chromium
+        run: npm run ci:install-playwright
+      - run: npm run test:cold-scripts
+      - name: Run Rust workspace tests once with coverage
+        run: npm run coverage:rust
+      - run: npm run coverage:monitor
 
   test-extension-e2e:
     name: Extension E2E Regression
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
@@ -69,38 +104,6 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  test-rust:
-    name: Rust Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Tauri Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev
-
-      - uses: dtolnay/rust-toolchain@1.97.0
-
-      - uses: Swatinem/rust-cache@v2
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
-      - run: npm ci
-
-      - run: npm run ci:test-rust
-
   test-desktop-visual:
     name: Desktop Visual Regression
     runs-on: macos-26
@@ -132,169 +135,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  cold-scripts:
-    name: Cold Script Smoke
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Tauri Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev
-
-      - uses: dtolnay/rust-toolchain@1.97.0
-        with:
-          components: llvm-tools-preview
-
-      - uses: Swatinem/rust-cache@v2
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
-
-      - run: npm ci
-
-      - name: Install Rust coverage tooling
-        run: cargo install cargo-llvm-cov --version 0.8.5 --locked
-
-      - name: Install Playwright Chromium
-        run: npm run ci:install-playwright
-
-      - run: npm run ci:cold-scripts
-
-  test-desktop-native-bundle:
-    name: Desktop Native Lifecycle
-    runs-on: macos-26
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
-
-      - uses: dtolnay/rust-toolchain@1.97.0
-
-      - uses: Swatinem/rust-cache@v2
-
-      - run: npm ci
-
-      - run: npm run build --workspace @browser-recall/desktop
-
-      - name: Verify native window frame restoration
-        run: cargo test --locked --release -p browser-recall-desktop --test macos_window_frame
-
-      - name: Exercise native startup and tray lifecycle
-        env:
-          BROWSER_RECALL_ISOLATED_MACOS_SESSION: '1'
-        run: node tests/smoke/macos-desktop-window-lifecycle.mjs
-
-      - name: Verify personal macOS sessions reject native automation
-        run: npx vitest run tests/integration/macos-native-session.test.js
-
-      - name: Preserve native lifecycle failure diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: desktop-native-lifecycle-failure
-          path: test-results/native-lifecycle/
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: Verify documentation builds preserve app URL routing
-        run: |
-          npx vitest run tests/integration/macos-documentation-url-routing.test.js
-          node tests/smoke/macos-documentation-url-routing.mjs
-
-  test-desktop-single-instance:
-    name: Desktop Windows Single Instance
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
-
-      - uses: dtolnay/rust-toolchain@1.97.0
-
-      - uses: Swatinem/rust-cache@v2
-
-      - run: npm ci
-
-      - run: npm run ci:test-windows-cleanup
-
-      - run: npm run build --workspace @browser-recall/desktop
-
-      - run: npm run ci:test-windows-artifacts -- tests/integration/desktop-artifact-collection.test.js
-
-      - name: Install Playwright Chromium
-        run: npm run ci:install-playwright
-
-      - name: Verify Windows extension system-font fallback
-        run: npm run ci:test-windows-extension-font
-
-      - name: Exercise native single-instance deep-link forwarding
-        run: npm run test:desktop-single-instance
-
-  lint-js:
-    name: Lint & Format (JS)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
-
-      - run: npm ci
-
-      - run: npm run ci:lint-js
-
-  lint-rust:
-    name: Lint & Format (Rust)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Tauri Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev
-
-      - uses: dtolnay/rust-toolchain@1.97.0
-        with:
-          components: clippy, rustfmt
-
-      - uses: Swatinem/rust-cache@v2
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
-      - run: npm ci
-
-      - run: npm run ci:lint-rust
+  desktop-release:
+    name: Desktop Release Validation
+    uses: ./.github/workflows/desktop-release-validation.yml
+    with:
+      production: false

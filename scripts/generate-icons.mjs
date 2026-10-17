@@ -186,6 +186,40 @@ export function generateAllIcons() {
     'icons/browser-recall-default.svg',
     'apps/desktop/src-tauri/icons/icon.icns',
   );
+  generateReadmeIconStrip();
+}
+
+function generateReadmeIconStrip() {
+  // Preserve the visible order of the README's four right-aligned images.
+  const artwork = [
+    'icon128-stop-recording.png',
+    'icon128-special-mixed.png',
+    'icon128-special-notes.png',
+    'icon128-special-lists.png',
+  ].map((name) => {
+    const job = iconJobs.find(({ outputs }) =>
+      outputs.some(([output]) => path.basename(output) === name),
+    );
+    if (!job) throw new Error(`Missing extension icon generation job: ${name}`);
+    return buildIconSvg(job.source, job)
+      .replace(/^[\s\S]*?<svg\b[^>]*>/, '')
+      .replace(/<\/svg>\s*$/, '')
+      .trim();
+  });
+  const size = 40;
+  const gap = 12;
+  const width = artwork.length * size + (artwork.length - 1) * gap;
+  const icons = artwork.map(
+    (svg, index) =>
+      `  <svg x="${index * (size + gap)}" width="${size}" height="${size}" viewBox="0 0 128 128">\n${svg}\n  </svg>`,
+  );
+  fs.writeFileSync(
+    path.join(
+      repoRoot,
+      `icons/browser-recall-icons-${size}px-gap-${gap}px.svg`,
+    ),
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${size}" viewBox="0 0 ${width} ${size}" role="img" aria-label="Browser Recall: recording paused, lists with notes or snapshots, notes or snapshots, and lists">\n${icons.join('\n')}\n</svg>\n`,
+  );
 }
 
 export function generateWindowsAndLinuxDesktopIcons() {
@@ -246,10 +280,8 @@ export function generateWindowsIcon(source, output) {
   }
 }
 
-function screenshotSvg(
+function buildIconSvg(
   source,
-  output,
-  size,
   {
     artworkScale = 1,
     background = null,
@@ -257,20 +289,22 @@ function screenshotSvg(
     renderSize = SOURCE_SIZE,
   } = {},
 ) {
-  const tempDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), 'browser-recall-icon-'),
-  );
-  const sourcePath = path.join(tempDir, 'source.svg');
   let sourceSvg = fs.readFileSync(path.resolve(repoRoot, source), 'utf8');
   if (background) sourceSvg = injectSvgAfterOpenTag(sourceSvg, background);
   if (preserveEyeInterior) sourceSvg = addEyeInteriorFill(sourceSvg);
   if (artworkScale !== 1) sourceSvg = scaleSvgArtwork(sourceSvg, artworkScale);
-  fs.writeFileSync(
-    sourcePath,
-    sourceSvg
-      .replace(/width="128"/, `width="${renderSize}"`)
-      .replace(/height="128"/, `height="${renderSize}"`),
+  return sourceSvg
+    .replace(/width="128"/, `width="${renderSize}"`)
+    .replace(/height="128"/, `height="${renderSize}"`);
+}
+
+function screenshotSvg(source, output, size, options = {}) {
+  const renderSize = options.renderSize ?? SOURCE_SIZE;
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'browser-recall-icon-'),
   );
+  const sourcePath = path.join(tempDir, 'source.svg');
+  fs.writeFileSync(sourcePath, buildIconSvg(source, options));
   const tempPng = path.join(tempDir, 'icon.png');
   try {
     execFileSync(
@@ -638,5 +672,6 @@ if (
   process.argv[1] &&
   fileURLToPath(import.meta.url) === path.resolve(process.argv[1])
 ) {
-  generateAllIcons();
+  if (process.argv.includes('--readme')) generateReadmeIconStrip();
+  else generateAllIcons();
 }

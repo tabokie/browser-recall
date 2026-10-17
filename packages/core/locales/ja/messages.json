@@ -16,7 +16,7 @@
     "description": "Extension store and browser management description."
   },
   "commandOpenPopup": {
-    "message": "Browser Recall のポップアップを開く",
+    "message": "ページの詳細を開く",
     "description": "ブラウザーコマンドの説明。"
   },
   "commandHighlightSelection": {

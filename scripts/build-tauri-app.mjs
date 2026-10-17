@@ -45,16 +45,18 @@ function forwardLine(line, target) {
   target.write(line);
 }
 
-export function tauriBuildInvocation({ platform = process.platform } = {}) {
-  const buildArgs = desktopBuildPlan(platform).tauriArgs;
+export function tauriBuildInvocation({
+  platform = process.platform,
+  buildArgs = desktopBuildPlan(platform).tauriArgs,
+} = {}) {
   return {
     command: process.execPath,
     args: [require.resolve('@tauri-apps/cli/tauri.js'), ...buildArgs],
   };
 }
 
-export function runTauriBuild() {
-  const { command, args } = tauriBuildInvocation();
+export function runTauriBuild(buildArgs) {
+  const { command, args } = tauriBuildInvocation({ buildArgs });
   const child = spawn(command, args, {
     cwd: path.join(repoRoot, 'apps', 'desktop'),
     env: process.env,
@@ -79,5 +81,5 @@ export function runTauriBuild() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  runTauriBuild();
+  runTauriBuild(process.argv.length > 2 ? process.argv.slice(2) : undefined);
 }
