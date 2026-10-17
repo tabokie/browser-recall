@@ -109,6 +109,19 @@ Read [ARCHITECTURE.md](docs/ARCHITECTURE.md) for how Browser Recall works,
 
 ## Rendering and native UI
 
+- Native macOS automation that launches Browser Recall tray apps must run in a
+  disposable macOS user account or CI runner. Never set
+  `BROWSER_RECALL_ISOLATED_MACOS_SESSION=1` in the user's personal login session.
+  Temporary data folders, `HOME`, bundle identifiers, and Launch Services cleanup
+  do not isolate Control Center's per-user menu bar ownership records. Use Finder
+  to launch the regular Browser Recall app when a personal-session launch is needed.
+  Documentation automation uses verified `no-tray` builds and does not need the
+  disposable-session flag. The flag acknowledges provisioning; it does not detect
+  whether an account is disposable.
+- For a missing macOS menu bar icon, check Control Center's `trackedApplications`
+  ownership records for Browser Recall under a blocked foreign app before repeating
+  permission toggles or registry cleanup. Preserve other permissions and back up
+  preferences before repairing a confirmed incorrect ownership link.
 - Inspect focused Playwright screenshots before changing popup/menu/overlay CSS.
   Element dimensions alone cannot reveal every clipping, scrollbar, or paint problem.
 - Preserve reading position during data refreshes. Avoid full `innerHTML`

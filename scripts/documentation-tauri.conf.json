@@ -1,6 +1,14 @@
 {
   "identifier": "app.browser-recall.documentation",
   "productName": "Browser Recall Documentation",
+  "build": {
+    "features": ["no-tray"]
+  },
+  "bundle": {
+    "macOS": {
+      "infoPlist": "../../../scripts/documentation-info.plist"
+    }
+  },
   "plugins": {
     "deep-link": {
       "desktop": []

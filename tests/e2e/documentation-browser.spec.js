@@ -320,7 +320,9 @@ test('browser documentation separates the clean popup from note taking', async (
       .toBe(true);
     if (nativeCapture) await captureWindow('browser-note-window.png');
     else await capture('browser-note.png', page);
-    await page.keyboard.press('Enter');
+    // Native capture can change keyboard focus. Close through the page's real
+    // outside-click save path instead of assuming the save button stayed focused.
+    await page.getByRole('heading', { name: 'A smaller, slower web' }).click();
     await expect(page.locator('#browser-recall-highlight-overlay')).toHaveCount(
       0,
     );

@@ -22,6 +22,7 @@ import { buildManualSeedFiles } from './lib/manual-seed.mjs';
 import { documentationSeed } from './lib/documentation-seed.mjs';
 import { composeDocumentationHero } from './compose-documentation-hero.mjs';
 import { verifyMacosDocumentationApp } from './verify-macos-documentation-app.mjs';
+import { launchMacosDocumentationApp } from './lib/macos-native-session.mjs';
 import {
   captureInputs,
   assertCaptureInputs,
@@ -237,19 +238,12 @@ try {
   run('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', app]);
   helper = compileDocumentationWindow(work);
   mkdirSync(output);
-  run('/usr/bin/open', [
-    '-n',
-    '-F',
-    '--env',
-    `BROWSER_RECALL_DESKTOP_TEST_PROFILE_DIR=${profile}`,
-    '--env',
-    'BROWSER_RECALL_SKIP_DEEP_LINK_REGISTRATION=1',
-    '--env',
-    'BROWSER_RECALL_SKIP_LOGIN_ITEM_REGISTRATION=1',
-    '--env',
-    `BROWSER_RECALL_PORTS=${port}`,
-    app,
-  ]);
+  launchMacosDocumentationApp(app, {
+    BROWSER_RECALL_DESKTOP_TEST_PROFILE_DIR: profile,
+    BROWSER_RECALL_SKIP_DEEP_LINK_REGISTRATION: '1',
+    BROWSER_RECALL_SKIP_LOGIN_ITEM_REGISTRATION: '1',
+    BROWSER_RECALL_PORTS: String(port),
+  });
   pid = Number(
     await waitFor('documentation app launch', () => run(helper, ['pid', app])),
   );

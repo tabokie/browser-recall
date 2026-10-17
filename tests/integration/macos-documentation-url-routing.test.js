@@ -12,10 +12,35 @@ import { expect, test } from 'vitest';
 import { compileDocumentationWindow } from '../../scripts/lib/documentation-native-capture.mjs';
 import { buildAndRegisterMacosDocumentationApp } from '../smoke/macos-documentation-app.mjs';
 import { withCleanup } from '../smoke/desktop-test-cleanup.mjs';
+import { verifyMacosDocumentationApp } from '../../scripts/verify-macos-documentation-app.mjs';
 import {
   macosAppRegistrar,
   unregisterMacosTestApp,
 } from '../smoke/macos-desktop-process.mjs';
+
+test.skipIf(process.platform !== 'darwin')(
+  'documentation verification rejects an executable without the no-tray build contract',
+  () => {
+    const work = mkdtempSync(
+      path.join('/private/tmp', 'browser-recall-tray-contract-'),
+    );
+    try {
+      const app = path.join(work, 'Documentation.app');
+      writeApp(app, 'app.browser-recall.documentation', '/usr/bin/false');
+      expect(() => verifyMacosDocumentationApp(app)).toThrow(/no-tray/);
+      execFileSync('/usr/libexec/PlistBuddy', [
+        '-c',
+        'Delete :BrowserRecallNoTray',
+        path.join(app, 'Contents/Info.plist'),
+      ]);
+      expect(() => verifyMacosDocumentationApp(app)).toThrow(
+        /missing no-tray build metadata/,
+      );
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  },
+);
 
 test.skipIf(process.platform !== 'darwin')(
   'documentation registration preserves a production handler discovered during the build',
@@ -87,6 +112,9 @@ function writeApp(app, identifier, executable, schemes = []) {
       CFBundleIdentifier: identifier,
       CFBundleName: path.basename(app, '.app'),
       CFBundleExecutable: 'routing-test',
+      ...(identifier === 'app.browser-recall.documentation'
+        ? { BrowserRecallNoTray: true }
+        : {}),
       CFBundlePackageType: 'APPL',
       CFBundleVersion: '1',
       CFBundleURLTypes: schemes.length

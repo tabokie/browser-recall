@@ -194,6 +194,7 @@ jobs:
       - name: Verify native update, relaunch, and retained collection
         run: node tests/smoke/desktop-update-lifecycle.mjs
         env:
+          BROWSER_RECALL_ISOLATED_MACOS_SESSION: '1'
           BROWSER_RECALL_ISOLATED_WINDOWS_SESSION: '1'
 
       - name: Preserve native update failure diagnostics

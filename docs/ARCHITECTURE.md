@@ -230,6 +230,15 @@ handling registers before other plugins so launching the app again reaches the
 existing process. If a saved window position is off-screen after a display change,
 the app centers the window on an available display.
 
+On macOS, Control Center tracks menu bar ownership per login user. Temporary app
+identifiers and data folders do not isolate those records. Native lifecycle tests,
+update tests, and desktop development launches require an explicit disposable-account
+acknowledgement. The acknowledgement is a provisioning contract rather than an
+account-isolation detector. Documentation builds use the Cargo feature `no-tray` to
+omit the menu bar item. The shared documentation launcher verifies the compiled
+mode before initializing native application services. Browser-based visual tests
+do not create Browser Recall menu bar items.
+
 On macOS, `NSWindow` is the AppKit window that owns the webview. Closing saves the
 complete `NSWindow` frame; reopening restores that frame on the main thread if
 the frame changed while hidden. The webview's inner size can differ from the

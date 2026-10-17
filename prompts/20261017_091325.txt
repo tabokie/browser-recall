@@ -1,0 +1,27 @@
+- In extension popup, when I punch in list name and select one to add, the text input drop down menu becomes out of focus (doesn't respond to text input). This is a confusing state. We should just automatically close the dropdown menu when a list is selected.
+- Continue
+- Move the default position of the extension hover window when viewing PDF slightly lower, it is blocking the browser's native tool bar.
+- CI Extension E2E Regression is failing (after timing out earlier):
+  1) tests/e2e/snapshot-slug-meta.spec.js:1476:3 › Snapshot slug meta tag › snapshot and live-page highlight editors render from the same surface 
+    Error: expect(received).toBe(expected) // Object.is equality
+    Expected: true
+    Received: false
+      1569 |     );
+      1570 |
+    > 1571 |     expect(snapshotEditorPixels.equals(liveEditorPixels)).toBe(true);
+           |                                                           ^
+      1572 |
+      1573 |     await viewer.close();
+      1574 |     await livePage.close();
+        at /home/runner/work/browser-recall/browser-recall/tests/e2e/snapshot-slug-meta.spec.js:1571:59
+    Error Context: test-results/snapshot-slug-meta-Snapsho-5330a-ender-from-the-same-surface/error-context.md
+  1 failed
+    tests/e2e/snapshot-slug-meta.spec.js:1476:3 › Snapshot slug meta tag › snapshot and live-page highlight editors render from the same surface
+- Why is my desktop app icon not appearing in the tray menu suddenly?
+- Continue
+- Why don't you trust my words? I have told you the icon is missing and it's not hidden in the notch.
+- We have tried to fix a similar issue before. It was because the temporary apps registered by Codex is messing up the system registry.
+- How can we make sure the similar issue doesn't happen again?
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) 
+- Fix them all
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) co-author=GPT-6.1 Sol

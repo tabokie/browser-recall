@@ -214,6 +214,7 @@ function updatePopupUiMutationState() {
   const pending = isPopupUiMutating();
   setPopupInteractionDisabled(pending);
   applyRecordingBarState();
+  if (!pending) focusListSearchCapture();
 }
 
 function finishPopupUiMutation(stateKey) {
@@ -1557,6 +1558,7 @@ function openListPicker(lists, options = {}) {
       if (!chipSynced || !pickerSynced) {
         await renderListChips(currentPage.summary?.lists || pickerLists);
       }
+      closeListPicker();
       return true;
     } catch (err) {
       showErrorBubble(err.message);

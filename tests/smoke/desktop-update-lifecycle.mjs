@@ -23,9 +23,11 @@ import { compileDocumentationWindow } from '../../scripts/lib/documentation-nati
 import { unregisterMacosTestApp } from './macos-desktop-process.mjs';
 import { isolatedDesktopEnvironment } from './windows-desktop-test-profile.mjs';
 import { removeTestProfile } from './windows-desktop-process.mjs';
+import { requireIsolatedMacosSession } from '../../scripts/lib/macos-native-session.mjs';
 
 if (!['darwin', 'win32'].includes(process.platform))
   throw new Error('Native update lifecycle requires macOS or Windows');
+requireIsolatedMacosSession();
 if (
   process.platform === 'win32' &&
   process.env.BROWSER_RECALL_ISOLATED_WINDOWS_SESSION !== '1'

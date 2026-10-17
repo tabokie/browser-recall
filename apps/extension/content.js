@@ -726,8 +726,8 @@ function initContentScript({ recordingEligible, recordingDocumentToken }) {
     const host = existing || document.createElement('div');
     if (!existing) {
       host.id = 'browser-recall-highlights-panel';
-      host.style.cssText =
-        'position: fixed; z-index: 2147483647; top: 16px; right: 16px;';
+      const top = document.contentType === 'application/pdf' ? 72 : 16;
+      host.style.cssText = `position: fixed; z-index: 2147483647; top: ${top}px; right: 16px;`;
       document.body.appendChild(host);
     }
 

@@ -158,19 +158,21 @@ native Update and restart control, and verify a different process running the ne
 version. A connector session remains open until shutdown; accepted note edits,
 settings, the selected data folder, and the pairing token must survive. The
 connector reconnects and successfully writes another note edit after relaunch.
-Windows runs this installer test only in a disposable session. CI retains native
+Both platforms run this test only in a disposable session. CI retains native
 update logs and accessibility text on failure. Release artifacts are kept for
 seven days before publication.
 
 Run the native update check after building a signed release package:
 
 ```bash
-node tests/smoke/desktop-update-lifecycle.mjs
+BROWSER_RECALL_ISOLATED_MACOS_SESSION=1 node tests/smoke/desktop-update-lifecycle.mjs
 ```
 
-On macOS, quit Browser Recall first. The check refuses to stop a user's running
-app and uses a temporary application, configuration, and collection. On Windows,
-use a disposable session and set `BROWSER_RECALL_ISOLATED_WINDOWS_SESSION=1`.
+On macOS, use a disposable macOS user account or CI runner, set
+`BROWSER_RECALL_ISOLATED_MACOS_SESSION=1`, and quit Browser Recall first. The check
+refuses to stop a user's running app and uses a temporary application,
+configuration, and collection. On Windows, use a disposable session and set
+`BROWSER_RECALL_ISOLATED_WINDOWS_SESSION=1`.
 The check builds an older fixture with a local HTTP endpoint; released binaries
 retain the production HTTPS endpoint. No test updater endpoint is added to the
 production runtime.
@@ -310,12 +312,29 @@ launch failure does not justify changing product code or assertions.
 
 ### Native platform checks
 
-The macOS window lifecycle test registers a real tray item. Run the test only in a
-temporary macOS login session or disposable CI runner:
+The macOS window lifecycle test, native update test, and `npm run dev:desktop`
+register real menu bar items. All three workflows refuse to run without
+`BROWSER_RECALL_ISOLATED_MACOS_SESSION=1`. The flag is an explicit acknowledgement
+of the caller's provisioned environment; the flag cannot prove account isolation.
+Set the flag only in a disposable macOS user account or CI runner:
 
 ```bash
 BROWSER_RECALL_ISOLATED_MACOS_SESSION=1 npm run test:desktop-native
 ```
+
+Temporary data folders, `HOME`, and bundle identifiers do not isolate Control
+Center's per-user menu bar ownership records. Launch Services unregistration does
+not remove incorrect Control Center ownership links. Do not bypass the session
+guard in a personal login session. Browser-based visual tests and the invisible
+AppKit window frame test below do not register Browser Recall tray items.
+
+Launch the regular Browser Recall app from Finder for personal use. Keep a single
+installed app for daily use and avoid launching temporary copies from Codex or a
+terminal. If a menu bar icon disappears again, inspect Control Center's protected
+`trackedApplications` records for Browser Recall under a blocked foreign app. An
+enabled Browser Recall permission alone does not rule out incorrect ownership.
+Back up preferences before repairing a confirmed ownership link; preserve other
+applications' permissions.
 
 The macOS window lifecycle test checks visible startup errors, relaunch after
 storage repair, tray activation, window reopening, focus, and saved window size and
@@ -478,6 +497,13 @@ permission, and the Chromium version installed by Playwright.
 npm run docs:screenshots
 npm run docs:screenshots:browser
 ```
+
+Desktop documentation capture uses the Cargo feature `no-tray`, which omits the
+menu bar item. The shared documentation launcher requires `BrowserRecallNoTray` bundle metadata
+before executing a binary, then runs the binary with `--check-no-tray` before
+launch. Older bundles without the metadata are rejected without execution.
+The check exits before initializing native application services. Desktop and browser
+documentation capture do not require the disposable-session flag.
 
 Run desktop and browser capture separately so native focus does not interfere.
 The documentation build uses `scripts/documentation-tauri.conf.json` to disable

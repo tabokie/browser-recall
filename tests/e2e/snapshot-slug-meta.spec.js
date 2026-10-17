@@ -1488,7 +1488,9 @@ test.describe('Snapshot slug meta tag', () => {
     const noteSlug = `highlight-editor-parity-${caseSeed}`;
     const highlightText = `shared highlight editor excerpt ${caseSeed}`;
     const noteText = `shared editor note ${caseSeed}`;
-    const pageBody = `<main><p>${highlightText}</p></main>`;
+    // Relative spacing exposes the different default page fonts in live pages
+    // and extension frames, placing the editors at different fractional origins.
+    const pageBody = `<main style="padding: 0.13em"><p>${highlightText}</p></main>`;
     const captureEditor = async (editor, filename) => {
       // Playwright cannot hide a caret inside this closed shadow root. Compare
       // the editor surfaces with the document body focused so caret blink timing
@@ -1500,7 +1502,13 @@ test.describe('Snapshot slug meta tag', () => {
         return host.ownerDocument.activeElement === body;
       });
       expect(bodyFocused).toBe(true);
-      return editor.screenshot({ path: test.info().outputPath(filename) });
+      // Match pixel origins so clipping and subpixel rasterization do not turn
+      // different page typography into an editor-surface difference.
+      return editor.screenshot({
+        path: test.info().outputPath(filename),
+        style:
+          '#browser-recall-highlight-overlay { left: 16px !important; top: 80px !important; }',
+      });
     };
 
     localServer.addPage(path, {

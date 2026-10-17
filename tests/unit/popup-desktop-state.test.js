@@ -1876,7 +1876,6 @@ describe('popup desktop state rendering', () => {
     document.querySelector('.list-picker-row').click();
 
     await waitFor(() => document.querySelector('.list-chip.selected'));
-    await waitFor(() => document.querySelector('.list-picker-row.selected'));
     expect(summaryCalls).toBe(1);
     expect(document.getElementById('listChips').textContent).toContain(
       'Reading',

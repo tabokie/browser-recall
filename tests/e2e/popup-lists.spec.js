@@ -2459,8 +2459,9 @@ test.describe('Popup list chip behavior', () => {
     await expect
       .poll(() => popup.evaluate(() => globalThis.__listToggleEventsForTest))
       .toContain('completed:picker-list:true:true:');
+    await expect(popup.locator('#listPickerHost.list-picker')).toHaveCount(0);
     await expect(
-      popup.locator('#listPickerHost.list-picker .list-picker-row.selected', {
+      popup.locator('#listChips .list-chip.selected', {
         hasText: 'Picker List',
       }),
     ).toBeVisible();
@@ -3499,6 +3500,16 @@ test.describe('Popup list chip behavior', () => {
         }),
       },
       {
+        path: 'views/manifest/list-name-to-id.json',
+        data: listNameToIdFixture({
+          deviceTimestamp: now,
+          paths: {
+            'test-device/Reading': 'reading',
+            'test-device/Archive': 'archive',
+          },
+        }),
+      },
+      {
         path: pageCheckpointPath(slug),
         data: pageEntityFixture({
           slug,
@@ -3525,6 +3536,19 @@ test.describe('Popup list chip behavior', () => {
     await expect(input).toHaveValue('re');
     await expect(popup.locator('#listPickerList')).toContainText('Reading');
     await expect(popup.locator('#listPickerList')).not.toContainText('Archive');
+
+    await popup.locator('.list-picker-row', { hasText: 'Reading' }).click();
+    await expect(popup.locator('#listPickerHost.list-picker')).toHaveCount(0);
+    await expect(
+      popup.locator('#listChips .list-chip.selected', { hasText: 'Reading' }),
+    ).toBeVisible();
+    await expect(input).toHaveValue('');
+    await expect(input).toBeEnabled();
+
+    await popup.keyboard.type('ar');
+    await expect(input).toHaveValue('ar');
+    await expect(popup.locator('#listPickerList')).toContainText('Archive');
+    await expect(popup.locator('#listPickerList')).not.toContainText('Reading');
 
     await popup.locator('#pageTitle').click();
     const titleInput = popup.locator('.page-title-input');
@@ -5124,11 +5148,16 @@ test.describe('Popup list chip behavior', () => {
     await expect.poll(activeText).toBe('Keyboard Alpha');
 
     await popup.keyboard.press('Enter');
-    await expect(popup.locator('#listPickerHost.list-picker')).toBeVisible();
+    await expect(popup.locator('#listPickerHost.list-picker')).toHaveCount(0);
     await expect(popup.locator('.list-chip.selected')).toContainText(
       'Keyboard Alpha',
     );
+    await expect(input).toHaveValue('');
+    await expect(input).toBeEnabled();
 
+    await popup.keyboard.type('Keyboard');
+    await popup.keyboard.press('ArrowDown');
+    await expect.poll(activeText).toBe('Keyboard Alpha');
     await popup.keyboard.press('ArrowDown');
     await expect.poll(activeText).toBe('Keyboard Beta');
 

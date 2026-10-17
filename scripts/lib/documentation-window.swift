@@ -11,6 +11,11 @@ func fail(_ message: String) -> Never {
 }
 
 let args = CommandLine.arguments
+// This helper creates no menu bar item and can serve as a registration fixture.
+if args.count == 2 && args[1] == "--check-no-tray" {
+    print("no-tray")
+    exit(0)
+}
 if args.count == 3 && args[1] == "url-handler" {
     guard let url = URL(string: args[2]) else { fail("Invalid URL") }
     print(NSWorkspace.shared.urlForApplication(toOpen: url)?.path ?? "none")

@@ -8,6 +8,7 @@ import { compileDocumentationWindow } from '../../scripts/lib/documentation-nati
 import { buildAndRegisterMacosDocumentationApp } from './macos-documentation-app.mjs';
 import { withCleanup } from './desktop-test-cleanup.mjs';
 import { unregisterMacosTestApp } from './macos-desktop-process.mjs';
+import { launchMacosDocumentationApp } from '../../scripts/lib/macos-native-session.mjs';
 
 if (process.platform !== 'darwin') {
   console.log('macOS documentation URL routing check skipped');
@@ -72,17 +73,11 @@ await withCleanup(async () => {
     '-',
     testApp,
   ]);
-  execFileSync('/usr/bin/open', [
-    '-n',
-    '-F',
-    '--env',
-    `BROWSER_RECALL_DESKTOP_TEST_PROFILE_DIR=${path.join(work, 'profile')}`,
-    '--env',
-    'BROWSER_RECALL_SKIP_DEEP_LINK_REGISTRATION=1',
-    '--env',
-    'BROWSER_RECALL_SKIP_LOGIN_ITEM_REGISTRATION=1',
-    testApp,
-  ]);
+  launchMacosDocumentationApp(testApp, {
+    BROWSER_RECALL_DESKTOP_TEST_PROFILE_DIR: path.join(work, 'profile'),
+    BROWSER_RECALL_SKIP_DEEP_LINK_REGISTRATION: '1',
+    BROWSER_RECALL_SKIP_LOGIN_ITEM_REGISTRATION: '1',
+  });
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
     try {

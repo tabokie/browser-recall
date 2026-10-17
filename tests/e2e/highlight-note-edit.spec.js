@@ -774,6 +774,12 @@ test.describe('Highlight note edit', () => {
     expect(await highlight('Actual DOM selection')).toMatchObject({
       success: true,
     });
+    const panel = page.locator('#browser-recall-highlights-panel');
+    await expect(panel).toBeVisible();
+    await page.screenshot({
+      path: test.info().outputPath('html-highlight-panel.png'),
+    });
+    expect((await panel.boundingBox()).y).toBe(16);
     const notes = await helper.evaluate(
       (slug) => chrome.runtime.sendMessage({ action: 'loadPageNotes', slug }),
       getSlugForUrl(url),
@@ -934,6 +940,10 @@ test.describe('Highlight note edit', () => {
     await page.screenshot({
       path: test.info().outputPath('pdf-highlight.png'),
     });
+    const toolbarBox = await pdfViewer.locator('viewer-toolbar').boundingBox();
+    expect((await panel.boundingBox()).y).toBeGreaterThanOrEqual(
+      toolbarBox.y + toolbarBox.height + 16,
+    );
     await page.reload();
     await expect(panel.locator('.highlight-note-text')).toHaveText(
       'PDF annotation',

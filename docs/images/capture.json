@@ -51,9 +51,9 @@
     "scripts/stage-app-assets.mjs": "4964ea5b7d48a596719d7a61a6b47b39dad29f7ba8773198ad42d7589a1e3cd2",
     "scripts/lib/documentation-seed.mjs": "30ede382fce3d4551e36a0e50cb9933507ae4d2bcec67f63f9ba32dca8a1c064",
     "scripts/lib/documentation-image-spec.mjs": "7a1de6de100b7db96fc50434547b940db2fe4d2cf0421dc3f3b9e69d935735c4",
-    "scripts/lib/documentation-window.swift": "50a2172560f1224506c5c06fde22835c589d7df0f45aafa63ea10866887f23c2",
+    "scripts/lib/documentation-window.swift": "1428540506c826312d18cf0d5d0c05c82775cad6224578afc85c689115b560a4",
     "scripts/lib/documentation-native-capture.mjs": "13bf01e22d8affd2ba5aa7882cba0452a09d44f24f5742a308cc4ac705258049",
-    "scripts/lib/documentation-freshness.mjs": "1eb9ba0662dce25b685695bf44bc06ea43ffe0979835bf8938b3c40932baa62e",
+    "scripts/lib/documentation-freshness.mjs": "20ac8e7d1c3b0132d271fc78280ad04f4928762895a8e9e3110e34e94318e03e",
     "scripts/lib/manual-seed.mjs": "2495a12d302cbacaf866d71ea89ae20afd1269d4ab767e1139226642604a9e97",
     "scripts/lib/seed-builder.mjs": "d7ab1c2e8b939ed65ee7f6fd1223ab8a12f20d384bb4ac013cdda75016655e64",
     "scripts/lib/replay-store.mjs": "4d6cb0c15dc4d9cb45b59de44a115acb222b5e09bfc2a4e04b7d91d05f96d82b",
@@ -84,19 +84,19 @@
     "apps/desktop/ui/time-chart.js": "c3951dc6485faa02d9a43b19625eac0b86cc973709e3cddd0bfa0813467646bf",
     "apps/desktop/ui/utils.js": "849e90e145e6bfad9af7d3751b34b966b39603bea57863dfce4e055ccca47100",
     "apps/desktop/ui/virtual-scroller.js": "dd6dc0601e86bec3e503451dd0cf37330dafb73d6994aafcc76f9acd85292407",
-    "apps/desktop/package.json": "946d069f9896db45b340a79a6e4464839eb1c8f39032f3f6a0caf245d978d031",
+    "apps/desktop/package.json": "2a533892c4e99fe9105c59d5fb5d6999c75ef16d51bfab37959d1e2ad4ff7496",
     "apps/desktop/src-tauri/src/config.rs": "4cd5ecde08c61c41fcb5eb88110e4f85cc347c33a723b93d59cac8c155d23ae4",
     "apps/desktop/src-tauri/src/logging.rs": "4e96947264d95534a12f69c0c53d9e8bde262ff6694a6e0d28527a2327704572",
     "apps/desktop/src-tauri/src/login_item.rs": "aa9885e65b905fa3f0a6dfa57b1b84fb867ccb89f3d2429ee0fd34206808e7ca",
     "apps/desktop/src-tauri/src/macos_window_frame.rs": "8b3257ad179a000a8811843fbbabf903c980aba692e9fcc6f1306ec39548efb5",
-    "apps/desktop/src-tauri/src/main.rs": "80697e4407e4d5a86ff601488aa54aefd9635fd3615f81e4a14eeafd4fe84591",
+    "apps/desktop/src-tauri/src/main.rs": "55c7177a1bff674216c2e40b8efdecd695c3006054e26de13bb4703966728eac",
     "apps/desktop/src-tauri/src/search.rs": "4707640e5fbf270f6982c9949c2ae7c4acea60db6742e35076eac9eb40632e2d",
     "apps/desktop/src-tauri/src/shell_contract.rs": "f937210da4c8c43adac9c9db916c3e84b28cd22068502c61e1872fcc6852b2f1",
     "apps/desktop/src-tauri/src/updates.rs": "a3ef80bc4006ce67ef9ab29ab756adb780f6188b9c4fa14a6131aa0269351336",
     "apps/desktop/src-tauri/src/windows_icon.rs": "114c1dd99ab60d9d23eb7c88bc0ae435266222f6e8657a7db58bbfc99854ebd1",
     "apps/desktop/src-tauri/build.rs": "13b6b01828d779bb27dc1a461fbcf75caf7bcfeafb7c3b287096cc54bf2290a7",
     "apps/desktop/src-tauri/build_support.rs": "a3428b913d4e5557d61030c005533b75c78daef397e73cb7d0764d4321a47717",
-    "apps/desktop/src-tauri/Cargo.toml": "0666ced335f0e2452178bb3be719810b33b69d1997601054735da3282385f8e0",
+    "apps/desktop/src-tauri/Cargo.toml": "7c24547f0ece8cf2cdf84d148f2f4d95fd5815eb26d212bf9163079567cef540",
     "apps/desktop/src-tauri/capabilities/main.json": "ad00db1db6a74b09e75e37fbeb63b4f2052b80b4f60fe8a0ec826a951c3338dc",
     "Cargo.lock": "44acfb6a344f6b47f392a79bba6a9bd561254041e828c59a777f540e0f6f8151",
     "Cargo.toml": "575afa94419349bbda4e73e4287f56fb55453c17fa7052fe8ec6b775a03cf48c",
@@ -106,9 +106,11 @@
     "apps/desktop/src-tauri/icons/icon.png": "3a146dacc860f8de268cf6bb8615a0dca0232485a396d2c5ccba815522db10be",
     "apps/desktop/src-tauri/icons/tray-icon.png": "047da4fdb0b2cfdbf0511decfdea7cfe316f4ea2d2badc0149879ed0ba10c732",
     "apps/desktop/src-tauri/tauri.conf.json": "6e5fc1d4d685dc3767f96285aa915a3a5b7c4e475256e3a6a274b2b54dfadf75",
-    "scripts/capture-documentation.mjs": "1e595bec30d1c1c0b4160957740c0e45781c8b96a3df48d3d09fe08bf2857769",
-    "scripts/documentation-tauri.conf.json": "b3fa8276d7f4111b99bbff9658ea57e32f41dd43a0061585a3040f88be07857c",
-    "scripts/verify-macos-documentation-app.mjs": "ed1b373caf8ccb17d0fc03e1902df6a9daa661b876147a2c7d2b62507f26296f",
+    "scripts/capture-documentation.mjs": "e8c46f2802ccb0f4109053fbc2f938a8ec6725f05f03e2314715a126eda54bac",
+    "scripts/lib/macos-native-session.mjs": "91e0705427e508601aad9e5dc011b5c1dd76b8dff14272465d8380e79597cc9b",
+    "scripts/documentation-tauri.conf.json": "77b121460707553df53cbfa24c4e9717e6d5840f0c7dc32d5087247f6e94665d",
+    "scripts/documentation-info.plist": "4aae6bb6408ed6927d9d9f7cce7590651f9b7e98a1b1ee0aee34d2478e047429",
+    "scripts/verify-macos-documentation-app.mjs": "72ef610ac923f6ef30ce88f4466bc910dcf407c9346d66d72b1201ab992fee56",
     "scripts/compose-documentation-hero.mjs": "4e735e9f9e61d8c07f3b4c14df0df56dd9e75c8d167b16fe2ad3ffb72464b394"
   },
   "platform": "macOS / native Tauri WKWebView",
@@ -131,7 +133,7 @@
   },
   "screenshots": {
     "timeline.png": {
-      "sha256": "8a7db8f703cb68bf6f0771b5d42914e01ea2a327994be34791268884b7cf1a3f",
+      "sha256": "651f9a73b74e392dac65c2120ad4a8d04ce571cbc5c748fe6df81a4c7786a4f5",
       "width": 2080,
       "height": 1400
     },
@@ -141,19 +143,19 @@
       "height": 1400
     },
     "timeline-mono.png": {
-      "sha256": "20724b01ac2307dc3e05b43f844d65c4ac35ee4df430f907b34897929cac2fa1",
+      "sha256": "28d077f2642b3e52eee712589e123a8fbeed6eb45d30349aa000d24c9ff63a25",
       "width": 2080,
       "height": 1400
     },
     "timeline-styles.png": {
-      "sha256": "b73bd21de323e6e0e7760cb6d3ad5d95298c6cf0cb79ee60820dd5cf85dee64d",
+      "sha256": "b8f52206b7a2bd05503739b09ff361963aafbf17171f39761a417f8edd97b083",
       "width": 2080,
       "height": 1400,
       "composition": {
         "sources": ["timeline.png", "timeline-mono.png"],
         "sourceSha256": [
-          "8a7db8f703cb68bf6f0771b5d42914e01ea2a327994be34791268884b7cf1a3f",
-          "20724b01ac2307dc3e05b43f844d65c4ac35ee4df430f907b34897929cac2fa1"
+          "651f9a73b74e392dac65c2120ad4a8d04ce571cbc5c748fe6df81a4c7786a4f5",
+          "28d077f2642b3e52eee712589e123a8fbeed6eb45d30349aa000d24c9ff63a25"
         ],
         "split": { "top": 0.62, "bottom": 0.38 }
       }

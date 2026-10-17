@@ -2207,6 +2207,15 @@ fn configure_deep_links(app: &AppHandle) {
 }
 
 fn main() -> tauri::Result<()> {
+    // Check documentation binaries before initializing AppKit or any plugins.
+    if std::env::args().any(|argument| argument == "--check-no-tray") {
+        if cfg!(feature = "no-tray") {
+            println!("no-tray");
+            return Ok(());
+        }
+        eprintln!("This Browser Recall binary was not built with no-tray");
+        std::process::exit(1);
+    }
     let builder = tauri::Builder::default();
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -2292,7 +2301,9 @@ fn main() -> tauri::Result<()> {
                     (None, inactive_server_snapshot(&bootstrap.config), None)
                 };
             let daemon_started = server_handle.is_some();
-            create_tray(app.handle())?;
+            if !cfg!(feature = "no-tray") {
+                create_tray(app.handle())?;
+            }
             let sync_notify = Arc::new(Notify::new());
             app.manage(DesktopState {
                 server: Mutex::new(server_handle),

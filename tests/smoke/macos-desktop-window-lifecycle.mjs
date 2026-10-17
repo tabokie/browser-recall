@@ -14,17 +14,14 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { requireIsolatedMacosSession } from '../../scripts/lib/macos-native-session.mjs';
 
 if (process.platform !== 'darwin') {
   console.log('macOS desktop window lifecycle smoke test skipped');
   process.exit(0);
 }
 
-if (process.env.BROWSER_RECALL_ISOLATED_MACOS_SESSION !== '1') {
-  throw new Error(
-    'Native tray testing registers a macOS status item. Run only in an ephemeral user/session with BROWSER_RECALL_ISOLATED_MACOS_SESSION=1.',
-  );
-}
+requireIsolatedMacosSession();
 
 const root = path.resolve(import.meta.dirname, '../..');
 const sourceApp = path.join(root, 'dist/desktop/macos/app/Browser Recall.app');

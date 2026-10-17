@@ -29,6 +29,29 @@ export function verifyMacosDocumentationApp(appPath) {
   ) {
     throw new Error('Documentation app must not register URL schemes');
   }
+  // Reject older bundles before executing them: an older binary may ignore the
+  // preflight argument and start its normal tray instead.
+  if (plist.BrowserRecallNoTray !== true) {
+    throw new Error('Documentation app is missing no-tray build metadata');
+  }
+  if (
+    typeof plist.CFBundleExecutable !== 'string' ||
+    path.basename(plist.CFBundleExecutable) !== plist.CFBundleExecutable
+  ) {
+    throw new Error('Documentation app executable is invalid');
+  }
+  try {
+    const mode = execFileSync(
+      path.join(appPath, 'Contents/MacOS', plist.CFBundleExecutable),
+      ['--check-no-tray'],
+      { encoding: 'utf8', timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'] },
+    ).trim();
+    if (mode !== 'no-tray') throw new Error('Unexpected build mode');
+  } catch (error) {
+    throw new Error('Documentation app must be built with no-tray', {
+      cause: error,
+    });
+  }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

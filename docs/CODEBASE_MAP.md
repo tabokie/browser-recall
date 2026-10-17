@@ -161,6 +161,7 @@ do not maintain a second production copy.
 | --- | --- |
 | `scripts/stage-app-assets.mjs` | Check translations and prepare extension/desktop assets |
 | `scripts/desktop-build-plan.mjs` | Select platform-specific desktop artifacts and build steps |
+| `scripts/dev-desktop.mjs` | Guard desktop development launches before starting Tauri |
 | `scripts/build-tauri-app.mjs` | Run the standard desktop build |
 | `scripts/collect-desktop-artifacts.mjs` | Replace build output, restore previous output on failure, and clean up locked Windows files |
 | `scripts/finalize-desktop-build.mjs` | Desktop build finalization |
@@ -172,7 +173,8 @@ do not maintain a second production copy.
 | `scripts/migrate-snapshot-identity.mjs` | Check and update snapshot URL/slug metadata through temporary-file replacement |
 | `scripts/rust-coverage.mjs`, `scripts/test-coverage-monitor.mjs` | Coverage generation, uncovered-line reporting, and test-growth guard |
 | `scripts/capture-documentation.mjs` | Native macOS desktop documentation capture |
-| `scripts/documentation-tauri.conf.json`, `scripts/verify-macos-documentation-app.mjs` | Isolated documentation app configuration and verification that generated bundles declare no URL schemes |
+| `scripts/lib/macos-native-session.mjs` | Guard native tray launches and verify documentation apps before launching without a tray |
+| `scripts/documentation-tauri.conf.json`, `scripts/documentation-info.plist`, `scripts/verify-macos-documentation-app.mjs` | Documentation app configuration, no-tray build metadata, and verification that generated bundles omit tray items and URL schemes |
 | `scripts/capture-browser-documentation.mjs` | Native macOS browser documentation capture |
 | `scripts/lib/documentation-seed.mjs` | Fictional reading collection |
 | `scripts/lib/documentation-window.swift`, `scripts/lib/documentation-image-spec.mjs` | Operate native windows, capture screenshots, and define image dimensions |
@@ -210,6 +212,7 @@ do not maintain a second production copy.
 | Native WKWebView chart layout | `tests/smoke/macos-wkwebview-chart-layout.mjs` |
 | Documentation bundles preserve macOS app URL routing, including production app discovery during the build, and URL activation reuses the running process | `tests/smoke/macos-documentation-url-routing.mjs`, `tests/smoke/macos-documentation-app.mjs`, `tests/integration/macos-documentation-url-routing.test.js` |
 | macOS startup, tray, and window lifecycle | `tests/smoke/macos-desktop-window-lifecycle.mjs` |
+| Personal macOS sessions reject temporary tray app automation before native tools run | `tests/integration/macos-native-session.test.js` |
 | macOS frame restoration after hidden size and position changes with an inset content view | `apps/desktop/src-tauri/tests/macos_window_frame.rs` |
 | Windows icons, single instance, and teardown | `tests/smoke/windows-desktop-single-instance.mjs`, `tests/integration/windows-desktop-cleanup.test.js` |
 | Native desktop cleanup preserves setup errors and completes teardown after failures | `tests/smoke/desktop-test-cleanup.mjs`, `tests/smoke/macos-desktop-process.mjs`, `tests/integration/macos-desktop-cleanup.test.js` |
