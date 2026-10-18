@@ -1,15 +1,15 @@
-<img src='icons/browser-recall-default.svg' width=120 height=120 align='right'/>
+<img src='icons/browser-recall-default.svg' width=130 height=130 align='right'/>
 
 # Browser Recall
 
 Help browser remember things.
 
-- Keep browsing **history** without a time limit. Capture compact webpage **snapshots**.
+- Keep browser **history** with no time limit. Capture compact webpage **snapshots**.
 - Organize webpages with **lists**. A page can belong to more than one list, as it should.
 - Add highlights and **notes** directly on the webpage and find them again in context.
 - **Search** across titles, URLs, highlights, notes, and snapshots from one place.
 
-Data collected by the app are stored using readable formats such as JSON and Markdown. You can read the files, search them with file tools, or ask an agent to analyze them. An AGENTS.md file in the data directory explains the layout and conventions. Nothing in the collection depends on Browser Recall to remain readable. You own your data.
+Browser Recall stores your data using readable formats such as JSON and Markdown. You can read the files, search them with file tools, or ask an agent to analyze them. An [AGENTS.md](crates/daemon/resources/data-AGENTS.md) in the data directory explains the layout and conventions. Nothing in the collection depends on Browser Recall to remain readable. You own your data.
 
 <img src='icons/browser-recall-icons-40px-gap-12px.svg' align='right'/>
 
@@ -21,14 +21,14 @@ Data collected by the app are stored using readable formats such as JSON and Mar
       <p align="center">
         <img src="docs/images/timeline-styles.png" alt="Browser Recall Timeline showing browsing history in Amber and Mono color schemes">
         <br>
-        Timeline, search the history
+        Timeline
       </p>
     </td>
     <td>
       <p align="center">
         <img src="docs/images/book.png" alt="Browser Recall Book showing collected highlights and notes grouped by day">
         <br>
-        Book, read highlights gathered by day
+        Book
       </p>
     </td>
   </tr>
@@ -37,14 +37,14 @@ Data collected by the app are stored using readable formats such as JSON and Mar
       <p align="center">
         <img src="docs/images/browser-popup-window.png" alt="Browser extension popup showing page details, lists, and saved snapshots">
         <br>
-        Details for each browser page
+        See page details in browser
       </p>
     </td>
     <td>
       <p align="center">
         <img src="docs/images/browser-note-window.png" alt="Browser extension note editor beneath a highlighted passage on a webpage">
         <br>
-        Highlight and take notes
+        Take notes in browser
       </p>
     </td>
   </tr>
@@ -56,15 +56,17 @@ Data collected by the app are stored using readable formats such as JSON and Mar
 
 Install both the desktop app and the browser extension.
 
-Desktop app is supported on MacOS and on Windows. The signed macOS app is available as a paid download from the [App Store](https://apps.apple.com/app/idAPP_ID). You can also [build from source](DEVELOPMENT.md#build-and-run).
+Desktop app is supported on macOS and on Windows. The signed macOS app is available as a paid download from the [App Store](https://apps.apple.com/app/idAPP_ID). You can also [build from source](DEVELOPMENT.md#build-and-run).
 
 Browser extension is free on the [Chrome Web Store](https://chromewebstore.google.com/detail/bgghgkobpfgcinpjjeeconciefclpdgp) and [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/browser-recall-connector/). Edge and Orion are supported using the Chromium extension.
 
-## Caveats
+## Alternatives
 
-Browser Recall is 100% implemented by AI agents under my supervision. From the outside, the software quality appears good enough based on my own use. But I would not recommend reading the implementation without AI assistance. For your context, almost every prompt used to build the project is tracked in [./prompts](./prompts).
+[Zotero](https://www.zotero.org/) is an excellent tool for organizing research materials, including webpages. Browser Recall is a smaller, more open and more web-centric version of it. Feature-wise, Zotero doesn’t support history tracking or taking notes in browser.
 
-Browser Recall is one particular take on keeping a durable and searchable record of the web you have seen. There're other options out there that might suit you better. [Hister](https://hister.org/), for example, focuses more on building a powerful search engine.
+[Hister](https://hister.org/) is another tool in this space, with similar browser integration. Compared with Browser Recall, it puts more emphasis on search and retrieval. Check it out if that is what you care about.
+
+File an issue if you think someone else deserves a mention.
 
 ---
 

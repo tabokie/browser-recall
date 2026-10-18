@@ -1,0 +1,10 @@
+- CI is failing: [https://github.com/tabokie/browser-recall/actions/runs/39015047614/job/117345325673](https://github.com/tabokie/browser-recall/actions/runs/39015047614/job/117345325673) , use my browser to check the logs
+- The MacOS x86 validation is really slow. Took 23m to build release. It is still necessary to ship mac x86 releases these day?
+- Ship x86, but remove regular validation for it.
+- Where is the AGENTS.md that we use in the user data directory maintained in repo?
+- What happens when user upgrade the binaries, will we automatically update the AGENTS.md?
+- Do you think it's a bit too verbose?
+- Go ahead
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) co-author=GPT-6.1 Sol

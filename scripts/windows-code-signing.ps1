@@ -3,6 +3,9 @@ param(
   [string]$File
 )
 $ErrorActionPreference = 'Stop'
+# Cert: is provided by the security module; a fresh powershell.exe may not have
+# loaded the provider. Use this PowerShell installation's module explicitly.
+Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
 $thumbprint = $env:WINDOWS_SIGNING_CERTIFICATE
 if ($thumbprint -notmatch '^[A-Fa-f0-9]{40}$') { throw 'WINDOWS_SIGNING_CERTIFICATE must be a SHA-1 certificate thumbprint' }
 $certificate = Get-Item "Cert:\CurrentUser\My\$thumbprint"

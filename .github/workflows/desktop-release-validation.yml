@@ -21,17 +21,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Intel Mac packages are built and validated only when publishing a release.
+        platform: [macos]
+        arch: ${{ fromJSON(inputs.production && '["arm64","x64"]' || '["arm64"]') }}
         include:
-          - runner: windows-2025
-            platform: windows
+          - platform: windows
             arch: x64
-          - runner: macos-15
-            platform: macos
-            arch: arm64
-          - runner: macos-15-intel
-            platform: macos
-            arch: x64
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.platform == 'windows' && 'windows-2025' || matrix.arch == 'arm64' && 'macos-15' || 'macos-15-intel' }}
     timeout-minutes: 60
     env:
       RELEASE_ARCH: ${{ matrix.arch }}

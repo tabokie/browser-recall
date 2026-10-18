@@ -506,7 +506,8 @@ of a second app instance. Browser-rendered UI tests do not provide complete cove
 of the native desktop interface.
 
 Regular CI and Release use one reusable native release-validation workflow on
-Windows x64 and both macOS architectures. The workflow builds signed packages,
+Windows x64 and macOS arm64. Release also builds and validates macOS x64 packages;
+regular CI omits the Intel Mac runner. The workflow builds signed packages,
 verifies installation, and exercises updates, relaunch, collection retention, and
 connector reconnection. Regular CI uses temporary signing keys in disposable
 runner checkouts; only Release uses production signing keys and publishes assets.

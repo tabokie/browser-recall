@@ -22,6 +22,7 @@ test.skipIf(
           '-Command',
           String.raw`
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
 $cert = $null
 $store = New-Object System.Security.Cryptography.X509Certificates.X509Store('Root', 'CurrentUser')
 try {
@@ -32,9 +33,11 @@ try {
   Remove-Item Env:WINDOWS_SIGNING_TIMESTAMP_URL -ErrorAction SilentlyContinue
   $file = Join-Path $env:BROWSER_RECALL_SIGNING_WORK 'fixture.exe'
   Copy-Item (Join-Path $env:WINDIR 'System32\where.exe') $file
-  & $env:BROWSER_RECALL_SIGNING_SCRIPT check
-  & $env:BROWSER_RECALL_SIGNING_SCRIPT sign $file
-  & $env:BROWSER_RECALL_SIGNING_SCRIPT verify $file
+  foreach ($action in @('check', 'sign', 'verify')) {
+    Remove-Module Microsoft.PowerShell.Security -ErrorAction SilentlyContinue
+    if (Get-PSDrive Cert -ErrorAction SilentlyContinue) { throw 'Certificate provider must be unloaded before signing' }
+    & $env:BROWSER_RECALL_SIGNING_SCRIPT $action $file
+  }
   $bytes = [System.IO.File]::ReadAllBytes($file)
   $bytes[512] = $bytes[512] -bxor 1
   [System.IO.File]::WriteAllBytes($file, $bytes)

@@ -22,8 +22,8 @@ Use this map to find the files that implement a feature. See
 | `tests/` | JavaScript unit/integration tests, Playwright scenarios, and native app tests |
 | `icons/` | SVG sources for generated runtime icons |
 | `docs/images/` | Documentation PNGs and capture manifests |
-| `.github/workflows/ci.yml` | Six regular CI runner jobs: Linux tests/coverage/lint, extension E2E, desktop visuals, and three native release validations |
-| `.github/workflows/desktop-release-validation.yml` | Shared native packaging, installation, update/relaunch, and platform regression checks used by CI and Release |
+| `.github/workflows/ci.yml` | Five regular CI runner jobs: Linux tests/coverage/lint, extension E2E, desktop visuals, and Windows x64/macOS arm64 release validations |
+| `.github/workflows/desktop-release-validation.yml` | Shared native packaging, installation, update/relaunch, and platform regression checks; Release additionally validates macOS x64 |
 | `.github/workflows/release.yml` | Manual native Windows/macOS and Chrome/Firefox builds, verified installers and extension archives, signed update packages, and GitHub Releases publishing |
 | `package.json` | Build, test, formatting, and analysis commands |
 | `rust-toolchain.toml` | Rust compiler and component pin |

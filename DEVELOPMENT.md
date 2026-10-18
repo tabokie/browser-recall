@@ -214,7 +214,8 @@ tag is `v` followed by the product version.
 
 Release builds use Node.js 24 and Rust 1.97.0 on native Windows and macOS runners.
 Regular CI and Release call `.github/workflows/desktop-release-validation.yml`
-with the same Windows x64, macOS arm64, and macOS x64 matrix. Regular CI generates
+with Windows x64 and macOS arm64 validation. Release also builds and validates
+macOS x64 packages; regular CI omits the Intel Mac runner. Regular CI generates
 a disposable signing key and embeds its public key only in that runner's checkout;
 CI packages are never uploaded for publication. Release uses the repository's
 signing secrets and uploads the verified packages. Signature verification uses
@@ -374,8 +375,8 @@ the daemon before starting tests that use the daemon; compiling Rust during test
 setup can exceed the startup timeout. To test a build without cached Rust output,
 set `CARGO_TARGET_DIR` to a temporary directory and run the same `ci:*` command.
 
-Regular CI has six runner jobs: one Linux tests/coverage/lint job, extension E2E,
-macOS visual regression, and three native release-validation jobs. Native packaging
+Regular CI has five runner jobs: one Linux tests/coverage/lint job, extension E2E,
+macOS visual regression, and two native release-validation jobs. Native packaging
 starts in parallel with the Linux checks. The Linux job validates release versions,
 README images, and JavaScript formatting before installing desktop build tooling.
 Pinned actionlint 1.7.12 validates workflow syntax and reusable-workflow inputs.
@@ -387,7 +388,8 @@ Native platform scenarios remain in regular CI: Windows installed-app
 single-instance/deep-link behavior, cleanup and replacement, and extension font
 fallback; macOS startup recovery, five tray reopen cycles, session guards, and
 documentation URL routing. Shared macOS window and routing scenarios run on arm64;
-both macOS architectures run signed-package installation and real update/relaunch.
+macOS arm64 runs signed-package installation and real update/relaunch in regular
+CI. Release runs package and update validation on both macOS architectures.
 Timings must be measured on hosted runners; removing duplicate builds and test
 executions does not establish a new wall-clock duration by itself.
 
