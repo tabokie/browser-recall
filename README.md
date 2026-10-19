@@ -1,4 +1,4 @@
-<img src='icons/browser-recall-default.svg' width=130 height=130 align='right'/>
+<img src='icons/browser-recall-default.svg' width=110 height=110 align='right'/>
 
 # Browser Recall
 
@@ -64,7 +64,7 @@ Browser extension is free on the [Chrome Web Store](https://chromewebstore.googl
 
 [Zotero](https://www.zotero.org/) is an excellent tool for organizing research materials, including webpages. Browser Recall is a smaller, more open and more web-centric version of it. Feature-wise, Zotero doesn’t support history tracking or taking notes in browser.
 
-[Hister](https://hister.org/) is another tool in this space, with similar browser integration. Compared with Browser Recall, it puts more emphasis on search and retrieval. Check it out if that is what you care about.
+[Hister](https://hister.org/) is another tool in this space with similar browser integration. Compared with Browser Recall, it puts more emphasis on search and retrieval.
 
 File an issue if you think someone else deserves a mention.
 

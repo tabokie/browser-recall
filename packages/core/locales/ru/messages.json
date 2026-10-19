@@ -759,6 +759,10 @@
     "message": "Удалить выделение",
     "description": "Delete highlight button title."
   },
+  "desktopOpenSnapshotFolder": {
+    "message": "Открыть папку снимка",
+    "description": "Open the containing directory for a saved snapshot in the system file manager."
+  },
   "extensionDeleteSnapshot": {
     "message": "Удалить снимок",
     "description": "Delete snapshot button title."

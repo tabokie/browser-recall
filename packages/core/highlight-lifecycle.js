@@ -9,6 +9,7 @@ export function createHighlightLifecycle(options) {
     onLoadError = () => {},
     onMark = () => {},
     formatExcerpt = (parts) => parts.join('\n'),
+    snapshot = false,
     reapplyDisabled = () => false,
     retryDelayMs = 150,
     retryWindowMs = 10000,
@@ -76,6 +77,29 @@ export function createHighlightLifecycle(options) {
   let runId = 0;
   let watchedIdentity = null;
   let watchedNotes = [];
+
+  function restoreRemovedSnapshotElements(root) {
+    const walker = doc.createTreeWalker(root, NodeFilterType.SHOW_COMMENT);
+    const removed = [];
+    while (walker.nextNode()) {
+      const comment = walker.currentNode;
+      const match = /^savepage-([a-z][a-z0-9-]*)-remove$/.exec(comment.data);
+      if (match) removed.push({ comment, tagName: match[1] });
+    }
+    for (const { comment, tagName } of removed) {
+      // Save Page WE records removed hidden siblings as comments. Empty hidden
+      // elements preserve their original selector positions without restoring
+      // removed content or searching for a different occurrence of the excerpt.
+      const placeholder = doc.createElement(tagName);
+      placeholder.hidden = true;
+      placeholder.style.setProperty('display', 'none', 'important');
+      comment.replaceWith(placeholder);
+    }
+    for (const element of root.querySelectorAll('*')) {
+      if (element.shadowRoot)
+        restoreRemovedSnapshotElements(element.shadowRoot);
+    }
+  }
 
   function cssEscape(value) {
     if (doc.defaultView?.CSS?.escape) return doc.defaultView.CSS.escape(value);
@@ -256,29 +280,98 @@ export function createHighlightLifecycle(options) {
     };
   }
 
-  function findTextRange(root, text, { whitespaceEquivalent = false } = {}) {
+  function findTextRange(root, text) {
     if (!root || !text) return null;
-    const index = buildTextIndex(root);
-    if (!whitespaceEquivalent) {
-      const start = index.text.indexOf(text);
-      return start < 0
-        ? null
-        : rangeFromOffsets(
-            index.textNodes,
-            index.offsets,
-            start,
-            start + text.length,
-          );
-    }
-    const haystack = normalizedTextWithMap(index.text);
     const needle = normalizedTextWithMap(text).text;
     if (!needle) return null;
-    const normalizedStart = haystack.text.indexOf(needle);
-    if (normalizedStart < 0) return null;
-    const start = haystack.map[normalizedStart];
-    const end = haystack.map[normalizedStart + needle.length];
-    if (start == null || end == null || end <= start) return null;
-    return rangeFromOffsets(index.textNodes, index.offsets, start, end);
+    let index = { text: '', textNodes: [], offsets: [], root: null };
+    let found = null;
+
+    function finishSegment() {
+      if (!found && index.text) {
+        const haystack = normalizedTextWithMap(index.text);
+        const start = haystack.text.indexOf(needle);
+        if (start >= 0) {
+          found = rangeFromOffsets(
+            index.textNodes,
+            index.offsets,
+            haystack.map[start],
+            haystack.map[start + needle.length],
+          );
+        }
+      }
+      index = { text: '', textNodes: [], offsets: [], root: null };
+    }
+
+    function useRoot(node) {
+      const tree = node.getRootNode();
+      if (index.root !== tree) finishSegment();
+      index.root = tree;
+    }
+
+    function blockBoundary() {
+      if (index.text && !index.text.endsWith('\n')) index.text += '\n';
+    }
+
+    // Search visible text in composed reading order, preserving BR and block
+    // boundaries. Keep saved offsets on their separate literal text-node index;
+    // fallback ranges cannot cross shadow roots or excluded UI.
+    function visit(node) {
+      if (found) return;
+      if (node.nodeType === NodeType.TEXT_NODE) {
+        const style = doc.defaultView.getComputedStyle(
+          node.parentElement || node.getRootNode().host,
+        );
+        if (style.visibility === 'hidden' || style.visibility === 'collapse') {
+          finishSegment();
+          return;
+        }
+        useRoot(node);
+        index.offsets.push(index.text.length);
+        index.textNodes.push(node);
+        index.text += node.textContent;
+        return;
+      }
+      if (node.nodeType !== NodeType.ELEMENT_NODE) {
+        for (const child of node.childNodes) visit(child);
+        return;
+      }
+      const style = doc.defaultView.getComputedStyle(node);
+      if (
+        node.matches(excludedSelector) ||
+        ['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE'].includes(node.tagName) ||
+        style.display === 'none' ||
+        style.contentVisibility === 'hidden'
+      ) {
+        finishSegment();
+        return;
+      }
+      const block =
+        style.display &&
+        !style.display.startsWith('inline') &&
+        style.display !== 'contents';
+      if (block) blockBoundary();
+      if (node.tagName === 'BR') {
+        useRoot(node);
+        index.text += '\n';
+      } else if (node.shadowRoot) {
+        finishSegment();
+        for (const child of node.shadowRoot.childNodes) visit(child);
+        finishSegment();
+      } else if (node.tagName === 'SLOT') {
+        finishSegment();
+        const assigned = node.assignedNodes({ flatten: true });
+        for (const child of assigned.length ? assigned : node.childNodes)
+          visit(child);
+        finishSegment();
+      } else {
+        for (const child of node.childNodes) visit(child);
+      }
+      if (block) blockBoundary();
+    }
+    visit(root);
+    finishSegment();
+    return found;
   }
 
   function markRange(range, text, { timestamp, noteSlug } = {}) {
@@ -322,20 +415,10 @@ export function createHighlightLifecycle(options) {
     }
   }
 
-  function markText(
-    text,
-    { root = doc.body, globalFallback = false, timestamp, noteSlug } = {},
-  ) {
+  function markText(text, { root = doc.body, timestamp, noteSlug } = {}) {
     if (!text) return null;
-    const exact = findTextRange(root, text);
-    const equivalent = exact
-      ? null
-      : findTextRange(root, text, { whitespaceEquivalent: true });
-    const range = exact || equivalent;
+    const range = findTextRange(root, text);
     if (range) return markRange(range, text, { timestamp, noteSlug });
-    if (globalFallback && root !== doc.body) {
-      return markText(text, { root: doc.body, timestamp, noteSlug });
-    }
     return null;
   }
 
@@ -418,8 +501,7 @@ export function createHighlightLifecycle(options) {
     );
     if (
       !range ||
-      (range.toString() !== text && rangeTextWithLineBreaks(range) !== text) ||
-      selectionIntersectsExistingMark(range)
+      (range.toString() !== text && rangeTextWithLineBreaks(range) !== text)
     ) {
       return null;
     }
@@ -455,7 +537,7 @@ export function createHighlightLifecycle(options) {
     return note.excerpt;
   }
 
-  function markSavedNote(note, root = doc.body) {
+  function markSavedNote(note, root, fallback) {
     const excerpts = excerptParts(note);
     if (
       !Array.isArray(note.cssPath) ||
@@ -468,28 +550,40 @@ export function createHighlightLifecycle(options) {
     }
     const paths = note.cssPath;
     const marks = [];
+    const restoredParts = new Set(
+      note.slug
+        ? allMarks(
+            `${markSelector}[data-note-slug="${cssEscape(note.slug)}"]`,
+          ).map((mark) => mark.dataset.highlightPart)
+        : [],
+    );
     for (let index = 0; index < excerpts.length; index += 1) {
+      if (restoredParts.has(String(index))) continue;
       const anchor = parseTextAnchor(paths[index]);
       const scopedRoot =
         anchor.kind === 'text-anchor'
           ? resolveTextAnchorScope(anchor)
           : resolvePath(anchor.selector, root);
-      if (!scopedRoot) continue;
-      const range =
-        anchor.kind === 'text-anchor'
-          ? textAnchorRange(scopedRoot, excerpts[index], anchor)
-          : null;
-      const mark =
-        anchor.kind === 'text-anchor'
-          ? range &&
-            markRange(range, excerpts[index], {
-              noteSlug: note.slug,
-            })
-          : markText(excerpts[index], {
-              root: scopedRoot,
-              noteSlug: note.slug,
-            });
+      let mark = null;
+      if (scopedRoot) {
+        if (anchor.kind === 'text-anchor') {
+          const range = textAnchorRange(scopedRoot, excerpts[index], anchor);
+          if (range) {
+            if (selectionIntersectsExistingMark(range)) continue;
+            mark = markRange(range, excerpts[index], { noteSlug: note.slug });
+          }
+        } else {
+          mark = markText(excerpts[index], {
+            root: scopedRoot,
+            noteSlug: note.slug,
+          });
+        }
+      }
+      if (!mark && fallback) {
+        mark = markText(excerpts[index], { root, noteSlug: note.slug });
+      }
       if (!mark) continue;
+      mark.dataset.highlightPart = String(index);
       mark.dataset.highlightText = formatExcerpt(note.excerpt);
       marks.push(mark);
     }
@@ -503,12 +597,21 @@ export function createHighlightLifecycle(options) {
   }
 
   function applySavedNotes(notes, root = doc.body) {
+    const savedNotes = Array.isArray(notes) ? notes : [];
+    // Reserve every matching saved anchor before text fallback can claim an
+    // occurrence needed by another note. Repeat this order during hydration.
+    for (const fallback of [false, true]) {
+      for (const note of savedNotes) {
+        const expectedCount = excerptParts(note).length;
+        if (note.slug && countMarksForNote(note.slug) >= expectedCount)
+          continue;
+        markSavedNote(note, root, fallback);
+      }
+    }
     const pending = [];
-    for (const note of Array.isArray(notes) ? notes : []) {
+    for (const note of savedNotes) {
       const expectedCount = excerptParts(note).length;
       if (expectedCount === 0) continue;
-      if (note.slug && countMarksForNote(note.slug) >= expectedCount) continue;
-      markSavedNote(note, root);
       if (note.slug && countMarksForNote(note.slug) < expectedCount) {
         pending.push(note);
       }
@@ -674,6 +777,7 @@ export function createHighlightLifecycle(options) {
             timestamp,
             noteSlug,
           });
+          if (marks[index]) marks[index].dataset.highlightPart = String(index);
         }
         return marks.filter(Boolean);
       },
@@ -803,6 +907,8 @@ export function createHighlightLifecycle(options) {
     else if (timestamp) removeGrouped(timestamp);
     else if (text) removeFirstByText(text);
   }
+
+  if (snapshot) restoreRemovedSnapshotElements(doc);
 
   return Object.freeze({
     applySaved: applySavedNotes,

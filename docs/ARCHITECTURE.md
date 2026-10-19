@@ -371,8 +371,8 @@ popup opens display the summary through the same code.
 
 The popup shows either the complete page dashboard or an error. Changing the target
 page cancels pending opens for the previous page. Daemon changes invalidate prepared
-summaries. Browsers that cannot open a popup programmatically open the prepared
-extension page in a tab.
+summaries. Failed popup opens clear the prepared summary and popup mapping, then
+return an error. Popup opens never fall back to opening an extension tab.
 
 The popup processes edits and list refreshes one at a time. Toggling membership in
 an existing list sends one command; `createListAndPin` creates the list and pins
@@ -394,9 +394,19 @@ The build generates a non-module content script from that shared code.
 
 A text anchor records where a highlight belongs. The current anchor format stores
 a block selector and exact UTF-16 text offsets. Anchors inside shadow DOM also
-record the sequence of host elements needed to reach the text. Restoring a highlight
-checks the excerpt at the saved offsets; the code never silently moves the highlight
-to another matching passage.
+record the sequence of host elements needed to reach the text. Restoration reserves
+all matching saved anchors before text search handles missing anchors. Text search
+restores the first available visible occurrence in reading order, including open
+shadow roots and assigned slots. Text search accepts equivalent whitespace, preserves
+BR and block boundaries, and excludes hidden content, scripts, Browser Recall controls,
+and existing marks. Saved offsets continue to count literal text-node characters.
+Selections are split by block element; BR line breaks within one block remain in a
+single excerpt. Restored parts are tracked individually
+so retries for a missing part do not duplicate parts that are already highlighted.
+Before applying snapshot highlights, the shared lifecycle reconstructs empty hidden
+elements from Save Page WE's removal comments. The placeholders preserve the original
+sibling positions used by selectors, including inside shadow roots. Removed content
+stays absent, and snapshot and note files remain unchanged.
 
 Native PDF viewers do not expose the selected PDF text as a DOM range.
 One `captureContextMenuSelection` request returns the selection source and
@@ -448,8 +458,14 @@ affected files through temporary files. Runtime readers continue to reject inval
 snapshot identity rather than repairing stored data during reads.
 
 Chrome file snapshots require **Allow access to file URLs**. If permission is
-missing, the popup explains how to enable permission. `blob:` content uses the
-extension viewer because Chrome cannot inject content scripts into `blob:` URLs.
+missing, the popup explains how to enable permission. Desktop snapshot actions
+open the saved HTML file; extension snapshot actions open the extension viewer.
+Both paths use the original page's identity for page details and highlight
+actions, including new highlights and rating shortcuts. Navigation from a live page to a file or extension document clears the
+live page's reported identity. Content scripts skip visit reporting for saved
+snapshots so file URLs never enter HTTP(S) page identity generation.
+`blob:` content uses the extension viewer because Chrome cannot inject content
+scripts into `blob:` URLs.
 
 ## Search and rules
 
@@ -511,6 +527,15 @@ regular CI omits the Intel Mac runner. The workflow builds signed packages,
 verifies installation, and exercises updates, relaunch, collection retention, and
 connector reconnection. Regular CI uses temporary signing keys in disposable
 runner checkouts; only Release uses production signing keys and publishes assets.
+Windows signing, cleanup, and artifact checks all run before a combined gate
+requires every check to pass; failure artifacts include the individual JSON test
+reports. Native update teardown preserves the original error, continues cleanup
+after individual failures, and rediscovers the running executable after relaunch.
+The Windows update fixture temporarily publishes isolation settings in the
+disposable user's environment registry, because the elevated installer's
+token-based relaunch rebuilds the environment from the Windows user profile.
+Teardown restores the previous values and registry types before removing the
+test profile; a failed restoration retains the rollback file for recovery.
 Linux tests, lint, and coverage share one job. Each JavaScript and Rust suite runs
 once with coverage, and Rust coverage reports reuse the same execution.
 

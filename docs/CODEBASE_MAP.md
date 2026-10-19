@@ -42,6 +42,7 @@ Use this map to find the files that implement a feature. See
 | `apps/desktop/src-tauri/src/main.rs` | Daemon lifecycle, Tauri commands/events, windows, tray, deep links, and single-instance handling |
 | `apps/desktop/src-tauri/src/config.rs` | Desktop configuration and saved setup choices |
 | `apps/desktop/src-tauri/src/shell_contract.rs` | Shell response types and route state |
+| `apps/desktop/src-tauri/src/snapshot_open.rs` | Open snapshot HTML or its storage directory with the operating system |
 | `apps/desktop/src-tauri/src/login_item.rs` | Check and change launch-at-login registration; undo changes if saving fails |
 | `apps/desktop/src-tauri/src/windows_icon.rs` | Windows window and taskbar icons matched to display scale |
 | `apps/desktop/src-tauri/src/macos_window_frame.rs` | Capture and restore the exact macOS AppKit window frame independently of webview insets |
@@ -140,7 +141,7 @@ crash recovery, history reads, ordering highlights by creation time, and sync.
 | File | Implements |
 | --- | --- |
 | `packages/core/page-identity.js` | Normalize URLs, generate file identifiers, classify unavailable browser pages, and distinguish URL changes from full page loads |
-| `packages/core/highlight-lifecycle.js` | Save selected text with explicit line breaks and text-node offsets, restore highlights, and repair marks after page content changes |
+| `packages/core/highlight-lifecycle.js` | Save block selections with literal offsets and explicit line breaks, reserve saved anchors before visible text fallback in reading order, preserve removed snapshot siblings, and repair marks after page content changes |
 | `packages/core/markdown-extractor.js` | Live DOM-to-Markdown conversion for searchable snapshots |
 | `packages/core/snapshot-html.js` | Validate saved URL/slug metadata, clean highlight markup, and prepare snapshots for reopening |
 | `packages/core/bounded-response.js` | Streamed resource byte limits |
@@ -221,7 +222,10 @@ do not maintain a second production copy.
 | Personal macOS sessions reject temporary tray app automation before native tools run | `tests/integration/macos-native-session.test.js` |
 | macOS frame restoration after hidden size and position changes with an inset content view | `apps/desktop/src-tauri/tests/macos_window_frame.rs` |
 | Windows icons, single instance, and teardown | `tests/smoke/windows-desktop-single-instance.mjs`, `tests/integration/windows-desktop-cleanup.test.js` |
-| Native desktop cleanup preserves setup errors and completes teardown after failures | `tests/smoke/desktop-test-cleanup.mjs`, `tests/smoke/macos-desktop-process.mjs`, `tests/integration/macos-desktop-cleanup.test.js` |
+| Native desktop cleanup preserves setup errors, completes teardown after failures, and stops original or relaunched update processes | `tests/smoke/desktop-test-cleanup.mjs`, `tests/smoke/macos-desktop-process.mjs`, `tests/integration/macos-desktop-cleanup.test.js`, `tests/integration/windows-desktop-cleanup.test.js` |
+| Windows native update isolation survives token-based installer relaunch and restores the user environment; portable rollback JSON reader covers Windows PowerShell array behavior | `tests/smoke/windows-desktop-update-environment.ps1`, `tests/smoke/windows-update-environment-snapshot.ps1`, `tests/integration/windows-update-environment.test.js`, `tests/fixtures/windows-token-launch.cs` |
+| Windows validation gate blocks packaging and prints failed assertions from JSON reports | `scripts/verify-windows-validation.mjs`, `tests/integration/ci-release-validation.test.js` |
+| Windows signing requires an unsigned compiled executable, rejects other signers and tampering, and uses disposable certificate stores | `tests/integration/windows-code-signing.test.js`, `scripts/windows-code-signing.ps1` |
 | Saved desktop language and right-to-left layout | `tests/e2e/desktop-locale-setting.spec.js` |
 | Native extension localization and system fonts | `tests/e2e/extension-localization.spec.js`, `tests/e2e/extension-font-fallback.spec.js` |
 | Real Firefox automatic capture and navigation, daemon persistence before identity probes, paused-document exclusion until refresh, and options-page popup messages | `tests/smoke/firefox-real-content.mjs` |

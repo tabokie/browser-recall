@@ -26,6 +26,10 @@ import { removeTestProfile } from './windows-desktop-process.mjs';
 import { requireIsolatedMacosSession } from '../../scripts/lib/macos-native-session.mjs';
 import { frameNativeUpdateWindow } from './native-update-window.mjs';
 import { verifyWindowsInstalledExecutable } from '../../scripts/verify-windows-installed-executable.mjs';
+import {
+  stopNativeUpdateProcesses,
+  withCleanup,
+} from './desktop-test-cleanup.mjs';
 
 if (!['darwin', 'win32'].includes(process.platform))
   throw new Error('Native update lifecycle requires macOS or Windows');
@@ -64,6 +68,7 @@ const executable =
   process.platform === 'darwin'
     ? path.join(app, 'Contents/MacOS/browser-recall-desktop')
     : path.join(installed, 'browser-recall-desktop.exe');
+const windowsEnvironmentState = path.join(work, 'windows-environment.json');
 let helper;
 let pid;
 let child;
@@ -151,6 +156,22 @@ function ui(action, label = '') {
     },
   );
 }
+function windowsUpdateEnvironment(action, env = process.env) {
+  run(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-File',
+      path.join(root, 'tests/smoke/windows-desktop-update-environment.ps1'),
+      '-Action',
+      action,
+      '-StatePath',
+      windowsEnvironmentState,
+    ],
+    { env, timeout: 15000 },
+  );
+}
 function request(connection, message, type) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(
@@ -211,7 +232,7 @@ async function command(action, fields) {
   assert.equal(result.success, true, result.error);
   return result.response;
 }
-try {
+await withCleanup(async () => {
   // Never shut down a user's Browser Recall process to make room for this test.
   if (process.platform === 'darwin') {
     const processes = run('/bin/ps', ['-axo', 'comm=']);
@@ -302,6 +323,9 @@ try {
     BROWSER_RECALL_PORTS: String(port),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--force-renderer-accessibility',
   };
+  if (process.platform === 'win32') {
+    windowsUpdateEnvironment('set', environment);
+  }
   const log = path.join(directory, `${platform}-application.log`);
   child = spawn(executable, [], {
     env: environment,
@@ -313,6 +337,7 @@ try {
       output += bytes;
       writeFileSync(log, output);
     });
+  await once(child, 'spawn');
   pid = await waitFor('Old Browser Recall process', runningPid);
   if (process.platform === 'darwin') {
     await frameNativeUpdateWindow(helper, pid);
@@ -372,6 +397,11 @@ try {
   ).then((value) => {
     pid = value;
   });
+  // Authenticate against the same isolated daemon before looking for UI
+  // controls. A lost profile must fail as a reconnect error, not a UI timeout.
+  socket = await waitFor('Connector reconnect using retained token', () =>
+    connect(port),
+  );
   await waitFor(
     'Relaunched Settings button',
     () =>
@@ -391,9 +421,6 @@ try {
       version,
     );
   else verifyWindowsInstalledExecutable(packagePath, executable);
-  socket = await waitFor('Connector reconnect using retained token', () =>
-    connect(port),
-  );
   const settings = await request(
     socket,
     { type: 'get_settings' },
@@ -419,49 +446,78 @@ try {
   console.log(
     `Native ${platform} update: 0.0.1 → ${version}, relaunch, retained data/settings/pairing, and connector writes verified.`,
   );
-} finally {
-  socket?.terminate();
-  if (existsSync(path.join(profile, 'logs'))) {
-    cpSync(
-      path.join(profile, 'logs'),
-      path.join(directory, `${platform}-logs`),
-      { recursive: true },
-    );
-  }
-  if (pid) {
+}, [
+  () => socket?.terminate(),
+  () => {
+    if (existsSync(path.join(profile, 'logs'))) {
+      cpSync(
+        path.join(profile, 'logs'),
+        path.join(directory, `${platform}-logs`),
+        { recursive: true },
+      );
+    }
+  },
+  () => {
+    if (!pid) return;
     try {
       writeFileSync(path.join(directory, `${platform}-ui.txt`), ui('dump'));
     } catch {
       /* The test process may already have exited. */
     }
-    if (process.platform === 'win32') {
-      try {
-        run('taskkill.exe', ['/PID', String(pid), '/T', '/F']);
-      } catch (error) {
-        if (runningPid() === pid) throw error;
-      }
-    } else {
-      try {
-        process.kill(pid, 'SIGTERM');
-      } catch (error) {
-        if (error.code !== 'ESRCH') throw error;
-      }
+  },
+  () =>
+    stopNativeUpdateProcesses({
+      pid,
+      child,
+      findPid: () => (child ? runningPid() : 0),
+      stopPid: async (target) => {
+        if (process.platform === 'win32') {
+          try {
+            run('taskkill.exe', ['/PID', String(target), '/T', '/F']);
+          } catch (error) {
+            if (runningPid() === target) throw error;
+          }
+        } else {
+          try {
+            process.kill(target, 'SIGTERM');
+          } catch (error) {
+            if (error.code !== 'ESRCH') throw error;
+          }
+        }
+        await waitFor('Test process cleanup', () => {
+          try {
+            process.kill(target, 0);
+            return false;
+          } catch (error) {
+            if (error.code === 'ESRCH') return true;
+            throw error;
+          }
+        });
+      },
+    }),
+  () => {
+    if (process.platform === 'darwin') unregisterMacosTestApp(app);
+  },
+  async () => {
+    if (windowsInstalled)
+      await execute(path.join(installed, 'uninstall.exe'), ['/S']);
+  },
+  () => {
+    if (existsSync(windowsEnvironmentState))
+      windowsUpdateEnvironment('restore');
+  },
+  async () => {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  },
+  () => {
+    if (existsSync(windowsEnvironmentState)) {
+      throw new Error(
+        `Windows user environment rollback retained at ${windowsEnvironmentState}`,
+      );
     }
-    await waitFor('Test process cleanup', () => {
-      try {
-        process.kill(pid, 0);
-        return false;
-      } catch (error) {
-        if (error.code === 'ESRCH') return true;
-        throw error;
-      }
-    });
-  }
-  if (process.platform === 'darwin') unregisterMacosTestApp(app);
-  if (windowsInstalled)
-    await execute(path.join(installed, 'uninstall.exe'), ['/S']);
-  server.closeAllConnections();
-  await new Promise((resolve) => server.close(resolve));
-  if (process.platform === 'win32') await removeTestProfile(work);
-  else rmSync(work, { recursive: true, force: true });
-}
+    return process.platform === 'win32'
+      ? removeTestProfile(work)
+      : rmSync(work, { recursive: true, force: true });
+  },
+]);

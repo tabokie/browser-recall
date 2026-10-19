@@ -759,6 +759,10 @@
     "message": "刪除突出顯示",
     "description": "Delete highlight button title."
   },
+  "desktopOpenSnapshotFolder": {
+    "message": "開啟快照資料夾",
+    "description": "Open the containing directory for a saved snapshot in the system file manager."
+  },
   "extensionDeleteSnapshot": {
     "message": "刪除快照",
     "description": "Delete snapshot button title."

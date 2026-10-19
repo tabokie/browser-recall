@@ -64,9 +64,34 @@ jobs:
         if: ${{ !inputs.production }}
         run: node scripts/prepare-ci-release.mjs
 
-      - name: Verify Windows signing, cleanup and artifacts
+      - name: Verify Windows signing
+        id: windows_signing
         if: matrix.platform == 'windows'
-        run: npx vitest run tests/integration/windows-desktop-cleanup.test.js tests/integration/desktop-artifact-collection.test.js tests/integration/windows-installed-executable.test.js tests/integration/desktop-signing.test.js tests/integration/windows-code-signing.test.js tests/unit/stage-app-assets.test.js
+        continue-on-error: true
+        timeout-minutes: 3
+        run: npx vitest run --reporter=verbose --reporter=json --outputFile=test-results/windows-validation/signing.json tests/integration/desktop-signing.test.js tests/integration/windows-code-signing.test.js
+
+      - name: Verify Windows cleanup
+        id: windows_cleanup
+        if: matrix.platform == 'windows'
+        continue-on-error: true
+        timeout-minutes: 3
+        run: npm run ci:test-windows-cleanup -- --reporter=verbose --reporter=json --outputFile=test-results/windows-validation/cleanup.json
+
+      - name: Verify Windows artifacts
+        id: windows_artifacts
+        if: matrix.platform == 'windows'
+        continue-on-error: true
+        timeout-minutes: 3
+        run: npx vitest run --reporter=verbose --reporter=json --outputFile=test-results/windows-validation/artifacts.json tests/integration/desktop-artifact-collection.test.js tests/integration/windows-installed-executable.test.js tests/unit/stage-app-assets.test.js
+
+      - name: Require Windows validation checks to pass
+        if: matrix.platform == 'windows'
+        env:
+          WINDOWS_SIGNING_RESULT: ${{ steps.windows_signing.outcome }}
+          WINDOWS_CLEANUP_RESULT: ${{ steps.windows_cleanup.outcome }}
+          WINDOWS_ARTIFACTS_RESULT: ${{ steps.windows_artifacts.outcome }}
+        run: node scripts/verify-windows-validation.mjs
 
       - name: Verify macOS signing and native session guards
         if: matrix.platform == 'macos' && matrix.arch == 'arm64'
@@ -85,19 +110,28 @@ jobs:
           $installed = Join-Path $env:RUNNER_TEMP 'browser-recall-installed-test'
           $process = Start-Process -FilePath $installer -ArgumentList '/S', "/D=$installed" -PassThru -Wait
           if ($process.ExitCode -ne 0) { throw 'Desktop installer failed' }
+          $installedAppError = $null
           try {
             $env:BROWSER_RECALL_DESKTOP_TEST_EXECUTABLE = Join-Path $installed 'browser-recall-desktop.exe'
             node scripts/verify-windows-installed-executable.mjs $installer $env:BROWSER_RECALL_DESKTOP_TEST_EXECUTABLE
             if ($LASTEXITCODE -ne 0) { throw 'Installed executable differs from the installer payload' }
             node tests/smoke/windows-desktop-single-instance.mjs
             if ($LASTEXITCODE -ne 0) { throw 'Installed application smoke test failed' }
-          } finally {
+          } catch {
+            $installedAppError = $_
+          }
+          try {
             Remove-Item Env:BROWSER_RECALL_DESKTOP_TEST_EXECUTABLE
             $uninstaller = Join-Path $installed 'uninstall.exe'
             if (!(Test-Path $uninstaller)) { throw 'Desktop uninstaller is missing' }
             $process = Start-Process -FilePath $uninstaller -ArgumentList '/S' -PassThru -Wait
             if ($process.ExitCode -ne 0) { throw 'Desktop uninstall failed' }
+          } catch {
+            if ($installedAppError) {
+              Write-Warning "Desktop uninstall also failed: $($_.Exception.Message)"
+            } else { throw }
           }
+          if ($installedAppError) { throw $installedAppError }
 
       - name: Verify the macOS disk image and update archive
         if: matrix.platform == 'macos'
@@ -152,6 +186,8 @@ jobs:
           path: |
             test-results/native-update/
             test-results/native-lifecycle/
+            test-results/windows-validation/
+            test-results/windows-font/
           if-no-files-found: ignore
           retention-days: 7
 

@@ -1570,6 +1570,21 @@ test.describe('Highlight note edit', () => {
         expectedExcerpt,
       );
       await expect(mark.locator('br')).toHaveCount(3);
+      // A block rename invalidates the stored selector without changing the
+      // stored single excerpt, including its explicit BR line breaks.
+      await page.locator('.CommentContent').evaluate((element) => {
+        const replacement = document.createElement('section');
+        replacement.className = element.className;
+        replacement.innerHTML =
+          '<br>sentence 1<br>sentence 2<br><br>sentence 3';
+        element.replaceWith(replacement);
+      });
+      await expect(mark).toHaveCount(1);
+      await expect(mark).toHaveAttribute(
+        'data-highlight-text',
+        expectedExcerpt,
+      );
+      await expect(mark.locator('br')).toHaveCount(3);
       await helper.close();
       await page.close();
     });

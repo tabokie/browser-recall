@@ -4528,6 +4528,8 @@ const DETAIL_ICON_DELETE =
   '<svg data-icon="delete" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>';
 const DETAIL_ICON_CONFIRM =
   '<svg data-icon="checkmark" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter"><path d="M2.5 8.5l3.2 3.2L13.5 4"/></svg>';
+const DETAIL_ICON_FOLDER =
+  '<svg aria-hidden="true" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4.5V3h5l1.5 2h6.5v8h-13z"/></svg>';
 
 function renderExtraDetailHtml(extra, cardTimestamp) {
   let html = '';
@@ -4583,6 +4585,10 @@ function renderExtraDetailHtml(extra, cardTimestamp) {
         html += `<span class="detail-snapshot-badge md" data-ts="${s.timestamp}">Markdown</span>`;
       if (s.hasHtml)
         html += `<span class="detail-snapshot-badge html" data-ts="${s.timestamp}">HTML</span>`;
+      const folderLabel = escapeHtml(
+        tr('desktopOpenSnapshotFolder', 'Open snapshot folder'),
+      );
+      html += `<button class="detail-snapshot-folder" title="${folderLabel}" aria-label="${folderLabel}">${DETAIL_ICON_FOLDER}</button>`;
       html += `<button class="detail-snapshot-delete" data-ts="${s.timestamp}" title="${escapeHtml(tr('extensionDeleteSnapshot', 'Delete snapshot'))}">&times;</button>`;
       html += '</span>';
       html += '</div>';
@@ -4954,6 +4960,22 @@ function openDetailNoteEditor(entry, noteSlug) {
 }
 
 function bindSnapshotClickHandlers(container) {
+  container.querySelectorAll('.detail-snapshot-folder').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const row = button.closest('.detail-snapshot-row');
+      const slug = button.closest('.detail-snapshots')?.dataset.slug;
+      const timestamp = Number(row?.dataset.ts);
+      if (!slug || !timestamp) return;
+      void sendAction({
+        action: 'openSnapshotDirectory',
+        slug,
+        timestamp,
+      }).catch((error) =>
+        surfaceBackgroundError('Could not open snapshot folder', error),
+      );
+    });
+  });
   container.querySelectorAll('.detail-snapshot-row').forEach((row) => {
     row.addEventListener('click', async (e) => {
       e.stopPropagation();

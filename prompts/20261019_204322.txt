@@ -1,0 +1,49 @@
+- Press Alt-R twice in browser opens a new tab that contains the popup. Is this expected?
+- No need to have fallback.
+- CI, npm run ci:test-extension-e2e is failing:
+  1) tests/e2e/snapshot-slug-meta.spec.js:778:5 › Snapshot slug meta tag › snapshot budget waits for commands arriving during and after drain completion 
+
+    Error: [{"delay":null,"injected":true,"success":true},{"delay":0,"injected":false,"success":true},{"delay":1,"injected":true,"success":true},{"delay":2,"injected":true,"success":true},{"delay":3,"injected":true,"success":true},{"delay":4,"injected":true,"success":true},{"delay":5,"injected":true,"success":true},{"delay":6,"injected":true,"success":true},{"delay":7,"injected":true,"success":true},{"delay":8,"injected":true,"success":true},{"delay":9,"injected":true,"success":true},{"delay":10,"injected":true,"success":true},{"delay":11,"injected":true,"success":true},{"delay":12,"injected":true,"success":true},{"delay":13,"injected":true,"success":true},{"delay":14,"injected":true,"success":true},{"delay":15,"injected":true,"success":true},{"delay":16,"injected":true,"success":true},{"delay":17,"injected":true,"success":true},{"delay":18,"injected":true,"success":true},{"delay":19,"injected":true,"success":true},{"delay":20,"injected":true,"success":true},{"delay":21,"injected":true,"success":true},{"delay":22,"injected":true,"success":true},{"delay":23,"injected":true,"success":true},{"delay":24,"injected":true,"success":true}]
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 1
+
+    @@ -4,11 +4,11 @@
+          "injected": true,
+          "success": true,
+        },
+        Object {
+          "delay": 0,
+    -     "injected": true,
+    +     "injected": false,
+          "success": true,
+        },
+        Object {
+          "delay": 1,
+          "injected": true,
+
+      861 |         { operation, url, slug },
+      862 |       );
+    > 863 |       expect(outcomes, JSON.stringify(outcomes)).toEqual(
+          |                                                  ^
+      864 |         outcomes.map(({ delay }) => ({ delay, injected: true, success: true })),
+      865 |       );
+      866 |       const capture = await helper.evaluate(() =>
+        at /home/runner/work/browser-recall/browser-recall/tests/e2e/snapshot-slug-meta.spec.js:863:50
+
+    Error Context: test-results/snapshot-slug-meta-Snapsho-28849--and-after-drain-completion/error-context.md
+
+  1 failed
+    tests/e2e/snapshot-slug-meta.spec.js:778:5 › Snapshot slug meta tag › snapshot budget waits for commands arriving during and after drain completion 
+- Windows x64 validation times out at "Verify Windows signing, cleanup and artifacts", the last log is:
+   ✓ installed executable matches packaged bytes, not the unpatched build 448ms
+- A highlight is not marked up in the snapshot of that page. slug=nytimes-2026-10-16-us-math-ai-gt3kzb&ts=1792407994618
+- What do you mean? You can read it to understand the issue.
+- Let's add a fallback for highlight matching. If the exact CSS path match is not found, try text search.
+- There're are two conflicting ways we open a snapshot, from extension popup it uses snapshot-viewer, from desktop it opens the html file directly. In the latter case, the page details in browser is not usable, says "Page URL must use HTTP or HTTPS and include a hostname".
+- In desktop app, add a small button (next to markdown, HTML buttons) to open snapshot directory in Finder.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) 
+- Fix them all. For 4, I thought we split different lines before storing them?
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) co-author=GPT-6.1 Sol

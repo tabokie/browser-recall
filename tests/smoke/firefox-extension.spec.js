@@ -817,14 +817,14 @@ test.describe('Firefox extension smoke', () => {
     });
   });
 
-  test('open-popup command falls back to a tab when Firefox rejects action.openPopup', async () => {
+  test('open-popup command returns an error without opening a tab when Firefox rejects action.openPopup', async () => {
     await withStagedFirefoxExtension(async (outDir) => {
       const api = createFirefoxWebExtensionApi();
       const activeTab = {
         id: 42,
         windowId: 1,
-        url: 'https://example.test/firefox-popup-fallback',
-        title: 'Firefox Popup Fallback',
+        url: 'https://example.test/firefox-popup-failure',
+        title: 'Firefox Popup Failure',
       };
       api.browserApi.tabs.query = async () => [activeTab];
       const createdTabs = [];
@@ -865,11 +865,12 @@ test.describe('Firefox extension smoke', () => {
             activeTab,
           );
 
-          expect(result).toEqual({ success: true });
-          expect(createdTabs).toHaveLength(1);
-          expect(createdTabs[0]).toMatch(
-            /^moz-extension:\/\/browser-recall\.invalid\/popup\.html\?bootstrap=/,
-          );
+          expect(result).toEqual({
+            success: false,
+            error: 'openPopup is unavailable in this Firefox window',
+          });
+          expect(createdTabs).toEqual([]);
+          expect(api.actionPopupState.popupByTab.get(activeTab.id)).toBe('');
         },
       );
 

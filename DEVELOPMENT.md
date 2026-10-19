@@ -266,6 +266,27 @@ On macOS, use a disposable macOS user account or CI runner, set
 refuses to stop a user's running app and uses a temporary application,
 configuration, and collection. On Windows, use a disposable session and set
 `BROWSER_RECALL_ISOLATED_WINDOWS_SESSION=1`.
+The Windows check temporarily saves its profile, connector port, registration
+guards, and WebView2 settings in the disposable user's environment registry.
+The elevated NSIS installer relaunches through `CreateProcessWithTokenW`, which
+rebuilds the environment from the Windows user profile and loses process-only
+overrides. Teardown restores the original registry values and value types; if
+restoration fails, the check retains the rollback file and reports its path.
+`npm run ci:test-windows-cleanup` includes a Windows GitHub runner regression that
+launches a real subprocess through the same Windows API before and after setup
+and verifies restoration after a simulated failure. The regression helper
+duplicates the desktop user's token, matching the installer, and reports the
+Windows API operation and error code on failure. The final Windows validation
+gate prints failed test names and errors from the individual JSON reports.
+The rollback JSON reader also runs without registry access when PowerShell is
+available (`pwsh` on macOS/Linux, or `BROWSER_RECALL_TEST_POWERSHELL` for an explicit
+executable). The regression checks absent values and saved string/expandable
+string values, including Windows PowerShell 5.1's JSON array pipeline behavior.
+The regression serializes each entry visited by restoration's `foreach` loop;
+Windows PowerShell 5.1 can add `value`/`Count` properties when reserializing the
+whole parsed array.
+The native update check
+authenticates the retained connector before inspecting the relaunched interface.
 The macOS check waits for the Accessibility window before positioning the window;
 process registration alone does not establish window readiness. A readiness
 timeout retains the native helper's error, including Accessibility failures.
@@ -474,6 +495,15 @@ production frame restoration directly and runs before the tray lifecycle test:
 cargo test --locked --release -p browser-recall-desktop --test macos_window_frame
 ```
 
+The snapshot folder check calls production snapshot-opening code, verifies the
+temporary snapshot directory in Finder, then closes only that test window. The
+check requires a macOS desktop session and does not launch Browser Recall or
+register a menu bar item:
+
+```bash
+cargo test --locked -p browser-recall-desktop --test snapshot_open -- --ignored
+```
+
 On Windows, close any running Browser Recall process before the single-instance
 test:
 
@@ -493,6 +523,37 @@ node tests/smoke/windows-desktop-single-instance.mjs --icons-only
 `npm run ci:test-windows-cleanup` checks test cleanup. Windows cleanup must stop
 the app and child processes before deleting profiles. Files that remain locked or
 cannot be deleted cause the test to fail. Windows CI builds before browser setup.
+Windows signing, cleanup, and artifact checks run in separate steps with three-minute
+deadlines. All three checks run before a combined gate blocks packaging if any
+check failed. JSON reports are saved under `test-results/windows-validation/`
+and uploaded with native failure diagnostics. The Windows font regression uses
+`test-results/windows-font/`, so Playwright does not clear earlier native logs or
+validation reports. The disposable certificate test closes PowerShell's standard input,
+streams progress, and terminates PowerShell after 25 seconds; asynchronous process
+execution also lets Vitest enforce its test deadline. The test creates a fresh
+unsigned x64 executable with the Windows .NET Framework `csc.exe` compiler and
+checks that Authenticode reports `NotSigned` before signing. Copied Windows system
+executables can retain catalog signatures, which PowerShell prefers over embedded
+signatures. The test checks rejection of a valid signature from another signer as
+well as tampering. The test creates a fresh code-signing certificate through
+.NET's `CertificateRequest`, avoiding the
+`New-SelfSignedCertificate` setup command that stalled on Windows CI. The test
+imports the private key into `CurrentUser\My` for real Authenticode signing and
+trusts only the public certificate in `LocalMachine\Root`. `CurrentUser\Root`
+can display a native confirmation dialog even with PowerShell's
+`-NonInteractive` option, so certificate-store changes require an elevated
+disposable GitHub runner. Separate progress messages identify both installations. Cleanup
+removes the certificate from both stores and disposes the temporary private key,
+including after a signing failure. macOS and Linux skip the native signing
+scenario; passing tests on those platforms do not verify Windows certificate
+installation or Authenticode behavior.
+
+Native update teardown preserves the original failure and attempts every cleanup
+even if diagnostics, process termination, or uninstalling also fails. Process
+cleanup uses the original child before process-ID discovery and rediscovers the
+installed executable after relaunch. The cleanup regression exercises both paths
+with real subprocesses without launching Browser Recall. Native launch errors
+are reported directly instead of being replaced by readiness timeouts.
 
 Tests on macOS and Linux do not compile Rust code restricted to Windows. For the additional
 Windows GNU type check, install MinGW and the Rust target:

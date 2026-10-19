@@ -759,6 +759,10 @@
     "message": "Eliminar resaltado",
     "description": "Delete highlight button title."
   },
+  "desktopOpenSnapshotFolder": {
+    "message": "Abrir carpeta de la captura",
+    "description": "Open the containing directory for a saved snapshot in the system file manager."
+  },
   "extensionDeleteSnapshot": {
     "message": "Eliminar instantánea",
     "description": "Delete snapshot button title."

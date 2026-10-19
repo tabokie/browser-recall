@@ -787,6 +787,10 @@
     "message": "Delete highlight",
     "description": "Delete highlight button title."
   },
+  "desktopOpenSnapshotFolder": {
+    "message": "Open snapshot folder",
+    "description": "Open the containing directory for a saved snapshot in the system file manager."
+  },
   "extensionDeleteSnapshot": {
     "message": "Delete snapshot",
     "description": "Delete snapshot button title."
