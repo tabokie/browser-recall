@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { buildDesktop } from './build-desktop.mjs';
 import { createDesktopDiskImage } from './lib/desktop-disk-image.mjs';
 import { verifyMacosAppBundle } from './verify-macos-app-bundle.mjs';
+import { timeBuildStep } from './lib/build-timing.mjs';
 import {
   readProductVersion,
   validateProductVersion,
@@ -48,22 +49,28 @@ export function packageDesktopRelease({
     let update;
     if (platform === 'darwin') {
       const app = artifacts.app;
-      verifyMacosAppBundle(app);
+      timeBuildStep('Release app signature verification', () =>
+        verifyMacosAppBundle(app),
+      );
       const diskImage = path.join(work, `${prefix}.dmg`);
-      createDesktopDiskImage(app, diskImage);
+      timeBuildStep('Release disk image creation', () =>
+        createDesktopDiskImage(app, diskImage),
+      );
       renameSync(diskImage, path.join(outDir, `${prefix}.dmg`));
       update = path.join(work, `${prefix}.app.tar.gz`);
-      execFileSync(
-        '/usr/bin/tar',
-        [
-          '--no-mac-metadata',
-          '-czf',
-          update,
-          '-C',
-          path.dirname(app),
-          path.basename(app),
-        ],
-        { stdio: 'pipe' },
+      timeBuildStep('Release update archive creation', () =>
+        execFileSync(
+          '/usr/bin/tar',
+          [
+            '--no-mac-metadata',
+            '-czf',
+            update,
+            '-C',
+            path.dirname(app),
+            path.basename(app),
+          ],
+          { stdio: 'pipe' },
+        ),
       );
     } else {
       const directory = path.join(artifacts.outDir, 'windows/nsis');
@@ -76,44 +83,50 @@ export function packageDesktopRelease({
           'Expected exactly one NSIS installer for the release version',
         );
       update = path.join(work, `${prefix}-setup.exe`);
-      cpSync(path.join(directory, installers[0]), update);
+      timeBuildStep('Release installer staging', () =>
+        cpSync(path.join(directory, installers[0]), update),
+      );
     }
     // Sign the finalized package, after macOS bundle signing and resource sealing.
     // Suppress signer output so CI cannot expose key material through diagnostics.
     try {
-      execFileSync(process.execPath, [cli, 'signer', 'sign', update], {
-        stdio: 'pipe',
-        env: {
-          ...process.env,
-          TAURI_SIGNING_PRIVATE_KEY: existsSync(
-            process.env.TAURI_SIGNING_PRIVATE_KEY,
-          )
-            ? readFileSync(process.env.TAURI_SIGNING_PRIVATE_KEY, 'utf8')
-            : process.env.TAURI_SIGNING_PRIVATE_KEY,
-        },
-      });
+      timeBuildStep('Release update package signing', () =>
+        execFileSync(process.execPath, [cli, 'signer', 'sign', update], {
+          stdio: 'pipe',
+          env: {
+            ...process.env,
+            TAURI_SIGNING_PRIVATE_KEY: existsSync(
+              process.env.TAURI_SIGNING_PRIVATE_KEY,
+            )
+              ? readFileSync(process.env.TAURI_SIGNING_PRIVATE_KEY, 'utf8')
+              : process.env.TAURI_SIGNING_PRIVATE_KEY,
+          },
+        }),
+      );
     } catch {
       throw new Error('Signing the desktop update package failed');
     }
-    execFileSync(
-      'cargo',
-      [
-        'test',
-        '--locked',
-        '--release',
-        '-p',
-        'browser-recall-desktop',
-        '--test',
-        'desktop_updates',
-        'release_package_matches_embedded_public_key',
-        '--',
-        '--ignored',
-      ],
-      {
-        cwd: root,
-        env: { ...process.env, BROWSER_RECALL_VERIFY_UPDATE_PACKAGE: update },
-        stdio: 'inherit',
-      },
+    timeBuildStep('Release Cargo signature verification', () =>
+      execFileSync(
+        'cargo',
+        [
+          'test',
+          '--locked',
+          '--release',
+          '-p',
+          'browser-recall-desktop',
+          '--test',
+          'desktop_updates',
+          'release_package_matches_embedded_public_key',
+          '--',
+          '--ignored',
+        ],
+        {
+          cwd: root,
+          env: { ...process.env, BROWSER_RECALL_VERIFY_UPDATE_PACKAGE: update },
+          stdio: 'inherit',
+        },
+      ),
     );
     for (const file of [update, `${update}.sig`])
       renameSync(file, path.join(outDir, path.basename(file)));

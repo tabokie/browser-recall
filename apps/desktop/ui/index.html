@@ -1871,7 +1871,8 @@
         background: rgba(80, 128, 176, 0.15);
       }
 
-      .detail-snapshot-delete {
+      .detail-snapshot-delete,
+      .detail-snapshot-folder {
         width: 20px;
         height: 20px;
         border: none;
@@ -1884,12 +1885,18 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        opacity: 0;
         transition:
           opacity 0.15s,
           background 0.15s,
           color 0.15s;
         padding: 0;
+      }
+      .detail-snapshot-delete {
+        opacity: 0;
+      }
+      .detail-snapshot-folder:hover {
+        background: var(--bg-surface-active);
+        color: var(--text-primary);
       }
       .detail-snapshot-row:hover .detail-snapshot-delete {
         opacity: 1;

@@ -186,6 +186,7 @@ function initContentScript({ recordingEligible, recordingDocumentToken }) {
   // artifact. This file adapts browser messages and daemon reads to that module.
   const highlightLifecycle = highlightLifecycleModule.create({
     document,
+    snapshot: Boolean(getEmbeddedPageSlug()),
     getCurrentIdentity: getSlugForCurrentPage,
     loadNotes: requestPageNotes,
     onLoadError: showExtensionReloadNotification,
@@ -393,6 +394,9 @@ function initContentScript({ recordingEligible, recordingDocumentToken }) {
   }
 
   function reportInitialVisit(url = window.location.href, referrerUrl) {
+    // Saved snapshots use their embedded page identity for explicit actions;
+    // opening a snapshot is not a new visit to the original page.
+    if (getEmbeddedPageSlug()) return;
     hasReportedVisit = recordingEligible;
     currentHistoryId = url;
     activePageUrl = url;
@@ -405,6 +409,7 @@ function initContentScript({ recordingEligible, recordingDocumentToken }) {
   if (!spaNavigationBridge?.isNavigating()) reportInitialVisit(activePageUrl);
 
   function handleSameDocumentNavigation(nextUrl = window.location.href) {
+    if (getEmbeddedPageSlug()) return;
     // Browser messages and queued page-world events may arrive after another
     // route has already replaced the document. Never attach live DOM to them.
     if (nextUrl !== window.location.href) return;
@@ -961,7 +966,7 @@ function initContentScript({ recordingEligible, recordingDocumentToken }) {
         }
 
         if (preparedSelection) {
-          const slug = getSlugForCurrentPage();
+          const { slug, url } = getPageIdentity();
           const timestamp = Date.now();
           if (preparedSelection.excerpt.length > 1) {
             console.log(
@@ -981,7 +986,7 @@ function initContentScript({ recordingEligible, recordingDocumentToken }) {
               .sendMessage({
                 action: 'createNote',
                 pageSlug: slug,
-                url: window.location.href,
+                url,
                 title: document.title,
                 excerpt: preparedSelection.excerpt,
                 note: '',

@@ -759,6 +759,10 @@
     "message": "हाइलाइट हटाएँ",
     "description": "Delete highlight button title."
   },
+  "desktopOpenSnapshotFolder": {
+    "message": "स्नैपशॉट फ़ोल्डर खोलें",
+    "description": "Open the containing directory for a saved snapshot in the system file manager."
+  },
   "extensionDeleteSnapshot": {
     "message": "स्नैपशॉट हटाएँ",
     "description": "Delete snapshot button title."

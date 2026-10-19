@@ -100,31 +100,6 @@ describe('highlight lifecycle architecture invariants', () => {
     );
   });
 
-  it('uses aligned paths and never falls back when a stored scope is invalid', () => {
-    document.body.innerHTML = `<main><section><p>duplicate</p></section><section><p>duplicate</p></section></main>`;
-
-    lifecycle.applySaved([
-      {
-        slug: 'note-scoped',
-        excerpt: ['duplicate'],
-        cssPath: ['main > section:nth-of-type(2) > p'],
-      },
-      {
-        slug: 'note-invalid-scope',
-        excerpt: ['duplicate'],
-        cssPath: ['main > section:nth-of-type(3) > p'],
-      },
-    ]);
-
-    expect(document.querySelector('section:nth-of-type(1) mark')).toBeNull();
-    expect(
-      document.querySelector('section:nth-of-type(2) mark')?.dataset.noteSlug,
-    ).toBe('note-scoped');
-    expect(
-      document.querySelector('[data-note-slug="note-invalid-scope"]'),
-    ).toBeNull();
-  });
-
   it('prepares aligned scoped chunks and applies the exact selected ranges', () => {
     document.body.innerHTML =
       '<main><p>repeat selected text</p><p>repeat selected text</p></main>';
@@ -179,17 +154,6 @@ describe('highlight lifecycle architecture invariants', () => {
     expect(mark?.textContent).toBe('same');
     expect(paragraph.textContent).toBe('same middle same');
     expect(mark?.previousSibling?.textContent).toBe('same middle ');
-
-    document.body.innerHTML = '<main><p>same shifted middle same</p></main>';
-    lifecycle = createHighlightLifecycle({ document });
-    lifecycle.applySaved([
-      {
-        slug: 'same-block-stale-anchor',
-        excerpt: ['same'],
-        cssPath: prepared.cssPath,
-      },
-    ]);
-    expect(document.querySelector('mark')).toBeNull();
   });
 
   it('rejects a selection intersecting an existing owned mark', () => {

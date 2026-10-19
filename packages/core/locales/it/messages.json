@@ -759,6 +759,10 @@
     "message": "Elimina l'evidenziazione",
     "description": "Delete highlight button title."
   },
+  "desktopOpenSnapshotFolder": {
+    "message": "Apri cartella dell’istantanea",
+    "description": "Open the containing directory for a saved snapshot in the system file manager."
+  },
   "extensionDeleteSnapshot": {
     "message": "Elimina istantanea",
     "description": "Delete snapshot button title."

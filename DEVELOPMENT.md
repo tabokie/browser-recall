@@ -266,6 +266,27 @@ On macOS, use a disposable macOS user account or CI runner, set
 refuses to stop a user's running app and uses a temporary application,
 configuration, and collection. On Windows, use a disposable session and set
 `BROWSER_RECALL_ISOLATED_WINDOWS_SESSION=1`.
+The Windows check temporarily saves its profile, connector port, registration
+guards, and WebView2 settings in the disposable user's environment registry.
+The elevated NSIS installer relaunches through `CreateProcessWithTokenW`, which
+rebuilds the environment from the Windows user profile and loses process-only
+overrides. Teardown restores the original registry values and value types; if
+restoration fails, the check retains the rollback file and reports its path.
+`npm run ci:test-windows-cleanup` includes a Windows GitHub runner regression that
+launches a real subprocess through the same Windows API before and after setup
+and verifies restoration after a simulated failure. The regression helper
+duplicates the desktop user's token, matching the installer, and reports the
+Windows API operation and error code on failure. The final Windows validation
+gate prints failed test names and errors from the individual JSON reports.
+The rollback JSON reader also runs without registry access when PowerShell is
+available (`pwsh` on macOS/Linux, or `BROWSER_RECALL_TEST_POWERSHELL` for an explicit
+executable). The regression checks absent values and saved string/expandable
+string values, including Windows PowerShell 5.1's JSON array pipeline behavior.
+The regression serializes each entry visited by restoration's `foreach` loop;
+Windows PowerShell 5.1 can add `value`/`Count` properties when reserializing the
+whole parsed array.
+The native update check
+authenticates the retained connector before inspecting the relaunched interface.
 The macOS check waits for the Accessibility window before positioning the window;
 process registration alone does not establish window readiness. A readiness
 timeout retains the native helper's error, including Accessibility failures.
@@ -375,9 +396,11 @@ the daemon before starting tests that use the daemon; compiling Rust during test
 setup can exceed the startup timeout. To test a build without cached Rust output,
 set `CARGO_TARGET_DIR` to a temporary directory and run the same `ci:*` command.
 
-Regular CI has five runner jobs: one Linux tests/coverage/lint job, extension E2E,
-macOS visual regression, and two native release-validation jobs. Native packaging
-starts in parallel with the Linux checks. The Linux job validates release versions,
+Regular CI has seven runner jobs: one Linux tests/coverage/lint job, extension E2E,
+macOS visual regression, two native release-validation jobs, and Windows extension
+system-font fallback, and macOS documentation URL routing. Native packaging,
+Windows font checks, and macOS documentation URL routing start independently
+in parallel with the Linux checks. The Linux job validates release versions,
 README images, and JavaScript formatting before installing desktop build tooling.
 Pinned actionlint 1.7.12 validates workflow syntax and reusable-workflow inputs.
 JavaScript tests run once with V8 coverage. Rust workspace tests run once under
@@ -390,8 +413,20 @@ fallback; macOS startup recovery, five tray reopen cycles, session guards, and
 documentation URL routing. Shared macOS window and routing scenarios run on arm64;
 macOS arm64 runs signed-package installation and real update/relaunch in regular
 CI. Release runs package and update validation on both macOS architectures.
+The macOS window frame check runs before release compilation in the minimal
+`browser-recall-native-tests` Cargo package, which imports the production frame
+module and depends only on AppKit bindings. Windows font checks run in their
+own job with a separate Rust cache, so Chromium setup and the debug daemon build
+do not delay packaging. The macOS documentation job builds and registers a real
+production app before building the no-tray documentation app, and requires the
+production URL handler to remain selected. Every job in the reusable workflow must succeed before
+Release can publish.
 Timings must be measured on hosted runners; removing duplicate builds and test
 executions does not establish a new wall-clock duration by itself.
+Release packaging and native update validation report separate phase durations in
+the job log and GitHub step summary. The [performance record](docs/DESKTOP_RELEASE_VALIDATION_PERFORMANCE.md)
+preserves the hosted baseline, link-time optimization comparison, reproduction
+commands, and hosted results for the independent required jobs.
 
 ### Product coverage
 
@@ -471,7 +506,16 @@ and position changes while the content view has an inset. The regression calls
 production frame restoration directly and runs before the tray lifecycle test:
 
 ```bash
-cargo test --locked --release -p browser-recall-desktop --test macos_window_frame
+cargo test --locked --release -p browser-recall-native-tests --test macos_window_frame
+```
+
+The snapshot folder check calls production snapshot-opening code, verifies the
+temporary snapshot directory in Finder, then closes only that test window. The
+check requires a macOS desktop session and does not launch Browser Recall or
+register a menu bar item:
+
+```bash
+cargo test --locked -p browser-recall-desktop --test snapshot_open -- --ignored
 ```
 
 On Windows, close any running Browser Recall process before the single-instance
@@ -492,7 +536,39 @@ node tests/smoke/windows-desktop-single-instance.mjs --icons-only
 
 `npm run ci:test-windows-cleanup` checks test cleanup. Windows cleanup must stop
 the app and child processes before deleting profiles. Files that remain locked or
-cannot be deleted cause the test to fail. Windows CI builds before browser setup.
+cannot be deleted cause the test to fail. Windows native validation and browser
+setup run on separate runners.
+Windows signing, cleanup, and artifact checks run in separate steps with three-minute
+deadlines. All three checks run before a combined gate blocks packaging if any
+check failed. JSON reports are saved under `test-results/windows-validation/`
+and uploaded with native failure diagnostics. The Windows font regression uses
+`test-results/windows-font/` and uploads its own failure artifact from the parallel
+job. The disposable certificate test closes PowerShell's standard input,
+streams progress, and terminates PowerShell after 25 seconds; asynchronous process
+execution also lets Vitest enforce its test deadline. The test creates a fresh
+unsigned x64 executable with the Windows .NET Framework `csc.exe` compiler and
+checks that Authenticode reports `NotSigned` before signing. Copied Windows system
+executables can retain catalog signatures, which PowerShell prefers over embedded
+signatures. The test checks rejection of a valid signature from another signer as
+well as tampering. The test creates a fresh code-signing certificate through
+.NET's `CertificateRequest`, avoiding the
+`New-SelfSignedCertificate` setup command that stalled on Windows CI. The test
+imports the private key into `CurrentUser\My` for real Authenticode signing and
+trusts only the public certificate in `LocalMachine\Root`. `CurrentUser\Root`
+can display a native confirmation dialog even with PowerShell's
+`-NonInteractive` option, so certificate-store changes require an elevated
+disposable GitHub runner. Separate progress messages identify both installations. Cleanup
+removes the certificate from both stores and disposes the temporary private key,
+including after a signing failure. macOS and Linux skip the native signing
+scenario; passing tests on those platforms do not verify Windows certificate
+installation or Authenticode behavior.
+
+Native update teardown preserves the original failure and attempts every cleanup
+even if diagnostics, process termination, or uninstalling also fails. Process
+cleanup uses the original child before process-ID discovery and rediscovers the
+installed executable after relaunch. The cleanup regression exercises both paths
+with real subprocesses without launching Browser Recall. Native launch errors
+are reported directly instead of being replaced by readiness timeouts.
 
 Tests on macOS and Linux do not compile Rust code restricted to Windows. For the additional
 Windows GNU type check, install MinGW and the Rust target:

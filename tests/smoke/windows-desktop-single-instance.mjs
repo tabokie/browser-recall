@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import {
   existsSync,
   mkdirSync,
@@ -348,6 +349,7 @@ await withCleanup(async () => {
     windowsHide: true,
     env: desktopEnvironment,
   });
+  await once(first, 'spawn');
   await waitFor(
     () => first.exitCode === null && readNewLogs().length > 0,
     15000,

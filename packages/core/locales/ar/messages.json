@@ -759,6 +759,10 @@
     "message": "حذف التمييز",
     "description": "Delete highlight button title."
   },
+  "desktopOpenSnapshotFolder": {
+    "message": "فتح مجلد اللقطة",
+    "description": "Open the containing directory for a saved snapshot in the system file manager."
+  },
   "extensionDeleteSnapshot": {
     "message": "حذف لقطة",
     "description": "Delete snapshot button title."

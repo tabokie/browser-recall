@@ -759,6 +759,10 @@
     "message": "Markierung löschen",
     "description": "Delete highlight button title."
   },
+  "desktopOpenSnapshotFolder": {
+    "message": "Snapshot-Ordner öffnen",
+    "description": "Open the containing directory for a saved snapshot in the system file manager."
+  },
   "extensionDeleteSnapshot": {
     "message": "Schnappschuss löschen",
     "description": "Delete snapshot button title."

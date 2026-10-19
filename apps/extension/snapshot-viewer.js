@@ -321,6 +321,7 @@ frame.addEventListener('load', async () => {
     snapshotHighlightLifecycle?.dispose();
     const highlightLifecycle = createHighlightLifecycle({
       document: doc,
+      snapshot: true,
       formatExcerpt: extensionSurface.formatHighlightExcerpt,
       onMark: (mark) => attachMarkClickHandler(doc, mark, highlightLifecycle),
     });

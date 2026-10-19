@@ -1,6 +1,34 @@
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { rm } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
+
+export async function runTestProcess(
+  file,
+  args,
+  { env, timeoutMs = 25_000 } = {},
+) {
+  const request = execFileAsync(file, args, {
+    env,
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: timeoutMs,
+  });
+  request.child.stdin.end();
+  request.child.stdout.pipe(process.stdout);
+  request.child.stderr.pipe(process.stderr);
+  try {
+    const { stdout } = await request;
+    return stdout;
+  } catch (error) {
+    if (error.killed) {
+      error.message = `Native test process timed out after ${timeoutMs}ms: ${file}\n${error.stdout || ''}${error.stderr || ''}`;
+    }
+    throw error;
+  }
+}
 
 export function waitForExit(child, timeoutMs) {
   if (child.exitCode !== null || child.signalCode !== null) {
@@ -17,11 +45,17 @@ export function waitForExit(child, timeoutMs) {
       cleanup();
       resolve({ code, signal });
     };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
     const cleanup = () => {
       clearTimeout(timer);
       child.off('exit', onExit);
+      child.off('error', onError);
     };
     child.on('exit', onExit);
+    child.on('error', onError);
   });
 }
 
