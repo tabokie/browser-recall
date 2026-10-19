@@ -759,6 +759,10 @@
     "message": "ハイライトの削除",
     "description": "Delete highlight button title."
   },
+  "desktopOpenSnapshotFolder": {
+    "message": "スナップショットのフォルダーを開く",
+    "description": "Open the containing directory for a saved snapshot in the system file manager."
+  },
   "extensionDeleteSnapshot": {
     "message": "スナップショットの削除",
     "description": "Delete snapshot button title."

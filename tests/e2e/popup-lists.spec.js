@@ -4397,6 +4397,115 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
+  test('open-popup failures never open a tab and allow a later retry', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    localServer.addPage('/keyboard-popup-failure', {
+      title: 'Keyboard Popup Retry',
+      body: '<main>Keyboard popup retry page</main>',
+    });
+    const url = localServer.url('/keyboard-popup-failure');
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+    const page = await extContext.newPage();
+    await page.goto(url);
+    const helper = await openHelperPage(extContext, extensionId);
+    const worker = extContext.serviceWorkers()[0];
+    const originalTabs = await helper.evaluate(async () =>
+      (await chrome.tabs.query({})).map((tab) => tab.id).sort(),
+    );
+    await worker.evaluate(() => {
+      globalThis.restorePopupApiForTest = (() => {
+        const { openPopup, setPopup } = chrome.action;
+        return () => Object.assign(chrome.action, { openPopup, setPopup });
+      })();
+    });
+
+    try {
+      for (const failure of [
+        'rejected',
+        'missing-openPopup',
+        'missing-setPopup',
+      ]) {
+        await worker.evaluate((failure) => {
+          globalThis.restorePopupApiForTest();
+          if (failure === 'rejected') {
+            chrome.action.openPopup = async () => {
+              throw new Error('Popup is already open');
+            };
+          } else {
+            chrome.action[failure.slice('missing-'.length)] = undefined;
+          }
+        }, failure);
+        await page.bringToFront();
+        const command = await helper.evaluate(() =>
+          chrome.runtime.sendMessage({
+            action: 'triggerCommandForTest',
+            command: 'open-popup',
+          }),
+        );
+        const tabs = await helper.evaluate(async () =>
+          (await chrome.tabs.query({})).map((tab) => tab.id).sort(),
+        );
+        expect(tabs, failure).toEqual(originalTabs);
+        expect(command, failure).toMatchObject({ success: false });
+        expect(command.error, failure).toBeTruthy();
+        if (failure === 'rejected') {
+          expect(command.error).toBe('Popup is already open');
+        }
+        await worker.evaluate(() => globalThis.restorePopupApiForTest());
+        const mappings = await helper.evaluate(async (pageUrl) => {
+          const [tab] = await chrome.tabs.query({ url: pageUrl });
+          return Promise.all([
+            chrome.action.getPopup({}),
+            chrome.action.getPopup({ tabId: tab.id }),
+          ]);
+        }, url);
+        expect(mappings, failure).toEqual(['', '']);
+      }
+
+      await page.bringToFront();
+      expect(
+        await helper.evaluate(() =>
+          chrome.runtime.sendMessage({
+            action: 'triggerCommandForTest',
+            command: 'open-popup',
+          }),
+        ),
+      ).toEqual({ success: true });
+      await expect
+        .poll(() =>
+          helper.evaluate(
+            () =>
+              chrome.extension
+                .getViews({ type: 'popup' })[0]
+                ?.document.getElementById('pageTitle')?.textContent,
+          ),
+        )
+        .toBe('Keyboard Popup Retry');
+    } finally {
+      await worker.evaluate(() => {
+        globalThis.restorePopupApiForTest();
+        delete globalThis.restorePopupApiForTest;
+      });
+      await helper.evaluate(() =>
+        chrome.extension.getViews({ type: 'popup' })[0]?.close(),
+      );
+      for (const tab of extContext.pages()) {
+        if (
+          tab.url().startsWith(`chrome-extension://${extensionId}/popup.html`)
+        ) {
+          await tab.close();
+        }
+      }
+      await helper.close();
+      await page.close();
+    }
+  });
+
   test(`open popup and badge consume live desktop mutations seed=${POPUP_MUTATION_SEED}`, async ({
     extContext,
     extensionId,

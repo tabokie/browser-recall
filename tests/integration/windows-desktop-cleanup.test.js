@@ -16,10 +16,33 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { expect, test } from 'vitest';
 import {
   removeTestProfile,
+  runTestProcess,
   stopTestProcess,
   waitForExit,
 } from '../smoke/windows-desktop-process.mjs';
-import { withCleanup } from '../smoke/desktop-test-cleanup.mjs';
+import {
+  stopNativeUpdateProcesses,
+  withCleanup,
+} from '../smoke/desktop-test-cleanup.mjs';
+
+test('native test commands close input, terminate stalled subprocesses, and preserve diagnostics', async () => {
+  await expect(
+    runTestProcess(process.execPath, [
+      '-e',
+      "process.stdin.resume(); process.stdin.on('end', () => console.log('input closed'))",
+    ]),
+  ).resolves.toBe('input closed\n');
+  await expect(
+    runTestProcess(
+      process.execPath,
+      ['-e', "console.log('waiting for signing'); setTimeout(() => {}, 2000)"],
+      { timeoutMs: 1000 },
+    ),
+  ).rejects.toMatchObject({
+    killed: true,
+    stdout: 'waiting for signing\n',
+  });
+});
 
 test('teardown preserves the original failure and completes cleanup after an error', async () => {
   const workDir = mkdtempSync(path.join(tmpdir(), 'browser-recall-cleanup-'));
@@ -61,6 +84,22 @@ test('cleanup recognizes a process that has already exited after a signal', asyn
   await stopTestProcess(child);
 });
 
+test('native process waiting reports a failed launch instead of timing out', async () => {
+  const work = mkdtempSync(
+    path.join(tmpdir(), 'browser-recall-missing-launch-'),
+  );
+  try {
+    const child = spawn(path.join(work, 'missing.exe'), []);
+    // An independent observer must not consume the exit waiter's launch error.
+    child.on('error', () => {});
+    await expect(waitForExit(child, 1000)).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
+});
+
 test('cleanup removes nested read-only profile files', async () => {
   const workDir = mkdtempSync(path.join(tmpdir(), 'browser-recall-cleanup-'));
   const cacheDir = path.join(workDir, 'profile', 'webview2', 'cache');
@@ -76,6 +115,58 @@ test('cleanup removes nested read-only profile files', async () => {
     await rm(workDir, { recursive: true, force: true });
   }
 });
+
+test.each(['before PID discovery', 'after relaunch', 'PID discovery fails'])(
+  'native update cleanup stops its real subprocess after failure %s',
+  async (stage) => {
+    const children = [];
+    const start = async () => {
+      const child = spawn(
+        process.execPath,
+        ['-e', "console.log('ready'); setInterval(() => {}, 1000)"],
+        { stdio: ['ignore', 'pipe', 'pipe'] },
+      );
+      children.push(child);
+      await once(child.stdout, 'data');
+      return child;
+    };
+    const stopPid = async (pid) => {
+      const child = children.findLast((candidate) => candidate.pid === pid);
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      const exited = once(child, 'exit');
+      child.kill();
+      await exited;
+    };
+    try {
+      const original = await start();
+      let current = original;
+      let pid;
+      if (stage === 'after relaunch') {
+        pid = original.pid;
+        await stopPid(pid);
+        current = await start();
+      }
+      const discoveryError = new Error('PID lookup failed');
+      const cleanup = stopNativeUpdateProcesses({
+        pid,
+        child: original,
+        findPid: () => {
+          if (stage === 'PID discovery fails') throw discoveryError;
+          return stage === 'after relaunch' ? current.pid : 0;
+        },
+        stopPid,
+      });
+      if (stage === 'PID discovery fails')
+        await expect(cleanup).rejects.toBe(discoveryError);
+      else await cleanup;
+      expect(current.exitCode !== null || current.signalCode !== null).toBe(
+        true,
+      );
+    } finally {
+      for (const child of children) await stopPid(child.pid);
+    }
+  },
+);
 
 test.skipIf(process.platform !== 'win32').each(['terminate', 'release'])(
   'cleanup handles an exclusive descendant lock: %s',

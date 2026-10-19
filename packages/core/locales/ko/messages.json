@@ -759,6 +759,10 @@
     "message": "하이라이트 삭제",
     "description": "Delete highlight button title."
   },
+  "desktopOpenSnapshotFolder": {
+    "message": "스냅샷 폴더 열기",
+    "description": "Open the containing directory for a saved snapshot in the system file manager."
+  },
   "extensionDeleteSnapshot": {
     "message": "스냅샷 삭제",
     "description": "Delete snapshot button title."

@@ -759,6 +759,10 @@
     "message": "Supprimer le surlignage",
     "description": "Delete highlight button title."
   },
+  "desktopOpenSnapshotFolder": {
+    "message": "Ouvrir le dossier de la capture",
+    "description": "Open the containing directory for a saved snapshot in the system file manager."
+  },
   "extensionDeleteSnapshot": {
     "message": "Supprimer l'instantané",
     "description": "Delete snapshot button title."

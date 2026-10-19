@@ -14,16 +14,19 @@ Use this map to find the files that implement a feature. See
 | `crates/daemon/` | Commands, data reads and writes, pairing, rules, and sync |
 | `crates/replay/` | Apply logged events, define data formats, select saved page files, and verify stored data |
 | `crates/search/` | Native search implementation |
+| `crates/native-tests/` | Minimal native integration test package; imports production frame code without depending on the Tauri application |
 | `packages/core/` | Shared JavaScript, CSS, localization, and generated bridge factories |
 | `apps/desktop/src-tauri/src/updates.rs`, `apps/desktop/ui/desktop-updates.js` | Native update checks, authenticated installation, and desktop update controls |
 | `scripts/build-release-desktop.mjs`, `scripts/create-update-manifest.mjs` | Package installers, sign finalized updates, and create the GitHub-hosted update manifest |
 | `scripts/lib/product-version.mjs` | Shared product and lockfile version validation for CI and local releases |
+| `scripts/lib/build-timing.mjs` | Synchronous and asynchronous build phase durations and outcomes in logs and GitHub step summaries |
+| `docs/DESKTOP_RELEASE_VALIDATION_PERFORMANCE.md` | Hosted validation baseline, local link-time optimization benchmark, reproduction commands, and further optimization criteria |
 | `scripts/` | Builds, migrations, manual workflows, coverage, and documentation capture |
 | `tests/` | JavaScript unit/integration tests, Playwright scenarios, and native app tests |
 | `icons/` | SVG sources for generated runtime icons |
 | `docs/images/` | Documentation PNGs and capture manifests |
-| `.github/workflows/ci.yml` | Five regular CI runner jobs: Linux tests/coverage/lint, extension E2E, desktop visuals, and Windows x64/macOS arm64 release validations |
-| `.github/workflows/desktop-release-validation.yml` | Shared native packaging, installation, update/relaunch, and platform regression checks; Release additionally validates macOS x64 |
+| `.github/workflows/ci.yml` | Seven regular CI runner jobs: Linux tests/coverage/lint, extension E2E, desktop visuals, Windows font fallback, macOS documentation URL routing, and Windows x64/macOS arm64 release validations |
+| `.github/workflows/desktop-release-validation.yml` | Shared native packaging, installation, update/relaunch, and platform regression checks, with independent required Windows font and macOS documentation validation; Release additionally validates macOS x64 |
 | `.github/workflows/release.yml` | Manual native Windows/macOS and Chrome/Firefox builds, verified installers and extension archives, signed update packages, and GitHub Releases publishing |
 | `package.json` | Build, test, formatting, and analysis commands |
 | `rust-toolchain.toml` | Rust compiler and component pin |
@@ -42,6 +45,7 @@ Use this map to find the files that implement a feature. See
 | `apps/desktop/src-tauri/src/main.rs` | Daemon lifecycle, Tauri commands/events, windows, tray, deep links, and single-instance handling |
 | `apps/desktop/src-tauri/src/config.rs` | Desktop configuration and saved setup choices |
 | `apps/desktop/src-tauri/src/shell_contract.rs` | Shell response types and route state |
+| `apps/desktop/src-tauri/src/snapshot_open.rs` | Open snapshot HTML or its storage directory with the operating system |
 | `apps/desktop/src-tauri/src/login_item.rs` | Check and change launch-at-login registration; undo changes if saving fails |
 | `apps/desktop/src-tauri/src/windows_icon.rs` | Windows window and taskbar icons matched to display scale |
 | `apps/desktop/src-tauri/src/macos_window_frame.rs` | Capture and restore the exact macOS AppKit window frame independently of webview insets |
@@ -140,7 +144,7 @@ crash recovery, history reads, ordering highlights by creation time, and sync.
 | File | Implements |
 | --- | --- |
 | `packages/core/page-identity.js` | Normalize URLs, generate file identifiers, classify unavailable browser pages, and distinguish URL changes from full page loads |
-| `packages/core/highlight-lifecycle.js` | Save selected text with explicit line breaks and text-node offsets, restore highlights, and repair marks after page content changes |
+| `packages/core/highlight-lifecycle.js` | Save block selections with literal offsets and explicit line breaks, reserve saved anchors before visible text fallback in reading order, preserve removed snapshot siblings, and repair marks after page content changes |
 | `packages/core/markdown-extractor.js` | Live DOM-to-Markdown conversion for searchable snapshots |
 | `packages/core/snapshot-html.js` | Validate saved URL/slug metadata, clean highlight markup, and prepare snapshots for reopening |
 | `packages/core/bounded-response.js` | Streamed resource byte limits |
@@ -219,9 +223,12 @@ do not maintain a second production copy.
 | Documentation bundles preserve macOS app URL routing, including production app discovery during the build, and URL activation reuses the running process | `tests/smoke/macos-documentation-url-routing.mjs`, `tests/smoke/macos-documentation-app.mjs`, `tests/integration/macos-documentation-url-routing.test.js` |
 | macOS startup, tray, and window lifecycle | `tests/smoke/macos-desktop-window-lifecycle.mjs` |
 | Personal macOS sessions reject temporary tray app automation before native tools run | `tests/integration/macos-native-session.test.js` |
-| macOS frame restoration after hidden size and position changes with an inset content view | `apps/desktop/src-tauri/tests/macos_window_frame.rs` |
+| macOS frame restoration after hidden size and position changes with an inset content view | `crates/native-tests/tests/macos_window_frame.rs` |
 | Windows icons, single instance, and teardown | `tests/smoke/windows-desktop-single-instance.mjs`, `tests/integration/windows-desktop-cleanup.test.js` |
-| Native desktop cleanup preserves setup errors and completes teardown after failures | `tests/smoke/desktop-test-cleanup.mjs`, `tests/smoke/macos-desktop-process.mjs`, `tests/integration/macos-desktop-cleanup.test.js` |
+| Native desktop cleanup preserves setup errors, completes teardown after failures, and stops original or relaunched update processes | `tests/smoke/desktop-test-cleanup.mjs`, `tests/smoke/macos-desktop-process.mjs`, `tests/integration/macos-desktop-cleanup.test.js`, `tests/integration/windows-desktop-cleanup.test.js` |
+| Windows native update isolation survives token-based installer relaunch and restores the user environment; portable rollback JSON reader covers Windows PowerShell array behavior | `tests/smoke/windows-desktop-update-environment.ps1`, `tests/smoke/windows-update-environment-snapshot.ps1`, `tests/integration/windows-update-environment.test.js`, `tests/fixtures/windows-token-launch.cs` |
+| Windows validation gate blocks packaging and prints failed assertions from JSON reports | `scripts/verify-windows-validation.mjs`, `tests/integration/ci-release-validation.test.js` |
+| Windows signing requires an unsigned compiled executable, rejects other signers and tampering, and uses disposable certificate stores | `tests/integration/windows-code-signing.test.js`, `scripts/windows-code-signing.ps1` |
 | Saved desktop language and right-to-left layout | `tests/e2e/desktop-locale-setting.spec.js` |
 | Native extension localization and system fonts | `tests/e2e/extension-localization.spec.js`, `tests/e2e/extension-font-fallback.spec.js` |
 | Real Firefox automatic capture and navigation, daemon persistence before identity probes, paused-document exclusion until refresh, and options-page popup messages | `tests/smoke/firefox-real-content.mjs` |

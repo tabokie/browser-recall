@@ -973,8 +973,12 @@ async function getContextMenuSelectionPayload(tabId, menuSelectionText) {
   };
 }
 
-async function handleContextMenuHighlight(url, title, selectionText, tabId) {
-  const slug = generateSlugFromUrl(url);
+async function handleContextMenuHighlight(url, selectionText, tabId) {
+  const tab = await chrome.tabs.get(tabId);
+  if (tab.url !== url)
+    throw new Error('Page changed before the highlight was captured');
+  const identity = await resolveTabPageIdentity(tab);
+  const { slug } = identity;
   const { excerpt, cssPath } = await getContextMenuSelectionPayload(
     tabId,
     selectionText,
@@ -985,8 +989,8 @@ async function handleContextMenuHighlight(url, title, selectionText, tabId) {
     excerpt,
     note: '',
     cssPath,
-    url,
-    title,
+    url: identity.url,
+    title: identity.title,
   });
   if (!response.success) return response;
   // Show highlights panel in the tab's content script
@@ -1044,7 +1048,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       ? await highlightSnapshotSelection(activeTab, selectionText)
       : await handleContextMenuHighlight(
           activeTab.url,
-          activeTab.title,
           selectionText,
           activeTab.id,
         );
@@ -1091,7 +1094,8 @@ chrome.commands.onCommand.addListener(async (command, commandTab) => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const snapshotSlug = snapshotViewerSlugFromUrl(tab?.url);
   const targetsSnapshotViewer =
-    command === 'highlight-selection' && Boolean(snapshotSlug);
+    Boolean(snapshotSlug) &&
+    ['highlight-selection', 'like-page', 'dislike-page'].includes(command);
   if (!tab || (isUnavailablePageUrl(tab.url) && !targetsSnapshotViewer)) {
     logDebug('[background] Command ignored: no suitable tab');
     return { success: true, handled: false, reason: 'no_suitable_tab' };
@@ -1179,10 +1183,11 @@ chrome.commands.onCommand.addListener(async (command, commandTab) => {
   } else if (command === 'like-page' || command === 'dislike-page') {
     const delta = command === 'like-page' ? 1 : -1;
     try {
+      const identity = await resolveTabPageIdentity(tab);
       const response = await runDesktopCommand('ratePage', {
-        url: tab.url,
+        url: identity.url,
         likes: delta,
-        title: tab.title || '',
+        title: identity.title,
       });
       if (!response.success)
         throw new Error(
@@ -2074,8 +2079,8 @@ async function openPreparedActionPopup(tab, options = {}) {
     return { presentation: 'cancelled' };
   }
   if (!chrome.action?.setPopup || !chrome.action?.openPopup) {
-    await chrome.tabs.create({ url: chrome.runtime.getURL(popupPath) });
-    return { presentation: 'tab' };
+    pendingPopupBootstraps.delete(token);
+    throw new Error('Browser Recall popup API is unavailable');
   }
   try {
     await setPreparedActionPopup(token, tabId, popupPath);
@@ -2088,25 +2093,8 @@ async function openPreparedActionPopup(tab, options = {}) {
     return { presentation: 'popup' };
   } catch (error) {
     await releasePreparedActionPopup(token);
-    if (!(await popupTargetIsCurrent(tab))) {
-      pendingPopupBootstraps.delete(token);
-      return { presentation: 'cancelled' };
-    }
-    // Preserve the one-shot bootstrap when the host rejects its native popup;
-    // the same prepared extension page remains valid as a deterministic tab.
-    logDebug(
-      '[popup] native action popup failed; opening an extension tab:',
-      error.message,
-    );
-    try {
-      await chrome.tabs.create({ url: chrome.runtime.getURL(popupPath) });
-      return { presentation: 'tab', actionError: error.message };
-    } catch (tabError) {
-      throw new AggregateError(
-        [error, tabError],
-        `Could not open Browser Recall popup: ${error.message}; tab fallback failed: ${tabError.message}`,
-      );
-    }
+    pendingPopupBootstraps.delete(token);
+    throw error;
   } finally {
     // Some engines resolve/callback openPopup before its document connects the
     // lifecycle port. If that never happens, clear the otherwise stale mapping.
@@ -2317,7 +2305,6 @@ async function handleContextMenuHighlightMsg(request) {
     const tabId = tabs?.[0]?.id || null;
     return await handleContextMenuHighlight(
       request.url,
-      request.title,
       request.selectionText,
       tabId,
     );

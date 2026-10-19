@@ -592,6 +592,8 @@ test.describe('Snapshot slug meta tag', () => {
   }) => {
     const originalUrl = 'https://example.com/legacy-desktop-snapshot-popup';
     const slug = getSlugForUrl(originalUrl);
+    const noteSlug = 'desktop-file-snapshot-note';
+    const highlightText = 'Legacy snapshot with obsolete identity metadata.';
     const timestamp = Date.now();
 
     await setExtensionFileAccess(extContext, extensionId, true);
@@ -604,14 +606,24 @@ test.describe('Snapshot slug meta tag', () => {
           url: originalUrl,
           title: 'Legacy Desktop Snapshot Popup',
           parentIds: [],
-          childIds: [`snapshot:${slug}-${timestamp}`],
+          childIds: [`snapshot:${slug}-${timestamp}`, `note:${noteSlug}`],
           timestamps: { 'test-device': timestamp },
+        }),
+      },
+      {
+        path: `objects/notes/${noteSlug}.json`,
+        data: noteEntityFixture({
+          slug: noteSlug,
+          excerpt: [highlightText],
+          note: '',
+          cssPath: ['body > p'],
+          url: originalUrl,
         }),
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'html'),
         content:
-          '<!doctype html><html><head><meta name="x-browser-recall-slug" content="obsolete-page-slug"><title>Legacy Desktop Snapshot Popup</title></head><body><p>Legacy snapshot with obsolete identity metadata.</p></body></html>',
+          '<!doctype html><html><head><meta name="x-browser-recall-slug" content="obsolete-page-slug"><title>Legacy Desktop Snapshot Popup</title></head><body><p>Legacy snapshot with obsolete identity metadata.</p><p id="keyboard-highlight">New keyboard highlight in saved HTML.</p><p id="menu-highlight">New context-menu highlight in saved HTML.</p></body></html>',
       },
       {
         path: snapshotSidecarPath(slug, timestamp, 'md'),
@@ -672,7 +684,24 @@ test.describe('Snapshot slug meta tag', () => {
       `<meta name="x-browser-recall-url" content="${originalUrl}">`,
     );
     expect(migratedHtml).not.toContain('obsolete-page-slug');
+    localServer.addPage('/before-desktop-snapshot', {
+      title: 'Before Desktop Snapshot',
+      body: '<p>A live page before opening a saved snapshot.</p>',
+    });
     const viewer = await extContext.newPage();
+    const liveUrl = localServer.url('/before-desktop-snapshot');
+    await viewer.goto(liveUrl);
+    await expect
+      .poll(() =>
+        helper.evaluate(async (url) => {
+          const [tab] = await chrome.tabs.query({ url });
+          return chrome.runtime.sendMessage({
+            action: 'getReportedUrl',
+            tabId: tab.id,
+          });
+        }, liveUrl),
+      )
+      .toMatchObject({ success: true, url: liveUrl });
     await viewer.goto(pathToFileURL(snapshotFile).href);
     await viewer.waitForLoadState('load');
     await viewer.bringToFront();
@@ -681,6 +710,18 @@ test.describe('Snapshot slug meta tag', () => {
       return tabs.length === 1 ? tabs[0].id : null;
     }, viewer.url());
     expect(viewerTabId).toEqual(expect.any(Number));
+    expect(
+      await helper.evaluate(
+        (tabId) =>
+          chrome.tabs.sendMessage(tabId, {
+            action: 'getHighlightMarkupState',
+          }),
+        viewerTabId,
+      ),
+    ).toEqual({ success: true, hidden: false });
+    await expect(viewer.locator('mark.browser-recall-highlight')).toHaveText(
+      highlightText,
+    );
 
     const openRequest = helper.evaluate((tabId) => {
       return chrome.runtime.sendMessage({
@@ -716,9 +757,95 @@ test.describe('Snapshot slug meta tag', () => {
       });
     await expect(openRequest).resolves.toMatchObject({ success: true });
 
+    const toggleMarkup = () =>
+      helper.evaluate(() => {
+        const popup = chrome.extension.getViews({ type: 'popup' })[0];
+        const button = popup?.document.getElementById('hideMarkupBtn');
+        if (!button) throw new Error('Snapshot markup toggle is missing');
+        button.click();
+      });
+    await toggleMarkup();
+    await expect(viewer.locator('mark.browser-recall-highlight')).toHaveCount(
+      0,
+    );
+    await expect
+      .poll(() =>
+        helper.evaluate(() =>
+          chrome.extension
+            .getViews({ type: 'popup' })[0]
+            ?.document.getElementById('hideMarkupBtn')
+            ?.getAttribute('aria-pressed'),
+        ),
+      )
+      .toBe('true');
+    await toggleMarkup();
+    await expect(viewer.locator('mark.browser-recall-highlight')).toHaveText(
+      highlightText,
+    );
+
     await helper.evaluate(() => {
       chrome.extension.getViews({ type: 'popup' })[0]?.close();
     });
+    await viewer.reload();
+    await expect(viewer.locator('mark.browser-recall-highlight')).toHaveText(
+      highlightText,
+    );
+    for (const [id, action] of [
+      ['keyboard-highlight', 'highlight-selection'],
+      ['menu-highlight', 'contextMenuHighlight'],
+    ]) {
+      const selectionText = await viewer
+        .locator(`#${id}`)
+        .evaluate((element) => {
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          const selection = window.getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+          return selection.toString();
+        });
+      await viewer.bringToFront();
+      const response = await helper.evaluate(
+        ({ action, url, selectionText }) =>
+          chrome.runtime.sendMessage(
+            action === 'contextMenuHighlight'
+              ? {
+                  action,
+                  url,
+                  title: 'Legacy Desktop Snapshot Popup',
+                  selectionText,
+                }
+              : { action: 'triggerCommandForTest', command: action },
+          ),
+        { action, url: viewer.url(), selectionText },
+      );
+      expect(response, JSON.stringify(response)).toMatchObject({
+        success: true,
+      });
+    }
+    const savedNotes = await helper.evaluate(
+      (slug) => chrome.runtime.sendMessage({ action: 'loadPageNotes', slug }),
+      slug,
+    );
+    expect(savedNotes.notes).toHaveLength(3);
+    expect(savedNotes.notes.map((note) => note.url)).toEqual([
+      originalUrl,
+      originalUrl,
+      originalUrl,
+    ]);
+    await viewer.reload();
+    await expect(viewer.locator('mark.browser-recall-highlight')).toHaveCount(
+      3,
+    );
+    await viewer.bringToFront();
+    expect(
+      await helper.evaluate(() =>
+        chrome.runtime.sendMessage({
+          action: 'triggerCommandForTest',
+          command: 'like-page',
+        }),
+      ),
+    ).toEqual({ success: true });
     await viewer.close();
     await helper.close();
   });
@@ -832,6 +959,12 @@ test.describe('Snapshot slug meta tag', () => {
             };
             let outcome;
             try {
+              // Seed work after installing the hook. An empty request can join
+              // a previous drain whose final state write already bypassed it.
+              await control.enqueueDesktopCommand('saveSettingsKey', {
+                key: 'theme',
+                value: 'light',
+              });
               if (operation === 'snapshot budget') {
                 await control.requestDesktopSnapshotCaptureBudget({
                   url,
@@ -1580,6 +1713,371 @@ test.describe('Snapshot slug meta tag', () => {
 
     await viewer.close();
     await livePage.close();
+  });
+
+  test('highlight text fallback uses the first occurrence on live pages and snapshots', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    const excerpts = {
+      missing: 'Repeated passage found by text search',
+      shifted: 'A passage with shifted text offsets',
+      legacy: 'Legacy path with changed whitespace',
+      shadow: 'A passage inside a relocated shadow root',
+      partial: 'An already restored part of a highlight',
+      late: 'A highlight part inserted after loading',
+      hidden: 'Visible passage after hidden duplicates',
+      reserved: 'A passage reserved by a valid anchor',
+      lines: 'First fallback line\nSecond fallback line',
+      slotted: 'A passage shown by the first visible slot',
+    };
+    const anchor = (selector, text) =>
+      `browser-recall-text-anchor:v1:${JSON.stringify({ selector, start: 0, end: text.length })}`;
+    const notes = [
+      {
+        slug: 'fallback-missing',
+        excerpt: [excerpts.missing],
+        cssPath: [anchor('#missing', excerpts.missing)],
+      },
+      {
+        slug: 'fallback-shifted',
+        excerpt: [excerpts.shifted],
+        cssPath: [anchor('#shifted', excerpts.shifted)],
+      },
+      {
+        slug: 'fallback-legacy',
+        excerpt: [excerpts.legacy],
+        cssPath: ['#old-layout > p'],
+      },
+      {
+        slug: 'fallback-shadow',
+        excerpt: [excerpts.shadow],
+        cssPath: [
+          `browser-recall-text-anchor:v2:${JSON.stringify({ selectors: ['#old-shadow-host', 'p'], start: 0, end: excerpts.shadow.length })}`,
+        ],
+      },
+      {
+        slug: 'fallback-reserved',
+        excerpt: [excerpts.reserved],
+        cssPath: [anchor('#missing-reserved', excerpts.reserved)],
+      },
+      {
+        slug: 'valid-reserved',
+        excerpt: [excerpts.reserved],
+        cssPath: [anchor('#reserved', excerpts.reserved)],
+      },
+      {
+        slug: 'fallback-hidden',
+        excerpt: [excerpts.hidden],
+        cssPath: [anchor('#missing-hidden', excerpts.hidden)],
+      },
+      {
+        slug: 'fallback-slotted',
+        excerpt: [excerpts.slotted],
+        cssPath: [anchor('#missing-slotted', excerpts.slotted)],
+      },
+      {
+        slug: 'fallback-lines',
+        excerpt: [excerpts.lines],
+        cssPath: [anchor('#missing-lines', excerpts.lines)],
+      },
+      {
+        slug: 'fallback-partial',
+        excerpt: [excerpts.partial, excerpts.late],
+        cssPath: [
+          anchor('#partial', excerpts.partial),
+          anchor('#old-late', excerpts.late),
+        ],
+      },
+    ];
+    const body = `<aside id="browser-recall-highlights-panel">${Object.values(excerpts).join(' ')}</aside>
+      <main><p id="first">${excerpts.missing}</p><p id="second">${excerpts.missing}</p>
+      <p id="shifted">New prefix: ${excerpts.shifted}</p>
+      <p id="legacy">Legacy path with\n changed whitespace</p>
+      <p id="legacy-later">${excerpts.legacy}</p>
+      <p id="partial">${excerpts.partial}</p><p id="partial-copy">${excerpts.partial}</p>
+      <div id="shadow-host"><template shadowrootmode="open"><p>${excerpts.shadow}</p></template><p id="unassigned-shadow-copy">${excerpts.shadow}</p></div>
+      <p id="shadow-later">${excerpts.shadow}</p>
+      <div id="slot-host"><template shadowrootmode="open"><slot name="first"></slot><slot name="last"></slot></template><p slot="last">${excerpts.slotted}</p><p slot="first">${excerpts.slotted}</p></div>
+      <p id="reserved">${excerpts.reserved}</p><p id="spare">${excerpts.reserved}</p>
+      <p hidden>${excerpts.hidden}</p><p style="display:none">${excerpts.hidden}</p><p style="visibility:hidden">${excerpts.hidden}</p>
+      <script type="application/json">${JSON.stringify(excerpts.hidden)}</script>
+      <p id="visible-copy">${excerpts.hidden}</p>
+      <p id="lines">First fallback line<br>Second fallback line</p></main>`;
+    localServer.addPage('/highlight-text-fallback', {
+      title: 'Highlight text fallback',
+      body,
+    });
+    const url = localServer.url('/highlight-text-fallback');
+    const slug = getSlugForUrl(url);
+    const timestamp = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      settingsCheckpoint(),
+      {
+        path: pageCheckpointPath(slug),
+        data: pageEntityFixture({
+          slug,
+          url,
+          title: 'Highlight text fallback',
+          parentIds: [],
+          childIds: [
+            ...notes.map((note) => `note:${note.slug}`),
+            `snapshot:${slug}-${timestamp}`,
+          ],
+          timestamps: { 'test-device': timestamp },
+        }),
+      },
+      ...notes.map((note) => ({
+        path: `objects/notes/${note.slug}.json`,
+        data: noteEntityFixture({ ...note, note: '', url }),
+      })),
+      {
+        path: snapshotSidecarPath(slug, timestamp, 'html'),
+        content: currentSnapshotHtml({
+          slug,
+          url,
+          html: `<!doctype html><html><head><title>Highlight text fallback</title></head><body>${body}<p id="late">${excerpts.late}</p></body></html>`,
+        }),
+      },
+    ]);
+    const page = await extContext.newPage();
+    let viewer;
+    try {
+      await page.goto(url);
+      await expect(page.locator('#first mark')).toHaveText(excerpts.missing);
+      await expect(page.locator('#second mark')).toHaveCount(0);
+      await expect(page.locator('#shifted mark')).toHaveText(excerpts.shifted);
+      await expect(page.locator('#legacy mark')).toHaveAttribute(
+        'data-highlight-text',
+        excerpts.legacy,
+      );
+      await expect(page.locator('#shadow-host mark')).toHaveText(
+        excerpts.shadow,
+      );
+      await expect(
+        page.locator(
+          '#shadow-later mark, #unassigned-shadow-copy mark, #legacy-later mark',
+        ),
+      ).toHaveCount(0);
+      await expect(page.locator('#reserved mark')).toHaveAttribute(
+        'data-note-slug',
+        'valid-reserved',
+      );
+      await expect(page.locator('#spare mark')).toHaveAttribute(
+        'data-note-slug',
+        'fallback-reserved',
+      );
+      await expect(page.locator('#visible-copy mark')).toHaveText(
+        excerpts.hidden,
+      );
+      await expect(
+        page.locator('[hidden] mark, [style] mark, script mark'),
+      ).toHaveCount(0);
+      await expect(page.locator('#lines mark')).toHaveAttribute(
+        'data-highlight-text',
+        excerpts.lines,
+      );
+      await expect(page.locator('#lines mark br')).toHaveCount(1);
+      await expect(page.locator('#slot-host [slot="first"] mark')).toHaveText(
+        excerpts.slotted,
+      );
+      await expect(page.locator('#slot-host [slot="last"] mark')).toHaveCount(
+        0,
+      );
+      await page.evaluate((text) => {
+        const paragraph = document.createElement('p');
+        paragraph.id = 'late';
+        paragraph.textContent = text;
+        document.querySelector('main').appendChild(paragraph);
+      }, excerpts.late);
+      await expect(page.locator('#late mark')).toHaveText(excerpts.late);
+      await expect(
+        page.locator('[data-note-slug="fallback-partial"]'),
+      ).toHaveCount(2);
+      await expect(page.locator('#partial-copy mark')).toHaveCount(0);
+      await expect(
+        page.locator('#browser-recall-highlights-panel mark'),
+      ).toHaveCount(0);
+
+      viewer = await extContext.newPage();
+      await viewer.goto(
+        `chrome-extension://${extensionId}/snapshot-viewer.html?slug=${slug}&ts=${timestamp}`,
+      );
+      const frame = viewer.frameLocator('#frame');
+      for (const id of ['first', 'shifted', 'partial', 'late']) {
+        await expect(frame.locator(`#${id} mark`)).toHaveCount(1);
+      }
+      await expect(frame.locator('#legacy mark')).toHaveAttribute(
+        'data-highlight-text',
+        excerpts.legacy,
+      );
+      await expect(frame.locator('#shadow-host mark')).toHaveText(
+        excerpts.shadow,
+      );
+      await expect(
+        frame.locator(
+          '#shadow-later mark, #unassigned-shadow-copy mark, #legacy-later mark',
+        ),
+      ).toHaveCount(0);
+      await expect(frame.locator('#reserved mark')).toHaveAttribute(
+        'data-note-slug',
+        'valid-reserved',
+      );
+      await expect(frame.locator('#spare mark')).toHaveAttribute(
+        'data-note-slug',
+        'fallback-reserved',
+      );
+      await expect(frame.locator('#visible-copy mark')).toHaveText(
+        excerpts.hidden,
+      );
+      await expect(
+        frame.locator('[hidden] mark, [style] mark, script mark'),
+      ).toHaveCount(0);
+      await expect(frame.locator('#lines mark')).toHaveAttribute(
+        'data-highlight-text',
+        excerpts.lines,
+      );
+      await expect(frame.locator('#slot-host [slot="first"] mark')).toHaveText(
+        excerpts.slotted,
+      );
+      await expect(frame.locator('#slot-host [slot="last"] mark')).toHaveCount(
+        0,
+      );
+      await expect(
+        frame.locator(
+          '#second mark, #partial-copy mark, #browser-recall-highlights-panel mark',
+        ),
+      ).toHaveCount(0);
+    } finally {
+      await viewer?.close();
+      await page.close();
+    }
+  });
+
+  test('captured snapshots preserve highlight anchors across removed hidden siblings', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    const highlightText = 'The saved passage stays in its original location';
+    localServer.addPage('/snapshot-hidden-siblings', {
+      title: 'Snapshot hidden siblings',
+      body: `<article id="story"><section>
+        <div style="display:none">Hidden advertisement one</div>
+        <div><p>${highlightText}</p></div>
+        <div style="display:none">Hidden advertisement two</div>
+        <div><p>First: ${highlightText}. Second: ${highlightText}.</p></div>
+        <div><p>${highlightText}</p></div>
+      </section></article>`,
+    });
+    const url = localServer.url('/snapshot-hidden-siblings');
+    const slug = getSlugForUrl(url);
+    const selector = 'article#story > section > div:nth-of-type(4) > p';
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+    const page = await extContext.newPage();
+    const helper = await openHelperPage(extContext, extensionId);
+    let viewer;
+    let savedPage;
+    try {
+      await page.goto(url);
+      await page.locator(selector).evaluate((paragraph, text) => {
+        const start = paragraph.textContent.lastIndexOf(text);
+        const range = document.createRange();
+        range.setStart(paragraph.firstChild, start);
+        range.setEnd(paragraph.firstChild, start + text.length);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }, highlightText);
+      await page.bringToFront();
+      const highlighted = await helper.evaluate(() =>
+        chrome.runtime.sendMessage({
+          action: 'triggerCommandForTest',
+          command: 'highlight-selection',
+        }),
+      );
+      expect(highlighted).toEqual({ success: true });
+      await expect(page.locator('mark.browser-recall-highlight')).toHaveText(
+        highlightText,
+      );
+      const notes = await helper.evaluate(
+        (slug) => chrome.runtime.sendMessage({ action: 'loadPageNotes', slug }),
+        slug,
+      );
+      expect(notes.success).toBe(true);
+      expect(notes.notes).toHaveLength(1);
+      const anchor = JSON.parse(
+        notes.notes[0].cssPath[0].slice(
+          'browser-recall-text-anchor:v1:'.length,
+        ),
+      );
+      expect(anchor.selector).toBe(selector);
+
+      await page.bringToFront();
+      const capture = await helper.evaluate(() =>
+        chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' }),
+      );
+      expect(capture).toMatchObject({ success: true });
+      const snapshot = await helper.evaluate(
+        ({ slug, timestamp }) =>
+          chrome.runtime.sendMessage({
+            action: 'getSnapshotHtml',
+            slug,
+            timestamp,
+          }),
+        { slug, timestamp: capture.timestamp },
+      );
+      expect(snapshot.success).toBe(true);
+      expect(snapshot.html.match(/<!--savepage-div-remove-->/g)).toHaveLength(
+        2,
+      );
+      expect(snapshot.html).not.toContain('Hidden advertisement');
+
+      viewer = await extContext.newPage();
+      await viewer.goto(
+        `chrome-extension://${extensionId}/snapshot-viewer.html?slug=${slug}&ts=${capture.timestamp}`,
+      );
+      const frame = viewer.frameLocator('#frame');
+      await expect(frame.locator('mark.browser-recall-highlight')).toHaveCount(
+        1,
+      );
+      const mark = frame.locator(selector).locator('mark');
+      await expect(mark).toHaveText(highlightText);
+      expect(
+        await mark.evaluate((mark) => mark.previousSibling.textContent),
+      ).toContain('Second: ');
+      await expect(frame.locator('#story > section > div[hidden]')).toHaveCount(
+        2,
+      );
+      await viewer.reload();
+      await expect(frame.locator(selector).locator('mark')).toHaveText(
+        highlightText,
+      );
+      await expect(frame.locator('#story > section > div[hidden]')).toHaveCount(
+        2,
+      );
+
+      // Direct saved HTML uses the generated content script rather than the viewer adapter.
+      localServer.addRawPage('/snapshot-hidden-siblings-saved', snapshot.html);
+      savedPage = await extContext.newPage();
+      await savedPage.goto(localServer.url('/snapshot-hidden-siblings-saved'));
+      await expect(
+        savedPage.locator('mark.browser-recall-highlight'),
+      ).toHaveCount(1);
+      await expect(savedPage.locator(selector).locator('mark')).toHaveText(
+        highlightText,
+      );
+    } finally {
+      await savedPage?.close();
+      await viewer?.close();
+      await helper.close();
+      await page.close();
+    }
   });
 
   test('snapshot viewer reapplies highlights within stored css path scope', async ({

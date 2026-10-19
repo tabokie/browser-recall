@@ -75,6 +75,14 @@ export function generateSlugFromUrl(url) {
 }
 
 export function isSameDocumentPageUrl(left, right) {
+  // Browser navigation also includes saved files and extension pages. Those
+  // documents cannot reuse a live HTTP(S) page's reported identity.
+  if (
+    !['http:', 'https:'].includes(new URL(left).protocol) ||
+    !['http:', 'https:'].includes(new URL(right).protocol)
+  ) {
+    return false;
+  }
   const leftUrl = new URL(canonicalizePageUrl(left));
   const rightUrl = new URL(canonicalizePageUrl(right));
   return (

@@ -1,5 +1,5 @@
 #[cfg(target_os = "macos")]
-#[path = "../src/macos_window_frame.rs"]
+#[path = "../../../apps/desktop/src-tauri/src/macos_window_frame.rs"]
 mod macos_window_frame;
 
 #[cfg(target_os = "macos")]

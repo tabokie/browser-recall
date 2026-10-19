@@ -16,6 +16,7 @@ mod login_item;
 mod macos_window_frame;
 mod search;
 mod shell_contract;
+mod snapshot_open;
 mod updates;
 #[cfg(target_os = "windows")]
 mod windows_icon;
@@ -1841,22 +1842,21 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 "children": payload["children"].clone(),
             })
         }
-        "openSnapshot" => {
+        "openSnapshot" | "openSnapshotDirectory" => {
             let slug = request
                 .get("slug")
                 .and_then(Value::as_str)
-                .ok_or_else(|| "openSnapshot missing slug".to_string())?;
+                .ok_or_else(|| format!("{action} missing slug"))?;
             let timestamp = request
                 .get("timestamp")
                 .and_then(Value::as_i64)
-                .ok_or_else(|| "openSnapshot missing timestamp".to_string())?;
-            let snapshot_path = storage()?.snapshot_html_file_path(slug, timestamp);
-            if !snapshot_path.exists() {
-                return Err("Snapshot not found".to_string());
-            }
-            app.opener()
-                .open_path(snapshot_path.to_string_lossy().to_string(), None::<&str>)
-                .map_err(|error| error.to_string())?;
+                .ok_or_else(|| format!("{action} missing timestamp"))?;
+            snapshot_open::open_snapshot(
+                storage()?,
+                slug,
+                timestamp,
+                action == "openSnapshotDirectory",
+            )?;
             json!({ "success": true })
         }
         "previewRule" => {
@@ -2006,7 +2006,7 @@ fn validate_desktop_bridge_fields(
         "loadHistoryBatch" => &["files"],
         "searchNotes" | "searchSnapshots" => &["query"],
         "loadPageNotes" | "listSnapshots" => &["slug"],
-        "getSnapshotHtml" | "openSnapshot" => &["slug", "timestamp"],
+        "getSnapshotHtml" | "openSnapshot" | "openSnapshotDirectory" => &["slug", "timestamp"],
         "previewRule" => &["rule", "entries"],
         "toggleSyncDevicePaused" | "deleteSyncDevice" => &["deviceId"],
         "toggleSyncRemember" => &["remember"],

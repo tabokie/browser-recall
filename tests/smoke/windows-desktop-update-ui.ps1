@@ -17,7 +17,10 @@ foreach ($element in $elements) {
     break
   }
 }
-if (!$target) { throw "Missing accessible button: $env:BROWSER_RECALL_UPDATE_UI_LABEL" }
+if (!$target) {
+  $visibleNames = @($elements | ForEach-Object { "$($_.Current.ControlType.ProgrammaticName): $($_.Current.Name)" }) -join '; '
+  throw "Missing accessible button: $env:BROWSER_RECALL_UPDATE_UI_LABEL. Process $($process.Id), window $($process.MainWindowHandle). Accessible elements: $visibleNames"
+}
 $pattern = $null
 if ($target.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern, [ref]$pattern)) {
   $pattern.ScrollIntoView()

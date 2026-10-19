@@ -20,6 +20,9 @@ if ($Action -eq 'sign') {
   if ($env:WINDOWS_SIGNING_TIMESTAMP_URL) { $options.TimestampServer = $env:WINDOWS_SIGNING_TIMESTAMP_URL }
   $signature = Set-AuthenticodeSignature @options
 } else { $signature = Get-AuthenticodeSignature -LiteralPath $File }
-if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Thumbprint -ne $thumbprint) {
+if ($signature.Status -ne 'Valid') {
   throw "Executable signature verification failed: $($signature.Status): $($signature.StatusMessage)"
+}
+if ($signature.SignerCertificate.Thumbprint -ne $thumbprint) {
+  throw "Executable signer mismatch: expected $thumbprint, found $($signature.SignerCertificate.Thumbprint) (signature type: $($signature.SignatureType))"
 }

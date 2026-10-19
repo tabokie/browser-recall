@@ -41,6 +41,19 @@ test.skipIf(process.platform !== 'darwin')(
         mkdirSync(path.dirname(path.join(repo, name)), { recursive: true });
         cpSync(path.join(root, name), path.join(repo, name));
       }
+      // Bind the disposable export fixture to its copied source files. Edits
+      // in this checkout must not prevent the staging/rollback scenario from
+      // reaching the conversion boundary. Checked-in capture records are not
+      // modified by this fixture setup.
+      const fixtureCapturePath = path.join(
+        repo,
+        'docs/images/browser-capture.json',
+      );
+      const fixtureCapture = JSON.parse(
+        readFileSync(fixtureCapturePath, 'utf8'),
+      );
+      fixtureCapture.inputs = captureInputs(repo, 'browser');
+      writeFileSync(fixtureCapturePath, JSON.stringify(fixtureCapture));
       // Include the shared export boundary when present, without making the red
       // phase depend on a production module that has not been implemented yet.
       const shared = 'scripts/lib/store-screenshots.mjs';

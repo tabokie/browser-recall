@@ -8,10 +8,133 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { expect, test } from 'vitest';
 import { prepareCiRelease } from '../../scripts/prepare-ci-release.mjs';
 import { generateRustCoverage } from '../../scripts/rust-coverage.mjs';
 import { validateMacosSignatureMetadata } from '../../scripts/verify-macos-app-bundle.mjs';
+
+test.each(['timeBuildStep', 'timeAsyncBuildStep'])(
+  '%s reports real subprocess success and failure without swallowing the exit code',
+  (timingFunction) => {
+    const work = mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-build-timing-'),
+    );
+    const summary = path.join(work, 'summary.md');
+    const timingModule = pathToFileURL(
+      path.resolve(import.meta.dirname, '../../scripts/lib/build-timing.mjs'),
+    ).href;
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          `
+        import { execFileSync, spawn } from 'node:child_process';
+        import { ${timingFunction} as timed } from ${JSON.stringify(timingModule)};
+        const run = (status) => {
+          const args = ['-e', 'process.exit(' + status + ')'];
+          if (${JSON.stringify(timingFunction)} === 'timeBuildStep')
+            return execFileSync(process.execPath, args, { stdio: 'ignore' });
+          return new Promise((resolve, reject) => {
+            const child = spawn(process.execPath, args, { stdio: 'ignore' });
+            child.once('error', reject);
+            child.once('exit', (status) => {
+              if (status === 0) resolve();
+              else reject(Object.assign(new Error('Verifier failed'), { status }));
+            });
+          });
+        };
+        await timed('Fixture package creation', () => run(0));
+        try {
+          await timed('Fixture package verification', () => run(23));
+        } catch (error) {
+          process.exitCode = error.status;
+        }
+      `,
+        ],
+        {
+          env: { ...process.env, GITHUB_STEP_SUMMARY: summary },
+          encoding: 'utf8',
+        },
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(23);
+      const timings = readFileSync(summary, 'utf8');
+      expect(timings).toMatch(/Fixture package creation: [\d.]+s \(passed\)/);
+      expect(timings).toMatch(
+        /Fixture package verification: [\d.]+s \(failed\)/,
+      );
+      expect(result.stdout).toContain(timings.replaceAll('- ', '').trim());
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  },
+);
+
+test('Windows validation gate surfaces the failed test from its JSON report and still blocks packaging', () => {
+  const root = path.resolve(import.meta.dirname, '../..');
+  const workflow = readFileSync(
+    path.join(root, '.github/workflows/desktop-release-validation.yml'),
+    'utf8',
+  );
+  const gate = workflow
+    .split('      - name: Require Windows validation checks to pass\n')[1]
+    .split('\n      - name: ')[0];
+  const command = gate.match(/        run: (?:\|\n\s*)?(node[^\n]+)/)[1];
+  const args = command.startsWith('node -e ')
+    ? ['-e', JSON.parse(command.slice('node -e '.length))]
+    : [path.join(root, command.slice('node '.length))];
+  const work = mkdtempSync(path.join(tmpdir(), 'browser-recall-windows-gate-'));
+  try {
+    const reports = path.join(work, 'test-results/windows-validation');
+    mkdirSync(reports, { recursive: true });
+    writeFileSync(
+      path.join(reports, 'cleanup.json'),
+      JSON.stringify({
+        testResults: [
+          {
+            assertionResults: [
+              {
+                fullName:
+                  'Windows installer relaunch retains the isolated profile',
+                status: 'failed',
+                failureMessages: [
+                  'DuplicateTokenEx failed (5): Access is denied',
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    for (const outcome of ['success', 'failure', 'cancelled', 'skipped']) {
+      const result = spawnSync(process.execPath, args, {
+        cwd: work,
+        env: {
+          ...process.env,
+          WINDOWS_SIGNING_RESULT: 'success',
+          WINDOWS_CLEANUP_RESULT: outcome,
+          WINDOWS_ARTIFACTS_RESULT: 'success',
+        },
+        encoding: 'utf8',
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(outcome === 'success' ? 0 : 1);
+      if (outcome === 'failure') {
+        expect(result.stderr).toContain(
+          'Windows installer relaunch retains the isolated profile',
+        );
+        expect(result.stderr).toContain(
+          'DuplicateTokenEx failed (5): Access is denied',
+        );
+      }
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
 
 test('local CI executes JavaScript and Rust tests only through coverage', () => {
   const work = mkdtempSync(path.join(tmpdir(), 'browser-recall-ci-plan-'));

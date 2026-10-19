@@ -46,10 +46,6 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSView", "NSWindow", "NSResponder"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSGeometry"] }
 
-[[test]]
-name = "macos_window_frame"
-harness = false
-
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
 tempfile = "3"

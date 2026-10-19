@@ -759,6 +759,10 @@
     "message": "Hapus sorotan",
     "description": "Delete highlight button title."
   },
+  "desktopOpenSnapshotFolder": {
+    "message": "Buka folder snapshot",
+    "description": "Open the containing directory for a saved snapshot in the system file manager."
+  },
   "extensionDeleteSnapshot": {
     "message": "Hapus cuplikan",
     "description": "Delete snapshot button title."

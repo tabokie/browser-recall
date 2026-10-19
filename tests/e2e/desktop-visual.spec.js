@@ -1145,6 +1145,8 @@ async function installDesktopBridgeMock(page, options = {}) {
               timestamp: request.timestamp,
             });
             return { success: true };
+          case 'openSnapshotDirectory':
+            return { success: true };
           case 'permanentDeleteAll': {
             const orphaned = stores.session.get('manifest:orphaned') || {
               entries: [],
@@ -4441,7 +4443,9 @@ test.describe('desktop visual regression', () => {
     });
   });
 
-  test('page detail snapshot opens on single click', async ({ page }) => {
+  test('page detail snapshot opens on single click and has a separate folder action', async ({
+    page,
+  }) => {
     await serveDesktopUi(async (desktopUrl) => {
       await openDesktopUi(page, desktopUrl, {
         setupComplete: true,
@@ -4457,6 +4461,9 @@ test.describe('desktop visual regression', () => {
       const snapshotRow = page.locator('.detail-snapshot-row');
       await expect(snapshotRow).toBeVisible();
       await expect(snapshotRow).toHaveCSS('cursor', 'pointer');
+      await snapshotRow.screenshot({
+        path: test.info().outputPath('snapshot-actions.png'),
+      });
       const snapshotRequest = await snapshotRow.evaluate((el) => {
         const section = el.closest('.detail-snapshots');
         return {
@@ -4472,6 +4479,25 @@ test.describe('desktop visual regression', () => {
           page.evaluate(() => window.__desktopVisualHarness.openedSnapshots()),
         )
         .toEqual([snapshotRequest]);
+
+      const folderButton = snapshotRow.getByRole('button', {
+        name: 'Open snapshot folder',
+      });
+      await folderButton.click();
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness
+              .bridgeActionInvocations()
+              .filter((request) => request.action === 'openSnapshotDirectory'),
+          ),
+        )
+        .toEqual([{ action: 'openSnapshotDirectory', ...snapshotRequest }]);
+      expect(
+        await page.evaluate(() =>
+          window.__desktopVisualHarness.openedSnapshots(),
+        ),
+      ).toEqual([snapshotRequest]);
     });
   });
 
