@@ -59,7 +59,32 @@ desktop package, despite importing only the production AppKit frame module. The
 follow-up change moves the same regression into `browser-recall-native-tests`,
 with explicit AppKit dependencies and no Tauri or daemon dependency. The native
 test still exercises five restorations of an invisible window with an inset
-content view. The follow-up hosted run must measure this package isolation.
+content view.
+
+The [follow-up validation run 39598601075](https://github.com/tabokie/browser-recall/actions/runs/39598601075)
+tests commit `a33f4aca875abeba4f79e83825432558cdda1626`. The isolated frame regression
+passed in **19s**, down from **3m 38s**. The independent documentation job passed in
+**8m 36s**, including **3m 24s** to build its production app and **4m 05s** for the
+documentation build and native scenario. The scenario confirmed that the real
+production handler remained selected. Documentation validation finished before
+either native package job completed. Independent Windows font validation passed
+in **5m 04s**.
+
+All **seven jobs passed** on the follow-up commit. Final required-job durations:
+
+| Required job | Follow-up duration |
+| --- | ---: |
+| Windows native validation | 10m 55s |
+| macOS native validation | 17m 24s |
+| Windows font validation | 5m 04s |
+| macOS documentation URL routing | 8m 36s |
+
+The longest required job was **17m 24s**, compared with **23m 36s** in the
+original baseline and **25m 05s** in the first parallel-font run. The observed
+reduction from the original baseline is **6m 12s**. These are
+completed hosted measurements, including job setup and cache work, rather than
+a prediction obtained by subtracting moved steps. Runner and cache variation
+still affect subsequent runs.
 
 Compare a later cache hit separately. Record the run URL, source commit, cache
 result, and job durations together; subtracting the moved steps from the baseline
@@ -72,11 +97,11 @@ installer staging, package signing, and Cargo signature verification. Native upd
 validation separately reports fixture compilation and installation/relaunch.
 
 The macOS documentation URL routing scenario took **4m 12s** in the initial run.
-The follow-up moves the scenario into its own required job. The new job measures
+The follow-up moves the scenario into its own required job and measures
 production-fixture compilation separately from the documentation build and native
-scenario. Its complete duration, including runner setup and the production fixture,
-must be compared with the native jobs; moving 4m 12s does not alone establish the
-new elapsed time.
+scenario. Its measured 8m 36s includes runner setup, the production fixture, and
+cache saving. The split adds work on another macOS runner while removing
+documentation compilation from the native update job's serial path.
 
 ## Link-time optimization benchmark
 
