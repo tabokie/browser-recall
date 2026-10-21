@@ -19,8 +19,15 @@ export async function runTestProcess(
   request.child.stdin.end();
   request.child.stdout.pipe(process.stdout);
   request.child.stderr.pipe(process.stderr);
-  const { stdout } = await request;
-  return stdout;
+  try {
+    const { stdout } = await request;
+    return stdout;
+  } catch (error) {
+    if (error.killed) {
+      error.message = `Native test process timed out after ${timeoutMs}ms: ${file}\n${error.stdout || ''}${error.stderr || ''}`;
+    }
+    throw error;
+  }
 }
 
 export function waitForExit(child, timeoutMs) {

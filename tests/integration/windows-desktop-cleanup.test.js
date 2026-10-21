@@ -41,6 +41,9 @@ test('native test commands close input, terminate stalled subprocesses, and pres
   ).rejects.toMatchObject({
     killed: true,
     stdout: 'waiting for signing\n',
+    message: expect.stringContaining(
+      'Native test process timed out after 1000ms',
+    ),
   });
 });
 

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, test } from 'vitest';
@@ -124,18 +124,18 @@ try {
   }
 }
 `;
-      // Pass one encoded argument rather than multiline Windows command-line
-      // syntax. Keep the event loop responsive so Vitest can enforce its own
-      // deadline, and terminate a stalled PowerShell process before that deadline.
+      // A file avoids multiline command-line quoting, CLIXML error serialization,
+      // and dumping the entire encoded script into a failed test's error message.
+      const scriptFile = path.join(work, 'validate-signing.ps1');
+      writeFileSync(scriptFile, script);
+      // Cold Windows PowerShell startup alone can consume most of the generic
+      // 25-second command budget. Bound the complete compile/sign/tamper scenario
+      // separately, below both Vitest's deadline and the three-minute CI step.
       const stdout = await runTestProcess(
         'powershell.exe',
-        [
-          '-NoProfile',
-          '-NonInteractive',
-          '-EncodedCommand',
-          Buffer.from(script, 'utf16le').toString('base64'),
-        ],
+        ['-NoProfile', '-NonInteractive', '-File', scriptFile],
         {
+          timeoutMs: 120_000,
           env: {
             ...process.env,
             BROWSER_RECALL_SIGNING_WORK: work,
@@ -152,4 +152,5 @@ try {
       rmSync(work, { recursive: true, force: true });
     }
   },
+  150_000,
 );
