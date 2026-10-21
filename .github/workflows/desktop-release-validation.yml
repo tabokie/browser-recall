@@ -97,16 +97,16 @@ jobs:
         if: matrix.platform == 'macos' && matrix.arch == 'arm64'
         run: npx vitest run tests/integration/macos-native-session.test.js tests/integration/desktop-signing.test.js
 
+      # The frame regression imports production code through a minimal AppKit
+      # package so Cargo does not build the Tauri application for this check.
+      - name: Verify native window frame restoration
+        if: matrix.platform == 'macos' && matrix.arch == 'arm64'
+        run: cargo test --locked --release -p browser-recall-native-tests --test macos_window_frame
+
       - run: npm run build:release --workspace @browser-recall/desktop
 
       - name: Verify dependency lockfiles stayed unchanged
         run: git diff --exit-code -- Cargo.lock package-lock.json
-
-      # Reuse the production configuration and Cargo test dependencies warmed by
-      # release signature verification before the update fixture changes them.
-      - name: Verify native window frame restoration
-        if: matrix.platform == 'macos' && matrix.arch == 'arm64'
-        run: cargo test --locked --release -p browser-recall-desktop --test macos_window_frame
 
       - name: Verify Windows installation and installed application
         if: matrix.platform == 'windows'
@@ -166,12 +166,6 @@ jobs:
           BROWSER_RECALL_ISOLATED_MACOS_SESSION: '1'
         run: node tests/smoke/macos-desktop-window-lifecycle.mjs
 
-      - name: Verify documentation builds preserve app URL routing
-        if: matrix.platform == 'macos' && matrix.arch == 'arm64'
-        run: |
-          npx vitest run tests/integration/macos-documentation-url-routing.test.js
-          node tests/smoke/macos-documentation-url-routing.mjs
-
       - name: Preserve native release failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v7
@@ -229,3 +223,40 @@ jobs:
           path: test-results/windows-font/
           if-no-files-found: ignore
           retention-days: 7
+
+  macos-documentation:
+    name: macOS documentation URL routing
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@1.97.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: desktop-release-macos-arm64
+
+      - run: npm ci
+
+      # Register a real production bundle so the independent documentation check
+      # must preserve an existing Browser Recall URL handler on this clean runner.
+      - name: Build production URL handler fixture
+        run: npm run build --workspace @browser-recall/desktop
+
+      - name: Verify documentation builds preserve app URL routing
+        env:
+          BROWSER_RECALL_DOCUMENTATION_PRODUCTION_APP: ${{ github.workspace }}/dist/desktop/macos/app/Browser Recall.app
+        run: |
+          npx vitest run tests/integration/macos-documentation-url-routing.test.js
+          node tests/smoke/macos-documentation-url-routing.mjs
+
+      - name: Verify dependency lockfiles stayed unchanged
+        run: git diff --exit-code -- Cargo.lock package-lock.json

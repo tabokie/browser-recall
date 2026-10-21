@@ -14,6 +14,7 @@ Use this map to find the files that implement a feature. See
 | `crates/daemon/` | Commands, data reads and writes, pairing, rules, and sync |
 | `crates/replay/` | Apply logged events, define data formats, select saved page files, and verify stored data |
 | `crates/search/` | Native search implementation |
+| `crates/native-tests/` | Minimal native integration test package; imports production frame code without depending on the Tauri application |
 | `packages/core/` | Shared JavaScript, CSS, localization, and generated bridge factories |
 | `apps/desktop/src-tauri/src/updates.rs`, `apps/desktop/ui/desktop-updates.js` | Native update checks, authenticated installation, and desktop update controls |
 | `scripts/build-release-desktop.mjs`, `scripts/create-update-manifest.mjs` | Package installers, sign finalized updates, and create the GitHub-hosted update manifest |
@@ -24,8 +25,8 @@ Use this map to find the files that implement a feature. See
 | `tests/` | JavaScript unit/integration tests, Playwright scenarios, and native app tests |
 | `icons/` | SVG sources for generated runtime icons |
 | `docs/images/` | Documentation PNGs and capture manifests |
-| `.github/workflows/ci.yml` | Six regular CI runner jobs: Linux tests/coverage/lint, extension E2E, desktop visuals, Windows font fallback, and Windows x64/macOS arm64 release validations |
-| `.github/workflows/desktop-release-validation.yml` | Shared native packaging, installation, update/relaunch, and platform regression checks, with independent required Windows font validation; Release additionally validates macOS x64 |
+| `.github/workflows/ci.yml` | Seven regular CI runner jobs: Linux tests/coverage/lint, extension E2E, desktop visuals, Windows font fallback, macOS documentation URL routing, and Windows x64/macOS arm64 release validations |
+| `.github/workflows/desktop-release-validation.yml` | Shared native packaging, installation, update/relaunch, and platform regression checks, with independent required Windows font and macOS documentation validation; Release additionally validates macOS x64 |
 | `.github/workflows/release.yml` | Manual native Windows/macOS and Chrome/Firefox builds, verified installers and extension archives, signed update packages, and GitHub Releases publishing |
 | `package.json` | Build, test, formatting, and analysis commands |
 | `rust-toolchain.toml` | Rust compiler and component pin |
@@ -222,7 +223,7 @@ do not maintain a second production copy.
 | Documentation bundles preserve macOS app URL routing, including production app discovery during the build, and URL activation reuses the running process | `tests/smoke/macos-documentation-url-routing.mjs`, `tests/smoke/macos-documentation-app.mjs`, `tests/integration/macos-documentation-url-routing.test.js` |
 | macOS startup, tray, and window lifecycle | `tests/smoke/macos-desktop-window-lifecycle.mjs` |
 | Personal macOS sessions reject temporary tray app automation before native tools run | `tests/integration/macos-native-session.test.js` |
-| macOS frame restoration after hidden size and position changes with an inset content view | `apps/desktop/src-tauri/tests/macos_window_frame.rs` |
+| macOS frame restoration after hidden size and position changes with an inset content view | `crates/native-tests/tests/macos_window_frame.rs` |
 | Windows icons, single instance, and teardown | `tests/smoke/windows-desktop-single-instance.mjs`, `tests/integration/windows-desktop-cleanup.test.js` |
 | Native desktop cleanup preserves setup errors, completes teardown after failures, and stops original or relaunched update processes | `tests/smoke/desktop-test-cleanup.mjs`, `tests/smoke/macos-desktop-process.mjs`, `tests/integration/macos-desktop-cleanup.test.js`, `tests/integration/windows-desktop-cleanup.test.js` |
 | Windows native update isolation survives token-based installer relaunch and restores the user environment; portable rollback JSON reader covers Windows PowerShell array behavior | `tests/smoke/windows-desktop-update-environment.ps1`, `tests/smoke/windows-update-environment-snapshot.ps1`, `tests/integration/windows-update-environment.test.js`, `tests/fixtures/windows-token-launch.cs` |

@@ -18,18 +18,52 @@ Hosted baseline: [successful run 39546319759](https://github.com/tabokie/browser
 ## Implemented scheduling changes
 
 - Windows font validation runs independently in the reusable workflow. Chromium installation and font regression previously added 4m 56s to the Windows native job. The new job has a separate debug Rust cache and failure artifact.
-- The macOS window frame check follows release signature verification, before the old-version update fixture changes the Tauri configuration. Cargo can reuse the production configuration and integration-test dependency graph.
+- The macOS window frame check runs before release compilation in a minimal native
+  test package. The native test imports the production frame module and declares
+  only its AppKit dependencies, avoiding the Tauri application's dependency graph.
 - Every check remains present. Release publication still depends on the complete reusable workflow, including Windows font validation.
+- macOS documentation URL routing runs independently. The documentation job builds
+  and registers a real production bundle, then requires documentation registration
+  and activation to preserve the production handler. Building that fixture adds
+  runner work but keeps the same native operating-system coverage.
 
-Extra runner setup, cache state, and queueing can affect elapsed time. Parallel font validation adds one runner job.
+Extra runner setup, cache state, and queueing can affect elapsed time. The parallel
+font and documentation checks add two runner jobs.
 
 ## Hosted verification
 
-The scheduling changes need a hosted Windows x64 and macOS arm64 run against the
-updated workflow. Check the new Windows font job on its first cache miss, then
-compare a later cache hit. Record the run URL, source commit, cache result, and job
-durations together; subtracting the moved steps from the baseline does not measure
-the new workflow's elapsed time.
+[Pull request #5](https://github.com/tabokie/browser-recall/pull/5) runs the updated
+workflow at commit `d1f284fe175895e8f3adfa79d692d6f001966cdd` in
+[validation run 39594940379](https://github.com/tabokie/browser-recall/actions/runs/39594940379).
+All six jobs passed. The initial scheduling changes produced these job durations:
+
+| Required job | Baseline | Initial parallel-font run |
+| --- | ---: | ---: |
+| Windows native validation | 23m 36s | 14m 17s |
+| macOS native validation | 21m 06s | 25m 05s |
+| Windows font validation | Included in Windows native job | 6m 37s |
+
+The macOS job became the longest required job, so the first scheduling change did
+not improve the overall elapsed time. Runner/cache variability also changed build
+durations; the Windows duration difference cannot all be attributed to parallelism.
+The independent Windows font job passed in **6m 37s**, including **3m 21s** for
+Chromium setup, **1m 30s** for the debug daemon build and font test, and **48s** for
+Rust cache saving. The dedicated Rust cache did not exist before the job and was
+created under `refs/pull/5/merge` at `2026-10-21T11:57:01Z`; the job therefore
+exercised a cold cache and stayed within its 15-minute deadline. The font job
+finished while both native package jobs were still building.
+
+The initial frame-check reorder did not improve its hosted duration: **3m 38s**
+versus **3m 37s** in the baseline. The frame regression still belonged to the Tauri
+desktop package, despite importing only the production AppKit frame module. The
+follow-up change moves the same regression into `browser-recall-native-tests`,
+with explicit AppKit dependencies and no Tauri or daemon dependency. The native
+test still exercises five restorations of an invisible window with an inset
+content view. The follow-up hosted run must measure this package isolation.
+
+Compare a later cache hit separately. Record the run URL, source commit, cache
+result, and job durations together; subtracting the moved steps from the baseline
+does not measure the new workflow's elapsed time.
 
 Release builds write each build and packaging phase's duration and success or
 failure to both the job log and GitHub's step summary. The release phases distinguish
@@ -37,12 +71,12 @@ app signature verification, disk image creation, update archive creation or
 installer staging, package signing, and Cargo signature verification. Native update
 validation separately reports fixture compilation and installation/relaunch.
 
-The macOS documentation URL routing scenario took 3m 50s in the baseline and still
-runs after native update validation. Keep the scenario on the native runner until
-hosted measurements show that the macOS job remains the longest required job.
-If the macOS job does remain longest, compare an independent documentation job's
-complete duration, including its own dependency build and runner setup, before
-adopting the split. The documentation job would still need to gate publication.
+The macOS documentation URL routing scenario took **4m 12s** in the initial run.
+The follow-up moves the scenario into its own required job. The new job measures
+production-fixture compilation separately from the documentation build and native
+scenario. Its complete duration, including runner setup and the production fixture,
+must be compared with the native jobs; moving 4m 12s does not alone establish the
+new elapsed time.
 
 ## Link-time optimization benchmark
 
@@ -77,6 +111,7 @@ npm run build:desktop-ui
 benchmark_root=$(mktemp -d)
 for lto in fat thin; do
   (
+    set -e
     export CARGO_TARGET_DIR="$benchmark_root/$lto"
     export CARGO_PROFILE_RELEASE_LTO="$lto"
     export CARGO_INCREMENTAL=0

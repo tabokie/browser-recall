@@ -65,6 +65,7 @@ test.skipIf(process.platform !== 'darwin')(
       const previousHandler = await buildAndRegisterMacosDocumentationApp({
         app: documentationApp,
         readHandler,
+        expectedHandler: productionApp,
         build: async () => {
           // Force the same transition as a clean CI runner: production routing
           // becomes available while the documentation build is in progress.
@@ -80,6 +81,14 @@ test.skipIf(process.platform !== 'darwin')(
       });
       expect(previousHandler).toBe(productionApp);
       expect(readHandler()).toBe(productionApp);
+      await expect(
+        buildAndRegisterMacosDocumentationApp({
+          app: documentationApp,
+          readHandler,
+          expectedHandler: 'none',
+          build: async () => {},
+        }),
+      ).rejects.toThrow('Production URL handler fixture is missing');
       // Moving the baseline must still reject a retained documentation bundle
       // that declares URL schemes, before registering that bundle.
       writeApp(documentationApp, 'app.browser-recall.documentation', helper, [

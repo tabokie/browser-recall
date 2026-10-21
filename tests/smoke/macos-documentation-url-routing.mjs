@@ -7,7 +7,11 @@ import path from 'node:path';
 import { compileDocumentationWindow } from '../../scripts/lib/documentation-native-capture.mjs';
 import { buildAndRegisterMacosDocumentationApp } from './macos-documentation-app.mjs';
 import { withCleanup } from './desktop-test-cleanup.mjs';
-import { unregisterMacosTestApp } from './macos-desktop-process.mjs';
+import {
+  macosAppRegistrar,
+  unregisterMacosTestApp,
+} from './macos-desktop-process.mjs';
+import { verifyMacosAppBundle } from '../../scripts/verify-macos-app-bundle.mjs';
 import { launchMacosDocumentationApp } from '../../scripts/lib/macos-native-session.mjs';
 
 if (process.platform !== 'darwin') {
@@ -23,7 +27,17 @@ const app = path.join(
 const work = mkdtempSync(path.join(tmpdir(), 'browser-recall-url-routing-'));
 const testApp = path.join(work, 'Browser Recall URL Test.app');
 let pid;
+const expectedHandler = process.env.BROWSER_RECALL_DOCUMENTATION_PRODUCTION_APP;
 await withCleanup(async () => {
+  if (expectedHandler) {
+    assert.equal(
+      process.env.GITHUB_ACTIONS,
+      'true',
+      'Production URL handler provisioning requires a disposable GitHub runner',
+    );
+    verifyMacosAppBundle(expectedHandler);
+    execFileSync(macosAppRegistrar, ['-f', expectedHandler]);
+  }
   const helper = compileDocumentationWindow(work);
   const handler = () =>
     execFileSync(helper, ['url-handler', 'browser-recall://open'], {
@@ -32,6 +46,7 @@ await withCleanup(async () => {
   const previousHandler = await buildAndRegisterMacosDocumentationApp({
     app,
     readHandler: handler,
+    expectedHandler,
     build: () =>
       new Promise((resolve, reject) => {
         const build = spawn(

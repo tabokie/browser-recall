@@ -529,10 +529,14 @@ connector reconnection. Regular CI uses temporary signing keys in disposable
 runner checkouts; only Release uses production signing keys and publishes assets.
 Windows extension system-font fallback runs in an independent job inside the same
 reusable workflow, with its own debug Rust cache and failure artifact. Release
-publication requires both native package validation and Windows font validation.
-The macOS window frame check follows release verification before the old-version
-update fixture changes the build configuration, allowing Cargo to reuse the
-production configuration and test dependencies.
+publication requires native package validation, Windows font validation, and
+macOS documentation URL routing. The independent documentation job builds a real
+production app and registers the production bundle before the no-tray build;
+the native routing scenario requires that production handler to remain selected.
+The macOS window frame check runs before release compilation in the minimal
+`browser-recall-native-tests` Cargo package. The native test imports the production
+frame module directly and declares only its AppKit dependencies, avoiding Tauri
+application builds for an invisible-window regression.
 Build, packaging, and native update phases share timing reporters that write
 duration and outcome to the job log and GitHub step summary. Native update fixture
 compilation is reported separately from installation and relaunch. The

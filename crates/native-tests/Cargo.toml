@@ -1,0 +1,14 @@
+[package]
+name = "browser-recall-native-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[test]]
+name = "macos_window_frame"
+harness = false
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSGraphics", "NSView", "NSWindow", "NSResponder"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSGeometry"] }

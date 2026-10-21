@@ -396,9 +396,10 @@ the daemon before starting tests that use the daemon; compiling Rust during test
 setup can exceed the startup timeout. To test a build without cached Rust output,
 set `CARGO_TARGET_DIR` to a temporary directory and run the same `ci:*` command.
 
-Regular CI has six runner jobs: one Linux tests/coverage/lint job, extension E2E,
+Regular CI has seven runner jobs: one Linux tests/coverage/lint job, extension E2E,
 macOS visual regression, two native release-validation jobs, and Windows extension
-system-font fallback. Native packaging and Windows font checks start independently
+system-font fallback, and macOS documentation URL routing. Native packaging,
+Windows font checks, and macOS documentation URL routing start independently
 in parallel with the Linux checks. The Linux job validates release versions,
 README images, and JavaScript formatting before installing desktop build tooling.
 Pinned actionlint 1.7.12 validates workflow syntax and reusable-workflow inputs.
@@ -412,19 +413,20 @@ fallback; macOS startup recovery, five tray reopen cycles, session guards, and
 documentation URL routing. Shared macOS window and routing scenarios run on arm64;
 macOS arm64 runs signed-package installation and real update/relaunch in regular
 CI. Release runs package and update validation on both macOS architectures.
-The macOS window frame check runs immediately after release verification, reusing
-the production configuration and Cargo test dependencies before the old-version
-update fixture changes the build configuration. Windows font checks run in their
+The macOS window frame check runs before release compilation in the minimal
+`browser-recall-native-tests` Cargo package, which imports the production frame
+module and depends only on AppKit bindings. Windows font checks run in their
 own job with a separate Rust cache, so Chromium setup and the debug daemon build
-do not delay packaging. Every job in the reusable workflow must succeed before
+do not delay packaging. The macOS documentation job builds and registers a real
+production app before building the no-tray documentation app, and requires the
+production URL handler to remain selected. Every job in the reusable workflow must succeed before
 Release can publish.
 Timings must be measured on hosted runners; removing duplicate builds and test
 executions does not establish a new wall-clock duration by itself.
 Release packaging and native update validation report separate phase durations in
 the job log and GitHub step summary. The [performance record](docs/DESKTOP_RELEASE_VALIDATION_PERFORMANCE.md)
 preserves the hosted baseline, link-time optimization comparison, reproduction
-commands, and criteria for splitting macOS documentation URL routing into another
-required job.
+commands, and hosted results for the independent required jobs.
 
 ### Product coverage
 
@@ -504,7 +506,7 @@ and position changes while the content view has an inset. The regression calls
 production frame restoration directly and runs before the tray lifecycle test:
 
 ```bash
-cargo test --locked --release -p browser-recall-desktop --test macos_window_frame
+cargo test --locked --release -p browser-recall-native-tests --test macos_window_frame
 ```
 
 The snapshot folder check calls production snapshot-opening code, verifies the
