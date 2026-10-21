@@ -396,9 +396,10 @@ the daemon before starting tests that use the daemon; compiling Rust during test
 setup can exceed the startup timeout. To test a build without cached Rust output,
 set `CARGO_TARGET_DIR` to a temporary directory and run the same `ci:*` command.
 
-Regular CI has five runner jobs: one Linux tests/coverage/lint job, extension E2E,
-macOS visual regression, and two native release-validation jobs. Native packaging
-starts in parallel with the Linux checks. The Linux job validates release versions,
+Regular CI has six runner jobs: one Linux tests/coverage/lint job, extension E2E,
+macOS visual regression, two native release-validation jobs, and Windows extension
+system-font fallback. Native packaging and Windows font checks start independently
+in parallel with the Linux checks. The Linux job validates release versions,
 README images, and JavaScript formatting before installing desktop build tooling.
 Pinned actionlint 1.7.12 validates workflow syntax and reusable-workflow inputs.
 JavaScript tests run once with V8 coverage. Rust workspace tests run once under
@@ -411,8 +412,19 @@ fallback; macOS startup recovery, five tray reopen cycles, session guards, and
 documentation URL routing. Shared macOS window and routing scenarios run on arm64;
 macOS arm64 runs signed-package installation and real update/relaunch in regular
 CI. Release runs package and update validation on both macOS architectures.
+The macOS window frame check runs immediately after release verification, reusing
+the production configuration and Cargo test dependencies before the old-version
+update fixture changes the build configuration. Windows font checks run in their
+own job with a separate Rust cache, so Chromium setup and the debug daemon build
+do not delay packaging. Every job in the reusable workflow must succeed before
+Release can publish.
 Timings must be measured on hosted runners; removing duplicate builds and test
 executions does not establish a new wall-clock duration by itself.
+Release packaging and native update validation report separate phase durations in
+the job log and GitHub step summary. The [performance record](docs/DESKTOP_RELEASE_VALIDATION_PERFORMANCE.md)
+preserves the hosted baseline, link-time optimization comparison, reproduction
+commands, and criteria for splitting macOS documentation URL routing into another
+required job.
 
 ### Product coverage
 
@@ -522,13 +534,14 @@ node tests/smoke/windows-desktop-single-instance.mjs --icons-only
 
 `npm run ci:test-windows-cleanup` checks test cleanup. Windows cleanup must stop
 the app and child processes before deleting profiles. Files that remain locked or
-cannot be deleted cause the test to fail. Windows CI builds before browser setup.
+cannot be deleted cause the test to fail. Windows native validation and browser
+setup run on separate runners.
 Windows signing, cleanup, and artifact checks run in separate steps with three-minute
 deadlines. All three checks run before a combined gate blocks packaging if any
 check failed. JSON reports are saved under `test-results/windows-validation/`
 and uploaded with native failure diagnostics. The Windows font regression uses
-`test-results/windows-font/`, so Playwright does not clear earlier native logs or
-validation reports. The disposable certificate test closes PowerShell's standard input,
+`test-results/windows-font/` and uploads its own failure artifact from the parallel
+job. The disposable certificate test closes PowerShell's standard input,
 streams progress, and terminates PowerShell after 25 seconds; asynchronous process
 execution also lets Vitest enforce its test deadline. The test creates a fresh
 unsigned x64 executable with the Windows .NET Framework `csc.exe` compiler and

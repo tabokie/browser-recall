@@ -527,6 +527,17 @@ regular CI omits the Intel Mac runner. The workflow builds signed packages,
 verifies installation, and exercises updates, relaunch, collection retention, and
 connector reconnection. Regular CI uses temporary signing keys in disposable
 runner checkouts; only Release uses production signing keys and publishes assets.
+Windows extension system-font fallback runs in an independent job inside the same
+reusable workflow, with its own debug Rust cache and failure artifact. Release
+publication requires both native package validation and Windows font validation.
+The macOS window frame check follows release verification before the old-version
+update fixture changes the build configuration, allowing Cargo to reuse the
+production configuration and test dependencies.
+Build, packaging, and native update phases share timing reporters that write
+duration and outcome to the job log and GitHub step summary. Native update fixture
+compilation is reported separately from installation and relaunch. The
+[performance record](DESKTOP_RELEASE_VALIDATION_PERFORMANCE.md) preserves the
+baseline and optimization decisions.
 Windows signing, cleanup, and artifact checks all run before a combined gate
 requires every check to pass; failure artifacts include the individual JSON test
 reports. Native update teardown preserves the original error, continues cleanup

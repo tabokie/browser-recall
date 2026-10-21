@@ -18,12 +18,14 @@ Use this map to find the files that implement a feature. See
 | `apps/desktop/src-tauri/src/updates.rs`, `apps/desktop/ui/desktop-updates.js` | Native update checks, authenticated installation, and desktop update controls |
 | `scripts/build-release-desktop.mjs`, `scripts/create-update-manifest.mjs` | Package installers, sign finalized updates, and create the GitHub-hosted update manifest |
 | `scripts/lib/product-version.mjs` | Shared product and lockfile version validation for CI and local releases |
+| `scripts/lib/build-timing.mjs` | Synchronous and asynchronous build phase durations and outcomes in logs and GitHub step summaries |
+| `docs/DESKTOP_RELEASE_VALIDATION_PERFORMANCE.md` | Hosted validation baseline, local link-time optimization benchmark, reproduction commands, and further optimization criteria |
 | `scripts/` | Builds, migrations, manual workflows, coverage, and documentation capture |
 | `tests/` | JavaScript unit/integration tests, Playwright scenarios, and native app tests |
 | `icons/` | SVG sources for generated runtime icons |
 | `docs/images/` | Documentation PNGs and capture manifests |
-| `.github/workflows/ci.yml` | Five regular CI runner jobs: Linux tests/coverage/lint, extension E2E, desktop visuals, and Windows x64/macOS arm64 release validations |
-| `.github/workflows/desktop-release-validation.yml` | Shared native packaging, installation, update/relaunch, and platform regression checks; Release additionally validates macOS x64 |
+| `.github/workflows/ci.yml` | Six regular CI runner jobs: Linux tests/coverage/lint, extension E2E, desktop visuals, Windows font fallback, and Windows x64/macOS arm64 release validations |
+| `.github/workflows/desktop-release-validation.yml` | Shared native packaging, installation, update/relaunch, and platform regression checks, with independent required Windows font validation; Release additionally validates macOS x64 |
 | `.github/workflows/release.yml` | Manual native Windows/macOS and Chrome/Firefox builds, verified installers and extension archives, signed update packages, and GitHub Releases publishing |
 | `package.json` | Build, test, formatting, and analysis commands |
 | `rust-toolchain.toml` | Rust compiler and component pin |

@@ -2,12 +2,13 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { appendFileSync, readdirSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { desktopBuildPlan } from './desktop-build-plan.mjs';
 import { finalizeDesktopBuild } from './finalize-desktop-build.mjs';
 import { desktopSigning } from './lib/desktop-signing.mjs';
 import { createDesktopDiskImage } from './lib/desktop-disk-image.mjs';
 import { readProductVersion } from './lib/product-version.mjs';
+import { timeBuildStep } from './lib/build-timing.mjs';
 
 const repoRoot = fileURLToPath(new URL('../', import.meta.url));
 
@@ -28,23 +29,8 @@ export function buildDesktop({
     run,
   });
   const options = { cwd: root, env: policy.environment, stdio: 'inherit' };
-  const timed = (name, operation) => {
-    const start = performance.now();
-    let status = 'failed';
-    try {
-      const result = operation();
-      status = 'passed';
-      return result;
-    } finally {
-      const seconds = ((performance.now() - start) / 1000).toFixed(1);
-      console.log(`${name}: ${seconds}s (${status})`);
-      if (environment.GITHUB_STEP_SUMMARY)
-        appendFileSync(
-          environment.GITHUB_STEP_SUMMARY,
-          `- ${name}: ${seconds}s (${status})\n`,
-        );
-    }
-  };
+  const timed = (name, operation) =>
+    timeBuildStep(name, operation, environment);
   timed('Desktop UI staging', () =>
     run(
       process.execPath,

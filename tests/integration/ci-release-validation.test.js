@@ -8,10 +8,70 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { expect, test } from 'vitest';
 import { prepareCiRelease } from '../../scripts/prepare-ci-release.mjs';
 import { generateRustCoverage } from '../../scripts/rust-coverage.mjs';
 import { validateMacosSignatureMetadata } from '../../scripts/verify-macos-app-bundle.mjs';
+
+test.each(['timeBuildStep', 'timeAsyncBuildStep'])(
+  '%s reports real subprocess success and failure without swallowing the exit code',
+  (timingFunction) => {
+    const work = mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-build-timing-'),
+    );
+    const summary = path.join(work, 'summary.md');
+    const timingModule = pathToFileURL(
+      path.resolve(import.meta.dirname, '../../scripts/lib/build-timing.mjs'),
+    ).href;
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          `
+        import { execFileSync, spawn } from 'node:child_process';
+        import { ${timingFunction} as timed } from ${JSON.stringify(timingModule)};
+        const run = (status) => {
+          const args = ['-e', 'process.exit(' + status + ')'];
+          if (${JSON.stringify(timingFunction)} === 'timeBuildStep')
+            return execFileSync(process.execPath, args, { stdio: 'ignore' });
+          return new Promise((resolve, reject) => {
+            const child = spawn(process.execPath, args, { stdio: 'ignore' });
+            child.once('error', reject);
+            child.once('exit', (status) => {
+              if (status === 0) resolve();
+              else reject(Object.assign(new Error('Verifier failed'), { status }));
+            });
+          });
+        };
+        await timed('Fixture package creation', () => run(0));
+        try {
+          await timed('Fixture package verification', () => run(23));
+        } catch (error) {
+          process.exitCode = error.status;
+        }
+      `,
+        ],
+        {
+          env: { ...process.env, GITHUB_STEP_SUMMARY: summary },
+          encoding: 'utf8',
+        },
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(23);
+      const timings = readFileSync(summary, 'utf8');
+      expect(timings).toMatch(/Fixture package creation: [\d.]+s \(passed\)/);
+      expect(timings).toMatch(
+        /Fixture package verification: [\d.]+s \(failed\)/,
+      );
+      expect(result.stdout).toContain(timings.replaceAll('- ', '').trim());
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  },
+);
 
 test('Windows validation gate surfaces the failed test from its JSON report and still blocks packaging', () => {
   const root = path.resolve(import.meta.dirname, '../..');
