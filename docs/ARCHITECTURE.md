@@ -6,6 +6,12 @@ The browser extension captures pages and provides current-page actions.
 
 ## Components
 
+The public product website in `website/` is a separate static page hosted on
+GitHub Pages. The website presents the product through a browser-local sample
+collection and verified documentation screenshots. The website has no backend,
+analytics, or access to the daemon or a visitor's Browser Recall data. Website
+builds copy only the page and selected public assets to `dist/website/`.
+
 The daemon is the Rust service that reads and writes Browser Recall data. The daemon
 runs inside the desktop app and accepts commands from the desktop interface and
 browser extension.

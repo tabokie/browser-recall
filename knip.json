@@ -3,11 +3,12 @@
     ".": {
       "entry": [
         "scripts/**/*.mjs",
+        "website/main.js",
         "tests/**/*.test.js",
         "tests/**/*.spec.js",
         "tests/fixtures/**/*.mjs"
       ],
-      "project": ["scripts/**/*.mjs", "tests/**/*.{js,mjs}"]
+      "project": ["scripts/**/*.mjs", "tests/**/*.{js,mjs}", "website/**/*.js"]
     },
     "apps/desktop": {
       "entry": ["ui/index.js"],

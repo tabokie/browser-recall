@@ -25,6 +25,42 @@ Playwright installation includes Linux system libraries and fonts through
 
 ## Build and run
 
+### Product website
+
+The product page lives in `website/` and uses plain HTML, CSS, and JavaScript.
+The website build copies the existing Browser Recall icon, Fraunces fonts, and
+verified documentation screenshots into `dist/website/`; no application build or
+daemon is needed. Install Node.js 24+ and run `npm ci` first.
+
+```bash
+npm run build:website
+npm run preview:website
+```
+
+Open `http://127.0.0.1:4173/browser-recall/`. The preview uses the GitHub Pages
+project path so relative asset links are exercised before deployment. Stop the
+preview with Ctrl+C. Re-run the preview command after editing source files.
+
+```bash
+npm run ci:install-playwright
+npm run test:website
+```
+
+Playwright checks the sample search, note editing, list selection, keyboard tabs,
+mobile layout, screenshots, and installation links, including without JavaScript.
+The interactive illustration uses fictional content and keeps edits only in the
+current page; the illustration does not connect to Browser Recall data.
+
+`.github/workflows/website.yml` runs these checks for relevant pull requests and
+publishes `dist/website/` on relevant pushes to `main`. In GitHub repository
+**Settings → Pages → Build and deployment → Source**, choose **GitHub Actions**
+once before the first deployment. The expected project URL is
+`https://tabokie.github.io/browser-recall/`. **Actions → Product Website → Run
+workflow** can publish the current `main` manually. GitHub Pages receives only the
+built website directory, not the application source or user data.
+
+### Application
+
 ```bash
 npm run build
 ```
