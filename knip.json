@@ -3,7 +3,7 @@
     ".": {
       "entry": [
         "scripts/**/*.mjs",
-        "website/main.js",
+        "website/**/*.js",
         "tests/**/*.test.js",
         "tests/**/*.spec.js",
         "tests/fixtures/**/*.mjs"

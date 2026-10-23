@@ -28,9 +28,12 @@ Playwright installation includes Linux system libraries and fonts through
 ### Product website
 
 The product page lives in `website/` and uses plain HTML, CSS, and JavaScript.
-The website build copies the existing Browser Recall icon, Fraunces fonts, and
-verified documentation screenshots into `dist/website/`; no application build or
-daemon is needed. Install Node.js 24+ and run `npm ci` first.
+The website build copies the existing Browser Recall icon, product fonts, and
+verified documentation screenshots into `dist/website/`. The first three demos
+reuse production components: Timeline search/results, the browser highlight
+editor, and popup list chips. The build reads desktop and popup HTML/CSS directly;
+isolated iframe documents prevent website styles from changing product controls.
+No application build or daemon is needed. Install Node.js 24+ and run `npm ci` first.
 
 ```bash
 npm run build:website
@@ -57,7 +60,8 @@ publishes `dist/website/` on relevant pushes to `main`. In GitHub repository
 once before the first deployment. The expected project URL is
 `https://tabokie.github.io/browser-recall/`. **Actions → Product Website → Run
 workflow** can publish the current `main` manually. GitHub Pages receives only the
-built website directory, not the application source or user data.
+built website directory, including the selected presentation modules and public
+assets needed by the demos. No user data or application backend is included.
 
 ### Application
 

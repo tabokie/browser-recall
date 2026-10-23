@@ -6,7 +6,11 @@ test('explore the collection, write a note, and organize one page into several l
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('./');
-  await page.evaluate(() => document.fonts.ready);
+  await expect(
+    page.frameLocator('.timeline-frame').locator('.result-item'),
+  ).toHaveCount(5);
+  for (const frame of page.frames())
+    await frame.evaluate(() => document.fonts.ready);
   const windowBottom = await page
     .locator('.demo-window')
     .evaluate((element) => element.getBoundingClientRect().bottom);
@@ -25,47 +29,54 @@ test('explore the collection, write a note, and organize one page into several l
     fullPage: true,
   });
 
-  const search = page.getByRole('searchbox');
+  const timeline = page.frameLocator('.timeline-frame');
+  const highlight = page.frameLocator('.highlight-frame');
+  const organize = page.frameLocator('.organize-frame');
+  const search = timeline.getByRole('searchbox');
   await search.fill('GARDEN');
   await search.press('Enter');
-  await expect(page.locator('.history-row:visible')).toHaveCount(1);
-  await expect(page.locator('.history-row:visible')).toContainText(
+  await expect(timeline.locator('.result-item:visible')).toHaveCount(1);
+  await expect(timeline.locator('.result-item:visible')).toContainText(
     'A garden that grows with you',
   );
   // Search a sample note that does not appear in the page title.
   await search.fill('unfinished');
-  await page.getByRole('button', { name: 'Search' }).click();
-  await expect(page.locator('.history-row:visible')).toHaveCount(1);
-  await expect(page.locator('.history-row:visible')).toContainText(
+  await search.press('Enter');
+  await expect(timeline.locator('.result-item:visible')).toHaveCount(1);
+  await expect(timeline.locator('.result-item:visible')).toContainText(
     'A smaller, slower web',
   );
   await search.fill('not in the collection');
   await search.press('Enter');
   await expect(
-    page.getByText('No pages found in this sample.', { exact: false }),
+    timeline.getByText('No pages found in this sample.', { exact: false }),
   ).toBeVisible();
   await search.fill('');
-  await expect(page.locator('.history-row:visible')).toHaveCount(5);
+  await expect(timeline.locator('.result-item:visible')).toHaveCount(5);
 
   await page.getByRole('tab', { name: 'Highlight', exact: true }).click();
-  await page
-    .getByLabel('Your note', { exact: true })
-    .fill('Keep some room for a personal website.');
-  await page.getByRole('button', { name: 'Save note' }).click();
-  await expect(
-    page.getByText('Note saved in this demo', { exact: true }),
-  ).toBeVisible();
+  await highlight
+    .getByRole('button', { name: 'Edit highlighted passage' })
+    .click();
+  // The actual extension editor uses a closed shadow root. Exercise its
+  // focused contenteditable with the keyboard, as a user does.
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.insertText('Keep some room for a personal website.');
   await page
     .locator('.demo-window')
     .screenshot({ path: testInfo.outputPath('highlights.png') });
-
+  await page.keyboard.press('Control+Enter');
+  await expect(page.locator('#note-status')).toContainText(
+    'Note saved in this demo',
+  );
   await page.getByRole('tab', { name: 'Organize', exact: true }).click();
-  await page.getByRole('checkbox', { name: 'Design details' }).check();
+  await organize.getByRole('button', { name: 'Design details' }).click();
+  await expect(organize.locator('#listCount')).toHaveText('03');
   await expect(
     page.getByText('One page, at home in 3 lists.', { exact: true }),
   ).toBeVisible();
   for (const name of ['Small web', 'Design details', 'Weekend reading']) {
-    await page.getByRole('checkbox', { name }).uncheck();
+    await organize.getByRole('button', { name, exact: true }).click();
   }
   await expect(
     page.getByText('No lists selected. The page remains in your history.'),
@@ -81,15 +92,21 @@ test('explore the collection, write a note, and organize one page into several l
     .locator('.demo-window')
     .screenshot({ path: testInfo.outputPath('snapshot.png') });
   await page.getByRole('tab', { name: 'Highlight', exact: true }).click();
-  await expect(page.getByLabel('Your note', { exact: true })).toHaveValue(
-    'Keep some room for a personal website.',
-  );
-  await expect(
-    page.getByText('Note saved in this demo', { exact: true }),
-  ).toBeVisible();
+  await highlight
+    .getByRole('button', { name: 'Edit highlighted passage' })
+    .click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await expect
+    .poll(() =>
+      highlight
+        .locator('body')
+        .evaluate(() => window.getSelection().toString()),
+    )
+    .toBe('Keep some room for a personal website.');
+  await page.keyboard.press('Control+Enter');
 
   await page.getByRole('tab', { name: 'Find again' }).click();
-  await expect(page.locator('.history-row:visible')).toHaveCount(5);
+  await expect(timeline.locator('.result-item:visible')).toHaveCount(5);
   await page.getByText('See Browser Recall in use', { exact: false }).click();
   for (const image of await page.locator('.screenshot-grid img').all()) {
     await image.scrollIntoViewIfNeeded();

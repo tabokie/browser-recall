@@ -1,4 +1,5 @@
-import { cp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { JSDOM } from 'jsdom';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -6,6 +7,16 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const output = path.join(root, 'dist/website');
 await rm(output, { recursive: true, force: true });
 await cp(path.join(root, 'website'), output, { recursive: true });
+for (const name of ['timeline', 'organize', 'highlight']) {
+  const file = path.join(output, `demos/${name}.js`);
+  const source = await readFile(file, 'utf8');
+  await writeFile(
+    file,
+    source
+      .replaceAll("'../../apps/", "'./product/apps/")
+      .replaceAll("'../../packages/", "'./product/packages/"),
+  );
+}
 await mkdir(path.join(output, 'assets'), { recursive: true });
 
 const assets = [
@@ -26,4 +37,88 @@ for (const [source, destination] of assets) {
   await cp(path.join(root, source), path.join(output, 'assets', destination));
 }
 await writeFile(path.join(output, '.nojekyll'), '');
+
+// Preserve the source directory layout so production module and CSS imports
+// resolve without a bundler or alternate implementations of product controls.
+const productFiles = [
+  'apps/desktop/ui/timeline-elements.js',
+  'apps/desktop/ui/utils.js',
+  'apps/desktop/ui/shared.css',
+  'apps/desktop/ui/fonts',
+  'apps/extension/popup-list-elements.js',
+  'apps/extension/utils.js',
+  'apps/extension/extension-surface.js',
+  'apps/extension/color-schemes.css',
+  'packages/core/utils.js',
+  'packages/core/page-identity.js',
+  'packages/core/highlight-lifecycle.js',
+  'packages/core/shared.css',
+  'packages/core/color-schemes.css',
+];
+for (const file of productFiles) {
+  const destination = path.join(output, 'demos/product', file);
+  await mkdir(path.dirname(destination), { recursive: true });
+  await cp(path.join(root, file), destination, { recursive: true });
+}
+
+async function productDocument(file) {
+  return new JSDOM(await readFile(path.join(root, file), 'utf8')).window
+    .document;
+}
+function fragment(document, selector) {
+  const element = document.querySelector(selector);
+  if (!element) throw new Error(`Product demo source is missing ${selector}`);
+  return element.cloneNode(true);
+}
+async function demoDocument(name, head, body) {
+  await writeFile(
+    path.join(output, `demos/${name}.html`),
+    `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Browser Recall ${name} demo</title>${head}</head><body>${body}
+<script type="module" src="${name}.js"></script></body></html>`,
+  );
+}
+
+const desktop = await productDocument('apps/desktop/ui/index.html');
+const sidebar = fragment(desktop, '.sidebar');
+sidebar
+  .querySelectorAll(
+    '#settingsBtn, #desktopUpdateNotice, #recycleBinBtn, .sidebar-content',
+  )
+  .forEach((element) => element.remove());
+sidebar.querySelector('#exploreBtn').classList.add('active');
+const header = fragment(desktop, '.main-header');
+header
+  .querySelectorAll('input, button:not(#sidebarToggle)')
+  .forEach((element) => element.remove());
+await demoDocument(
+  'timeline',
+  `
+<link rel="stylesheet" href="product/apps/desktop/ui/shared.css">
+${desktop.querySelector('style').outerHTML}`,
+  `
+${sidebar.outerHTML}${fragment(desktop, '#sidebarOverlay').outerHTML}
+<div class="main scroll-boundary-contained">${header.outerHTML}
+<div class="search-filters-panel"><div class="search-draft" id="demoSearch"></div></div>
+${fragment(desktop, '#resultsWrapper').outerHTML}</div>`,
+);
+
+const popup = await productDocument('apps/extension/popup.html');
+const pageHeader = fragment(popup, '#pageHeader');
+pageHeader.style.display = '';
+pageHeader.querySelector('#pageTitle').textContent = 'A smaller, slower web';
+pageHeader.querySelector('#pageUrl').textContent =
+  'https://fieldnotes.example/a-smaller-web';
+const lists = fragment(popup, '#listSection');
+lists.style.display = '';
+// The demo focuses on toggling existing lists; creating/searching lists belongs
+// to the full popup, so omit the associated hint and add button here.
+lists.querySelector('.list-search-hint').remove();
+await demoDocument(
+  'organize',
+  `${popup.querySelector('style').outerHTML}<link rel="stylesheet" href="product/apps/extension/color-schemes.css">`,
+  `
+${pageHeader.outerHTML}${lists.outerHTML}`,
+);
 console.log(`Browser Recall website built in ${output}`);

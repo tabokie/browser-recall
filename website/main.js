@@ -1,9 +1,6 @@
 const tabs = [...document.querySelectorAll('[role="tab"]')];
 document.querySelector('.demo-tabs').hidden = false;
 document.querySelector('#demo-fallback').hidden = true;
-for (const control of document.querySelectorAll('#demo-search [disabled]')) {
-  control.disabled = false;
-}
 const panels = [...document.querySelectorAll('[role="tabpanel"]')];
 const caption = document.querySelector('#demo-caption');
 const captions = {
@@ -25,6 +22,11 @@ function selectTab(selectedTab) {
     panel.hidden = panel.id !== selectedTab.getAttribute('aria-controls');
   }
   caption.textContent = captions[selectedTab.dataset.tab];
+  if (selectedTab.dataset.tab === 'organize') {
+    document
+      .querySelector('.organize-frame')
+      .contentWindow.postMessage({ type: 'measure' }, location.origin);
+  }
 }
 
 for (const [index, tab] of tabs.entries()) {
@@ -43,49 +45,59 @@ for (const [index, tab] of tabs.entries()) {
   });
 }
 
-const searchInput = document.querySelector('#search-input');
-const rows = [...document.querySelectorAll('.history-row')];
-
-function searchSamples() {
-  const query = searchInput.value.trim().toLocaleLowerCase();
-  let count = 0;
-  for (const row of rows) {
-    row.hidden = !row.dataset.search.toLocaleLowerCase().includes(query);
-    if (!row.hidden) count += 1;
+// Frames isolate the unmodified product styles from the marketing page.
+window.addEventListener('message', (event) => {
+  if (event.origin !== location.origin) return;
+  const frames = [...document.querySelectorAll('.product-frame')];
+  const frame = frames.find(
+    (candidate) => candidate.contentWindow === event.source,
+  );
+  if (!frame) return;
+  if (
+    event.data?.type === 'list-height' &&
+    frame.classList.contains('organize-frame')
+  ) {
+    const viewport = frame.parentElement;
+    viewport.dataset.height = String(event.data.height);
+    sizeProductViewport(viewport, viewport.clientWidth);
   }
-  document.querySelector('#results-label').textContent = query
-    ? `${count} ${count === 1 ? 'match' : 'matches'} in the sample collection`
-    : 'A little of what caught your eye';
-  document.querySelector('#empty-results').hidden = count !== 0;
-}
-
-document.querySelector('#demo-search').addEventListener('submit', (event) => {
-  event.preventDefault();
-  searchSamples();
-});
-searchInput.addEventListener('input', () => {
-  if (searchInput.value === '') searchSamples();
-});
-
-document.querySelector('#note-form').addEventListener('submit', (event) => {
-  event.preventDefault();
-  document.querySelector('#note-status').textContent = document
-    .querySelector('#sample-note')
-    .value.trim()
-    ? 'Note saved in this demo'
-    : 'Note cleared in this demo';
-});
-document.querySelector('#sample-note').addEventListener('input', () => {
-  document.querySelector('#note-status').textContent =
-    'Unsaved changes · Demo only';
-});
-
-const listInputs = [...document.querySelectorAll('[name="sample-list"]')];
-for (const input of listInputs) {
-  input.addEventListener('change', () => {
-    const count = listInputs.filter((checkbox) => checkbox.checked).length;
+  if (
+    event.data?.type === 'show-highlight' &&
+    frame.classList.contains('timeline-frame')
+  ) {
+    selectTab(document.querySelector('#tab-highlight'));
+  }
+  if (
+    event.data?.type === 'note-status' &&
+    frame.classList.contains('highlight-frame')
+  ) {
+    document.querySelector('#note-status').textContent = event.data.text;
+  }
+  if (
+    event.data?.type === 'list-status' &&
+    frame.classList.contains('organize-frame')
+  ) {
+    const count = event.data.count;
     document.querySelector('#list-status').textContent = count
       ? `One page, at home in ${count} ${count === 1 ? 'list' : 'lists'}.`
       : 'No lists selected. The page remains in your history.';
-  });
+  }
+});
+
+function sizeProductViewport(target, availableWidth) {
+  if (!availableWidth) return;
+  const frame = target.querySelector('iframe');
+  const width = Number(target.dataset.width);
+  const height = Number(target.dataset.height);
+  const scale = Math.min(1, availableWidth / width);
+  frame.style.width = `${width}px`;
+  frame.style.height = `${height}px`;
+  frame.style.transform = `scale(${scale})`;
+  target.style.height = `${height * scale}px`;
 }
+const viewportObserver = new ResizeObserver((entries) => {
+  for (const { target, contentRect } of entries)
+    sizeProductViewport(target, contentRect.width);
+});
+for (const viewport of document.querySelectorAll('.product-viewport'))
+  viewportObserver.observe(viewport);

@@ -26,7 +26,9 @@ Use this map to find the files that implement a feature. See
 | `icons/` | SVG sources for generated runtime icons |
 | `docs/images/` | Documentation PNGs and capture manifests |
 | `website/` | Static product page, responsive styles, and in-memory interactive illustration |
-| `scripts/build-website.mjs`, `scripts/serve-website.mjs` | Copy public website assets and preview at the GitHub Pages project path |
+| `website/demos/` | In-memory sample adapters for production Timeline, highlight editor, and list controls |
+| `apps/desktop/ui/timeline-elements.js`, `apps/extension/popup-list-elements.js` | Production renderers shared with the website demos |
+| `scripts/build-website.mjs`, `scripts/serve-website.mjs` | Extract product HTML/CSS, copy presentation modules/public assets, and preview at the GitHub Pages project path |
 | `playwright.website.config.js`, `tests/website/` | Desktop/mobile product-page scenarios, keyboard interaction, and no-JavaScript fallback |
 | `.github/workflows/website.yml` | Check the product website and publish the built directory to GitHub Pages |
 | `.github/workflows/ci.yml` | Seven regular CI runner jobs: Linux tests/coverage/lint, extension E2E, desktop visuals, Windows font fallback, macOS documentation URL routing, and Windows x64/macOS arm64 release validations |

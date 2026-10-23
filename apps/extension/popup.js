@@ -1,3 +1,4 @@
+import { listChipHtml } from './popup-list-elements.js';
 // Popup — current-page dashboard
 import {
   generateSlugFromUrl,
@@ -1207,12 +1208,7 @@ async function renderListChips(listOverride = null) {
       chip.textContent = list.name;
     });
   } else {
-    let html = displayLists
-      .map((list) => {
-        const pinned = list.containsPage;
-        return `<span class="list-chip${pinned ? ' selected' : ''}" role="button" tabindex="0" data-list-id="${list.slug}">${escapeHtml(list.name)}</span>`;
-      })
-      .join('');
+    let html = displayLists.map(listChipHtml).join('');
 
     html += `<span class="list-add-btn" id="listAddBtn" title="${escapeHtml(tr('extensionAddToList', 'Add to list', undefined))}">+</span>`;
 

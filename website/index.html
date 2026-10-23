@@ -140,122 +140,11 @@
             aria-labelledby="tab-find"
             tabindex="0"
           >
-            <aside class="demo-sidebar" aria-label="Timeline preview">
-              <span class="sidebar-brand">Your library</span>
-              <span class="sidebar-item selected"
-                ><span class="line-icon timeline-icon" aria-hidden="true"></span
-                >Timeline</span
-              >
-              <span class="sidebar-item"
-                ><span class="line-icon book-icon" aria-hidden="true"></span
-                >Book</span
-              >
-              <span class="sidebar-heading">Lists</span>
-              <span class="sidebar-list">Small web</span>
-              <span class="sidebar-list">Design details</span>
-              <span class="sidebar-list">Weekend reading</span>
-              <span class="sidebar-bottom">A place for your curiosity.</span>
-            </aside>
-            <div class="timeline-content">
-              <div class="panel-heading">
-                <h2>Find your way back.</h2>
-                <span class="subtle-label">Timeline</span>
-              </div>
-              <form
-                id="demo-search"
-                role="search"
-                aria-label="Search the sample collection"
-              >
-                <label class="search-box" for="search-input">
-                  <span class="search-icon" aria-hidden="true"></span>
-                  <input
-                    id="search-input"
-                    type="search"
-                    placeholder="Try “garden” or “small web”"
-                    autocomplete="off"
-                    aria-label="Search sample titles, URLs, highlights, notes, and snapshots"
-                    disabled
-                  />
-                  <button type="submit" disabled>
-                    Search <span aria-hidden="true">↵</span>
-                  </button>
-                </label>
-              </form>
-              <div class="history-heading">
-                <span id="results-label" role="status" aria-live="polite"
-                  >A little of what caught your eye</span
-                ><span>5 pages</span>
-              </div>
-              <div class="history-rows">
-                <article
-                  class="history-row"
-                  data-search="A smaller, slower web fieldnotes.example small web personal websites leave the unfinished bits in"
-                >
-                  <span class="page-symbol terracotta" aria-hidden="true"
-                    >f.</span
-                  >
-                  <div class="history-copy">
-                    <h3>A smaller, slower web</h3>
-                    <p>fieldnotes.example <span>·</span> Today, 10:42</p>
-                  </div>
-                  <span class="tag">Small web</span>
-                </article>
-                <article
-                  class="history-row"
-                  data-search="A garden that grows with you leaf.example garden plants balcony start with one pot and let curiosity take over"
-                >
-                  <span class="page-symbol olive" aria-hidden="true">l.</span>
-                  <div class="history-copy">
-                    <h3>A garden that grows with you</h3>
-                    <p>leaf.example <span>·</span> Today, 09:18</p>
-                  </div>
-                  <span
-                    class="row-indicator"
-                    aria-label="Has a highlight"
-                  ></span>
-                </article>
-                <article
-                  class="history-row"
-                  data-search="Good tools leave room for you workshop.example design details quiet places personal website"
-                >
-                  <span class="page-symbol blue" aria-hidden="true">w.</span>
-                  <div class="history-copy">
-                    <h3>Good tools leave room for you</h3>
-                    <p>workshop.example <span>·</span> Yesterday</p>
-                  </div>
-                  <span class="tag">Design details</span>
-                </article>
-                <article
-                  class="history-row"
-                  data-search="Lemon and white bean soup table.example recipe cooking weekend reading a squeeze of lemon at the end"
-                >
-                  <span class="page-symbol ochre" aria-hidden="true">t.</span>
-                  <div class="history-copy">
-                    <h3>Lemon and white bean soup</h3>
-                    <p>table.example <span>·</span> Yesterday</p>
-                  </div>
-                  <span
-                    class="row-indicator"
-                    aria-label="Has a highlight"
-                  ></span>
-                </article>
-                <article
-                  class="history-row"
-                  data-search="Notes from the old coast path footpath.example walk sea weekend reading snapshot saved copy the path bends toward the sea"
-                >
-                  <span class="page-symbol mauve" aria-hidden="true">p.</span>
-                  <div class="history-copy">
-                    <h3>Notes from the old coast path</h3>
-                    <p>footpath.example <span>·</span> Monday</p>
-                  </div>
-                  <span class="tag muted-tag">Snapshot</span>
-                </article>
-              </div>
-              <p id="empty-results" hidden>
-                No pages found in this sample. Try “garden”, “lemon”, or “small
-                web”.
-              </p>
-            </div>
+            <iframe
+              class="product-frame timeline-frame"
+              src="demos/timeline.html"
+              title="Browser Recall Timeline demo"
+            ></iframe>
           </div>
 
           <div
@@ -275,36 +164,25 @@
                 context.
               </p>
               <span class="demo-instruction"
-                >Try adding a note to this passage
+                >Click the highlight, then edit its note
                 <span aria-hidden="true">↗</span></span
               >
             </div>
-            <div class="reading-paper">
-              <div class="paper-masthead">FIELDNOTES <span>No. 018</span></div>
-              <h3>A smaller, slower web</h3>
-              <p>
-                A personal website can be a place to think out loud.
-                <mark>Leave room for the unfinished things.</mark> A photograph
-                from a walk, a question you cannot answer, a list that only
-                makes sense to you.
+            <div class="product-example">
+              <div
+                class="product-viewport highlight-viewport"
+                data-width="360"
+                data-height="370"
+              >
+                <iframe
+                  class="product-frame highlight-frame"
+                  src="demos/highlight.html"
+                  title="Browser Recall highlight editor demo"
+                ></iframe>
+              </div>
+              <p class="demo-status" id="note-status" role="status">
+                Click the highlighted passage to edit the note.
               </p>
-              <p>Over time, those small pieces begin to describe a life.</p>
-              <form id="note-form" class="note-form">
-                <label for="sample-note">Your note</label>
-                <textarea
-                  id="sample-note"
-                  rows="2"
-                  maxlength="240"
-                  placeholder="A thought worth keeping…"
-                >
-Leave a little room for curiosity.</textarea
-                >
-                <div>
-                  <span id="note-status" role="status" aria-live="polite"
-                    >Only in this demo</span
-                  ><button class="small-button" type="submit">Save note</button>
-                </div>
-              </form>
             </div>
           </div>
 
@@ -328,40 +206,19 @@ Leave a little room for curiosity.</textarea
                 <span aria-hidden="true">↗</span></span
               >
             </div>
-            <div class="list-paper">
-              <span class="page-symbol terracotta" aria-hidden="true">f.</span>
-              <h3>A smaller, slower web</h3>
-              <p class="sample-url">fieldnotes.example</p>
-              <fieldset>
-                <legend>Keep in your lists</legend>
-                <label
-                  ><span>Small web</span
-                  ><input
-                    type="checkbox"
-                    name="sample-list"
-                    value="Small web"
-                    checked /></label
-                ><label
-                  ><span>Design details</span
-                  ><input
-                    type="checkbox"
-                    name="sample-list"
-                    value="Design details" /></label
-                ><label
-                  ><span>Weekend reading</span
-                  ><input
-                    type="checkbox"
-                    name="sample-list"
-                    value="Weekend reading"
-                    checked
-                /></label>
-              </fieldset>
-              <p
-                id="list-status"
-                class="list-status"
-                role="status"
-                aria-live="polite"
+            <div class="product-example">
+              <div
+                class="product-viewport organize-viewport"
+                data-width="296"
+                data-height="245"
               >
+                <iframe
+                  class="product-frame organize-frame"
+                  src="demos/organize.html"
+                  title="Browser Recall list controls demo"
+                ></iframe>
+              </div>
+              <p class="demo-status" id="list-status" role="status">
                 One page, at home in 2 lists.
               </p>
             </div>

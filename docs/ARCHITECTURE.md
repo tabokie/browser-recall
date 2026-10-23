@@ -10,7 +10,12 @@ The public product website in `website/` is a separate static page hosted on
 GitHub Pages. The website presents the product through a browser-local sample
 collection and verified documentation screenshots. The website has no backend,
 analytics, or access to the daemon or a visitor's Browser Recall data. Website
-builds copy only the page and selected public assets to `dist/website/`.
+builds copy the page and selected presentation modules/public assets to
+`dist/website/`. Timeline search and result renderers and popup list-chip markup
+are shared with the production interfaces. Highlighting uses the production
+highlight lifecycle and floating note editor. The build extracts production
+HTML/CSS into iframe documents, keeping product styling independent of website
+styling. The demo scripts supply fictional content and in-memory actions only.
 
 The daemon is the Rust service that reads and writes Browser Recall data. The daemon
 runs inside the desktop app and accepts commands from the desktop interface and

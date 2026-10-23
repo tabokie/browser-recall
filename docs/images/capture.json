@@ -75,13 +75,14 @@
     "apps/desktop/ui/fonts/nunito.woff2": "f85212b2392aff6c178df5c0c6176fe341785ba641e6ec4ab0c80fb10dc38e0c",
     "apps/desktop/ui/highlight-format.js": "9e5be7cc41e99dbfa9f5262aebacfe77da0cbca58416e6e53536cb01abd6f00d",
     "apps/desktop/ui/index.html": "cdf6f170f1037d91b433e479c0f872671f4d142cd1df8a7a0ff98576593b24ea",
-    "apps/desktop/ui/index.js": "c340a59442bce580602462fff06b2971850385aa8fe27d13b0930065daa18687",
+    "apps/desktop/ui/index.js": "7da6b2da1c26654e8a54540d050856c22d57b044ee602b04fac8800121bb09a8",
     "apps/desktop/ui/logger.js": "73939f96285999acfd96bf693d081955a6be4cb6929f17b2aeea59774b632f8c",
     "apps/desktop/ui/search-runtime.d.ts": "4c41e73480a780bc85d7e8f8279c87ba00e8b0753a52ca82375aca32baa1d797",
     "apps/desktop/ui/search-runtime.js": "68b8a6cd99b5b64628df2c8f86224a80a5eca025dd3c77cdab1e315f409dadf7",
     "apps/desktop/ui/shared.css": "7a1f0a695b89f29349af111d134a169bb309b15d8b904741fc88616a9d80eb38",
     "apps/desktop/ui/theme.js": "1b00783e53576694e49414c5e7862db7cce928e59f39a72f918a5f27f4a0d488",
     "apps/desktop/ui/time-chart.js": "c3951dc6485faa02d9a43b19625eac0b86cc973709e3cddd0bfa0813467646bf",
+    "apps/desktop/ui/timeline-elements.js": "5e3850f59810711c96acb2f5177d176e395bfed2106dd922827d89affbe22dd5",
     "apps/desktop/ui/utils.js": "849e90e145e6bfad9af7d3751b34b966b39603bea57863dfce4e055ccca47100",
     "apps/desktop/ui/virtual-scroller.js": "dd6dc0601e86bec3e503451dd0cf37330dafb73d6994aafcc76f9acd85292407",
     "apps/desktop/package.json": "b703d0257661b7d6c0eba39e923ef341eee608a335b7365491ca3d36a7a313da",
@@ -97,9 +98,9 @@
     "apps/desktop/src-tauri/src/windows_icon.rs": "114c1dd99ab60d9d23eb7c88bc0ae435266222f6e8657a7db58bbfc99854ebd1",
     "apps/desktop/src-tauri/build.rs": "a243e40d9c2faa063094a5644b325f9d52e54b71074e6014f2eaafd76c2cc9cc",
     "apps/desktop/src-tauri/build_support.rs": "a3428b913d4e5557d61030c005533b75c78daef397e73cb7d0764d4321a47717",
-    "apps/desktop/src-tauri/Cargo.toml": "7c24547f0ece8cf2cdf84d148f2f4d95fd5815eb26d212bf9163079567cef540",
+    "apps/desktop/src-tauri/Cargo.toml": "586b0511bfa65aad4a669aec8a06a32024e75a804717fb2002580c04f75c68f9",
     "apps/desktop/src-tauri/capabilities/main.json": "ad00db1db6a74b09e75e37fbeb63b4f2052b80b4f60fe8a0ec826a951c3338dc",
-    "Cargo.lock": "44acfb6a344f6b47f392a79bba6a9bd561254041e828c59a777f540e0f6f8151",
+    "Cargo.lock": "ecabad57494b0b40014ef94f5b9d97c0b34fde0d577ef658023bb165e4ae9a54",
     "Cargo.toml": "575afa94419349bbda4e73e4287f56fb55453c17fa7052fe8ec6b775a03cf48c",
     "rust-toolchain.toml": "f7cbfca0c3a394984b9eadf81df706d3a7c671ba479aecc12c154bf7c36d77db",
     "apps/desktop/src-tauri/icons/icon.icns": "27af23b25f93f42712fb5aaad2bd7edb437a0c5a056c4164b9d30ef524c493d6",
@@ -134,7 +135,7 @@
   },
   "screenshots": {
     "timeline.png": {
-      "sha256": "bc90f7ab3bf468fe6c8e3a6afe4c17b1875217a2e3d2d0fc36a96cc1af8673b5",
+      "sha256": "5a4a4a9bf2303fd2e40ad82bd8866bee8abab29bab69d6e67f4c338a6bec580d",
       "width": 2080,
       "height": 1400
     },
@@ -144,19 +145,19 @@
       "height": 1400
     },
     "timeline-mono.png": {
-      "sha256": "eb3a1ed1509970e73677da00072623a0c942f227334d0ce65d61ff542eb596c7",
+      "sha256": "4aa88de214449410ba01611e784fc4d347eb61ac089302ca4a27b02b25bf2cda",
       "width": 2080,
       "height": 1400
     },
     "timeline-styles.png": {
-      "sha256": "7fc1247b50971a7414f3d71e13ebdd54ee4426163e627d06173aae92f01cb578",
+      "sha256": "0110eebd7256d9f8c5888f62bc8c2b9cca4baa37c875ed53ad92652286d3a4a2",
       "width": 2080,
       "height": 1400,
       "composition": {
         "sources": ["timeline.png", "timeline-mono.png"],
         "sourceSha256": [
-          "bc90f7ab3bf468fe6c8e3a6afe4c17b1875217a2e3d2d0fc36a96cc1af8673b5",
-          "eb3a1ed1509970e73677da00072623a0c942f227334d0ce65d61ff542eb596c7"
+          "5a4a4a9bf2303fd2e40ad82bd8866bee8abab29bab69d6e67f4c338a6bec580d",
+          "4aa88de214449410ba01611e784fc4d347eb61ac089302ca4a27b02b25bf2cda"
         ],
         "split": { "top": 0.62, "bottom": 0.38 }
       }
