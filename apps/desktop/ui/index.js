@@ -51,8 +51,17 @@ import {
 } from './entity-types.js';
 import { logDebug, logError } from './logger.js';
 import { applyTheme } from './theme.js';
-import { justify } from './vendor/justif/index.js';
-import { hyphenateEnUS } from './vendor/justif/hyphenate/en-us.js';
+import { justifyBookParagraph } from './book-typesetting.js';
+import {
+  DETAIL_ICON_EDIT,
+  DETAIL_ICON_DELETE,
+  detailNoteContentHtml,
+  highlightHistoryTextHtml,
+  highlightHistoryEntryHtml,
+  highlightHistoryDayHtml,
+  highlightHistoryPageGroupHtml,
+  formatHighlightHistoryDate,
+} from './book-elements.js';
 import {
   canonicalRegisteredLocale,
   getActiveLocale,
@@ -2763,32 +2772,17 @@ function destroyHighlightHistoryJustification(
 function applyHighlightHistoryJustification(container) {
   for (const paragraph of highlightHistoryTextElements(container)) {
     destroyHighlightHistoryJustification([paragraph]);
-    const options = {
-      hyphenate: hyphenateEnUS,
-      hangingPunctuation: 'all-lines',
-      lastLineMinWidth: 0.5,
-      onSkip: (_skippedParagraph, reason) => {
+    const controller = justifyBookParagraph(
+      paragraph,
+      (_skippedParagraph, reason) => {
         logDebug('Highlight history text kept native layout:', reason);
       },
-    };
-    if (paragraph.matches('.detail-note-content')) {
-      options.pretolerance = -1;
-    }
-    const controller = justify(paragraph, options);
+    );
     highlightHistoryState.justificationControllers.set(paragraph, controller);
     controller.ready.catch((error) => {
       logError('Failed to finish highlight history text layout', error);
     });
   }
-}
-
-function highlightHistoryTextHtml(text) {
-  return escapeHtml(text).replace(/\r\n?|\n/g, '<br>\n');
-}
-
-function detailNoteContentHtml(noteText, formatText = escapeHtml) {
-  if (!noteText) return '';
-  return `<span class="detail-note-content">${formatText(noteText)}</span>`;
 }
 
 function disableGlobalVirtualScrollerForDirectRender() {
@@ -2801,59 +2795,8 @@ function disableGlobalVirtualScrollerForDirectRender() {
   container.style.paddingBottom = '';
 }
 
-function highlightHistoryPageMetaHtml(item) {
-  const { page, createdAt } = item;
-  const url = new URL(page.url);
-  const site =
-    url.protocol === 'file:' ? 'file' : url.hostname.replace(/^www\./, '');
-  const title = page.user_title || page.title || page.url;
-  return `<div class="highlight-history-meta">
-    <span class="highlight-history-page-title" data-url="${escapeHtml(page.url)}" role="link" tabindex="0"><span class="highlight-history-page-title-label">${escapeHtml(title)}</span></span>
-    <span class="highlight-history-site">${escapeHtml(site)}</span>
-    <span class="highlight-history-time">${escapeHtml(formatTime(createdAt))}</span>
-  </div>`;
-}
-
-function highlightHistoryEntryHtml(item) {
-  const { note } = item;
-  const excerpt = formatHighlightExcerpt(note.excerpt);
-  const noteBody = detailNoteContentHtml(note.note, highlightHistoryTextHtml);
-  const contentClass = note.note
-    ? 'highlight-history-content has-note'
-    : 'highlight-history-content';
-  return `<article class="highlight-history-entry detail-note-entry" data-note-slug="${escapeHtml(note.slug)}">
-    <div class="${contentClass}">
-      <div class="highlight-history-quote">
-        <div class="detail-note-header">
-          <div class="detail-note-excerpt">${highlightHistoryTextHtml(excerpt)}</div>
-          <button class="detail-note-action-btn delete" title="${escapeHtml(tr('extensionDeleteHighlight', 'Delete highlight'))}">${DETAIL_ICON_DELETE}</button>
-        </div>
-      </div>
-      <div class="detail-note-body">
-        ${noteBody}
-        <button class="detail-note-action-btn edit" title="${escapeHtml(tr('extensionEditNote', 'Edit note'))}">${DETAIL_ICON_EDIT}</button>
-      </div>
-    </div>
-  </article>`;
-}
-
-function formatHighlightHistoryDate(timestamp) {
-  const date = new Date(timestamp);
-  return [
-    String(date.getFullYear()).slice(-2),
-    String(date.getMonth() + 1).padStart(2, '0'),
-    String(date.getDate()).padStart(2, '0'),
-  ].join('');
-}
-
 function appendHighlightHistoryDay(list, dateLabel) {
-  list.insertAdjacentHTML(
-    'beforeend',
-    `<section class="highlight-history-day-section" data-highlight-history-date="${dateLabel}">
-      <h2 class="highlight-history-date"><span class="highlight-history-date-label">${dateLabel}</span></h2>
-      <div class="highlight-history-day-entries"></div>
-    </section>`,
-  );
+  list.insertAdjacentHTML('beforeend', highlightHistoryDayHtml(dateLabel));
   return list.lastElementChild;
 }
 
@@ -2867,10 +2810,9 @@ function getHighlightHistoryDay(list, dateLabel) {
 function appendHighlightHistoryPageGroup(dayEntries, item) {
   dayEntries.insertAdjacentHTML(
     'beforeend',
-    `<section class="highlight-history-page-group" data-highlight-history-page-url="${escapeHtml(item.page.url)}">
-      ${highlightHistoryPageMetaHtml(item)}
-      <div class="highlight-history-page-entries"></div>
-    </section>`,
+    highlightHistoryPageGroupHtml(item, {
+      timeLabel: formatTime(item.createdAt),
+    }),
   );
   return dayEntries.lastElementChild;
 }
@@ -2895,7 +2837,10 @@ function appendHighlightHistoryItems(list, items) {
     );
     pageEntries.insertAdjacentHTML(
       'beforeend',
-      highlightHistoryEntryHtml(item),
+      highlightHistoryEntryHtml(item, {
+        deleteLabel: tr('extensionDeleteHighlight', 'Delete highlight'),
+        editLabel: tr('extensionEditNote', 'Edit note'),
+      }),
     );
     entries.push(pageEntries.lastElementChild);
     pageGroups.add(pageGroup);
@@ -4521,10 +4466,6 @@ function renderVisitDatesHtml(visitDates, cardTimestamp) {
   return '';
 }
 
-const DETAIL_ICON_EDIT =
-  '<svg data-icon="edit" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 1.5l3 3L5 14H2v-3z"/></svg>';
-const DETAIL_ICON_DELETE =
-  '<svg data-icon="delete" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>';
 const DETAIL_ICON_CONFIRM =
   '<svg data-icon="checkmark" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter"><path d="M2.5 8.5l3.2 3.2L13.5 4"/></svg>';
 const DETAIL_ICON_FOLDER =

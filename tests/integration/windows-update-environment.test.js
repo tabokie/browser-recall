@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   mkdtempSync,
@@ -11,37 +11,19 @@ import path from 'node:path';
 import { expect, test } from 'vitest';
 import { isolatedDesktopEnvironment } from '../smoke/windows-desktop-test-profile.mjs';
 import { withCleanup } from '../smoke/desktop-test-cleanup.mjs';
+import { runPowerShell } from '../smoke/powershell-process.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const environmentHelper = path.join(
   root,
   'tests/smoke/windows-desktop-update-environment.ps1',
 );
-const portablePowershell =
-  process.env.BROWSER_RECALL_TEST_POWERSHELL ||
-  (process.platform === 'win32' ? 'powershell.exe' : 'pwsh');
-const powershellProbe = spawnSync(
-  portablePowershell,
-  [
-    '-NoProfile',
-    '-NonInteractive',
-    '-Command',
-    '$PSVersionTable.PSVersion.ToString()',
-  ],
-  { encoding: 'utf8', timeout: 10000 },
-);
 
-test
-  .skipIf(
-    process.platform !== 'win32' &&
-      !process.env.BROWSER_RECALL_TEST_POWERSHELL &&
-      powershellProbe.error?.code === 'ENOENT',
-  )
-  .each([false, true])(
+// These reader checks are portable and mandatory; only registry changes below
+// require a disposable Windows runner. Missing PowerShell must never look green.
+test.each([false, true])(
   'environment rollback iterates separate absent and existing entries; Windows PowerShell array behavior: %s',
-  (windowsArrayBehavior) => {
-    expect(powershellProbe.error).toBeUndefined();
-    expect(powershellProbe.status).toBe(0);
+  async (windowsArrayBehavior) => {
     const work = mkdtempSync(
       path.join(tmpdir(), 'browser-recall-rollback-json-'),
     );
@@ -90,23 +72,17 @@ foreach ($entry in $snapshot) {
 }
 `,
       );
-      const result = execFileSync(
-        portablePowershell,
-        ['-NoProfile', '-NonInteractive', '-File', script],
-        {
-          encoding: 'utf8',
-          timeout: 10000,
-          env: {
-            ...process.env,
-            BROWSER_RECALL_SNAPSHOT_HELPER: path.join(
-              root,
-              'tests/smoke/windows-update-environment-snapshot.ps1',
-            ),
-            BROWSER_RECALL_SNAPSHOT_FILE: state,
-            BROWSER_RECALL_WINDOWS_JSON_ARRAY: windowsArrayBehavior ? '1' : '0',
-          },
+      const result = await runPowerShell(['-File', script], {
+        env: {
+          ...process.env,
+          BROWSER_RECALL_SNAPSHOT_HELPER: path.join(
+            root,
+            'tests/smoke/windows-update-environment-snapshot.ps1',
+          ),
+          BROWSER_RECALL_SNAPSHOT_FILE: state,
+          BROWSER_RECALL_WINDOWS_JSON_ARRAY: windowsArrayBehavior ? '1' : '0',
         },
-      );
+      });
       expect(
         result
           .trim()
@@ -117,6 +93,7 @@ foreach ($entry in $snapshot) {
       rmSync(work, { recursive: true, force: true });
     }
   },
+  75_000,
 );
 
 // User environment changes and token-based launches belong on disposable runners.

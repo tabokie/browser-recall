@@ -2,6 +2,7 @@ import {
   resultRowHtml,
   searchDraftControlHtml,
 } from '../../apps/desktop/ui/timeline-elements.js';
+import { justifyBookParagraph } from '../../apps/desktop/ui/book-typesetting.js';
 
 const tr = (_key, fallback) => fallback;
 const samples = [
@@ -49,77 +50,134 @@ document.querySelector('#demoSearch').innerHTML = searchDraftControlHtml(
   tr,
 );
 const search = document.querySelector('#searchDraftInput');
-search.setAttribute('aria-label', 'Search the sample collection');
-const clear = document.querySelector('#searchDraftClearBtn');
+search.readOnly = true;
+search.setAttribute('aria-label', 'Timeline search preview');
+document.querySelector('#demoSearch').inert = true;
 
-function render() {
-  const query = search.value.trim().toLocaleLowerCase();
-  container.innerHTML = samples
-    .filter((sample) =>
-      `${sample.title} ${sample.url} ${sample.note} ${(sample.listSlugs || []).map((slug) => listNameById.get(slug)).join(' ')}`
-        .toLocaleLowerCase()
-        .includes(query),
-    )
-    .map((sample, index) =>
-      resultRowHtml(
-        sample.title,
-        sample.url,
-        {
-          ...sample,
-          timestamps: [Date.UTC(2026, 8, 16, 10 - index)],
-          attScore: 5 - index,
-          maxAtt: 5,
-          matchSources:
-            query && sample.note.toLocaleLowerCase().includes(query)
-              ? new Set(['note'])
-              : undefined,
-        },
-        {
-          tr,
-          listNameById,
-          cardDataByUrl,
-          formatTime: (timestamp) =>
-            new Date(timestamp).toLocaleTimeString('en', {
-              hour: 'numeric',
-              minute: '2-digit',
-              timeZone: 'UTC',
-            }),
-          deleteIcon: '',
-        },
-      ),
-    )
-    .join('');
-  if (!container.children.length)
-    container.textContent =
-      'No pages found in this sample. Try “garden”, “lemon”, or “small web”.';
-  // Result cards are real product markup. Details and navigation are outside
-  // this focused search demonstration; disable those controls explicitly.
-  for (const item of container.querySelectorAll('.result-item'))
-    item.draggable = false;
-  for (const button of container.querySelectorAll('button'))
-    button.disabled = true;
+container.innerHTML = samples
+  .map((sample, index) =>
+    resultRowHtml(
+      sample.title,
+      sample.url,
+      {
+        ...sample,
+        timestamps: [Date.UTC(2026, 8, 16, 10 - index)],
+        attScore: 5 - index,
+        maxAtt: 5,
+      },
+      {
+        tr,
+        listNameById,
+        cardDataByUrl,
+        formatTime: (timestamp) =>
+          new Date(timestamp).toLocaleTimeString('en', {
+            hour: 'numeric',
+            minute: '2-digit',
+            timeZone: 'UTC',
+          }),
+        deleteIcon: '',
+      },
+    ),
+  )
+  .join('');
+for (const item of container.querySelectorAll('.result-item'))
+  item.draggable = false;
+for (const button of container.querySelectorAll('button')) {
+  button.disabled = true;
+  button.setAttribute('aria-hidden', 'true');
 }
-search.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') render();
+
+// Match the desktop's click, toggle, and range selection. The production
+// .result-row.selected rule supplies the visual highlight.
+let selectionAnchor = null;
+function selectRow(row, event) {
+  const rows = [...container.querySelectorAll('.result-row')];
+  const additive = event.ctrlKey || event.metaKey;
+  if (event.shiftKey && selectionAnchor) {
+    const from = rows.indexOf(selectionAnchor);
+    const to = rows.indexOf(row);
+    if (!additive) rows.forEach((item) => item.classList.remove('selected'));
+    for (let i = Math.min(from, to); i <= Math.max(from, to); i++)
+      rows[i].classList.add('selected');
+  } else if (additive) {
+    row.classList.toggle('selected');
+    selectionAnchor = row;
+  } else {
+    const toggleOff =
+      row.classList.contains('selected') &&
+      rows.filter((item) => item.classList.contains('selected')).length === 1;
+    rows.forEach((item) => item.classList.remove('selected'));
+    row.classList.toggle('selected', !toggleOff);
+    selectionAnchor = toggleOff ? null : row;
+  }
+  for (const item of container.querySelectorAll('.result-item'))
+    item.setAttribute(
+      'aria-pressed',
+      String(item.querySelector('.result-row').classList.contains('selected')),
+    );
+}
+for (const item of container.querySelectorAll('.result-item')) {
+  item.tabIndex = 0;
+  item.setAttribute('role', 'button');
+  item.setAttribute('aria-pressed', 'false');
+}
+container.addEventListener('click', (event) => {
+  if (event.target.closest('.att-ctrl, .card-actions')) return;
+  const row = event.target
+    .closest('.result-item')
+    ?.querySelector('.result-row');
+  if (row) selectRow(row, event);
 });
-search.addEventListener('input', () => {
-  clear.classList.toggle('visible', Boolean(search.value));
-  if (!search.value) render();
+container.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  const row = event.target
+    .closest('.result-item')
+    ?.querySelector('.result-row');
+  if (!row) return;
+  event.preventDefault();
+  selectRow(row, event);
 });
-clear.addEventListener('click', () => {
-  search.value = '';
-  clear.classList.remove('visible');
-  render();
-  search.focus();
-});
+
+const bookTypesetting = new Map();
+function typesetBook() {
+  for (const paragraph of document.querySelectorAll(
+    '#demoBook .detail-note-excerpt, #demoBook .detail-note-content',
+  )) {
+    const existing = bookTypesetting.get(paragraph);
+    if (existing) {
+      existing.refresh();
+      continue;
+    }
+    const controller = justifyBookParagraph(
+      paragraph,
+      (_skippedParagraph, reason) =>
+        console.debug('Book text kept native layout:', reason),
+    );
+    bookTypesetting.set(paragraph, controller);
+    controller.ready.catch((error) =>
+      console.error('Failed to finish Book text layout', error),
+    );
+  }
+}
+
+function showView(book) {
+  document.querySelector('#mainTitle').textContent = book ? 'Book' : 'Timeline';
+  document.querySelector('#exploreBtn').classList.toggle('active', !book);
+  document
+    .querySelector('#highlightsHistoryBtn')
+    .classList.toggle('active', book);
+  document.querySelector('.search-filters-panel').hidden = book;
+  document.querySelector('#resultsWrapper').hidden = book;
+  document.querySelector('#demoBook').hidden = !book;
+  document.querySelector('.sidebar').classList.remove('sidebar-open');
+  if (book) typesetBook();
+}
 document
   .querySelector('#exploreBtn')
-  .addEventListener('click', () => clear.click());
+  .addEventListener('click', () => showView(false));
 document
   .querySelector('#highlightsHistoryBtn')
-  .addEventListener('click', () => {
-    parent.postMessage({ type: 'show-highlight' }, location.origin);
-  });
+  .addEventListener('click', () => showView(true));
 document
   .querySelector('#sidebarToggle')
   .addEventListener('click', () =>
@@ -130,4 +188,3 @@ document
   .addEventListener('click', () =>
     document.querySelector('.sidebar').classList.remove('sidebar-open'),
   );
-render();

@@ -1,0 +1,65 @@
+/* Preview documents share the page's native scroll chain. Product controls
+   retain their styles; only the embedded app's scroll containers change. */
+html,
+body,
+.main,
+.scroll-boundary-contained,
+.sidebar-content {
+  overflow: hidden;
+  overscroll-behavior: auto;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* Keep the product navigation beside the sample at normal phone widths.
+   The desktop app's overlay navigation remains available below 320px. */
+@media (min-width: 320px) and (max-width: 768px) {
+  .sidebar {
+    --sidebar-padding-x: 7px;
+    display: flex;
+    position: static;
+    width: clamp(108px, 24vw, 180px);
+    min-width: 108px;
+    height: calc(
+      100vh - var(--desktop-titlebar-space) - var(--desktop-panel-bottom-space)
+    );
+    margin: var(--desktop-titlebar-space) 0 var(--desktop-panel-bottom-space)
+      8px;
+    border-radius: var(--radius-xl);
+    z-index: auto;
+  }
+  .sidebar-header h1 {
+    font-size: clamp(13px, 2.35vw, 18px);
+  }
+  .sidebar-hero-button {
+    gap: 6px;
+    padding-inline: 6px;
+  }
+  .sidebar-open ~ .sidebar-overlay,
+  #sidebarToggle {
+    display: none;
+  }
+  .main {
+    min-width: 0;
+    padding-right: 0;
+  }
+  .main-header {
+    padding-inline: 16px;
+  }
+  .results-container {
+    --results-padding: 10px;
+  }
+}
+
+@media (min-width: 320px) and (max-width: 480px) {
+  .result-site,
+  .result-time {
+    display: none;
+  }
+  .highlight-history-content.has-note {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 8px;
+  }
+}

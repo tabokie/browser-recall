@@ -6,6 +6,11 @@ See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for how Browser Recall works and
 ## Prerequisites
 
 - Node.js 24+ and npm dependencies from `package-lock.json`.
+- PowerShell for the portable Windows environment rollback checks. Install
+  [PowerShell 7.6.6](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell)
+  on macOS/Linux; GitHub Actions pins the same release. Windows uses built-in
+  Windows PowerShell 5.1. Set `BROWSER_RECALL_TEST_POWERSHELL` to select an explicit
+  executable when PowerShell is outside `PATH`.
 - Firefox for the real Firefox extension check; CI pins Firefox 157.0.1. Set
   `FIREFOX_BINARY` if Firefox is not installed at the default system path.
 - Rust 1.97.0 with Rustfmt, Clippy, and LLVM tools, pinned in `rust-toolchain.toml`.
@@ -15,6 +20,7 @@ See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for how Browser Recall works and
 
 ```bash
 npm ci
+npm run ci:check-prerequisites
 cargo install cargo-llvm-cov --version 0.8.5 --locked
 npm run ci:install-playwright
 npm run ci:install-desktop-visual-browsers
@@ -30,9 +36,25 @@ Playwright installation includes Linux system libraries and fonts through
 The product page lives in `website/` and uses plain HTML, CSS, and JavaScript.
 The website build copies the existing Browser Recall icon, product fonts, and
 verified documentation screenshots into `dist/website/`. The first three demos
-reuse production components: Timeline search/results, the browser highlight
-editor, and popup list chips. The build reads desktop and popup HTML/CSS directly;
+reuse production components: Timeline search/results, saved browser highlights,
+and popup list chips. Timeline search and the saved highlight are display-only.
+Timeline rows support selection using the production highlight styles. The desktop
+sidebar switches between Timeline and Book, whose sample content comes from
+`scripts/lib/documentation-seed.mjs`. Book retains the full multi-day sample
+inside the same fixed-height viewport as Timeline. Content beyond the viewport
+is clipped, and the outer page owns scrolling. The build reads desktop and popup
+HTML/CSS directly;
 isolated iframe documents prevent website styles from changing product controls.
+Book uses `apps/desktop/ui/book-elements.js` for the same day, page, and highlight
+markup as the desktop app, with editing and page links omitted in the read-only
+demo. Hosts retain data loading, grouping, and event handlers. Book also uses
+`apps/desktop/ui/book-typesetting.js`, shared with the desktop app,
+and the same locked Justif package, English hyphenation, and punctuation settings.
+The website build copies Justif and its license into local assets; typesetting
+does not load remote scripts.
+The demo keeps a compact sidebar visible at phone widths, hiding Timeline site
+and time columns when space is limited. Overlay navigation is used only when
+the embedded viewport is narrower than 320px.
 No application build or daemon is needed. Install Node.js 24+ and run `npm ci` first.
 
 ```bash
@@ -45,14 +67,25 @@ project path so relative asset links are exercised before deployment. Stop the
 preview with Ctrl+C. Re-run the preview command after editing source files.
 
 ```bash
-npm run ci:install-playwright
+npm run ci:install-desktop-visual-browsers
 npm run test:website
 ```
 
-Playwright checks the sample search, note editing, list selection, keyboard tabs,
-mobile layout, screenshots, and installation links, including without JavaScript.
+Playwright checks Timeline/Book navigation, the display-only controls, list
+selection, page scrolling over previews, keyboard tabs, mobile layout,
+screenshots, and installation links, including without JavaScript. Chromium and
+mobile WebKit cover phone layouts and a consistent 510px demo height across all
+feature tabs. Chromium also drives native touch scrolling. Playwright cannot
+drive native swipes in mobile WebKit, so a separate WebKit project verifies wheel
+scroll chaining at phone width; native Safari swipes still need a device check.
 The interactive illustration uses fictional content and keeps edits only in the
 current page; the illustration does not connect to Browser Recall data.
+
+`website/analytics.js` loads GoatCounter asynchronously on HTTPS pages outside
+localhost, using the blog's `https://tabokie.goatcounter.com/count` endpoint.
+Page views use the fixed `/browser-recall/` path so query strings and fragment
+links do not split the count. Automatic click events are disabled. Local HTTP
+previews and embedded demo documents do not load GoatCounter.
 
 `.github/workflows/website.yml` runs these checks for relevant pull requests and
 publishes `dist/website/` on relevant pushes to `main`. In GitHub repository
@@ -318,9 +351,13 @@ and verifies restoration after a simulated failure. The regression helper
 duplicates the desktop user's token, matching the installer, and reports the
 Windows API operation and error code on failure. The final Windows validation
 gate prints failed test names and errors from the individual JSON reports.
-The rollback JSON reader also runs without registry access when PowerShell is
-available (`pwsh` on macOS/Linux, or `BROWSER_RECALL_TEST_POWERSHELL` for an explicit
-executable). The regression checks absent values and saved string/expandable
+The rollback JSON reader runs without registry access on every platform and is
+required by JavaScript tests and coverage. Missing PowerShell fails explicitly;
+`npm run ci:check-prerequisites` checks PowerShell before the full local suite and
+the hosted tests. Portable PowerShell processes run asynchronously with closed
+standard input and a 60-second deadline, including startup. A subprocess regression
+delays startup beyond the former 10-second limit and runs the real reader.
+The regression checks absent values and saved string/expandable
 string values, including Windows PowerShell 5.1's JSON array pipeline behavior.
 The regression serializes each entry visited by restoration's `foreach` loop;
 Windows PowerShell 5.1 can add `value`/`Count` properties when reserializing the
@@ -436,12 +473,13 @@ the daemon before starting tests that use the daemon; compiling Rust during test
 setup can exceed the startup timeout. To test a build without cached Rust output,
 set `CARGO_TARGET_DIR` to a temporary directory and run the same `ci:*` command.
 
-Regular CI has seven runner jobs: one Linux tests/coverage/lint job, extension E2E,
+Regular CI has seven runner jobs: Tests, Coverage and Lint, extension E2E,
 macOS visual regression, two native release-validation jobs, and Windows extension
 system-font fallback, and macOS documentation URL routing. Native packaging,
 Windows font checks, and macOS documentation URL routing start independently
-in parallel with the Linux checks. The Linux job validates release versions,
-README images, and JavaScript formatting before installing desktop build tooling.
+in parallel with Tests, Coverage and Lint. Tests, Coverage and Lint uses an Ubuntu
+runner and validates PowerShell availability, release versions, README images,
+and JavaScript formatting before installing desktop build tooling.
 Pinned actionlint 1.7.12 validates workflow syntax and reusable-workflow inputs.
 JavaScript tests run once with V8 coverage. Rust workspace tests run once under
 `cargo llvm-cov`; both Rust reports reuse that execution. A newer push cancels the

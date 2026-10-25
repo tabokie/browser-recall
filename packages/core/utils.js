@@ -137,9 +137,11 @@ export function collectVisitDateKeys(item = {}) {
 
 // Escape HTML entities for safe insertion into innerHTML
 export function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+  return String(text ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
 }
 
 // Generate deterministic slug for a note entity

@@ -8,14 +8,31 @@ The browser extension captures pages and provides current-page actions.
 
 The public product website in `website/` is a separate static page hosted on
 GitHub Pages. The website presents the product through a browser-local sample
-collection and verified documentation screenshots. The website has no backend,
-analytics, or access to the daemon or a visitor's Browser Recall data. Website
+collection and verified documentation screenshots. The website has no backend
+or access to the daemon or a visitor's Browser Recall data. The HTTPS website
+uses GoatCounter for page views in the existing blog dashboard, under the
+`/browser-recall/` path. Local previews and embedded demos do not load GoatCounter,
+and automatic click events are disabled. Website
 builds copy the page and selected presentation modules/public assets to
 `dist/website/`. Timeline search and result renderers and popup list-chip markup
 are shared with the production interfaces. Highlighting uses the production
-highlight lifecycle and floating note editor. The build extracts production
+highlight lifecycle and saved-note renderer in a display-only preview. Timeline
+search is display-only, Timeline rows support selection, and Book uses the
+documentation screenshot seed with production styles. Book retains the full
+multi-day content inside the same fixed-height iframe as Timeline, clipping
+content beyond the viewport. All feature panels retain the same 510px height,
+fitting interactive previews into the space below the phone copy. Desktop and
+website Book markup shares `book-elements.js`, a presentation module with a
+read-only option; hosts own data loading, grouping, and interactions. Book paragraphs share
+`book-typesetting.js`, using the same Justif version, English hyphenation, and
+punctuation settings. The website build includes Justif as local assets.
+The build extracts production
 HTML/CSS into iframe documents, keeping product styling independent of website
-styling. The demo scripts supply fictional content and in-memory actions only.
+styling. Embedded document styles let scrolling reach the main page. The demo
+keeps a compact sidebar visible down to a 320px embedded viewport; narrower
+viewports use the product's overlay navigation. Timeline site and time columns
+are hidden on compact phone layouts to leave room for page titles. The demo
+scripts supply fictional content and in-memory page and list selection only.
 
 The daemon is the Rust service that reads and writes Browser Recall data. The daemon
 runs inside the desktop app and accepts commands from the desktop interface and
@@ -562,8 +579,13 @@ disposable user's environment registry, because the elevated installer's
 token-based relaunch rebuilds the environment from the Windows user profile.
 Teardown restores the previous values and registry types before removing the
 test profile; a failed restoration retains the rollback file for recovery.
-Linux tests, lint, and coverage share one job. Each JavaScript and Rust suite runs
-once with coverage, and Rust coverage reports reuse the same execution.
+Tests, Coverage and Lint runs on an Ubuntu runner. Each JavaScript and Rust suite
+runs once with coverage, and Rust coverage reports reuse the same execution.
+Portable Windows environment rollback checks require PowerShell on every platform;
+the full local suite and hosted tests check availability before expensive work.
+Missing PowerShell is an error, and each portable invocation runs asynchronously
+with closed standard input and a 60-second deadline. Only the registry and native
+token-launch regression requires a disposable Windows GitHub runner.
 
 Local and hosted verification share `ci:*` scripts. Documentation captures are
 manual macOS workflows. Native window pixels are composited over a fixed light

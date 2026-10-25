@@ -1,10 +1,10 @@
 # Browser Recall — Privacy Policy
 
-**Last updated:** October 9, 2026
+**Last updated:** October 24, 2026
 
-Browser Recall stores product data locally. Browser Recall does not send analytics
-or browsing data to a developer-operated service. Optional GitHub sync uses a
-repository selected by the user.
+Browser Recall's desktop app and browser extension store product data locally
+and do not send analytics or browsing data to a developer-operated service.
+Optional GitHub sync uses a repository selected by the user.
 
 ## Data recorded
 
@@ -86,6 +86,21 @@ Browser Recall uses browsing data only to provide the user's browsing library.
 Browser Recall does not sell user data or use user data for advertising,
 creditworthiness, or lending. Optional GitHub sync transfers data only to the
 repository configured by the user for the browsing library.
+
+## Website analytics
+
+The Browser Recall product website uses GoatCounter to measure page views.
+Website analytics are separate from the desktop app and browser extension.
+GoatCounter receives the product page's path and title, referring page, and
+basic visitor information such as browser, operating system, country, language,
+and screen size. The product page reports the fixed `/browser-recall/` path
+without query strings or fragment identifiers. Automatic click events are disabled.
+
+GoatCounter does not store cookies or other visitor information in the browser.
+See the [GoatCounter privacy policy](https://www.goatcounter.com/help/privacy)
+for details about GoatCounter's data handling. Local previews and embedded demos
+do not load GoatCounter. Website analytics do not receive Browser Recall browsing
+history, highlights, notes, lists, or snapshots from the user's collection.
 
 ## Contact
 

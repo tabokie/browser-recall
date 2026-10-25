@@ -26,12 +26,15 @@ Use this map to find the files that implement a feature. See
 | `icons/` | SVG sources for generated runtime icons |
 | `docs/images/` | Documentation PNGs and capture manifests |
 | `website/` | Static product page, responsive styles, and in-memory interactive illustration |
-| `website/demos/` | In-memory sample adapters for production Timeline, highlight editor, and list controls |
+| `website/analytics.js` | GoatCounter page views for the HTTPS website; excludes local previews and embedded demos |
+| `website/demos/` | Selectable Timeline rows, Book interaction/typesetting, a display-only saved highlight, interactive list chips, and embedded document scroll styles |
 | `apps/desktop/ui/timeline-elements.js`, `apps/extension/popup-list-elements.js` | Production renderers shared with the website demos |
+| `apps/desktop/ui/book-typesetting.js` | Justif paragraph layout and English hyphenation shared by desktop Book and the website demo |
+| `apps/desktop/ui/book-elements.js` | Shared Book day, page, and highlight markup, with read-only website rendering from the documentation seed |
 | `scripts/build-website.mjs`, `scripts/serve-website.mjs` | Extract product HTML/CSS, copy presentation modules/public assets, and preview at the GitHub Pages project path |
-| `playwright.website.config.js`, `tests/website/` | Desktop/mobile product-page scenarios, keyboard interaction, and no-JavaScript fallback |
+| `playwright.website.config.js`, `tests/website/` | Chromium and mobile WebKit product-page scenarios, fixed demo heights, scrolling, keyboard interaction, and no-JavaScript fallback |
 | `.github/workflows/website.yml` | Check the product website and publish the built directory to GitHub Pages |
-| `.github/workflows/ci.yml` | Seven regular CI runner jobs: Linux tests/coverage/lint, extension E2E, desktop visuals, Windows font fallback, macOS documentation URL routing, and Windows x64/macOS arm64 release validations |
+| `.github/workflows/ci.yml` | Seven regular CI runner jobs: Tests, Coverage and Lint, extension E2E, desktop visuals, Windows font fallback, macOS documentation URL routing, and Windows x64/macOS arm64 release validations |
 | `.github/workflows/desktop-release-validation.yml` | Shared native packaging, installation, update/relaunch, and platform regression checks, with independent required Windows font and macOS documentation validation; Release additionally validates macOS x64 |
 | `.github/workflows/release.yml` | Manual native Windows/macOS and Chrome/Firefox builds, verified installers and extension archives, signed update packages, and GitHub Releases publishing |
 | `package.json` | Build, test, formatting, and analysis commands |
@@ -233,6 +236,7 @@ do not maintain a second production copy.
 | Windows icons, single instance, and teardown | `tests/smoke/windows-desktop-single-instance.mjs`, `tests/integration/windows-desktop-cleanup.test.js` |
 | Native desktop cleanup preserves setup errors, completes teardown after failures, and stops original or relaunched update processes | `tests/smoke/desktop-test-cleanup.mjs`, `tests/smoke/macos-desktop-process.mjs`, `tests/integration/macos-desktop-cleanup.test.js`, `tests/integration/windows-desktop-cleanup.test.js` |
 | Windows native update isolation survives token-based installer relaunch and restores the user environment; portable rollback JSON reader covers Windows PowerShell array behavior | `tests/smoke/windows-desktop-update-environment.ps1`, `tests/smoke/windows-update-environment-snapshot.ps1`, `tests/integration/windows-update-environment.test.js`, `tests/fixtures/windows-token-launch.cs` |
+| Mandatory PowerShell prerequisite and bounded asynchronous startup; subprocess regressions cover missing PowerShell, slow startup, and local CI fail-fast behavior | `scripts/check-test-prerequisites.mjs`, `tests/smoke/powershell-process.mjs`, `tests/integration/powershell-prerequisites.test.js`, `tests/integration/ci-release-validation.test.js` |
 | Windows validation gate blocks packaging and prints failed assertions from JSON reports | `scripts/verify-windows-validation.mjs`, `tests/integration/ci-release-validation.test.js` |
 | Windows signing requires an unsigned compiled executable, rejects other signers and tampering, and uses disposable certificate stores | `tests/integration/windows-code-signing.test.js`, `scripts/windows-code-signing.ps1` |
 | Saved desktop language and right-to-left layout | `tests/e2e/desktop-locale-setting.spec.js` |

@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   checks:
-    name: Linux Tests, Coverage and Lint
+    name: Tests, Coverage and Lint
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -31,6 +31,20 @@ jobs:
         with:
           key: linux-checks
       - run: npm ci
+
+      - name: Install PowerShell 7.6.6 for portable rollback checks
+        run: |
+          powershell_dir="$RUNNER_TEMP/powershell-7.6.6"
+          mkdir -p "$powershell_dir"
+          curl --fail --location --silent --show-error \
+            https://github.com/PowerShell/PowerShell/releases/download/v7.6.6/powershell-7.6.6-linux-x64.tar.gz \
+            -o "$RUNNER_TEMP/powershell.tar.gz"
+          echo "ddbc4a2d113bbd46d283cfedcbcd117a70caefd7673f41f2b4e0000badf103bc  $RUNNER_TEMP/powershell.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/powershell.tar.gz" -C "$powershell_dir"
+          chmod +x "$powershell_dir/pwsh"
+          echo "$powershell_dir" >> "$GITHUB_PATH"
+      - name: Check test prerequisites before expensive checks
+        run: npm run ci:check-prerequisites
 
       - name: Validate release versions before expensive builds
         run: node scripts/lib/product-version.mjs

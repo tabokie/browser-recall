@@ -6,6 +6,7 @@ on:
     paths:
       - 'website/**'
       - 'scripts/build-website.mjs'
+      - 'scripts/lib/documentation-seed.mjs'
       - 'scripts/serve-website.mjs'
       - 'tests/website/**'
       - 'playwright.website.config.js'
@@ -26,6 +27,7 @@ on:
     paths:
       - 'website/**'
       - 'scripts/build-website.mjs'
+      - 'scripts/lib/documentation-seed.mjs'
       - 'scripts/serve-website.mjs'
       - 'tests/website/**'
       - 'playwright.website.config.js'
@@ -62,7 +64,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run ci:install-playwright
+      - run: npm run ci:install-desktop-visual-browsers
       - run: npm run test:website
       - name: Preserve website failure screenshots and traces
         if: failure()

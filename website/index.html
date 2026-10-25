@@ -23,46 +23,43 @@
       type="font/woff2"
       crossorigin
     />
+    <link
+      rel="preload"
+      href="./assets/nunito.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
     <link rel="stylesheet" href="./styles.css" />
     <script src="./main.js" defer></script>
+    <script src="./analytics.js" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header wrap">
-      <a class="wordmark" href="#" aria-label="Browser Recall home">
+      <div class="wordmark">
         <img src="./assets/icon.svg" width="38" height="38" alt="" />
         <span>Browser Recall</span>
-      </a>
+      </div>
       <nav aria-label="Main navigation">
-        <a href="#explore">Explore</a>
         <a href="https://github.com/tabokie/browser-recall"
           >GitHub <span aria-hidden="true">↗</span></a
         >
-        <a class="nav-download" href="#get-started">Get Browser Recall</a>
       </nav>
     </header>
 
     <main id="main">
       <section class="hero wrap" aria-labelledby="hero-title">
-        <p class="eyebrow">Your own little corner of the web</p>
         <h1 id="hero-title">A little <em>memory</em><br />for your browser.</h1>
         <p class="hero-description">
-          The page you loved. The line you highlighted. The idea you almost
-          forgot.<br class="desktop-break" />
-          Keep your browsing close, and find your way back.
+          Keep your browsing history, highlights, and notes in one place. Find
+          your way back to the things worth keeping.
         </p>
         <div class="hero-actions">
           <a class="button button-primary" href="#get-started"
-            >Get Browser Recall <span aria-hidden="true">↗</span></a
-          >
-          <a class="text-link" href="#explore"
-            >Take a look around <span aria-hidden="true">↓</span></a
+            >Get Browser Recall</a
           >
         </div>
-        <p class="hero-footnote">
-          macOS & Windows <span aria-hidden="true">·</span> A desktop app +
-          browser extension
-        </p>
       </section>
 
       <section
@@ -71,10 +68,6 @@
         aria-label="Explore Browser Recall features"
       >
         <div class="demo-controls">
-          <span class="demo-label"
-            ><span class="small-spark" aria-hidden="true">✳</span> A few things
-            to remember</span
-          >
           <div
             class="demo-tabs"
             role="tablist"
@@ -128,11 +121,6 @@
         </div>
 
         <div class="demo-window">
-          <div class="window-bar" aria-hidden="true">
-            <span class="window-dots"><i></i><i></i><i></i></span>
-            <span>Browser Recall</span>
-            <span class="local-label"><span></span> On your computer</span>
-          </div>
           <div
             class="demo-panel"
             id="panel-find"
@@ -156,17 +144,12 @@
             hidden
           >
             <div class="feature-copy">
-              <span class="eyebrow">Highlights & notes</span>
               <h2>Keep the words.<br />Add your thoughts.</h2>
               <p>
                 Highlight a passage on a webpage and leave a note beside it.
                 Read your highlights together in Book, or return to the original
                 context.
               </p>
-              <span class="demo-instruction"
-                >Click the highlight, then edit its note
-                <span aria-hidden="true">↗</span></span
-              >
             </div>
             <div class="product-example">
               <div
@@ -177,12 +160,9 @@
                 <iframe
                   class="product-frame highlight-frame"
                   src="demos/highlight.html"
-                  title="Browser Recall highlight editor demo"
+                  title="Browser Recall saved highlight demo"
                 ></iframe>
               </div>
-              <p class="demo-status" id="note-status" role="status">
-                Click the highlighted passage to edit the note.
-              </p>
             </div>
           </div>
 
@@ -195,16 +175,11 @@
             hidden
           >
             <div class="feature-copy">
-              <span class="eyebrow">Lists</span>
               <h2>One page.<br />More than one place.</h2>
               <p>
                 Collect pages around a project, a passing interest, or a weekend
                 plan. A page can belong to as many lists as you like.
               </p>
-              <span class="demo-instruction"
-                >Try choosing a couple of lists
-                <span aria-hidden="true">↗</span></span
-              >
             </div>
             <div class="product-example">
               <div
@@ -218,7 +193,7 @@
                   title="Browser Recall list controls demo"
                 ></iframe>
               </div>
-              <p class="demo-status" id="list-status" role="status">
+              <p class="visually-hidden" id="list-status" role="status">
                 One page, at home in 2 lists.
               </p>
             </div>
@@ -233,16 +208,11 @@
             hidden
           >
             <div class="feature-copy">
-              <span class="eyebrow">Snapshots</span>
               <h2>The web changes.<br />Your copy stays.</h2>
               <p>
                 Save a compact webpage snapshot to revisit later, even offline.
                 Search the saved text alongside your history and notes.
               </p>
-              <span class="demo-instruction"
-                >A saved page, ready when you are
-                <span aria-hidden="true">↗</span></span
-              >
             </div>
             <div class="snapshot-paper">
               <div class="snapshot-toolbar">
@@ -250,7 +220,6 @@
                 snapshot <span>HTML</span>
               </div>
               <div class="snapshot-body">
-                <span class="eyebrow">Walking journal</span>
                 <h3>Notes from the<br />old coast path</h3>
                 <div
                   class="coast-illustration"
@@ -270,12 +239,10 @@
             </div>
           </div>
         </div>
-        <div class="demo-caption">
-          <p id="demo-caption">
-            Search across titles, URLs, highlights, notes, and saved page text.
-          </p>
-          <span>Interactive illustration · Sample content</span>
-        </div>
+        <p class="demo-caption" id="demo-caption">
+          Explore a sample collection. Open Book to read the saved highlights
+          and notes.
+        </p>
         <p id="demo-fallback" class="noscript-note">
           Enable JavaScript to try the interactive illustration. Explore the
           product screenshots below without JavaScript.
@@ -295,7 +262,7 @@
                   loading="lazy"
                   alt="Browser Recall Timeline in Amber and Mono color schemes, with browsing history and lists"
               /></a>
-              <figcaption>Timeline — your browsing, remembered.</figcaption>
+              <figcaption>Timeline</figcaption>
             </figure>
             <figure>
               <a href="./assets/book.png"
@@ -306,7 +273,7 @@
                   loading="lazy"
                   alt="Browser Recall Book collects highlights and notes by day"
               /></a>
-              <figcaption>Book — the passages you kept, together.</figcaption>
+              <figcaption>Book</figcaption>
             </figure>
             <figure>
               <a href="./assets/browser-note-window.png"
@@ -317,7 +284,7 @@
                   loading="lazy"
                   alt="Browser Recall note editor beside a highlighted passage in a webpage"
               /></a>
-              <figcaption>Highlights and notes, right on the page.</figcaption>
+              <figcaption>Highlights and notes</figcaption>
             </figure>
             <figure>
               <a href="./assets/browser-popup-window.png"
@@ -328,7 +295,7 @@
                   loading="lazy"
                   alt="Browser Recall browser popup with page details, list membership, and snapshots"
               /></a>
-              <figcaption>Page details, lists, and saved snapshots.</figcaption>
+              <figcaption>Browser extension</figcaption>
             </figure>
           </div>
         </details>
@@ -336,7 +303,6 @@
 
       <section class="ownership wrap" aria-labelledby="ownership-title">
         <div class="ownership-copy">
-          <p class="eyebrow">Local. Readable. Yours.</p>
           <h2 id="ownership-title">Your collection.<br />Your folder.</h2>
           <p>
             Browser Recall keeps your library in a folder you choose. History,
@@ -344,46 +310,29 @@
             or explore with your own tools.
           </p>
           <p class="ownership-detail">
-            No developer-operated cloud. No analytics.<br />Open source, under
-            the MIT license.
+            No developer-operated cloud or app analytics. Open source, under the
+            MIT license.
           </p>
-          <a
-            class="text-link"
-            href="https://github.com/tabokie/browser-recall/blob/main/docs/PRIVACY.md"
-            >Read about privacy <span aria-hidden="true">↗</span></a
-          >
         </div>
         <div
           class="folder-visual"
           aria-label="Browser Recall data folder contains history logs, notes, and webpage snapshots"
         >
           <div class="folder-title">
-            <span class="folder-icon" aria-hidden="true"></span> My Browser
-            Recall
+            <span class="folder-icon" aria-hidden="true"></span> Browser Recall
           </div>
           <ul class="file-tree">
             <li>
-              <span class="file-type">JSONL</span
-              ><span>Browsing history<small>The paths you took</small></span>
+              <span class="file-type">JSONL</span><span>Browsing history</span>
             </li>
             <li>
-              <span class="file-type">JSON</span
-              ><span
-                >Highlights & notes<small>The thoughts you kept</small></span
-              >
+              <span class="file-type">JSON</span><span>Highlights & notes</span>
             </li>
             <li>
-              <span class="file-type">HTML</span
-              ><span
-                >Page snapshots<small>The pages, as you saved them</small></span
-              >
+              <span class="file-type">HTML</span><span>Page snapshots</span>
             </li>
-            <li>
-              <span class="file-type">MD</span
-              ><span>Snapshot text<small>Ready to search and read</small></span>
-            </li>
+            <li><span class="file-type">MD</span><span>Snapshot text</span></li>
           </ul>
-          <p>Readable with or without Browser Recall.</p>
         </div>
       </section>
 
@@ -392,77 +341,51 @@
         id="get-started"
         aria-labelledby="get-started-title"
       >
-        <img
-          class="closing-icon"
-          src="./assets/icon.svg"
-          width="64"
-          height="64"
-          alt=""
-        />
-        <p class="eyebrow">For the things worth coming back to</p>
         <h2 id="get-started-title">Make yourself a little library.</h2>
         <p>
-          Install the desktop app and the browser extension.<br />Choose a data
-          folder, connect your browser, and carry on exploring.
+          Install the desktop app and browser extension, then connect them to
+          start your collection.
         </p>
         <div class="install-options">
           <div class="install-option">
-            <span class="step-number">01</span>
             <div>
               <h3>The desktop app</h3>
-              <p>Home for your collection · macOS & Windows</p>
+              <p>For macOS and Windows.</p>
               <div class="install-links">
                 <a
                   class="button button-primary"
                   href="https://github.com/tabokie/browser-recall/releases"
                   >Desktop releases <span aria-hidden="true">↗</span></a
-                ><a
-                  class="text-link"
-                  href="https://github.com/tabokie/browser-recall/blob/main/DEVELOPMENT.md#build-and-run"
-                  >Build from source</a
                 >
               </div>
             </div>
           </div>
           <div class="install-option">
-            <span class="step-number">02</span>
             <div>
               <h3>The browser extension</h3>
-              <p>Your companion on the web · Free</p>
+              <p>For Chrome, Firefox, Edge, and Orion.</p>
               <div class="install-links">
                 <a
-                  class="button button-outline"
+                  class="text-link"
                   href="https://chromewebstore.google.com/detail/bgghgkobpfgcinpjjeeconciefclpdgp"
                   >Chrome <span aria-hidden="true">↗</span></a
                 ><a
-                  class="button button-outline"
+                  class="text-link"
                   href="https://addons.mozilla.org/firefox/addon/browser-recall-connector/"
                   >Firefox <span aria-hidden="true">↗</span></a
                 >
               </div>
-              <p class="browser-note">
-                The Chromium extension also supports Edge and Orion.
-              </p>
             </div>
           </div>
         </div>
       </section>
     </main>
     <footer class="site-footer wrap">
-      <a class="wordmark" href="#"
-        ><img src="./assets/icon.svg" width="28" height="28" alt="" /><span
-          >Browser Recall</span
-        ></a
-      ><span>Help browser remember things.</span>
-      <div>
-        <a href="https://github.com/tabokie/browser-recall">Source code</a
-        ><a
-          href="https://github.com/tabokie/browser-recall/blob/main/docs/PRIVACY.md"
-          >Privacy</a
-        ><a href="https://github.com/tabokie/browser-recall/issues"
-          >Say hello <span aria-hidden="true">↗</span></a
-        >
-      </div>
+      <span>Browser Recall</span>
+      <a
+        href="https://github.com/tabokie/browser-recall/blob/main/docs/PRIVACY.md"
+        >Privacy</a
+      >
     </footer>
   </body>
 </html>

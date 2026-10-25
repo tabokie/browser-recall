@@ -3,14 +3,6 @@ document.querySelector('.demo-tabs').hidden = false;
 document.querySelector('#demo-fallback').hidden = true;
 const panels = [...document.querySelectorAll('[role="tabpanel"]')];
 const caption = document.querySelector('#demo-caption');
-const captions = {
-  find: 'Search across titles, URLs, highlights, notes, and saved page text.',
-  highlight: 'Keep highlights in context, and collect your thoughts in Book.',
-  organize:
-    'A page can belong to more than one list. Make room for overlapping interests.',
-  snapshot:
-    'Save webpage snapshots as local files, and return to the saved copy offline.',
-};
 
 function selectTab(selectedTab) {
   for (const tab of tabs) {
@@ -21,7 +13,7 @@ function selectTab(selectedTab) {
   for (const panel of panels) {
     panel.hidden = panel.id !== selectedTab.getAttribute('aria-controls');
   }
-  caption.textContent = captions[selectedTab.dataset.tab];
+  caption.hidden = selectedTab.dataset.tab !== 'find';
   if (selectedTab.dataset.tab === 'organize') {
     document
       .querySelector('.organize-frame')
@@ -59,19 +51,7 @@ window.addEventListener('message', (event) => {
   ) {
     const viewport = frame.parentElement;
     viewport.dataset.height = String(event.data.height);
-    sizeProductViewport(viewport, viewport.clientWidth);
-  }
-  if (
-    event.data?.type === 'show-highlight' &&
-    frame.classList.contains('timeline-frame')
-  ) {
-    selectTab(document.querySelector('#tab-highlight'));
-  }
-  if (
-    event.data?.type === 'note-status' &&
-    frame.classList.contains('highlight-frame')
-  ) {
-    document.querySelector('#note-status').textContent = event.data.text;
+    sizeProductViewport(viewport);
   }
   if (
     event.data?.type === 'list-status' &&
@@ -84,20 +64,26 @@ window.addEventListener('message', (event) => {
   }
 });
 
-function sizeProductViewport(target, availableWidth) {
-  if (!availableWidth) return;
+function sizeProductViewport(target) {
+  const container = target.parentElement;
+  if (!container.clientWidth || !container.clientHeight) return;
   const frame = target.querySelector('iframe');
   const width = Number(target.dataset.width);
   const height = Number(target.dataset.height);
-  const scale = Math.min(1, availableWidth / width);
+  const scale = Math.min(
+    1,
+    container.clientWidth / width,
+    container.clientHeight / height,
+  );
   frame.style.width = `${width}px`;
   frame.style.height = `${height}px`;
   frame.style.transform = `scale(${scale})`;
+  target.style.width = `${width * scale}px`;
   target.style.height = `${height * scale}px`;
 }
 const viewportObserver = new ResizeObserver((entries) => {
-  for (const { target, contentRect } of entries)
-    sizeProductViewport(target, contentRect.width);
+  for (const { target } of entries)
+    sizeProductViewport(target.querySelector('.product-viewport'));
 });
 for (const viewport of document.querySelectorAll('.product-viewport'))
-  viewportObserver.observe(viewport);
+  viewportObserver.observe(viewport.parentElement);

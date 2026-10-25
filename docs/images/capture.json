@@ -45,7 +45,7 @@
     "packages/core/snapshot-html.test.js": "bbb7d28dd92431ffa44da9f000295013f0fe2d3bddcb059085d49415962778b6",
     "packages/core/theme.js": "cc1686ccad1b4ccbe34b4e059534b4ed5efc3971373d79ac929d9d87b70e8d01",
     "packages/core/time-chart.js": "6f4405568ae9d417eb3dfdd91089455c7f244bd71bd6ed43ba318aa794fb1db0",
-    "packages/core/utils.js": "fdb5f3327fffa08d3f9b261611ff0008f5e259679ee4525eb9668d565d871e46",
+    "packages/core/utils.js": "0f8e3a330c92ff258cd1bc474eef9f4aa02252fdae8abc99a0bd51d13b18d9ac",
     "packages/core/virtual-scroller.js": "4498103f7f7b18fa6d5a4b246a701c026811fb65cea085e98cdd410a6efde216",
     "apps/extension/utils.js": "eea5cc2425981454fde629445ca28c0f4eb3aa42f9b39a4f9de9ce4ba17e4ad0",
     "scripts/stage-app-assets.mjs": "4964ea5b7d48a596719d7a61a6b47b39dad29f7ba8773198ad42d7589a1e3cd2",
@@ -59,6 +59,8 @@
     "scripts/lib/replay-store.mjs": "4d6cb0c15dc4d9cb45b59de44a115acb222b5e09bfc2a4e04b7d91d05f96d82b",
     "tests/integration/daemon-test-harness.js": "f2352beb37f585b384ba65b9af75d224a61f73655c30648cdcd47c7c3d53113a",
     "apps/desktop/ui/attention-utils.js": "c913974a4940df7d9ab83871ae240821d846ae7d2f597f1e989bc58229d9ce41",
+    "apps/desktop/ui/book-elements.js": "f17749836d339b5240423546d69c1acd6a0819290e909b519a74d6985d4b8bd8",
+    "apps/desktop/ui/book-typesetting.js": "789dca305afa140e75b01da7d1a2821f24747865fc0c0728c09d32266f8d0a14",
     "apps/desktop/ui/bookmark-parser.js": "0cecc7e3d228ad48595d09f43555afe34d6304abff361091dc9caeeaf8d99208",
     "apps/desktop/ui/color-schemes.css": "23bc18429474f074f71222b9719046a95f6c088725610e4e5b8fc8ac6f343f64",
     "apps/desktop/ui/dark-theme.css": "2b69c31842088ed0c119321937d66b93918199db3bf069460c74629360ec04e1",
@@ -75,7 +77,7 @@
     "apps/desktop/ui/fonts/nunito.woff2": "f85212b2392aff6c178df5c0c6176fe341785ba641e6ec4ab0c80fb10dc38e0c",
     "apps/desktop/ui/highlight-format.js": "9e5be7cc41e99dbfa9f5262aebacfe77da0cbca58416e6e53536cb01abd6f00d",
     "apps/desktop/ui/index.html": "cdf6f170f1037d91b433e479c0f872671f4d142cd1df8a7a0ff98576593b24ea",
-    "apps/desktop/ui/index.js": "7da6b2da1c26654e8a54540d050856c22d57b044ee602b04fac8800121bb09a8",
+    "apps/desktop/ui/index.js": "9ac79a4692128665c423ec60f9ffa8990776b69891a94f5c20b3f6a33b98b79e",
     "apps/desktop/ui/logger.js": "73939f96285999acfd96bf693d081955a6be4cb6929f17b2aeea59774b632f8c",
     "apps/desktop/ui/search-runtime.d.ts": "4c41e73480a780bc85d7e8f8279c87ba00e8b0753a52ca82375aca32baa1d797",
     "apps/desktop/ui/search-runtime.js": "68b8a6cd99b5b64628df2c8f86224a80a5eca025dd3c77cdab1e315f409dadf7",
@@ -135,7 +137,7 @@
   },
   "screenshots": {
     "timeline.png": {
-      "sha256": "5a4a4a9bf2303fd2e40ad82bd8866bee8abab29bab69d6e67f4c338a6bec580d",
+      "sha256": "0509f6983dd15a374cffaa9d5a693285e60b96c09e2543199aaf64cd27f03a2a",
       "width": 2080,
       "height": 1400
     },
@@ -145,19 +147,19 @@
       "height": 1400
     },
     "timeline-mono.png": {
-      "sha256": "4aa88de214449410ba01611e784fc4d347eb61ac089302ca4a27b02b25bf2cda",
+      "sha256": "a5f774852768c5d9b6dd00c8ed7c3248fa9010c5eac6bd932beac39af8b872c3",
       "width": 2080,
       "height": 1400
     },
     "timeline-styles.png": {
-      "sha256": "0110eebd7256d9f8c5888f62bc8c2b9cca4baa37c875ed53ad92652286d3a4a2",
+      "sha256": "b8d11acb7f6af8bb523abff78df61dea7be0ef5b7be89513810a5613ec8224c2",
       "width": 2080,
       "height": 1400,
       "composition": {
         "sources": ["timeline.png", "timeline-mono.png"],
         "sourceSha256": [
-          "5a4a4a9bf2303fd2e40ad82bd8866bee8abab29bab69d6e67f4c338a6bec580d",
-          "4aa88de214449410ba01611e784fc4d347eb61ac089302ca4a27b02b25bf2cda"
+          "0509f6983dd15a374cffaa9d5a693285e60b96c09e2543199aaf64cd27f03a2a",
+          "a5f774852768c5d9b6dd00c8ed7c3248fa9010c5eac6bd932beac39af8b872c3"
         ],
         "split": { "top": 0.62, "bottom": 0.38 }
       }

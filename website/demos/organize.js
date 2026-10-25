@@ -19,6 +19,7 @@ function update() {
     '0',
   );
   parent.postMessage({ type: 'list-status', count }, location.origin);
+  reportHeight();
 }
 container.addEventListener('click', (event) => {
   const chip = event.target.closest('.list-chip');
@@ -43,7 +44,9 @@ function reportHeight() {
     location.origin,
   );
 }
-new ResizeObserver(reportHeight).observe(document.body);
+// Known content changes drive measurement. Observing the body while the parent
+// resizes this iframe can cause a ResizeObserver delivery loop in WebKit.
+document.fonts.ready.then(reportHeight);
 window.addEventListener('message', (event) => {
   if (
     event.origin === location.origin &&

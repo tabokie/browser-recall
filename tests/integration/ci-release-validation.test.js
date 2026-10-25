@@ -136,51 +136,67 @@ test('Windows validation gate surfaces the failed test from its JSON report and 
   }
 });
 
-test('local CI executes JavaScript and Rust tests only through coverage', () => {
-  const work = mkdtempSync(path.join(tmpdir(), 'browser-recall-ci-plan-'));
-  try {
-    const source = JSON.parse(
-      readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
-    );
-    const scripts = { ...source.scripts };
-    for (const name of [
-      'ci:check-docs',
-      'ci:install-playwright',
-      'ci:test-extension-e2e',
-      'ci:install-desktop-visual-browsers',
-      'ci:test-desktop-visual',
-      'ci:lint-js',
-      'ci:lint-rust',
-      'test:cold-scripts',
-      'coverage:monitor',
-    ])
-      scripts[name] = 'node check.mjs other';
-    for (const name of ['test', 'coverage:js'])
-      scripts[name] = 'node check.mjs javascript';
-    for (const name of ['ci:test-rust', 'coverage:rust'])
-      scripts[name] = 'node check.mjs rust';
-    writeFileSync(path.join(work, 'package.json'), JSON.stringify({ scripts }));
-    writeFileSync(
-      path.join(work, 'check.mjs'),
-      "import { appendFileSync } from 'node:fs'; appendFileSync('executions', process.argv[2] + '\\n');",
-    );
-    execFileSync(
-      process.platform === 'win32' ? 'cmd.exe' : 'npm',
-      process.platform === 'win32'
-        ? ['/d', '/s', '/c', 'npm run ci']
-        : ['run', 'ci'],
-      { cwd: work, stdio: 'pipe' },
-    );
-    const executions = readFileSync(
-      path.join(work, 'executions'),
-      'utf8',
-    ).split('\n');
-    expect(executions.filter((name) => name === 'javascript')).toHaveLength(1);
-    expect(executions.filter((name) => name === 'rust')).toHaveLength(1);
-  } finally {
-    rmSync(work, { recursive: true, force: true });
-  }
-});
+test.each([0, 23])(
+  'local CI checks prerequisites first and executes tests only through coverage; prerequisite exit: %s',
+  (prerequisiteStatus) => {
+    const work = mkdtempSync(path.join(tmpdir(), 'browser-recall-ci-plan-'));
+    try {
+      const source = JSON.parse(
+        readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
+      );
+      const scripts = { ...source.scripts };
+      scripts['ci:check-prerequisites'] =
+        `node check.mjs prerequisites ${prerequisiteStatus}`;
+      for (const name of [
+        'ci:check-docs',
+        'ci:install-playwright',
+        'ci:test-extension-e2e',
+        'ci:install-desktop-visual-browsers',
+        'ci:test-desktop-visual',
+        'ci:lint-js',
+        'ci:lint-rust',
+        'test:cold-scripts',
+        'coverage:monitor',
+      ])
+        scripts[name] = 'node check.mjs other';
+      for (const name of ['test', 'coverage:js'])
+        scripts[name] = 'node check.mjs javascript';
+      for (const name of ['ci:test-rust', 'coverage:rust'])
+        scripts[name] = 'node check.mjs rust';
+      writeFileSync(
+        path.join(work, 'package.json'),
+        JSON.stringify({ scripts }),
+      );
+      writeFileSync(
+        path.join(work, 'check.mjs'),
+        "import { appendFileSync } from 'node:fs'; appendFileSync('executions', process.argv[2] + '\\n'); process.exitCode = Number(process.argv[3] || 0);",
+      );
+      const result = spawnSync(
+        process.platform === 'win32' ? 'cmd.exe' : 'npm',
+        process.platform === 'win32'
+          ? ['/d', '/s', '/c', 'npm run ci']
+          : ['run', 'ci'],
+        { cwd: work, encoding: 'utf8' },
+      );
+      const executions = readFileSync(
+        path.join(work, 'executions'),
+        'utf8',
+      ).split('\n');
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(prerequisiteStatus);
+      expect(executions[0]).toBe('prerequisites');
+      expect(executions.filter((name) => name === 'javascript')).toHaveLength(
+        prerequisiteStatus ? 0 : 1,
+      );
+      expect(executions.filter((name) => name === 'rust')).toHaveLength(
+        prerequisiteStatus ? 0 : 1,
+      );
+      if (prerequisiteStatus) expect(executions).toEqual(['prerequisites', '']);
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  },
+);
 
 test('CI signing preparation refuses a normal developer checkout', () => {
   const env = { ...process.env };
