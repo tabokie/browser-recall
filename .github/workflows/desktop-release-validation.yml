@@ -37,11 +37,19 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
+          filter: blob:none
 
       - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
+
+      - name: Select optional platform checks from changed inputs
+        id: platform_checks
+        env:
+          BROWSER_RECALL_CI_PRODUCTION: ${{ inputs.production }}
+        run: node scripts/select-platform-checks.mjs
 
       - uses: dtolnay/rust-toolchain@1.97.0
 
@@ -93,9 +101,9 @@ jobs:
           WINDOWS_ARTIFACTS_RESULT: ${{ steps.windows_artifacts.outcome }}
         run: node scripts/verify-windows-validation.mjs
 
-      - name: Verify macOS signing and native session guards
+      - name: Verify macOS signing, session guards and documentation registration
         if: matrix.platform == 'macos' && matrix.arch == 'arm64'
-        run: npx vitest run tests/integration/macos-native-session.test.js tests/integration/desktop-signing.test.js
+        run: npx vitest run tests/integration/macos-native-session.test.js tests/integration/desktop-signing.test.js tests/integration/macos-documentation-url-routing.test.js
 
       # The frame regression imports production code through a minimal AppKit
       # package so Cargo does not build the Tauri application for this check.
@@ -104,9 +112,6 @@ jobs:
         run: cargo test --locked --release -p browser-recall-native-tests --test macos_window_frame
 
       - run: npm run build:release --workspace @browser-recall/desktop
-
-      - name: Verify dependency lockfiles stayed unchanged
-        run: git diff --exit-code -- Cargo.lock package-lock.json
 
       - name: Verify Windows installation and installed application
         if: matrix.platform == 'windows'
@@ -166,6 +171,17 @@ jobs:
           BROWSER_RECALL_ISOLATED_MACOS_SESSION: '1'
         run: node tests/smoke/macos-desktop-window-lifecycle.mjs
 
+      # Reuse the finalized production app; the scenario builds only the no-tray
+      # documentation app. Unrelated changes retain the cheap registration tests.
+      - name: Verify documentation builds preserve app URL routing
+        if: matrix.platform == 'macos' && matrix.arch == 'arm64' && steps.platform_checks.outputs.macos_documentation == 'true'
+        env:
+          BROWSER_RECALL_DOCUMENTATION_PRODUCTION_APP: ${{ github.workspace }}/dist/desktop/macos/app/Browser Recall.app
+        run: node tests/smoke/macos-documentation-url-routing.mjs
+
+      - name: Verify dependency lockfiles stayed unchanged
+        run: git diff --exit-code -- Cargo.lock package-lock.json
+
       - name: Preserve native release failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v7
@@ -187,76 +203,54 @@ jobs:
           compression-level: 0
           retention-days: 7
 
-  windows-font:
-    name: Windows extension system-font fallback
+  windows-extension:
+    name: Windows extension rendering
     runs-on: windows-2025
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
+          filter: blob:none
 
-      - uses: actions/setup-node@v6
+      # Select optional checks before restoring caches or installing dependencies.
+      # setup-node enables npm caching automatically unless explicitly disabled.
+      - name: Set up Node for change selection without npm caching
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Select optional platform checks from changed inputs
+        id: platform_checks
+        env:
+          BROWSER_RECALL_CI_PRODUCTION: ${{ inputs.production }}
+        run: node scripts/select-platform-checks.mjs
+
+      - name: Restore npm cache for selected Windows rendering check
+        if: steps.platform_checks.outputs.windows_extension == 'true'
+        uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@1.97.0
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: desktop-windows-font-x64
-
       - run: npm ci
+        if: steps.platform_checks.outputs.windows_extension == 'true'
 
-      - name: Install Playwright Chromium for Windows font regression
+      - name: Install Playwright Chromium for Windows extension rendering
+        if: steps.platform_checks.outputs.windows_extension == 'true'
         run: npm run ci:install-playwright
 
-      - name: Verify Windows extension system-font fallback
-        run: npm run ci:test-windows-extension-font
+      - name: Verify Windows extension rendering
+        if: steps.platform_checks.outputs.windows_extension == 'true'
+        run: npm run ci:test-extension-rendering
 
-      - name: Preserve Windows font failure diagnostics
-        if: failure()
+      - name: Preserve Windows extension rendering failure diagnostics
+        if: failure() && steps.platform_checks.outputs.windows_extension == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: desktop-release-failure-windows-font
-          path: test-results/windows-font/
+          name: windows-extension-rendering-failure
+          path: test-results/extension-rendering/
           if-no-files-found: ignore
           retention-days: 7
-
-  macos-documentation:
-    name: macOS documentation URL routing
-    runs-on: macos-15
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.sha }}
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
-
-      - uses: dtolnay/rust-toolchain@1.97.0
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: desktop-release-macos-arm64
-
-      - run: npm ci
-
-      # Register a real production bundle so the independent documentation check
-      # must preserve an existing Browser Recall URL handler on this clean runner.
-      - name: Build production URL handler fixture
-        run: npm run build --workspace @browser-recall/desktop
-
-      - name: Verify documentation builds preserve app URL routing
-        env:
-          BROWSER_RECALL_DOCUMENTATION_PRODUCTION_APP: ${{ github.workspace }}/dist/desktop/macos/app/Browser Recall.app
-        run: |
-          npx vitest run tests/integration/macos-documentation-url-routing.test.js
-          node tests/smoke/macos-documentation-url-routing.mjs
-
-      - name: Verify dependency lockfiles stayed unchanged
-        run: git diff --exit-code -- Cargo.lock package-lock.json

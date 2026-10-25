@@ -15,12 +15,12 @@ const TEST_CONTROL_FILES = [
   'background-test-control.js',
 ];
 
-function pinTestConnectorPorts(extensionDir) {
+function pinTestConnectorPorts(extensionDir, ports) {
   const clientPath = path.join(extensionDir, 'connector', 'ws-client.js');
   const source = fs.readFileSync(clientPath, 'utf8');
   fs.writeFileSync(
     clientPath,
-    `globalThis.__BROWSER_RECALL_CONNECTOR_PORTS = ${JSON.stringify(DAEMON_PORTS)};\n${source}`,
+    `globalThis.__BROWSER_RECALL_CONNECTOR_PORTS = ${JSON.stringify(ports)};\n${source}`,
   );
 }
 
@@ -56,9 +56,10 @@ function enableBackgroundTestControl(extensionDir) {
 
 export function createTestExtensionDir(
   prefix = 'browser-recall-test-extension-',
+  ports = DAEMON_PORTS,
 ) {
   const extensionDir = createStagedExtensionDir(prefix);
-  pinTestConnectorPorts(extensionDir);
+  pinTestConnectorPorts(extensionDir, ports);
   enableBackgroundTestControl(extensionDir);
   return extensionDir;
 }

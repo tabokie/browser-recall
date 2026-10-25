@@ -7,6 +7,7 @@ import {
   cleanupTestExtensionDir,
   createTestExtensionDir,
 } from '../fixtures/test-extension.mjs';
+import { extensionBrowserChannel } from '../fixtures/extension-browser-channel.mjs';
 import {
   startDaemon,
   waitForDesktopConnector,
@@ -67,6 +68,7 @@ export const test = base.extend({
   extContext: [
     async ({ daemon, extensionHeadless, extensionEnglish }, use) => {
       void daemon;
+      const channel = extensionBrowserChannel();
       const extPath = createTestExtensionDir('browser-recall-test-extension-');
       const userDataDirs = [];
 
@@ -90,11 +92,7 @@ export const test = base.extend({
         }
         const ctx = await chromium.launchPersistentContext(userDataDir, {
           executablePath,
-          channel:
-            process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'chrome' ||
-            process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE === 'msedge'
-              ? process.env.BROWSER_RECALL_PLAYWRIGHT_ENGINE
-              : undefined,
+          channel,
           headless: false,
           locale: extensionEnglish ? 'en-US' : undefined,
           ignoreDefaultArgs: extensionHeadless ? [] : ['--enable-automation'],

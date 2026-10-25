@@ -659,11 +659,14 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       return state.state === 'connected' && state.pendingCommands === 0;
     });
 
+    // Connector acknowledgements precede asynchronous checkpoint writes. Graceful
+    // shutdown must flush accepted notes and page checkpoints before disk reads.
+    await stopTestDaemon(child);
     const dataRoot = path.join(dir, 'browser-data');
-    const noteFiles = await waitFor(async () => {
-      const files = await readdir(path.join(dataRoot, 'objects', 'notes'));
-      return files.length > 0 ? files : null;
-    });
+    const noteFiles = (
+      await readdir(path.join(dataRoot, 'objects', 'notes'))
+    ).filter((file) => file.endsWith('.json'));
+    expect(noteFiles).toHaveLength(1);
     const noteRaw = readFileSync(
       path.join(dataRoot, 'objects', 'notes', noteFiles[0]),
       'utf8',

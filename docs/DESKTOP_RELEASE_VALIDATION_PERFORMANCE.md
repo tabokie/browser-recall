@@ -1,5 +1,28 @@
 # Desktop Release Validation performance investigation
 
+## Current scheduling policy
+
+Windows extension rendering uses a browser-only fixture and no Rust toolchain,
+debug daemon build, or Rust cache. The Windows job installs npm dependencies and
+Chromium only when relevant rendering/build/dependency inputs change. Unrelated
+changes run checkout, Node setup, and selection only.
+The initial Node setup disables automatic npm caching; cache restore and save are
+enabled only after the Windows rendering check is selected.
+
+Lightweight macOS documentation registration regressions run in the existing macOS
+arm64 validation job. The full native documentation scenario runs there only for
+relevant native/documentation/build/dependency changes, reuses the finalized
+production app, and compiles only the no-tray documentation app. The separate
+documentation job and its production-fixture build have been removed. Regular CI
+now has six runner jobs instead of seven.
+
+`scripts/select-platform-checks.mjs` compares complete push ranges and PR merge-base
+diffs, including deleted/renamed paths. Manual/release validation always runs both
+scenarios. Hosted durations for this policy have not been measured; the results
+below describe the previous scheduling policy and remain historical evidence.
+
+## Historical baseline
+
 Hosted baseline: [successful run 39546319759](https://github.com/tabokie/browser-recall/actions/runs/39546319759).
 
 | Job or step | Duration |
@@ -15,7 +38,7 @@ Hosted baseline: [successful run 39546319759](https://github.com/tabokie/browser
 | macOS window frame check | 3m 37s |
 | macOS documentation URL routing | 3m 50s |
 
-## Implemented scheduling changes
+## Previous scheduling changes
 
 - Windows font validation runs independently in the reusable workflow. Chromium installation and font regression previously added 4m 56s to the Windows native job. The new job has a separate debug Rust cache and failure artifact.
 - The macOS window frame check runs before release compilation in a minimal native

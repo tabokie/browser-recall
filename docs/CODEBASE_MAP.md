@@ -33,9 +33,10 @@ Use this map to find the files that implement a feature. See
 | `apps/desktop/ui/book-elements.js` | Shared Book day, page, and highlight markup, with read-only website rendering from the documentation seed |
 | `scripts/build-website.mjs`, `scripts/serve-website.mjs` | Extract product HTML/CSS, copy presentation modules/public assets, and preview at the GitHub Pages project path |
 | `playwright.website.config.js`, `tests/website/` | Chromium and mobile WebKit product-page scenarios, fixed demo heights, scrolling, keyboard interaction, and no-JavaScript fallback |
-| `.github/workflows/website.yml` | Check the product website and publish the built directory to GitHub Pages |
-| `.github/workflows/ci.yml` | Seven regular CI runner jobs: Tests, Coverage and Lint, extension E2E, desktop visuals, Windows font fallback, macOS documentation URL routing, and Windows x64/macOS arm64 release validations |
-| `.github/workflows/desktop-release-validation.yml` | Shared native packaging, installation, update/relaunch, and platform regression checks, with independent required Windows font and macOS documentation validation; Release additionally validates macOS x64 |
+| `.github/workflows/website.yml` | One job builds and checks the product website, then publishes the built directory to GitHub Pages on `main`; pull requests only run checks |
+| `.github/workflows/ci.yml` | Six regular CI runner jobs: Tests, Coverage and Lint, extension E2E, desktop visuals, Windows extension rendering, and Windows x64/macOS arm64 release validations |
+| `.github/workflows/desktop-release-validation.yml` | Shared native packaging, installation, update/relaunch, and platform regressions; conditional browser-only Windows rendering and macOS documentation validation that reuses the packaged app; Release additionally validates macOS x64 and always runs both optional scenarios |
+| `scripts/select-platform-checks.mjs`, `tests/integration/platform-check-selection.test.js` | Select expensive platform scenarios from complete Git push/PR ranges, retain deleted/renamed inputs, and verify selection through real repositories and CLI output |
 | `.github/workflows/release.yml` | Manual native Windows/macOS and Chrome/Firefox builds, verified installers and extension archives, signed update packages, and GitHub Releases publishing |
 | `package.json` | Build, test, formatting, and analysis commands |
 | `rust-toolchain.toml` | Rust compiler and component pin |
@@ -241,6 +242,8 @@ do not maintain a second production copy.
 | Windows signing requires an unsigned compiled executable, rejects other signers and tampering, and uses disposable certificate stores | `tests/integration/windows-code-signing.test.js`, `scripts/windows-code-signing.ps1` |
 | Saved desktop language and right-to-left layout | `tests/e2e/desktop-locale-setting.spec.js` |
 | Native extension localization and system fonts | `tests/e2e/extension-localization.spec.js`, `tests/e2e/extension-font-fallback.spec.js` |
+| Browser-only extension font fixture with no daemon or Rust build and an isolated rejecting connector endpoint | `tests/fixtures/extension-rendering.mjs`, `tests/fixtures/test-extension.mjs` |
+| Shared pinned Chromium selection and real-process coverage that rejects unsupported extension browsers before launch, without browser installation | `tests/fixtures/extension-browser-channel.mjs`, `tests/integration/extension-browser-selection.test.js` |
 | Real Firefox automatic capture and navigation, daemon persistence before identity probes, paused-document exclusion until refresh, and options-page popup messages | `tests/smoke/firefox-real-content.mjs` |
 | Native popup shortcut | `tests/smoke/native-extension-shortcut.mjs` |
 | Documentation images match the recorded source files and capture results | `tests/integration/documentation-freshness.test.js` |

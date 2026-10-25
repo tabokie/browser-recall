@@ -1,4 +1,5 @@
-import { expect, test } from './fixtures.js';
+import { expect } from '@playwright/test';
+import { test } from '../fixtures/extension-rendering.mjs';
 import { openHelperPage } from './helpers.js';
 
 const CJK_SAMPLE = '浏览记录';
@@ -52,11 +53,9 @@ function renderedFamilies(fonts) {
 }
 
 test('extension CJK text uses the host system UI font fallback', async ({
-  extContext,
-  extensionId,
-  setupDir,
+  renderingExtension,
 }) => {
-  void setupDir;
+  const { context: extContext, extensionId } = renderingExtension;
   const popup = await extContext.newPage();
   await popup.goto(`chrome-extension://${extensionId}/popup.html`, {
     waitUntil: 'domcontentloaded',

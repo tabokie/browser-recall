@@ -555,12 +555,22 @@ regular CI omits the Intel Mac runner. The workflow builds signed packages,
 verifies installation, and exercises updates, relaunch, collection retention, and
 connector reconnection. Regular CI uses temporary signing keys in disposable
 runner checkouts; only Release uses production signing keys and publishes assets.
-Windows extension system-font fallback runs in an independent job inside the same
-reusable workflow, with its own debug Rust cache and failure artifact. Release
-publication requires native package validation, Windows font validation, and
-macOS documentation URL routing. The independent documentation job builds a real
-production app and registers the production bundle before the no-tray build;
-the native routing scenario requires that production handler to remain selected.
+Windows extension rendering runs in a separate browser-only job, with no Rust
+toolchain or daemon. The rendering fixture reserves a rejecting connector port,
+loads the actual extension, and checks system fonts in the popup and shadow DOM.
+Both extension fixtures require pinned Chromium and reject unsupported browser
+choices before launch. JavaScript subprocess regressions check these errors
+without browser installation; the real font scenario runs after Playwright setup.
+Lightweight macOS documentation registration regressions always run in macOS arm64
+native validation. The full documentation scenario shares that job and reuses the
+finalized production bundle before building the no-tray app; the native routing
+scenario requires that production handler to remain selected.
+`scripts/select-platform-checks.mjs` limits the expensive Windows rendering and
+macOS documentation scenarios to relevant source, configuration, dependency, and
+workflow changes. Selection uses the complete push range or pull request merge-base
+diff, including removed source paths. Invalid events fail; an unavailable force-push
+predecessor explicitly runs both scenarios. Manual and release validation always
+run both scenarios, and release publication requires every selected check to pass.
 The macOS window frame check runs before release compilation in the minimal
 `browser-recall-native-tests` Cargo package. The native test imports the production
 frame module directly and declares only its AppKit dependencies, avoiding Tauri

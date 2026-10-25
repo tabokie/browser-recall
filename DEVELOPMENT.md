@@ -87,8 +87,10 @@ Page views use the fixed `/browser-recall/` path so query strings and fragment
 links do not split the count. Automatic click events are disabled. Local HTTP
 previews and embedded demo documents do not load GoatCounter.
 
-`.github/workflows/website.yml` runs these checks for relevant pull requests and
-publishes `dist/website/` on relevant pushes to `main`. In GitHub repository
+`.github/workflows/website.yml` builds, checks, and publishes the product website
+in one job. Relevant pull requests run the checks without entering the GitHub Pages
+deployment environment. Relevant pushes to `main` publish `dist/website/` after
+the checks pass. In GitHub repository
 **Settings → Pages → Build and deployment → Source**, choose **GitHub Actions**
 once before the first deployment. The expected project URL is
 `https://tabokie.github.io/browser-recall/`. **Actions → Product Website → Run
@@ -451,6 +453,7 @@ windows, tray actions, and process startup run separately.
 | `npm test` | Vitest unit and integration suites |
 | `npm run test:integration` | JavaScript integration suites |
 | `npm run build:test-daemon` | Build the daemon before Playwright tests that use the daemon |
+| `npm run ci:test-extension-rendering` | Real Chromium extension font rendering with an isolated rejecting connector endpoint; no Rust build or daemon |
 | `npm run test:e2e` | Playwright workflows |
 | `npm run test:visual` | Build UI assets; run native WKWebView, Chromium, and selected WebKit tests |
 | `npm run ci:test-rust` | Build UI assets and run Rust workspace tests |
@@ -473,10 +476,9 @@ the daemon before starting tests that use the daemon; compiling Rust during test
 setup can exceed the startup timeout. To test a build without cached Rust output,
 set `CARGO_TARGET_DIR` to a temporary directory and run the same `ci:*` command.
 
-Regular CI has seven runner jobs: Tests, Coverage and Lint, extension E2E,
+Regular CI has six runner jobs: Tests, Coverage and Lint, extension E2E,
 macOS visual regression, two native release-validation jobs, and Windows extension
-system-font fallback, and macOS documentation URL routing. Native packaging,
-Windows font checks, and macOS documentation URL routing start independently
+rendering. Native packaging and Windows extension rendering start independently
 in parallel with Tests, Coverage and Lint. Tests, Coverage and Lint uses an Ubuntu
 runner and validates PowerShell availability, release versions, README images,
 and JavaScript formatting before installing desktop build tooling.
@@ -486,25 +488,44 @@ JavaScript tests run once with V8 coverage. Rust workspace tests run once under
 older regular CI run for the same branch. Release publication remains serialized.
 
 Native platform scenarios remain in regular CI: Windows installed-app
-single-instance/deep-link behavior, cleanup and replacement, and extension font
-fallback; macOS startup recovery, five tray reopen cycles, session guards, and
-documentation URL routing. Shared macOS window and routing scenarios run on arm64;
+single-instance/deep-link behavior, cleanup and replacement; macOS startup
+recovery, five tray reopen cycles, session guards, and lightweight documentation
+registration regressions. Windows extension rendering runs on relevant changes.
+Shared macOS window and routing scenarios run on arm64;
 macOS arm64 runs signed-package installation and real update/relaunch in regular
 CI. Release runs package and update validation on both macOS architectures.
 The macOS window frame check runs before release compilation in the minimal
 `browser-recall-native-tests` Cargo package, which imports the production frame
-module and depends only on AppKit bindings. Windows font checks run in their
-own job with a separate Rust cache, so Chromium setup and the debug daemon build
-do not delay packaging. The macOS documentation job builds and registers a real
-production app before building the no-tray documentation app, and requires the
-production URL handler to remain selected. Every job in the reusable workflow must succeed before
-Release can publish.
+module and depends only on AppKit bindings. Windows extension rendering keeps a
+separate job but installs npm dependencies and Chromium only when selected; the
+initial Node setup disables automatic npm caching, and the npm cache is restored
+only after selection. The job uses no Rust toolchain, Rust cache, or daemon.
+The browser fixture reserves a
+rejecting local connector endpoint so the extension cannot pair with a personal
+daemon. The full macOS documentation scenario runs inside native validation when
+selected, reuses the finalized production app, and builds only the no-tray
+documentation app. The scenario requires the production URL handler to remain
+selected. Release always runs both optional scenarios before publication.
+
+`scripts/select-platform-checks.mjs` selects Windows extension rendering for
+extension/shared-core sources, rendering fixtures, browser/build configuration,
+dependencies, and relevant workflow changes. The full macOS documentation scenario
+is selected for native desktop sources, documentation/native build and registration
+helpers, Rust/npm dependencies, and relevant workflow changes. The selector uses
+all commits in a push or the pull request's merge-base diff, including deleted
+and renamed source paths. Both scenarios run for manual/release validation and
+initial pushes; an unavailable force-push predecessor explicitly selects both.
+Malformed event data and other Git failures stop validation. Checkouts retain
+complete commit history with historical blobs omitted. Unrelated changes leave
+the Windows job at checkout, Node setup, and selection; macOS retains the cheap
+registration regressions without compiling a documentation app.
 Timings must be measured on hosted runners; removing duplicate builds and test
 executions does not establish a new wall-clock duration by itself.
 Release packaging and native update validation report separate phase durations in
 the job log and GitHub step summary. The [performance record](docs/DESKTOP_RELEASE_VALIDATION_PERFORMANCE.md)
 preserves the hosted baseline, link-time optimization comparison, reproduction
-commands, and hosted results for the independent required jobs.
+commands, and historical hosted results. Measure the new policy on hosted runners
+before claiming a wall-clock improvement.
 
 ### Product coverage
 
@@ -619,8 +640,8 @@ setup run on separate runners.
 Windows signing, cleanup, and artifact checks run in separate steps with three-minute
 deadlines. All three checks run before a combined gate blocks packaging if any
 check failed. JSON reports are saved under `test-results/windows-validation/`
-and uploaded with native failure diagnostics. The Windows font regression uses
-`test-results/windows-font/` and uploads its own failure artifact from the parallel
+and uploaded with native failure diagnostics. Windows extension rendering uses
+`test-results/extension-rendering/` and uploads its own failure artifact from the parallel
 job. The disposable certificate test closes PowerShell's standard input,
 streams progress, and terminates PowerShell after 25 seconds; asynchronous process
 execution also lets Vitest enforce its test deadline. The test creates a fresh
@@ -685,9 +706,14 @@ Firefox. `test:shortcut:native` sends Option+R to a temporary Chromium window on
 macOS.
 
 Focused local desktop tests may set `BROWSER_RECALL_PLAYWRIGHT_ENGINE=chrome`
-when pinned Chromium is unavailable. Extension tests require pinned Chromium or
-an explicit `msedge` channel; Chrome-branded builds reject command-line unpacked
-extension loading. The `ci:*` scripts always use the pinned browsers.
+when pinned Chromium is unavailable. Extension tests require pinned Chromium.
+Both extension fixtures share browser selection and reject explicit `chrome`,
+`msedge`, and `webkit` choices before launching a browser. Google Chrome and
+Microsoft Edge removed the command-line flags needed to load unpacked extensions.
+The subprocess regressions verify these errors without requiring any installed
+browser, so JavaScript coverage can run before Playwright installation. Actual
+font rendering runs in extension E2E after Playwright setup. The `ci:*` scripts
+always use the pinned browsers.
 
 ## Manual testing and debugging
 

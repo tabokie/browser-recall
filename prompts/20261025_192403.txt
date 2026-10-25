@@ -1,0 +1,7 @@
+- Merge the two product website CI jobs.
+- What is the use of "**Windows extension system-font fallback" and "macOS documentation URL routing"? Their naming sounds to be very specific test case. Are they worth the dedicated CI jobs? (one took 4m another took 8m)**
+- Go ahead
+- Where should we link the product website in the GitHub page? In README or in project description?
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them
+- I have updated already.

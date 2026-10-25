@@ -53,10 +53,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build and check product website
+  website:
+    name: Build, check and publish product website
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      # Pull requests run checks without entering the deployment environment.
+      name: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && 'github-pages' || '' }}
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -76,20 +84,9 @@ jobs:
       - uses: actions/upload-pages-artifact@v4
         with:
           path: dist/website
-
-  deploy:
-    name: Publish GitHub Pages
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: build
-    runs-on: ubuntu-24.04
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
       - uses: actions/configure-pages@v5
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
       - name: Deploy product website
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         id: deployment
         uses: actions/deploy-pages@v4
