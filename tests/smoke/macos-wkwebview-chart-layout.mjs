@@ -45,7 +45,7 @@ try {
     timeout: 30_000,
   }).trim();
   const result = JSON.parse(output.split('\n').at(-1));
-  const expectedGap = 16;
+  const expectedGap = 32;
   if (Math.abs(result.before.visibleGap - expectedGap) > 0.5) {
     throw new Error(
       `The initial WKWebView chart-to-list gap changed from ${expectedGap}px to ${result.before.visibleGap}px:\n${JSON.stringify(result, null, 2)}`,
@@ -56,6 +56,14 @@ try {
     throw new Error(
       `Selecting a page widened the WKWebView chart-to-list gap by ${shift}px:\n${JSON.stringify(result, null, 2)}`,
     );
+  }
+  for (const metrics of [result.before, result.after]) {
+    const scrollbarHeight = metrics.barsBoxHeight - metrics.barsClientHeight;
+    if (scrollbarHeight < 16) {
+      throw new Error(
+        `The WKWebView chart scrollbar target is only ${scrollbarHeight}px tall:\n${JSON.stringify(result, null, 2)}`,
+      );
+    }
   }
   console.log('WKWebView chart-to-list spacing remained stable');
 } finally {

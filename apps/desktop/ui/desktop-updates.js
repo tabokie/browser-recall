@@ -74,6 +74,13 @@ export function createDesktopUpdates({ tr, openSettings, showError }) {
   async function refresh() {
     const expectedRevision = revision;
     const response = await sendAction({ action: 'getDesktopUpdateState' });
+    if (typeof response.enabled !== 'boolean') {
+      throw new Error('Desktop update state is missing enabled');
+    }
+    document
+      .getElementById('desktopUpdatesSection')
+      .closest('.modal-group').style.display = response.enabled ? '' : 'none';
+    if (!response.enabled) return;
     if (revision === expectedRevision) accept(response.update);
   }
 

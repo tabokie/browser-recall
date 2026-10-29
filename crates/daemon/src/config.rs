@@ -55,6 +55,29 @@ pub struct SyncDeviceRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+pub struct ReviewRequestHistory {
+    pub first_opened_at: i64,
+    pub requested_at: Vec<i64>,
+}
+
+impl ReviewRequestHistory {
+    fn validate(&self) -> Result<(), String> {
+        if self.first_opened_at <= 0 || self.requested_at.len() > 2 {
+            return Err("review request history is invalid".into());
+        }
+        let mut previous = self.first_opened_at;
+        for timestamp in &self.requested_at {
+            if *timestamp <= previous {
+                return Err("review request timestamps must increase after first opening".into());
+            }
+            previous = *timestamp;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct DaemonConfig {
     pub device_id: String,
     pub data_dir: PathBuf,
@@ -71,6 +94,8 @@ pub struct DaemonConfig {
     pub sync_remember_token: bool,
     pub sync_paused_devices: Vec<String>,
     pub sync_devices: BTreeMap<String, SyncDeviceRecord>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub review_requests: Option<ReviewRequestHistory>,
 }
 
 impl DaemonConfig {
@@ -88,6 +113,7 @@ impl DaemonConfig {
             sync_remember_token: true,
             sync_paused_devices: Vec::new(),
             sync_devices: BTreeMap::new(),
+            review_requests: None,
         })
     }
 
@@ -122,6 +148,9 @@ impl DaemonConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        if let Some(history) = &self.review_requests {
+            history.validate()?;
+        }
         if self.device_id.is_empty()
             || self.device_id.len() > DEVICE_ID_MAX_LEN
             || !self

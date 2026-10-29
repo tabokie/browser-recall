@@ -7,15 +7,24 @@ pub fn open_snapshot(
     directory: bool,
 ) -> Result<(), String> {
     let snapshot_path = storage.snapshot_html_file_path(slug, timestamp);
-    let target_path = if directory {
-        snapshot_path
-            .parent()
-            .ok_or_else(|| "Snapshot directory is unavailable".to_string())?
-    } else {
-        snapshot_path.as_path()
-    };
-    if !target_path.exists() {
+    if !snapshot_path
+        .try_exists()
+        .map_err(|error| error.to_string())?
+    {
         return Err("Snapshot not found".to_string());
     }
-    tauri_plugin_opener::open_path(target_path, None::<&str>).map_err(|error| error.to_string())
+    if directory {
+        let markdown_path = snapshot_path.with_extension("md");
+        let mut snapshot_paths = vec![snapshot_path];
+        if markdown_path
+            .try_exists()
+            .map_err(|error| error.to_string())?
+        {
+            snapshot_paths.push(markdown_path);
+        }
+        tauri_plugin_opener::reveal_items_in_dir(snapshot_paths).map_err(|error| error.to_string())
+    } else {
+        tauri_plugin_opener::open_path(snapshot_path, None::<&str>)
+            .map_err(|error| error.to_string())
+    }
 }

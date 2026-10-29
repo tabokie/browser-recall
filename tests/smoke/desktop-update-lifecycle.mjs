@@ -296,7 +296,7 @@ await withCleanup(async () => {
       await new Promise((resolve) => probe.listen(0, '127.0.0.1', resolve));
       const port = probe.address().port;
       await new Promise((resolve) => probe.close(resolve));
-      mkdirSync(path.join(profile, 'daemon'), { recursive: true });
+      mkdirSync(profile, { recursive: true });
       mkdirSync(data);
       const connector = {
         browser_id: 'chrome',
@@ -308,7 +308,7 @@ await withCleanup(async () => {
         last_seen_at: null,
       };
       writeFileSync(
-        path.join(profile, 'daemon/config.json'),
+        path.join(profile, 'config.json'),
         JSON.stringify({
           device_id: 'native-upgrade-test',
           data_dir: data,
@@ -322,6 +322,7 @@ await withCleanup(async () => {
           sync_remember_token: true,
           sync_paused_devices: [],
           sync_devices: {},
+          review_requests: null,
         }),
       );
       const environment = {
@@ -455,7 +456,7 @@ await withCleanup(async () => {
         note: 'written after reconnect',
       });
       const config = JSON.parse(
-        readFileSync(path.join(profile, 'daemon/config.json')),
+        readFileSync(path.join(profile, 'config.json')),
       );
       assert.equal(config.data_dir, data);
       assert.equal(config.device_id, 'native-upgrade-test');

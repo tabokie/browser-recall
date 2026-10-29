@@ -1,4 +1,6 @@
 mod build_support;
+#[cfg(feature = "mac-app-store")]
+mod storekit_build;
 
 use std::{env, path::PathBuf, process};
 
@@ -25,6 +27,8 @@ fn try_build() -> Result<(), String> {
         );
     }
     build_support::require_frontend_dist(&config_path)?;
+    #[cfg(feature = "mac-app-store")]
+    storekit_build::build(&manifest_dir)?;
     tauri_build::try_build(tauri_build::Attributes::default())
         .map_err(|error| format!("failed to generate the Tauri build context: {error:#}"))
 }

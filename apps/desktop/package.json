@@ -6,6 +6,7 @@
   "scripts": {
     "build:release": "node ../../scripts/build-release-desktop.mjs",
     "build:ui": "node ../../scripts/stage-app-assets.mjs desktop-ui",
+    "build:app-store": "npm run build:ui && node ../../scripts/build-tauri-app.mjs build --bundles app --features mac-app-store",
     "dev": "node ../../scripts/dev-desktop.mjs",
     "build": "node ../../scripts/build-desktop.mjs",
     "build:unsigned": "node ../../scripts/build-desktop.mjs unsigned",

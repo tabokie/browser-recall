@@ -222,6 +222,10 @@ impl SyncController {
         self.worker_notify.clone()
     }
 
+    pub fn is_in_progress(&self) -> bool {
+        self.state.lock().sync_in_progress
+    }
+
     pub fn device_entries(&self) -> Vec<SyncDeviceEntry> {
         let state = self.state.lock();
         collect_sync_device_entries(&state, &self.device_id)

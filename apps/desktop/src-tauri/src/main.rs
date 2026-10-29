@@ -10,10 +10,13 @@
 )]
 
 mod config;
+mod distribution;
 mod logging;
 mod login_item;
 #[cfg(target_os = "macos")]
 mod macos_window_frame;
+mod reviews;
+mod reviews_native;
 mod search;
 mod shell_contract;
 mod snapshot_open;
@@ -1480,12 +1483,51 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
         .ok_or_else(|| "bridge action missing `action`".to_string())?;
     if matches!(
         action,
+        "getAppReviewState" | "requestAppReview" | "cancelAppReview"
+    ) {
+        validate_desktop_bridge_fields(action, request_object)?;
+        let coordinator = app.state::<reviews::ReviewCoordinator>();
+        if action == "getAppReviewState" {
+            return Ok(json!({ "success": true, "enabled": coordinator.enabled(),
+                "session": coordinator.begin_session() }));
+        }
+        let session = request["session"]
+            .as_u64()
+            .filter(|value| *value > 0)
+            .ok_or("review session must be a positive integer")?;
+        let generation = request["generation"]
+            .as_u64()
+            .filter(|value| *value > 0)
+            .ok_or("review generation must be a positive integer")?;
+        if action == "cancelAppReview" {
+            coordinator.cancel(session, generation);
+            return Ok(json!({ "success": true }));
+        }
+        let requested = coordinator
+            .request(
+                session,
+                generation,
+                chrono::Utc::now().timestamp_millis(),
+                || reviews_native::prepare(&app),
+                |epoch, permit| reviews_native::present(&app, epoch, permit),
+            )
+            .await?;
+        return Ok(json!({ "success": true, "requested": requested }));
+    }
+    if matches!(
+        action,
         "getDesktopUpdateState" | "checkDesktopUpdate" | "installDesktopUpdate"
     ) {
         validate_desktop_bridge_fields(action, request_object)?;
         let updates = app.state::<updates::DesktopUpdates>();
         return match action {
-            "getDesktopUpdateState" => Ok(json!({ "success": true, "update": updates.snapshot() })),
+            "getDesktopUpdateState" => Ok(json!({
+                "success": true, "enabled": !distribution::MAC_APP_STORE_BUILD,
+                "update": updates.snapshot()
+            })),
+            _ if distribution::MAC_APP_STORE_BUILD => {
+                Err("Application updates are managed by the Mac App Store".into())
+            }
             "checkDesktopUpdate" => {
                 Ok(json!({ "success": true, "update": updates.check(&app).await? }))
             }
@@ -1995,6 +2037,7 @@ fn validate_desktop_bridge_fields(
     request: &serde_json::Map<String, Value>,
 ) -> Result<(), String> {
     let fields: &[&str] = match action {
+        "requestAppReview" | "cancelAppReview" => &["session", "generation"],
         "openExternalUrl" | "getPageRelations" => &["url"],
         "completeDesktopSetup" => &["launchAtLogin"],
         "updateDesktopShellSettings" => &["launchAtLogin", "debugLogging"],
@@ -2012,6 +2055,7 @@ fn validate_desktop_bridge_fields(
         "toggleSyncRemember" => &["remember"],
         "setSyncToken" => &["token", "remember"],
         "getDesktopSystemLocale"
+        | "getAppReviewState"
         | "getDeviceId"
         | "getDesktopConnectorState"
         | "triggerDesktopPairing"
@@ -2224,8 +2268,9 @@ fn main() -> tauri::Result<()> {
     let builder = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_deep_link::init());
+    #[cfg(not(feature = "mac-app-store"))]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     #[cfg(target_os = "linux")]
     let builder = builder.plugin(tauri_plugin_autostart::init(
         tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -2257,6 +2302,17 @@ fn main() -> tauri::Result<()> {
             let app_handle = app.handle().clone();
             let bootstrap = config::bootstrap(&app_handle)?;
             let logging = logging::init(&bootstrap.log_dir, &bootstrap.config.log_level)?;
+            let review_coordinator = reviews::ReviewCoordinator::new(
+                bootstrap.config_store.clone(),
+                distribution::reviews_enabled(),
+                chrono::Utc::now().timestamp_millis(),
+            );
+            app.manage(review_coordinator.clone());
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = review_coordinator.initialize().await {
+                    warn!(%error, "could not initialize App Store review request history");
+                }
+            });
             info!(
                 data_dir = %bootstrap.config.data_dir.display(),
                 log_dir = %bootstrap.log_dir.display(),
@@ -2264,6 +2320,9 @@ fn main() -> tauri::Result<()> {
             );
             if let Some(error) = &bootstrap.login_item_error {
                 warn!(%error, "could not reconcile launch-at-login registration");
+            }
+            if let Err(error) = reviews_native::start(app.handle()) {
+                warn!(%error, "could not monitor App Store review interaction");
             }
 
             let (server_handle, initial_snapshot, watcher_bundle) =
@@ -2357,6 +2416,7 @@ fn main() -> tauri::Result<()> {
             show_main_window(app.handle());
             // Documentation and native test profiles must never contact releases.
             if !cfg!(debug_assertions)
+                && !distribution::MAC_APP_STORE_BUILD
                 && std::env::var_os("BROWSER_RECALL_DESKTOP_TEST_PROFILE_DIR").is_none()
                 && cfg!(any(target_os = "macos", target_os = "windows"))
             {

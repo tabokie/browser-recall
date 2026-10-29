@@ -1,3 +1,14 @@
+const reviewOpportunities = new Set([
+  'saveListMeta',
+  'toggleListPin',
+  'updateNote',
+  'replaceNote',
+  'renamePage',
+  'updateListTree',
+  'addRule',
+  'removeRule',
+]);
+
 async function invokeBridgeAction(request) {
   if (window.__TAURI__?.core?.invoke) {
     return window.__TAURI__.core.invoke('bridge_action', { request });
@@ -33,6 +44,9 @@ export async function sendAction(msg) {
       throw new Error(`${msg.action} failure response is missing an error`);
     }
     throw new Error(resp.error);
+  }
+  if (reviewOpportunities.has(msg.action)) {
+    window.dispatchEvent(new Event('desktop-review-opportunity'));
   }
   return resp;
 }

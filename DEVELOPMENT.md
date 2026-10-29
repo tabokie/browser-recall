@@ -31,6 +31,36 @@ Playwright installation includes Linux system libraries and fonts through
 
 ## Build and run
 
+Mac App Store channel builds enable native StoreKit review requests and disable
+GitHub update checks and installation:
+
+```bash
+npm run build:app-store --workspace @browser-recall/desktop
+cargo test --locked -p browser-recall-desktop --features mac-app-store --test reviews
+```
+
+The channel build requires macOS and Xcode with the Swift compiler. The build
+command produces a Tauri app bundle; App Store signing, provisioning, sandbox
+entitlements, and submission remain distribution setup. Regular build and GitHub
+release commands omit `mac-app-store`. The native release-validation workflow
+compiles and tests the Mac App Store channel before building the GitHub artifacts.
+
+Review history is the required nullable `review_requests` field in local
+`config.json`. Mac App Store builds record `first_opened_at` and zero to two
+`requested_at` timestamps in milliseconds. The first request requires seven days
+since first opening, and the second requires thirty days since the first request.
+A StoreKit call consumes the attempt even when StoreKit displays no dialog. The
+schedule has no expiry windows and is not reset by changing collections. Browser
+tests verify quiet timing and cancellation; Rust integration tests verify the
+persisted schedule, cancellation during file locking, and reservation rollback
+through the production configuration store. The no-tray native review probe uses
+production AppKit code with a recording presenter, preserving the content view and
+checking focus, visibility, sheets and native activity. The native review probe
+uses actual focus in an unlocked session; a locked session verifies rejection
+through the production focus gate and exercises remaining checks with controlled
+focus. No App Store rating dialog is shown. No configuration
+migration or legacy reader is provided.
+
 ### Product website
 
 The product page lives in `website/` and uses plain HTML, CSS, and JavaScript.
@@ -545,8 +575,8 @@ exception using `ALLOW_UNIT_TEST_GROWTH=1`.
 
 ### Desktop visual baselines
 
-`npm run test:visual` runs the native macOS WKWebView chart-layout probe, all
-Chromium desktop visual tests, and `@webkit` cases. The native probe skips on
+`npm run test:visual` runs the native macOS WKWebView chart-layout and review
+presentation probes, all Chromium desktop visual tests, and `@webkit` cases. The native probes skip on
 other operating systems. Desktop visual tests replace Tauri calls with test
 responses. Separate Rust and native tests check the real desktop integration.
 
@@ -608,10 +638,11 @@ production frame restoration directly and runs before the tray lifecycle test:
 cargo test --locked --release -p browser-recall-native-tests --test macos_window_frame
 ```
 
-The snapshot folder check calls production snapshot-opening code, verifies the
-temporary snapshot directory in Finder, then closes only that test window. The
-check requires a macOS desktop session and does not launch Browser Recall or
-register a menu bar item:
+The snapshot folder check calls production snapshot-opening code, verifies that
+Finder selects the snapshot HTML file and optional Markdown file, then closes only
+the test window. The check also covers snapshots without Markdown and missing
+snapshot HTML. The check requires a macOS desktop session and does not launch
+Browser Recall or register a menu bar item:
 
 ```bash
 cargo test --locked -p browser-recall-desktop --test snapshot_open -- --ignored

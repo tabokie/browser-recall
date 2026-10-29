@@ -111,6 +111,13 @@ jobs:
         if: matrix.platform == 'macos' && matrix.arch == 'arm64'
         run: cargo test --locked --release -p browser-recall-native-tests --test macos_window_frame
 
+      - name: Verify Mac App Store review channel
+        if: matrix.platform == 'macos'
+        run: |
+          npm run build:desktop-ui
+          cargo build --locked --release -p browser-recall-desktop --features mac-app-store
+          cargo test --locked --release -p browser-recall-desktop --features mac-app-store --test reviews
+
       - run: npm run build:release --workspace @browser-recall/desktop
 
       - name: Verify Windows installation and installed application

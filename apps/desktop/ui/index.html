@@ -789,10 +789,10 @@
       /* ── Time chart (flat, blends with background) ── */
       .time-chart {
         display: none;
-        /* 3px bar padding + 46px bars + 4px gap + 12px axis + 16px panel padding.
-           A fixed block size prevents WKWebView from adding its 13px horizontal
-           scrollbar to the parent only after the first bar is highlighted. */
-        height: 81px;
+        /* 3px bar padding + 46px bars + 4px gap + 12px axis + 16px scrollbar
+           + 16px panel padding. Reserve the scrollbar space so the results do
+           not cover its hit area or shift when WKWebView paints the scrollbar. */
+        height: 97px;
         padding: 8px 24px;
         position: relative;
       }
@@ -817,6 +817,20 @@
         display: flex;
         align-items: flex-start;
         user-select: none;
+        /* Use the custom scrollbar instead of the shared thin overlay style. */
+        scrollbar-width: auto;
+        scrollbar-color: auto;
+      }
+
+      .chart-bars::-webkit-scrollbar {
+        height: 16px;
+      }
+
+      .chart-bars::-webkit-scrollbar-thumb {
+        border: 5px solid transparent;
+        border-radius: 8px;
+        background-clip: padding-box;
+        min-width: 32px;
       }
 
       .chart-select-band {

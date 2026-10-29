@@ -170,8 +170,7 @@ try {
   });
   const port = server.address().port;
   await new Promise((resolve) => server.close(resolve));
-  const configDir = path.join(profile, 'daemon');
-  daemon = launchTestDaemon(configDir, { ports: [port] });
+  daemon = launchTestDaemon(profile, { ports: [port] });
   await waitForDaemonListening(daemon);
   // SIGINT follows the daemon's graceful shutdown path and flushes settings.
   await new Promise((resolve, reject) => {
@@ -180,7 +179,7 @@ try {
     );
     daemon.kill('SIGINT');
   });
-  const configPath = path.join(configDir, 'config.json');
+  const configPath = path.join(profile, 'config.json');
   const config = JSON.parse(readFileSync(configPath));
   const currentSettings = JSON.parse(
     readFileSync(path.join(config.data_dir, 'views/manifest/settings.json')),

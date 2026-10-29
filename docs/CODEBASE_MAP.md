@@ -53,9 +53,14 @@ Use this map to find the files that implement a feature. See
 | `apps/desktop/ui/bookmark-parser.js` | Bookmark HTML parsing |
 | `apps/desktop/ui/shared.css`, `apps/desktop/ui/fonts/` | Bundled fonts and shared desktop typography |
 | `apps/desktop/src-tauri/src/main.rs` | Daemon lifecycle, Tauri commands/events, windows, tray, deep links, and single-instance handling |
-| `apps/desktop/src-tauri/src/config.rs` | Desktop configuration and saved setup choices |
+| `apps/desktop/src-tauri/src/config.rs` | Desktop configuration and saved setup choices in `config.json` at the application configuration directory or test-profile root |
 | `apps/desktop/src-tauri/src/shell_contract.rs` | Shell response types and route state |
-| `apps/desktop/src-tauri/src/snapshot_open.rs` | Open snapshot HTML or its storage directory with the operating system |
+| `apps/desktop/src-tauri/src/snapshot_open.rs` | Open snapshot HTML or reveal and select snapshot HTML and optional Markdown files in the system file manager |
+| `apps/desktop/src-tauri/src/distribution.rs` | Identify the distribution channel and suppress reviews in desktop test profiles |
+| `apps/desktop/src-tauri/src/reviews.rs` | Coordinate review scheduling, worker persistence, request contexts, reservations and rollback |
+| `apps/desktop/src-tauri/src/reviews_native.rs` | Dispatch readiness and presentation checks to AppKit without file access |
+| `apps/desktop/src-tauri/src/reviews.swift`, `apps/desktop/src-tauri/storekit_build.rs` | Build native StoreKit presentation with focus, sheet, visibility and activity checks |
+| `apps/desktop/ui/desktop-reviews.js` | Register busy views and operations, wait for completed reading/editing tasks, and cancel pending or dispatched requests when interaction resumes |
 | `apps/desktop/src-tauri/src/login_item.rs` | Check and change launch-at-login registration; undo changes if saving fails |
 | `apps/desktop/src-tauri/src/windows_icon.rs` | Windows window and taskbar icons matched to display scale |
 | `apps/desktop/src-tauri/src/macos_window_frame.rs` | Capture and restore the exact macOS AppKit window frame independently of webview insets |
@@ -225,6 +230,7 @@ do not maintain a second production copy.
 | Snapshot URL/slug metadata, resources, frames, and shadow roots | `tests/e2e/snapshot-slug-meta.spec.js`, `tests/e2e/snapshot-resource-timeout.spec.js` |
 | Seeded cross-feature workflows | `tests/e2e/seeded-combination-workflows.spec.js`, `tests/e2e/manual-seed-workflow.spec.js` |
 | Desktop layout, navigation, search, and scroll retention | `tests/e2e/desktop-visual.spec.js` |
+| App Store review timing, persistence, cancellation, rollback and failed writes | `apps/desktop/src-tauri/tests/reviews.rs` |
 | Update signature validation, checkpoint failure, and native macOS update installation | `apps/desktop/src-tauri/tests/desktop_updates.rs`, `tests/e2e/desktop-visual.spec.js` |
 | Running native app upgrades, relaunch, retained configuration/data/pairing, and connector reconnection | `tests/smoke/desktop-update-lifecycle.mjs`, `tests/smoke/windows-desktop-update-ui.ps1` |
 | Release CI checks matching desktop/extension versions, packages production Chrome/Firefox extensions, and requires complete checksummed assets before publishing | `tests/integration/extension-release-workflow.test.js` |
@@ -253,6 +259,10 @@ Desktop visual tests check layout and command calls with simulated Tauri respons
 Rust and native app tests check real daemon calls and operating-system behavior.
 Native window tests cover selected scenarios; browser-rendered UI tests do not
 exercise every native desktop interaction.
+
+The no-tray native review probe is `tests/smoke/macos-review-presentation.mjs` with
+`macos-review-presentation.swift`; it exercises production AppKit code with a
+recording presenter and never displays an App Store rating dialog.
 
 ## User documents
 

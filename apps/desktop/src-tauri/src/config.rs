@@ -45,10 +45,9 @@ pub fn bootstrap<R: Runtime>(app: &AppHandle<R>) -> Result<DesktopBootstrap, Box
 
 pub fn daemon_config_store<R: Runtime>(app: &AppHandle<R>) -> Result<ConfigStore, tauri::Error> {
     if let Some(profile_dir) = desktop_test_profile_dir()? {
-        return Ok(ConfigStore::new(profile_dir.join("daemon")));
+        return Ok(ConfigStore::new(profile_dir));
     }
-    let config_dir = app.path().app_config_dir()?.join("daemon");
-    Ok(ConfigStore::new(config_dir))
+    Ok(ConfigStore::new(app.path().app_config_dir()?))
 }
 
 pub fn desktop_log_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, tauri::Error> {

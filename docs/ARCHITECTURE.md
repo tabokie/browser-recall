@@ -215,7 +215,40 @@ concurrent writers from overwriting each other's changes; temporary-file replace
 prevents partial JSON reads. Each caller changes only the fields the caller manages.
 WebSocket handlers do not keep a separate editable copy of configuration.
 
+The desktop stores local configuration directly in `config.json` in Tauri's
+application configuration directory. The local configuration includes the selected
+data-folder path, device identity, and connector credentials. Desktop test profiles
+use the same `config.json` layout at the profile root. The standalone daemon uses
+the directory passed through `--config-dir`.
+
 ## Desktop app
+
+The `mac-app-store` Cargo feature selects the Mac App Store distribution channel.
+Only the Mac App Store channel initializes local `review_requests` history in
+`config.json` and can call StoreKit. The first request becomes eligible seven days
+after the first opening; the second request becomes eligible thirty days after the
+first request. There are at most two attempts, with no expiry windows. Atomic
+configuration updates on a blocking worker save an attempt before calling StoreKit, including when
+StoreKit suppresses the dialog. Collection changes and app updates retain the
+history. Invalid history is an explicit configuration error. Configuration writes
+that fail prevent the StoreKit call and are logged without interrupting the user.
+
+Successful list, rule, page-title, and note edits, completed searches, completed
+navigation to Timeline, Book or a list, and closing page details create review
+opportunities. Views register busy editors, dialogs and visible errors with the
+frontend coordinator; imports and searches register pending work. The desktop
+waits for three seconds without interaction and requires a focused, visible window
+with no busy work or sync operation. Activity, focus loss, new busy work or a webview
+reload invalidates the frontend request context even after dispatch. The Rust review
+coordinator owns eligibility, durable reservation and cancellation; an unused
+reservation is rolled back on a worker. Native activity epochs reject delayed
+requests even if the cancellation message has not reached Rust. No configuration
+locking, JSON work or file writes run in the AppKit presentation callback.
+The native bridge invokes `AppStore.requestReview(in:)` on the AppKit main thread
+using a small Swift bridge; macOS versions before 13 do not request reviews.
+Desktop test profiles never invoke StoreKit. The Mac App Store channel also omits
+the GitHub updater plugin, rejects manual updater calls, and hides updater controls.
+Regular builds retain GitHub updates and cannot request App Store reviews.
 
 Local, release, and disk-image builds share desktop build orchestration: stage UI
 assets, compile with Tauri, sign, and verify staged artifacts before replacing
@@ -293,6 +326,10 @@ change. Startup checks the saved setting against the operating-system registrati
 Check failures appear beside the setting without blocking the rest of the app.
 
 ### Rendering and refreshes
+
+Snapshot rows open saved HTML in the default application. The snapshot folder
+action reveals and selects the snapshot HTML file and optional Markdown file in
+the system file manager. Missing snapshot HTML produces an explicit error.
 
 Timeline and Book navigation activate the destination and title immediately, then
 wait for the navigation animations before rendering content. Unrelated or repeating

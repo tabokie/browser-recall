@@ -1,0 +1,12 @@
+- In desktop app, time chart scroll bar click area is too small
+- The "open in folder" button of the page snapshot should open finder selecting the files.
+- I want to show a non-intrusive popup in desktop app that asks user to rate on app store. But it should only show up for the binary we release to app store, not the GitHub release. It should also not get in the way of user's normal operation and show up once in the first month, once in the third month. What do you think?
+- What is "A suppressed request"? How is it suppressed?
+- Where is the "request history" stored? Where is the data directory path config being stored?
+- Why is there a nested directory "daemon"? Shall we remove it?
+- Don't worry about existing installation and compatibility.
+- Go ahead implement the request rating functionality as we discussed.
+- It should ask the first time if both conditions are true: (1) there was no previous request, (2) time since first opening >= 7d. If should ask the second time if: (1) there was a first request, (2) time since that request >= 30d.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them all
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) co-author=GPT-6.1 Sol

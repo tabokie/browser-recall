@@ -64,9 +64,10 @@
     "apps/desktop/ui/bookmark-parser.js": "0cecc7e3d228ad48595d09f43555afe34d6304abff361091dc9caeeaf8d99208",
     "apps/desktop/ui/color-schemes.css": "23bc18429474f074f71222b9719046a95f6c088725610e4e5b8fc8ac6f343f64",
     "apps/desktop/ui/dark-theme.css": "2b69c31842088ed0c119321937d66b93918199db3bf069460c74629360ec04e1",
-    "apps/desktop/ui/desktop-bridge.js": "9882ce6417fd125f03fb954a0d94f92324790026334c58a2c5e21a4e04312cd5",
+    "apps/desktop/ui/desktop-bridge.js": "461822daa75aec245cbcf28e1d27591077b141d0ca3eb132566304f6352510e5",
     "apps/desktop/ui/desktop-platform.js": "b2541feccd3050aa905e2272bd6b4319334f1f5368bdacec0bea477058833e38",
-    "apps/desktop/ui/desktop-updates.js": "870fa8f7310e9c8eda838f968bddd0b34f05c917cf4bdbf48b0d0ec2fc5494f8",
+    "apps/desktop/ui/desktop-reviews.js": "e832c8b492694aa47297e38d97f35e42e1017bb362eb5ac34b94bc3c05088f94",
+    "apps/desktop/ui/desktop-updates.js": "070aa6f5b5bcfa7d8bc1b1d15ce5e4cc682fd5eb121945276ae7532bb839542f",
     "apps/desktop/ui/entity-types.js": "ada225d44416ae47b65658eec9ff6af28662a39c22d341ff594da69d623994bf",
     "apps/desktop/ui/fonts/GentiumBookPlus-BoldItalic.woff2": "7717c32d7e32b8af047375228b4435e63a4b331b5f2b727834af43be3ccdbd5a",
     "apps/desktop/ui/fonts/GentiumBookPlus-Italic.woff2": "ee06a26cfe0956e72d9565b9a5ade35e4c82332284813f8324dc886f87ee60ad",
@@ -76,8 +77,8 @@
     "apps/desktop/ui/fonts/fraunces-regular.woff2": "533efccd81345ccb4da3e483661855964c575fda7e21205e494075e88fe052d6",
     "apps/desktop/ui/fonts/nunito.woff2": "f85212b2392aff6c178df5c0c6176fe341785ba641e6ec4ab0c80fb10dc38e0c",
     "apps/desktop/ui/highlight-format.js": "9e5be7cc41e99dbfa9f5262aebacfe77da0cbca58416e6e53536cb01abd6f00d",
-    "apps/desktop/ui/index.html": "cdf6f170f1037d91b433e479c0f872671f4d142cd1df8a7a0ff98576593b24ea",
-    "apps/desktop/ui/index.js": "9ac79a4692128665c423ec60f9ffa8990776b69891a94f5c20b3f6a33b98b79e",
+    "apps/desktop/ui/index.html": "d3be75c0ecfec2d1b4c799b0b969a49e471003ea0f397e992df2c6e4ca7673be",
+    "apps/desktop/ui/index.js": "3a3148d744429e23194353f10a9aaa88eb6721d5505a468f83df4bf0cfb84ba6",
     "apps/desktop/ui/logger.js": "73939f96285999acfd96bf693d081955a6be4cb6929f17b2aeea59774b632f8c",
     "apps/desktop/ui/search-runtime.d.ts": "4c41e73480a780bc85d7e8f8279c87ba00e8b0753a52ca82375aca32baa1d797",
     "apps/desktop/ui/search-runtime.js": "68b8a6cd99b5b64628df2c8f86224a80a5eca025dd3c77cdab1e315f409dadf7",
@@ -88,19 +89,23 @@
     "apps/desktop/ui/utils.js": "849e90e145e6bfad9af7d3751b34b966b39603bea57863dfce4e055ccca47100",
     "apps/desktop/ui/virtual-scroller.js": "dd6dc0601e86bec3e503451dd0cf37330dafb73d6994aafcc76f9acd85292407",
     "apps/desktop/package.json": "b703d0257661b7d6c0eba39e923ef341eee608a335b7365491ca3d36a7a313da",
-    "apps/desktop/src-tauri/src/config.rs": "4cd5ecde08c61c41fcb5eb88110e4f85cc347c33a723b93d59cac8c155d23ae4",
+    "apps/desktop/src-tauri/src/config.rs": "f32940fa4cd06ef7a21092af9949da2df1c7617aea114ebf1eb07a12e9bfa58f",
+    "apps/desktop/src-tauri/src/distribution.rs": "951576fc707fc6dca5fd7e0a625ce994f9498eecb40756d5fe76aa6294d98995",
     "apps/desktop/src-tauri/src/logging.rs": "4e96947264d95534a12f69c0c53d9e8bde262ff6694a6e0d28527a2327704572",
     "apps/desktop/src-tauri/src/login_item.rs": "aa9885e65b905fa3f0a6dfa57b1b84fb867ccb89f3d2429ee0fd34206808e7ca",
     "apps/desktop/src-tauri/src/macos_window_frame.rs": "8b3257ad179a000a8811843fbbabf903c980aba692e9fcc6f1306ec39548efb5",
-    "apps/desktop/src-tauri/src/main.rs": "fe42250a126e49c144594d345c5308db3d950035e89e12563cc6d5f6c7648098",
+    "apps/desktop/src-tauri/src/main.rs": "9c63f023e1b7eec455ecc9ed97fa9359aa90488e456c0b7879e2c59709ebc50b",
+    "apps/desktop/src-tauri/src/reviews.rs": "1bfb298cf220984e070804376415ed5f75dfb3cb41487c8727f60cb765674e33",
+    "apps/desktop/src-tauri/src/reviews.swift": "433ae57ba922872f63e50252ef9ec4192f442f394a6aa3304261a58653b68fbb",
+    "apps/desktop/src-tauri/src/reviews_native.rs": "2dcb11a5433b6f9c55c0271cf54497198ddfe3c7e10a802cdfb70dffda860f12",
     "apps/desktop/src-tauri/src/search.rs": "4707640e5fbf270f6982c9949c2ae7c4acea60db6742e35076eac9eb40632e2d",
     "apps/desktop/src-tauri/src/shell_contract.rs": "f937210da4c8c43adac9c9db916c3e84b28cd22068502c61e1872fcc6852b2f1",
-    "apps/desktop/src-tauri/src/snapshot_open.rs": "76e7205e93ffaed90ec92b7969c534ce31cc50bc94d97cb193acd190d02923b6",
+    "apps/desktop/src-tauri/src/snapshot_open.rs": "e7e4e22dbff5efe0fa9085b4649be650de67779f0111835a84185f84285b95ec",
     "apps/desktop/src-tauri/src/updates.rs": "a3ef80bc4006ce67ef9ab29ab756adb780f6188b9c4fa14a6131aa0269351336",
     "apps/desktop/src-tauri/src/windows_icon.rs": "114c1dd99ab60d9d23eb7c88bc0ae435266222f6e8657a7db58bbfc99854ebd1",
-    "apps/desktop/src-tauri/build.rs": "a243e40d9c2faa063094a5644b325f9d52e54b71074e6014f2eaafd76c2cc9cc",
+    "apps/desktop/src-tauri/build.rs": "61814164f28bc0c52c8ee9459436eb690e137015835cb91f0343f1c54b4879f3",
     "apps/desktop/src-tauri/build_support.rs": "a3428b913d4e5557d61030c005533b75c78daef397e73cb7d0764d4321a47717",
-    "apps/desktop/src-tauri/Cargo.toml": "586b0511bfa65aad4a669aec8a06a32024e75a804717fb2002580c04f75c68f9",
+    "apps/desktop/src-tauri/Cargo.toml": "73aa39b7a90b69a32a2e576357badbb63566a3c98d1a06ca21287fcc1684dc79",
     "apps/desktop/src-tauri/capabilities/main.json": "ad00db1db6a74b09e75e37fbeb63b4f2052b80b4f60fe8a0ec826a951c3338dc",
     "Cargo.lock": "ecabad57494b0b40014ef94f5b9d97c0b34fde0d577ef658023bb165e4ae9a54",
     "Cargo.toml": "575afa94419349bbda4e73e4287f56fb55453c17fa7052fe8ec6b775a03cf48c",
@@ -110,7 +115,7 @@
     "apps/desktop/src-tauri/icons/icon.png": "3a146dacc860f8de268cf6bb8615a0dca0232485a396d2c5ccba815522db10be",
     "apps/desktop/src-tauri/icons/tray-icon.png": "047da4fdb0b2cfdbf0511decfdea7cfe316f4ea2d2badc0149879ed0ba10c732",
     "apps/desktop/src-tauri/tauri.conf.json": "6e5fc1d4d685dc3767f96285aa915a3a5b7c4e475256e3a6a274b2b54dfadf75",
-    "scripts/capture-documentation.mjs": "e8c46f2802ccb0f4109053fbc2f938a8ec6725f05f03e2314715a126eda54bac",
+    "scripts/capture-documentation.mjs": "b42c8951a41801c6a39a9432c253e811e6bdf13bb15eef6a50b382712d689b9e",
     "scripts/lib/macos-native-session.mjs": "91e0705427e508601aad9e5dc011b5c1dd76b8dff14272465d8380e79597cc9b",
     "scripts/documentation-tauri.conf.json": "77b121460707553df53cbfa24c4e9717e6d5840f0c7dc32d5087247f6e94665d",
     "scripts/documentation-info.plist": "4aae6bb6408ed6927d9d9f7cce7590651f9b7e98a1b1ee0aee34d2478e047429",
@@ -137,7 +142,7 @@
   },
   "screenshots": {
     "timeline.png": {
-      "sha256": "0509f6983dd15a374cffaa9d5a693285e60b96c09e2543199aaf64cd27f03a2a",
+      "sha256": "bf38ff69ba4459e0c122e9a99591ee378e01b89c9b084504450a0c8e47f68701",
       "width": 2080,
       "height": 1400
     },
@@ -147,19 +152,19 @@
       "height": 1400
     },
     "timeline-mono.png": {
-      "sha256": "a5f774852768c5d9b6dd00c8ed7c3248fa9010c5eac6bd932beac39af8b872c3",
+      "sha256": "361f8f8064623c2586193558633591fb84a9f02e47d51d6fcf4c8a8a44ed9971",
       "width": 2080,
       "height": 1400
     },
     "timeline-styles.png": {
-      "sha256": "b8d11acb7f6af8bb523abff78df61dea7be0ef5b7be89513810a5613ec8224c2",
+      "sha256": "55c28b509d42c6fa7bc072853adcfca7971b4f8a9161e04d177febf98bb04645",
       "width": 2080,
       "height": 1400,
       "composition": {
         "sources": ["timeline.png", "timeline-mono.png"],
         "sourceSha256": [
-          "0509f6983dd15a374cffaa9d5a693285e60b96c09e2543199aaf64cd27f03a2a",
-          "a5f774852768c5d9b6dd00c8ed7c3248fa9010c5eac6bd932beac39af8b872c3"
+          "bf38ff69ba4459e0c122e9a99591ee378e01b89c9b084504450a0c8e47f68701",
+          "361f8f8064623c2586193558633591fb84a9f02e47d51d6fcf4c8a8a44ed9971"
         ],
         "split": { "top": 0.62, "bottom": 0.38 }
       }

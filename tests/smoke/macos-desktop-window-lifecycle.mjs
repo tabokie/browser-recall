@@ -176,7 +176,7 @@ print("\\(bounds.origin.x),\\(bounds.origin.y),\\(bounds.width),\\(bounds.height
   const dataDir = path.join(testHome, 'browser-data');
   const configDir = path.join(
     testHome,
-    'Library/Application Support/app.browser-recall.desktop/daemon',
+    'Library/Application Support/app.browser-recall.desktop',
   );
   const malformedLogPath = path.join(
     dataDir,
@@ -208,6 +208,7 @@ print("\\(bounds.origin.x),\\(bounds.origin.y),\\(bounds.width),\\(bounds.height
       sync_remember_token: true,
       sync_paused_devices: [],
       sync_devices: {},
+      review_requests: null,
     }),
   );
 

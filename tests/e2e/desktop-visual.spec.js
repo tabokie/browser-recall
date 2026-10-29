@@ -348,12 +348,15 @@ async function installDesktopBridgeMock(page, options = {}) {
       getSettingsDelayMs,
       resumeServiceDelayMs,
       updateNoteDelayMs,
+      saveListMetaDelayMs,
       fullscreenScrollResetDelayMs,
       initialRoute,
       systemLocale,
       loginItemError,
       previewRuleMatchesByPattern,
       desktopUpdateFailure,
+      appStoreBuild,
+      requestAppReviewDelayMs,
     }) => {
       if (initialRoute) window.__BR_STATE__ = { route: initialRoute };
       const listeners = new Map();
@@ -377,6 +380,8 @@ async function installDesktopBridgeMock(page, options = {}) {
       const loadHistoryBatchInvocations = [];
       const previewRuleInvocations = [];
       const bridgeActionInvocations = [];
+      let reviewGeneration = 0;
+      const reviewPresentations = [];
       let updateNoteCounter = 0;
 
       function clone(value) {
@@ -929,6 +934,9 @@ async function installDesktopBridgeMock(page, options = {}) {
         loadHistoryBatchInvocationCount() {
           return loadHistoryBatchInvocations.length;
         },
+        reviewPresentations() {
+          return clone(reviewPresentations);
+        },
         bridgeActionInvocations() {
           return clone(bridgeActionInvocations);
         },
@@ -1002,7 +1010,37 @@ async function installDesktopBridgeMock(page, options = {}) {
               dataFolder: setupComplete ? '/tmp/browser-recall-visual' : null,
             };
           case 'getDesktopUpdateState':
-            return { success: true, update: clone(desktopUpdate) };
+            return {
+              success: true,
+              enabled: !appStoreBuild,
+              update: clone(desktopUpdate),
+            };
+          case 'getAppReviewState':
+            return { success: true, enabled: appStoreBuild, session: 1 };
+          case 'cancelAppReview':
+            if (request.session !== 1)
+              throw new Error('Unknown review session');
+            reviewGeneration = Math.max(reviewGeneration, request.generation);
+            return { success: true };
+          case 'requestAppReview': {
+            if (
+              request.session !== 1 ||
+              !Number.isSafeInteger(request.generation)
+            )
+              throw new Error('Missing review context');
+            const stale = request.generation <= reviewGeneration;
+            reviewGeneration = Math.max(reviewGeneration, request.generation);
+            if (requestAppReviewDelayMs)
+              await new Promise((resolve) =>
+                setTimeout(resolve, requestAppReviewDelayMs),
+              );
+            const requested =
+              appStoreBuild &&
+              !stale &&
+              request.generation === reviewGeneration;
+            if (requested) reviewPresentations.push(clone(request));
+            return { success: true, requested };
+          }
           case 'checkDesktopUpdate':
             desktopUpdate = {
               ...desktopUpdate,
@@ -1228,6 +1266,11 @@ async function installDesktopBridgeMock(page, options = {}) {
             return { success: true };
           }
           case 'saveListMeta': {
+            if (saveListMetaDelayMs > 0) {
+              await new Promise((resolve) =>
+                setTimeout(resolve, saveListMetaDelayMs),
+              );
+            }
             const listId = request.listId || request.slug;
             if (listId) {
               const key = `list:${listId}`;
@@ -1464,12 +1507,15 @@ async function installDesktopBridgeMock(page, options = {}) {
       getSettingsDelayMs: options.getSettingsDelayMs || 0,
       resumeServiceDelayMs: options.resumeServiceDelayMs || 0,
       updateNoteDelayMs: options.updateNoteDelayMs || 0,
+      saveListMetaDelayMs: options.saveListMetaDelayMs || 0,
       fullscreenScrollResetDelayMs:
         options.fullscreenScrollResetDelayMs ?? null,
       initialRoute: options.initialRoute || '',
       systemLocale: options.systemLocale || 'en',
       loginItemError: options.loginItemError || null,
       desktopUpdateFailure: options.desktopUpdateFailure || null,
+      appStoreBuild: options.appStoreBuild || false,
+      requestAppReviewDelayMs: options.requestAppReviewDelayMs || 0,
       previewRuleMatchesByPattern: options.previewRuleMatchesByPattern || {},
     },
   );
@@ -2220,6 +2266,7 @@ test.describe('desktop visual regression', () => {
     await serveDesktopUi(async (desktopUrl) => {
       await openDesktopUi(page, desktopUrl, {
         setupComplete: true,
+        appStoreBuild: true,
         extraSession: {
           'list:research': {
             slug: 'research',
@@ -2236,6 +2283,9 @@ test.describe('desktop visual regression', () => {
         },
       });
 
+      const now = Date.now();
+      await page.clock.install({ time: new Date(now) });
+      await page.clock.pauseAt(new Date(now + 1000));
       await page.locator('.sidebar-item[data-list-id="research"]').click();
 
       await expect(page.locator('#mainTitle')).toHaveText('Hubs');
@@ -2243,6 +2293,12 @@ test.describe('desktop visual regression', () => {
         `Error: ${projectionError}`,
       );
       await expect(page.locator('#relatedResults')).not.toContainText('$1');
+      await page.clock.runFor(5000);
+      expect(
+        await page.evaluate(() =>
+          window.__desktopVisualHarness.reviewPresentations(),
+        ),
+      ).toHaveLength(0);
     });
   });
 
@@ -4837,6 +4893,254 @@ test.describe('desktop visual regression', () => {
       await expect(page.locator('#settingsModal')).toHaveClass(/open/);
     });
   });
+
+  test('review requests stay out of rule editing after preview @webkit', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        appStoreBuild: true,
+        saveListMetaDelayMs: 6000,
+      });
+      const now = Date.now();
+      await page.clock.install({ time: new Date(now) });
+      await page.clock.pauseAt(new Date(now + 1000));
+      await page.locator('#createListBtn').click();
+      await page
+        .locator('.inline-list-create')
+        .fill('Pending review opportunity');
+      await page.locator('.inline-list-create').press('Enter');
+      await page.locator('.sidebar-item[data-list-id="research"]').click();
+      await page.locator('#inboxToggleBtn').click();
+      await page.locator('#rulesAddBtn').click();
+      await page.locator('.rule-edit-input').fill('needle');
+      await page.locator('.rule-preview-btn').click();
+      await page.clock.runFor(11000);
+      await expect(page.locator('.rule-entry.rule-editing')).toBeVisible();
+      expect(
+        await page.evaluate(() =>
+          window.__desktopVisualHarness
+            .bridgeActionInvocations()
+            .filter((request) => request.action === 'requestAppReview'),
+        ),
+      ).toHaveLength(0);
+    });
+  });
+
+  test('review requests cancel after dispatch when the user opens an editor @webkit', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        appStoreBuild: true,
+        requestAppReviewDelayMs: 6000,
+      });
+      const now = Date.now();
+      await page.clock.install({ time: new Date(now) });
+      await page.clock.pauseAt(new Date(now + 1000));
+      await page.locator('#createListBtn').click();
+      await page.locator('.inline-list-create').fill('Delayed review');
+      await page.locator('.inline-list-create').press('Enter');
+      await page.clock.runFor(3100);
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              window.__desktopVisualHarness
+                .bridgeActionInvocations()
+                .filter((request) => request.action === 'requestAppReview')
+                .length,
+          ),
+        )
+        .toBe(1);
+      await page.locator('.sidebar-item[data-list-id="research"]').click();
+      await page.locator('#inboxToggleBtn').click();
+      await page.locator('#rulesAddBtn').click();
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              window.__desktopVisualHarness
+                .bridgeActionInvocations()
+                .filter((request) => request.action === 'cancelAppReview')
+                .length,
+          ),
+        )
+        .toBeGreaterThan(0);
+      await page.clock.runFor(10000);
+      expect(
+        await page.evaluate(() =>
+          window.__desktopVisualHarness.reviewPresentations(),
+        ),
+      ).toHaveLength(0);
+    });
+  });
+
+  test('review requests wait through a visible error and recover after the error fades @webkit', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        appStoreBuild: true,
+        saveSettingsKeyFailureKey: 'captureSnapshotVideo',
+      });
+      const now = Date.now();
+      await page.clock.install({ time: new Date(now) });
+      await page.clock.pauseAt(new Date(now + 1000));
+      await page.locator('#settingsBtn').click();
+      await page.locator('#captureSnapshotVideo').locator('..').click();
+      await expect(page.locator('#errorBubble')).toContainText(
+        'Could not persist captureSnapshotVideo',
+      );
+      await page.locator('#settingsClose').click();
+      const createList = async (name) => {
+        await page.locator('#createListBtn').click();
+        await page.locator('.inline-list-create').fill(name);
+        await page.locator('.inline-list-create').press('Enter');
+        await expect(
+          page.locator('.sidebar-item .label', { hasText: name }),
+        ).toBeVisible();
+      };
+      await createList('Blocked by error');
+      await page.clock.runFor(3100);
+      expect(
+        await page.evaluate(() =>
+          window.__desktopVisualHarness.reviewPresentations(),
+        ),
+      ).toHaveLength(0);
+      await page.clock.runFor(1500);
+      await expect(page.locator('#errorBubble')).toHaveCSS('opacity', '0');
+      await createList('Allowed after error');
+      await page.clock.runFor(3100);
+      expect(
+        await page.evaluate(() =>
+          window.__desktopVisualHarness.reviewPresentations(),
+        ),
+      ).toHaveLength(1);
+    });
+  });
+
+  test('a completed search creates a review opportunity while reading results @webkit', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        appStoreBuild: true,
+      });
+      await page.locator('#searchDraftInput').fill('example');
+      await page.locator('#searchDraftInput').press('Enter');
+      await expect(page.locator('#contentSearchSpinner')).toBeHidden();
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () => window.__desktopVisualHarness.reviewPresentations().length,
+          ),
+        )
+        .toBe(1);
+    });
+  });
+
+  test('reading Book creates a review opportunity without editing @webkit', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        appStoreBuild: true,
+      });
+      await page.locator('#highlightsHistoryBtn').click();
+      await expect(page.locator('#highlightsHistoryBtn')).toHaveClass(/active/);
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              window.__desktopVisualHarness
+                .bridgeActionInvocations()
+                .filter((request) => request.action === 'requestAppReview')
+                .length,
+          ),
+        )
+        .toBe(1);
+    });
+  });
+
+  for (const appStoreBuild of [false, true]) {
+    test(`review requests wait for a completed action and a quiet desktop, App Store build: ${appStoreBuild} @webkit`, async ({
+      page,
+    }) => {
+      await serveDesktopUi(async (desktopUrl) => {
+        await openDesktopUi(page, desktopUrl, {
+          setupComplete: true,
+          appStoreBuild,
+          saveListMetaDelayMs: 1000,
+        });
+        const clockStart = Date.now();
+        await page.clock.install({ time: new Date(clockStart) });
+        await page.clock.pauseAt(new Date(clockStart + 1000));
+        const requests = () =>
+          page.evaluate(
+            () =>
+              window.__desktopVisualHarness
+                .bridgeActionInvocations()
+                .filter((request) => request.action === 'requestAppReview')
+                .length,
+          );
+        const createList = async (name) => {
+          await page.locator('#createListBtn').click();
+          await page.locator('.inline-list-create').fill(name);
+          await page.locator('.inline-list-create').press('Enter');
+          await page.clock.runFor(1000);
+          await expect(
+            page.locator('.sidebar-item .label', { hasText: name }),
+          ).toBeVisible();
+        };
+        await page.clock.runFor(10_000);
+        expect(await requests()).toBe(0);
+
+        await createList('Review cancelled by activity');
+        await page.clock.runFor(1000);
+        await page.mouse.move(800, 260);
+        await page.clock.runFor(4000);
+        expect(await requests()).toBe(0);
+
+        await page.locator('#createListBtn').click();
+        await page
+          .locator('.inline-list-create')
+          .fill('Review blocked by dialog');
+        await page.locator('.inline-list-create').press('Enter');
+        // Complete the save after Settings opens, so the busy guard is exercised.
+        await page.locator('#settingsBtn').click();
+        await page.clock.runFor(6000);
+        await expect(
+          page.locator('.sidebar-item .label', {
+            hasText: 'Review blocked by dialog',
+          }),
+        ).toBeVisible();
+        expect(await requests()).toBe(0);
+        await expect(page.locator('#desktopUpdatesSection')).toBeVisible({
+          visible: !appStoreBuild,
+        });
+        await page.locator('#settingsClose').click();
+
+        await createList('Review cancelled by switching away');
+        // Headless tabs retain focus; deliver the webview's blur event explicitly.
+        // The native bridge separately checks AppKit application/window focus.
+        await page.evaluate(() => window.dispatchEvent(new FocusEvent('blur')));
+        await page.clock.runFor(4000);
+        expect(await requests()).toBe(0);
+
+        await createList('Review after finishing');
+        await page.clock.runFor(2999);
+        expect(await requests()).toBe(0);
+        await page.clock.runFor(100);
+        await expect.poll(requests).toBe(appStoreBuild ? 1 : 0);
+      });
+    });
+  }
 
   test('desktop updates proceed with incomplete GitHub sync settings', async ({
     page,
@@ -7961,6 +8265,77 @@ test.describe('desktop visual regression', () => {
       await expect(chart.locator('.chart-bar-group.active')).toHaveCount(0);
       await expect(page.locator('#relatedResults')).toHaveText(rowsBefore);
     });
+  });
+
+  test('time chart scrollbar has a generous drag target without changing date filters @webkit', async ({
+    playwright,
+    browserName,
+  }, testInfo) => {
+    // Headless Chromium hides native scrollbars unless this default is removed.
+    const browser = await playwright[browserName].launch({
+      channel: testInfo.project.use.channel,
+      ignoreDefaultArgs: ['--hide-scrollbars'],
+    });
+    try {
+      const page = await browser.newPage({ timezoneId: 'UTC' });
+      await page.clock.setFixedTime(Date.UTC(2026, 9, 28, 12));
+      const historyEntries = ['2025-01-01', '2026-10-28'].map((date) => ({
+        url: `https://example.com/scrollbar-${date}`,
+        title: `Scrollbar ${date}`,
+        timestamp: Date.parse(`${date}T12:00:00Z`),
+        deviceId: 'device-a',
+      }));
+
+      await serveDesktopUi(async (desktopUrl) => {
+        await openDesktopUi(page, desktopUrl, {
+          setupComplete: true,
+          historyEntries,
+        });
+        const chart = page.locator('#relatedChartBars');
+        await expect(chart).toBeVisible();
+        const selectedBar = chart.locator(
+          '.chart-bar-group[data-date="2026-10-28"] .chart-bar',
+        );
+        await selectedBar.click();
+        const rowsBefore = await page.locator('#relatedResults').innerText();
+        await page.locator('#listLayout').screenshot({
+          path: testInfo.outputPath('time-chart.png'),
+        });
+        const metrics = await chart.evaluate((element) => {
+          const bounds = element.getBoundingClientRect();
+          return {
+            right: bounds.right,
+            bottom: bounds.bottom,
+            scrollbarHeight: element.offsetHeight - element.clientHeight,
+            maxScroll: element.scrollWidth - element.clientWidth,
+          };
+        });
+        expect(metrics.maxScroll).toBeGreaterThan(0);
+        expect(metrics.scrollbarHeight).toBeGreaterThanOrEqual(16);
+
+        // Grab both edges of the scrollbar, outside the thin painted thumb.
+        for (const inset of [2, 14]) {
+          await chart.hover();
+          await page.mouse.wheel(1_000_000, 0);
+          await expect
+            .poll(() => chart.evaluate((element) => element.scrollLeft))
+            .toBe(metrics.maxScroll);
+          const y = metrics.bottom - inset;
+          await page.mouse.move(metrics.right - 12, y);
+          await page.mouse.down();
+          await page.mouse.move(metrics.right - 132, y, { steps: 12 });
+          await page.mouse.up();
+          await expect
+            .poll(() => chart.evaluate((element) => element.scrollLeft))
+            .toBeLessThan(metrics.maxScroll - 100);
+          await expect(chart.locator('.chart-bar-group.active')).toHaveCount(1);
+          await expect(page.locator('#relatedResults')).toHaveText(rowsBefore);
+          await expect(page.locator('.chart-select-band')).toHaveCount(0);
+        }
+      });
+    } finally {
+      await browser.close();
+    }
   });
 
   test('highest time chart bar has vertical breathing room', async ({

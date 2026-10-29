@@ -26,6 +26,7 @@ import {
 } from './desktop-bridge.js';
 import { formatHighlightExcerpt } from './highlight-format.js';
 import { createDesktopUpdates } from './desktop-updates.js';
+import { createDesktopReviewRequests } from './desktop-reviews.js';
 import { attentionStrength, aggregateAttention } from './attention-utils.js';
 import {
   initCharts,
@@ -78,6 +79,28 @@ if ('scrollRestoration' in history) {
 // parseBookmarkHtml imported dynamically inside the block below
 
 let desktopSystemLocale = null;
+
+const desktopReviewRequests = createDesktopReviewRequests({
+  isBusy: () => searchState.pendingPhases > 0 || searchDraftPreviewActive,
+  isEditing: () =>
+    document.activeElement?.matches('input, textarea, [contenteditable]') &&
+    !(
+      document.activeElement.id === 'searchDraftInput' &&
+      committedSearchQuery.trim() &&
+      !searchDraftPreviewActive
+    ),
+  reportError: (error) =>
+    logError('App Store review request failed:', error.message),
+});
+
+for (const id of [
+  'settingsModal',
+  'mainTitleInput',
+  'serviceErrorBanner',
+  'rulesFormError',
+]) {
+  desktopReviewRequests.trackBusy(document.getElementById(id));
+}
 
 function tr(key, fallback, substitutions) {
   return translate(key, fallback, substitutions);
@@ -413,6 +436,7 @@ function showTimedBubble({ id, style, text, duration }) {
     bubble.style.cssText = style;
     document.body.appendChild(bubble);
   }
+  if (id === 'errorBubble') desktopReviewRequests.trackBusy(bubble);
   bubble.textContent = text;
   bubble.style.opacity = '1';
   clearTimeout(bubbleTimers.get(id));
@@ -1009,6 +1033,8 @@ const searchState = {
   results: [],
   resultIndex: new Map(),
   pendingPhases: 0,
+  reviewOnCompletion: false,
+  endReviewBusy: null,
   loadingRenderCommitted: false,
 };
 let resetRelatedScrollOnNextRender = false;
@@ -1118,6 +1144,7 @@ async function runStreamingHistorySearch(query, gen) {
     }
     if (payload.type === 'historySearchDone') {
       const current = gen === searchState.generation;
+      if (current && !payload.success) searchState.reviewOnCompletion = false;
       if (current && !payload.success && !payload.cancelled && payload.error) {
         surfaceBackgroundError(
           'History search failed',
@@ -1380,15 +1407,25 @@ function phaseComplete(gen) {
   searchState.pendingPhases--;
   if (searchState.pendingPhases <= 0) {
     hideSearchSpinner();
-    void renderProgressiveResults(gen);
+    searchState.endReviewBusy?.();
+    searchState.endReviewBusy = null;
+    void renderProgressiveResults(gen).then(() => {
+      if (gen === searchState.generation && searchState.reviewOnCompletion) {
+        searchState.reviewOnCompletion = false;
+        desktopReviewRequests.completed();
+      }
+    });
   }
 }
 
 function clearProgressiveSearchState() {
+  searchState.endReviewBusy?.();
+  searchState.endReviewBusy = null;
   searchState.generation++;
   searchState.results = [];
   searchState.resultIndex.clear();
   searchState.pendingPhases = 0;
+  searchState.reviewOnCompletion = false;
   searchState.loadingRenderCommitted = false;
   hideSearchSpinner();
 }
@@ -1410,6 +1447,14 @@ function markShellReady() {
 
 function markAppReady() {
   document.body.dataset.ready = 'true';
+  void desktopReviewRequests
+    .start()
+    .catch((error) =>
+      logError(
+        'App Store review request initialization failed:',
+        error.message,
+      ),
+    );
 }
 
 function shouldPreserveCommittedSearchOnVisibilityRefresh() {
@@ -1547,6 +1592,7 @@ async function runPhase1(query, gen) {
     streamingStarted = await runStreamingHistorySearch(query, gen);
     if (streamingStarted) return;
   } catch (error) {
+    if (gen === searchState.generation) searchState.reviewOnCompletion = false;
     surfaceBackgroundError('History search failed', error);
   } finally {
     if (!streamingStarted) phaseComplete(gen);
@@ -1570,6 +1616,7 @@ async function runDaemonContentSearch({
     mergeSearchResults(results, source, gen);
     await renderFirstAvailableSearchResults(gen);
   } catch (error) {
+    if (gen === searchState.generation) searchState.reviewOnCompletion = false;
     surfaceBackgroundError(`${phaseLabel} failed`, error);
   } finally {
     phaseComplete(gen);
@@ -1729,6 +1776,9 @@ async function runProgressiveSearch(allQueries) {
   searchState.results = [];
   searchState.resultIndex.clear();
   searchState.pendingPhases = 3;
+  const endReviewBusy = desktopReviewRequests.beginBusy();
+  searchState.endReviewBusy?.();
+  searchState.endReviewBusy = endReviewBusy;
   searchState.loadingRenderCommitted = false;
   showSearchSpinner();
   const query = allQueries.join(' ');
@@ -2987,6 +3037,12 @@ async function showHighlightsHistory({
       document
         .querySelector(HIGHLIGHT_HISTORY_LIST_SELECTOR)
         ?.insertAdjacentHTML('beforeend', message);
+    desktopReviewRequests.trackBusy(
+      highlightHistoryState.items.length === 0
+        ? container.firstElementChild
+        : document.querySelector(HIGHLIGHT_HISTORY_LIST_SELECTOR)
+            .lastElementChild,
+    );
   } finally {
     if (isCurrentHighlightHistoryRender(renderSequence) && preserveScroll) {
       // Keep scrolling performed while later batches were loading.
@@ -3162,6 +3218,9 @@ async function showExplore({
     logError('Explore load error:', error);
     document.getElementById('relatedResults').innerHTML =
       `<div class="no-results">${escapeHtml(tr('desktopErrorPrefix', `Error: ${error.message}`, [error.message]))}</div>`;
+    desktopReviewRequests.trackBusy(
+      document.getElementById('relatedResults').firstElementChild,
+    );
     markShellReady();
     if (markReady) markAppReady();
   }
@@ -3256,6 +3315,9 @@ async function showList(list) {
     logError('List load error:', error);
     document.getElementById('relatedResults').innerHTML =
       `<div class="no-results">${escapeHtml(tr('desktopErrorPrefix', `Error: ${error.message}`, [error.message]))}</div>`;
+    desktopReviewRequests.trackBusy(
+      document.getElementById('relatedResults').firstElementChild,
+    );
   }
 }
 
@@ -3679,6 +3741,7 @@ function startRuleEdit(listId, ruleId, rule) {
     container.insertAdjacentHTML('beforeend', buildEditRowHTML('keyword', {}));
   }
   const editRow = container.querySelector('.rule-entry.rule-editing');
+  desktopReviewRequests.trackBusy(editRow);
   attachEditRowHandlers(editRow, listId, ruleId);
 }
 
@@ -3986,6 +4049,10 @@ async function runListPinFilter({ preserveScroll = false } = {}) {
   renderFilteredPins(filtered, listPinsListId, allQueries.join(' '), {
     preserveScroll,
   });
+  if (searchState.reviewOnCompletion) {
+    searchState.reviewOnCompletion = false;
+    desktopReviewRequests.completed();
+  }
 }
 
 function disableRelatedVirtualScrollerForDirectRender(container) {
@@ -4838,6 +4905,7 @@ function openDetailNoteEditor(entry, noteSlug) {
   body.innerHTML = `<span class="detail-note-editor" contenteditable="plaintext-only" role="textbox" aria-multiline="true" data-placeholder="${escapeHtml(tr('extensionAddNote', 'Add a note...'))}">${escapeHtml(currentText)}</span>
     <button class="detail-note-action-btn confirm" title="${escapeHtml(tr('commonConfirm', 'Confirm'))}">${DETAIL_ICON_CONFIRM}</button>`;
   const editor = body.querySelector('.detail-note-editor');
+  desktopReviewRequests.trackBusy(editor);
   const confirmButton = body.querySelector('.detail-note-action-btn.confirm');
   const deleteButton = entry.querySelector('.detail-note-action-btn.delete');
   let saving = false;
@@ -5123,6 +5191,7 @@ function openPageDetailCard(
   });
   overlay.appendChild(card);
   document.body.appendChild(overlay);
+  desktopReviewRequests.trackBusy(overlay);
   // Allow one frame for backdrop-filter compositing before fading in
   requestAnimationFrame(() => overlay.classList.add('visible'));
 
@@ -5158,6 +5227,7 @@ function startEditingDetailTitle(card, url) {
   const currentTitle = titleEl.textContent;
 
   const input = document.createElement('input');
+  desktopReviewRequests.trackBusy(input);
   input.type = 'text';
   input.className = 'page-detail-title-input';
   input.value = currentTitle;
@@ -5201,6 +5271,7 @@ function closePageDetailCard() {
     if (overlay._escHandler)
       document.removeEventListener('keydown', overlay._escHandler);
     overlay.remove();
+    desktopReviewRequests.completed();
   }
 }
 
@@ -5587,7 +5658,7 @@ function createSidebarItemDOM(node, depth) {
   item.addEventListener('click', (e) => {
     if (e.target.closest('.remove-list') || e.target.closest('.fold-toggle'))
       return;
-    showList(node);
+    void showList(node).then(() => desktopReviewRequests.completed());
   });
 
   item.querySelector('.remove-list').addEventListener('click', async (e) => {
@@ -5833,7 +5904,7 @@ function bindSidebarItemDragDrop(item, node) {
           if (titles.some(Boolean)) msg.titles = titles;
           await sendAction(msg);
           if (activeView.type === 'list' && activeView.id === node.slug) {
-            showList(node);
+            void showList(node).then(() => desktopReviewRequests.completed());
           }
         }
       } catch (err) {
@@ -5926,7 +5997,8 @@ async function renderPrimaryNavigationAfterActivation(
   if (renderSequence !== primaryNavigationRenderSequence || !isCurrentView()) {
     return;
   }
-  void render();
+  await render();
+  desktopReviewRequests.completed();
 }
 
 // --- Event listeners: primary sidebar destinations ---
@@ -5965,6 +6037,7 @@ document.getElementById('createListBtn').addEventListener('click', () => {
   input.className = 'inline-list-create';
   input.placeholder = tr('desktopListNamePlaceholder', 'List name...');
   listEl.prepend(input);
+  desktopReviewRequests.trackBusy(input);
   input.focus();
 
   async function commitCreate() {
@@ -7282,6 +7355,7 @@ function renderImportFailures(container, failures, getName) {
     const selected = collectCheckedTree(treeContainer._items);
     if (selected.length === 0) return;
 
+    const endReviewBusy = desktopReviewRequests.beginBusy();
     importBtn.disabled = true;
     importBtn.textContent = tr('desktopImporting', 'Importing...');
     progressEl.textContent = tr(
@@ -7314,6 +7388,7 @@ function renderImportFailures(container, failures, getName) {
         [error.message],
       );
     } finally {
+      endReviewBusy();
       importBtn.textContent = tr('commonImportSelected', 'Import Selected');
       importBtn.disabled = false;
     }
@@ -7503,6 +7578,7 @@ document
   importBtn.addEventListener('click', async () => {
     if (normalizedEntries.length === 0) return;
 
+    const endReviewBusy = desktopReviewRequests.beginBusy();
     importBtn.disabled = true;
     importBtn.textContent = tr('desktopImporting', 'Importing...');
     progressEl.textContent = tr(
@@ -7539,6 +7615,7 @@ document
         [error.message],
       );
     } finally {
+      endReviewBusy();
       importBtn.textContent = tr('commonImportHistory', 'Import History');
       importBtn.disabled = normalizedEntries.length === 0;
     }
@@ -8216,6 +8293,7 @@ function commitSearchDraft(draftInput) {
   }
   renderSearchPanel();
   saveSearchQuery();
+  searchState.reviewOnCompletion = true;
   runActiveSearchPipeline();
   focusSearchDraftInputWithoutDraftMode();
 }
@@ -8632,6 +8710,7 @@ async function runSearchFilterPipeline() {
 
 async function openFocusPanel(url, title) {
   const overlay = document.getElementById('focusOverlay');
+  desktopReviewRequests.trackBusy(overlay);
   const content = document.getElementById('focusContent');
 
   content.innerHTML =
@@ -8681,6 +8760,7 @@ async function openFocusPanel(url, title) {
 
 async function openListFocusPanel(listId, listName) {
   const overlay = document.getElementById('focusOverlay');
+  desktopReviewRequests.trackBusy(overlay);
   const content = document.getElementById('focusContent');
 
   content.innerHTML =
