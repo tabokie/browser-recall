@@ -377,13 +377,21 @@ test.describe('Popup list chip behavior', () => {
     const helper = await openHelperPage(extContext, extensionId);
     const previous = await helper.evaluate(() => chrome.action.getPopup({}));
     try {
-      for (const failure of ['short', 'long']) {
-        await helper.evaluate(async (failure) => {
-          await chrome.action.setPopup({
-            popup: `popup.html?startupFailure=${failure}`,
-          });
-          await chrome.action.openPopup();
-        }, failure);
+      for (const [failure, scrollbars] of [
+        ['short', 'native'],
+        ['long', 'native'],
+        ['long', 'classic'],
+      ]) {
+        const suffix = `${failure}-${scrollbars}`;
+        await helper.evaluate(
+          async ({ failure, scrollbars }) => {
+            await chrome.action.setPopup({
+              popup: `popup.html?startupFailure=${failure}&scrollbars=${scrollbars}`,
+            });
+            await chrome.action.openPopup();
+          },
+          { failure, scrollbars },
+        );
         await expect
           .poll(() =>
             helper.evaluate(() => {
@@ -414,6 +422,7 @@ test.describe('Popup list chip behavior', () => {
               message: message.getBoundingClientRect().toJSON(),
               messageText: message.textContent,
               scrollable: message.scrollHeight > message.clientHeight,
+              scrollbarWidth: message.offsetWidth - message.clientWidth,
               horizontalOverflow:
                 view.document.documentElement.scrollWidth > view.innerWidth,
               dashboardHidden:
@@ -425,7 +434,7 @@ test.describe('Popup list chip behavior', () => {
         let layout;
         await withPopupLayout(
           testInfo,
-          `fatal-${failure}-layout`,
+          `fatal-${suffix}-layout`,
           async () => {
             await expect
               .poll(async () => {
@@ -453,6 +462,7 @@ test.describe('Popup list chip behavior', () => {
         expect(layout.dashboardHidden).toBe(true);
         expect(layout.reloadFocused).toBe(true);
         expect(layout.scrollable).toBe(failure === 'long');
+        if (scrollbars === 'classic') expect(layout.scrollbarWidth).toBe(16);
         await helper.evaluate(() =>
           chrome.extension.getViews({ type: 'popup' })[0].close(),
         );
@@ -460,12 +470,12 @@ test.describe('Popup list chip behavior', () => {
         try {
           await screenshot.setViewportSize({ width: 296, height: 600 });
           await screenshot.goto(
-            `chrome-extension://${extensionId}/popup.html?startupFailure=${failure}`,
+            `chrome-extension://${extensionId}/popup.html?startupFailure=${failure}&scrollbars=${scrollbars}`,
           );
           await expect(screenshot.locator('#fatalReloadBtn')).toBeVisible();
           await screenshot
             .locator('body')
-            .screenshot({ path: testInfo.outputPath(`fatal-${failure}.png`) });
+            .screenshot({ path: testInfo.outputPath(`fatal-${suffix}.png`) });
         } finally {
           await screenshot.close();
         }

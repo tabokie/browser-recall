@@ -122,6 +122,7 @@ function renderPopupShell(options = {}) {
   const surface = popupShellState.surface;
   const contentVisible = surface === 'dashboard' || surface === 'diagnostic';
 
+  document.documentElement.dataset.popupSurface = surface;
   if (loading) loading.style.display = 'none';
   if (dashboard)
     dashboard.style.display = surface === 'fatal' ? 'none' : 'flex';

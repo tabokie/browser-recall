@@ -755,6 +755,8 @@ extension copies exercise short and long fatal-error messages; titles and Reload
 buttons must remain inside the window, and long messages must scroll without
 horizontal overflow. The same failure fixture is used by the Chromium popup E2E
 suite and is omitted from production bundles.
+The Chromium failure scenario also forces a 16px message scrollbar; fatal errors
+keep scrolling inside the message rather than the native popup viewport.
 The Chromium popup sizing check also starts in a wider provisional viewport;
 the document root must keep the same width as the content before native resizing.
 Native popup measurements are retained as JSON test attachments on failures.

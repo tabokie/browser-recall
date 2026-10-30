@@ -108,8 +108,8 @@
     "apps/extension/page-spa-navigation.js": "6b07ec6bf86cebd4f0d720e069274dc64cfa4d0413891722d8d1ba5a972b88b8",
     "apps/extension/popup-list-elements.js": "be19c82c33cc318093b7617e8a2ba39a670e5791d1cfb2061c305ec1bc89138c",
     "apps/extension/popup-note-session.js": "19fc8024e3eef0c74481f07e61a5441eda975850c3c0f0e58a81efdc9d68d870",
-    "apps/extension/popup.html": "f167edc4d310577693c0c46459c1034396207c1a641d429895e719817866368e",
-    "apps/extension/popup.js": "887d78720d4e7e2138e71f77e2d50d3939627a8349d14d2e4868dce86ac032b0",
+    "apps/extension/popup.html": "50cce23d754239616f5d3542cb3d2e0a034316226f96b773cfef968be7f8113c",
+    "apps/extension/popup.js": "e0ea9c097d8fc79b9cfdc1b2c638e57135bec6051fc1161dcabb6ab7eab194bf",
     "apps/extension/recording-controller.js": "f485e8aa8d72f523dd9471b97f4487456d8ed8d99613b2787558b222be37c882",
     "apps/extension/savepage/UPSTREAM.md": "bef0f720472d308ecd8eccc082c268b8be12457e49477480d1b0b637f9a2e9b6",
     "apps/extension/savepage/content-fontface-intercept.js": "43398bfe7d452bd096de1d561afada34f86b5ef17b4f111f65323ca49ad0d95c",
@@ -140,7 +140,7 @@
     "tests/fixtures/extension-rendering.mjs": "15b95bf9a461c3d238765ec0efa6332a22fd5a7c979b9a2e3cff5e9b0dd39d5d",
     "tests/fixtures/highlight-selection.pdf": "d01e508a37a4ba34a927c9b70055ba18d807357ef5183031e3d5ae072c744a8d",
     "tests/fixtures/popup-layout.mjs": "024f151212f25878cd8b0f6302393f1294f93376c86ac3b25f8099981a83d618",
-    "tests/fixtures/popup-startup-failure.mjs": "404e7af5760d8e9826fa0869fa6f80ca937d39e3a394eb75e40ef3470948edb4",
+    "tests/fixtures/popup-startup-failure.mjs": "6273c0c1b01b224ca8299cbd176424db50d8dcbb1d58c17821600fb67d321224",
     "tests/fixtures/test-extension.mjs": "562ab56a1faec275ee445e4b51f785dece88d82eea255b57daf00a853d3bc950",
     "tests/fixtures/windows-token-launch.cs": "387262fc1091d3e3c6e10159485f46f3069debf8fe62101c4a012aded01208d6",
     "playwright.config.js": "961feb8c9b84501d4a3eceef31428b8eeca1bf574bfdd5e17b99284bb1dce2b8"
@@ -160,12 +160,12 @@
   "scenarioSha256": "2f3dfa9de623218485dafe9fdb0694e478c6edf1c95b449cf0328ed918f30a94",
   "screenshots": {
     "browser-popup-window.png": {
-      "sha256": "6e3d9fa909b2d0def86a77abbe0f93daed53aa6865eb0b3c194ecb4746a21ad9",
+      "sha256": "22079e8d6ea4d785f7d8f6926709f3832a0ca64beb465b7df928379e996182f5",
       "width": 1760,
       "height": 1028
     },
     "browser-note-window.png": {
-      "sha256": "ea0240b49bcdc94573f0ad887dc3e61646f2439e02055e197b7d9d509a33a2c8",
+      "sha256": "eb52b3b85697ea9d4adfa565c990af19c2f9cc3c5e61e5936b4b4412836b4e46",
       "width": 1760,
       "height": 1028
     }

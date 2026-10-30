@@ -14,6 +14,12 @@
         background: #f7f4ea;
       }
 
+      /* The message owns fatal-error scrolling. A viewport scrollbar can
+         subtract its gutter from Chromium's native popup measurement. */
+      html[data-popup-surface='fatal'] {
+        overflow: hidden;
+      }
+
       *,
       *::before,
       *::after {
