@@ -538,6 +538,10 @@ registration regressions. Windows extension rendering runs on relevant changes.
 Shared macOS window and routing scenarios run on arm64;
 macOS arm64 runs signed-package installation and real update/relaunch in regular
 CI. Release runs package and update validation on both macOS architectures.
+Failed macOS validation records the Rust host, runner architecture, and build-script
+executable formats in `test-results/native-build/executables.txt`, alongside the
+existing native failure artifacts. This distinguishes incompatible executables
+and architecture mismatches without relying on Cargo's exit status alone.
 The macOS window frame check runs before release compilation in the minimal
 `browser-recall-native-tests` Cargo package, which imports the production frame
 module and depends only on AppKit bindings. Windows extension rendering keeps a
@@ -751,9 +755,25 @@ extension copies exercise short and long fatal-error messages; titles and Reload
 buttons must remain inside the window, and long messages must scroll without
 horizontal overflow. The same failure fixture is used by the Chromium popup E2E
 suite and is omitted from production bundles.
+The Chromium popup sizing check also starts in a wider provisional viewport;
+the document root must keep the same width as the content before native resizing.
+Native popup measurements are retained as JSON test attachments on failures.
+Popup diagnostics and Firefox teardown use `withCleanup` to preserve the original
+failure together with any diagnostic or cleanup errors, and attempt every cleanup.
 On macOS and Linux, the launcher owns a separate process group so cleanup can
 terminate Firefox descendants even after `npx` exits. Cleanup closes HTTP
 connections and finishes before the check prints its success message.
+Cleanup force-kills only a process group that remains after graceful shutdown;
+an exited process group must not receive a redundant `SIGKILL`.
+macOS can deny signals even after group members are defunct or exiting. Cleanup
+confirms those `Z`/`E` states through the native process table and still waits for
+output pipes to close. Permission errors for live or uninspectable groups remain
+failures.
+Firefox process inspection and pipe closure share an overall cleanup deadline.
+`timeoutMs` sets the graceful shutdown period; the total budget is twice that
+period, including any timed process inspection.
+The macOS native validation job runs these process-readiness integration tests,
+including denied signals against a real defunct process group.
 `test:firefox:smoke` uses simulated browser APIs and does not launch
 Firefox. `test:shortcut:native` sends Option+R to a temporary Chromium window on
 macOS.

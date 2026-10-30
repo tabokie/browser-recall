@@ -1,19 +1,19 @@
 {
   "inputs": {
-    "docs/images/browser-popup-window.png": "22079e8d6ea4d785f7d8f6926709f3832a0ca64beb465b7df928379e996182f5",
-    "docs/images/browser-note-window.png": "eb52b3b85697ea9d4adfa565c990af19c2f9cc3c5e61e5936b4b4412836b4e46",
+    "docs/images/browser-popup-window.png": "6e3d9fa909b2d0def86a77abbe0f93daed53aa6865eb0b3c194ecb4746a21ad9",
+    "docs/images/browser-note-window.png": "ea0240b49bcdc94573f0ad887dc3e61646f2439e02055e197b7d9d509a33a2c8",
     "scripts/export-chrome-web-store-screenshots.mjs": "60033dba68024906d765601b319378e097171ebbc9d49ea704cf694e8709b1f6",
     "scripts/lib/store-screenshot.swift": "ed682f41a76d8d874a938c01c035a78e84db6c339c82f6034158310be4413ee5",
     "scripts/lib/store-screenshots.mjs": "1d9d69a289cd9c25e3964d09bbd917d80bdf841efa7838ae5cec65a04827fec1"
   },
   "screenshots": {
     "browser-popup-window.png": {
-      "sha256": "d9a1e202bbeef95d54706a49c9d85f9be73d9963d3d82ff9f4ce91e4ed065f68",
+      "sha256": "a969125648839ff37e79fa38a7052ae81f27b66dda81177da05464affd2d2255",
       "width": 1280,
       "height": 800
     },
     "browser-note-window.png": {
-      "sha256": "8534f927e1ffffd97c13eb882a5b33bb37c2d49f4891a694d8b6d8b687698176",
+      "sha256": "eb414d5b5d6ae47fd643db7b02942c5498c465d5f7aeaf5920555f195e80d94c",
       "width": 1280,
       "height": 800
     }

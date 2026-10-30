@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures.js';
+import { withPopupLayout } from '../fixtures/popup-layout.mjs';
 import {
   POPUP_LONG_STARTUP_ERROR,
   POPUP_STARTUP_ERROR,
@@ -392,27 +393,53 @@ test.describe('Popup list chip behavior', () => {
             }),
           )
           .toBeGreaterThan(0);
-        const layout = await helper.evaluate(() => {
-          const view = chrome.extension.getViews({ type: 'popup' })[0];
-          const reload = view.document.getElementById('fatalReloadBtn');
-          const title = reload.parentElement.firstElementChild;
-          const message = reload.previousElementSibling;
-          return {
-            calls: view.popupStartupFailureCalls,
-            viewport: { width: view.innerWidth, height: view.innerHeight },
-            reload: reload.getBoundingClientRect().toJSON(),
-            title: title.getBoundingClientRect().toJSON(),
-            message: message.getBoundingClientRect().toJSON(),
-            messageText: message.textContent,
-            scrollable: message.scrollHeight > message.clientHeight,
-            horizontalOverflow:
-              view.document.documentElement.scrollWidth > view.innerWidth,
-            dashboardHidden:
-              view.getComputedStyle(view.document.getElementById('dashboard'))
-                .display === 'none',
-            reloadFocused: view.document.activeElement === reload,
-          };
+        await helper.evaluate(async () => {
+          await chrome.extension.getViews({ type: 'popup' })[0].document.fonts
+            .ready;
         });
+        const readLayout = () =>
+          helper.evaluate(() => {
+            const view = chrome.extension.getViews({ type: 'popup' })[0];
+            const reload = view.document.getElementById('fatalReloadBtn');
+            const title = reload.parentElement.firstElementChild;
+            const message = reload.previousElementSibling;
+            return {
+              calls: view.popupStartupFailureCalls,
+              viewport: { width: view.innerWidth, height: view.innerHeight },
+              root: view.document.documentElement
+                .getBoundingClientRect()
+                .toJSON(),
+              reload: reload.getBoundingClientRect().toJSON(),
+              title: title.getBoundingClientRect().toJSON(),
+              message: message.getBoundingClientRect().toJSON(),
+              messageText: message.textContent,
+              scrollable: message.scrollHeight > message.clientHeight,
+              horizontalOverflow:
+                view.document.documentElement.scrollWidth > view.innerWidth,
+              dashboardHidden:
+                view.getComputedStyle(view.document.getElementById('dashboard'))
+                  .display === 'none',
+              reloadFocused: view.document.activeElement === reload,
+            };
+          });
+        let layout;
+        await withPopupLayout(
+          testInfo,
+          `fatal-${failure}-layout`,
+          async () => {
+            await expect
+              .poll(async () => {
+                layout = await readLayout();
+                return (
+                  !layout.horizontalOverflow &&
+                  Math.abs(layout.viewport.width - layout.root.width) < 1 &&
+                  layout.reload.bottom <= layout.viewport.height
+                );
+              })
+              .toBe(true);
+          },
+          () => layout,
+        );
         expect(layout.calls).toBe(1);
         expect(layout.messageText).toBe(
           failure === 'long' ? POPUP_LONG_STARTUP_ERROR : POPUP_STARTUP_ERROR,
@@ -520,7 +547,9 @@ test.describe('Popup list chip behavior', () => {
           title: 'Popup Content Size',
           locale: 'en-US',
         });
-        await popup.setViewportSize({ width: 296, height: 600 });
+        // Chromium measures the popup inside a provisional viewport before
+        // choosing the native window size. The root must retain content width.
+        await popup.setViewportSize({ width: 512, height: 600 });
         await expect(popup.locator('#listChips .list-chip')).toHaveCount(
           Math.min(count, 10),
         );
@@ -530,12 +559,14 @@ test.describe('Popup list chip behavior', () => {
           path: testInfo.outputPath(`popup-${count}-lists.png`),
         });
         const size = await popup.evaluate(() => ({
+          root: document.documentElement.getBoundingClientRect().toJSON(),
           body: document.body.getBoundingClientRect().toJSON(),
           frame: document
             .getElementById('dashboard')
             .getBoundingClientRect()
             .toJSON(),
         }));
+        expect(size.root.width).toBe(size.body.width);
         expect(size.body.width).toBe(size.frame.width);
         expect(
           size.body.bottom - size.frame.bottom,
@@ -562,25 +593,52 @@ test.describe('Popup list chip behavior', () => {
           });
           await chrome.action.openPopup({ windowId: tab.windowId });
         }, url);
-        await expect
-          .poll(() =>
-            helper.evaluate(() => {
-              const view = chrome.extension.getViews({ type: 'popup' })[0];
-              if (
-                !view ||
-                view.document.documentElement.hasAttribute('data-popup-hidden')
+        let nativeLayout;
+        await withPopupLayout(
+          testInfo,
+          `popup-${count}-native-layout`,
+          async () => {
+            await expect
+              .poll(() =>
+                helper
+                  .evaluate(() => {
+                    const view = chrome.extension.getViews({
+                      type: 'popup',
+                    })[0];
+                    if (
+                      !view ||
+                      view.document.documentElement.hasAttribute(
+                        'data-popup-hidden',
+                      )
+                    )
+                      return null;
+                    const frame = view.document
+                      .getElementById('dashboard')
+                      .getBoundingClientRect();
+                    return {
+                      viewport: {
+                        width: view.innerWidth,
+                        height: view.innerHeight,
+                      },
+                      frame: frame.toJSON(),
+                      root: view.document.documentElement
+                        .getBoundingClientRect()
+                        .toJSON(),
+                      scrollWidth: view.document.documentElement.scrollWidth,
+                    };
+                  })
+                  .then((layout) => {
+                    nativeLayout = layout;
+                    return layout
+                      ? Math.abs(layout.viewport.height - layout.frame.bottom) +
+                          Math.abs(layout.viewport.width - layout.frame.right)
+                      : Infinity;
+                  }),
               )
-                return null;
-              const frame = view.document
-                .getElementById('dashboard')
-                .getBoundingClientRect();
-              return (
-                Math.abs(view.innerHeight - frame.bottom) +
-                Math.abs(view.innerWidth - frame.right)
-              );
-            }),
-          )
-          .toBeLessThan(1);
+              .toBeLessThan(1);
+          },
+          () => nativeLayout,
+        );
         if (count === 0) {
           const initialHeight = await helper.evaluate(
             () => chrome.extension.getViews({ type: 'popup' })[0].innerHeight,
