@@ -414,6 +414,29 @@ test.describe('Popup list chip behavior', () => {
             return {
               calls: view.popupStartupFailureCalls,
               viewport: { width: view.innerWidth, height: view.innerHeight },
+              visualViewport: {
+                width: view.visualViewport.width,
+                height: view.visualViewport.height,
+              },
+              screen: {
+                width: view.screen.width,
+                height: view.screen.height,
+                availableHeight: view.screen.availHeight,
+              },
+              rootStyle: {
+                overflow: view.getComputedStyle(view.document.documentElement)
+                  .overflow,
+                minWidth: view.getComputedStyle(view.document.documentElement)
+                  .minWidth,
+              },
+              client: {
+                width: view.document.documentElement.clientWidth,
+                height: view.document.documentElement.clientHeight,
+              },
+              scroll: {
+                width: view.document.documentElement.scrollWidth,
+                height: view.document.documentElement.scrollHeight,
+              },
               root: view.document.documentElement
                 .getBoundingClientRect()
                 .toJSON(),

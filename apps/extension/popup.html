@@ -8,16 +8,11 @@
       html,
       body {
         width: 296px;
+        min-width: 296px;
       }
 
       html {
         background: #f7f4ea;
-      }
-
-      /* The message owns fatal-error scrolling. A viewport scrollbar can
-         subtract its gutter from Chromium's native popup measurement. */
-      html[data-popup-surface='fatal'] {
-        overflow: hidden;
       }
 
       *,
@@ -118,6 +113,7 @@
       .fatal-error-title {
         color: #b41e1e;
         font-size: 14px;
+        line-height: 20px;
         font-weight: 600;
       }
 
