@@ -109,6 +109,18 @@ jobs:
         env:
           FIREFOX_BINARY: ${{ steps.firefox.outputs.firefox-path }}
 
+      - name: Report native popup measurements after a failure
+        if: failure()
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          for (const file of fs.globSync('test-results/**/fatal-*-layout.json')) {
+            const { messageText, ...layout } = JSON.parse(fs.readFileSync(file, 'utf8'));
+            console.log(`::notice title=${path.basename(file)}::${JSON.stringify(layout).replaceAll('%', '%25')}`);
+          }
+          JS
+
       - name: Preserve extension E2E failure artifacts
         if: failure()
         uses: actions/upload-artifact@v7
