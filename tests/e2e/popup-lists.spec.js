@@ -1,5 +1,9 @@
 import { test, expect } from './fixtures.js';
 import {
+  POPUP_LONG_STARTUP_ERROR,
+  POPUP_STARTUP_ERROR,
+} from '../fixtures/popup-startup-failure.mjs';
+import {
   resetAndSeed,
   settingsCheckpoint,
   getExtensionMessage,
@@ -363,6 +367,286 @@ test('loading popup follows navigation committed during identity resolution', as
 });
 
 test.describe('Popup list chip behavior', () => {
+  test('fatal startup messages fit the toolbar popup and keep Reload visible', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }, testInfo) => {
+    void setupDir;
+    const helper = await openHelperPage(extContext, extensionId);
+    const previous = await helper.evaluate(() => chrome.action.getPopup({}));
+    try {
+      for (const failure of ['short', 'long']) {
+        await helper.evaluate(async (failure) => {
+          await chrome.action.setPopup({
+            popup: `popup.html?startupFailure=${failure}`,
+          });
+          await chrome.action.openPopup();
+        }, failure);
+        await expect
+          .poll(() =>
+            helper.evaluate(() => {
+              const view = chrome.extension.getViews({ type: 'popup' })[0];
+              const reload = view?.document.getElementById('fatalReloadBtn');
+              return reload?.getBoundingClientRect().height || 0;
+            }),
+          )
+          .toBeGreaterThan(0);
+        const layout = await helper.evaluate(() => {
+          const view = chrome.extension.getViews({ type: 'popup' })[0];
+          const reload = view.document.getElementById('fatalReloadBtn');
+          const title = reload.parentElement.firstElementChild;
+          const message = reload.previousElementSibling;
+          return {
+            calls: view.popupStartupFailureCalls,
+            viewport: { width: view.innerWidth, height: view.innerHeight },
+            reload: reload.getBoundingClientRect().toJSON(),
+            title: title.getBoundingClientRect().toJSON(),
+            message: message.getBoundingClientRect().toJSON(),
+            messageText: message.textContent,
+            scrollable: message.scrollHeight > message.clientHeight,
+            horizontalOverflow:
+              view.document.documentElement.scrollWidth > view.innerWidth,
+            dashboardHidden:
+              view.getComputedStyle(view.document.getElementById('dashboard'))
+                .display === 'none',
+            reloadFocused: view.document.activeElement === reload,
+          };
+        });
+        expect(layout.calls).toBe(1);
+        expect(layout.messageText).toBe(
+          failure === 'long' ? POPUP_LONG_STARTUP_ERROR : POPUP_STARTUP_ERROR,
+        );
+        expect(layout.title.top).toBeGreaterThanOrEqual(0);
+        expect(layout.reload.bottom).toBeLessThanOrEqual(
+          layout.viewport.height,
+        );
+        expect(layout.reload.right).toBeLessThanOrEqual(layout.viewport.width);
+        expect(layout.horizontalOverflow).toBe(false);
+        expect(layout.dashboardHidden).toBe(true);
+        expect(layout.reloadFocused).toBe(true);
+        expect(layout.scrollable).toBe(failure === 'long');
+        await helper.evaluate(() =>
+          chrome.extension.getViews({ type: 'popup' })[0].close(),
+        );
+        const screenshot = await extContext.newPage();
+        try {
+          await screenshot.setViewportSize({ width: 296, height: 600 });
+          await screenshot.goto(
+            `chrome-extension://${extensionId}/popup.html?startupFailure=${failure}`,
+          );
+          await expect(screenshot.locator('#fatalReloadBtn')).toBeVisible();
+          await screenshot
+            .locator('body')
+            .screenshot({ path: testInfo.outputPath(`fatal-${failure}.png`) });
+        } finally {
+          await screenshot.close();
+        }
+      }
+    } finally {
+      await helper.evaluate(async (previous) => {
+        chrome.extension.getViews({ type: 'popup' })[0]?.close();
+        await chrome.action.setPopup({ popup: previous });
+      }, previous);
+      await helper.close();
+    }
+  });
+
+  test('popup frame fits short content with zero or few lists and grows with more lists', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }, testInfo) => {
+    void setupDir;
+    localServer.addPage('/popup-content-size', {
+      title: 'Popup Content Size',
+      body: '<main>A page without notes or snapshots.</main>',
+    });
+    const url = localServer.url('/popup-content-size');
+    for (const count of [0, 1, 12]) {
+      const lists = Array.from({ length: count }, (_, index) => ({
+        slug: `size-list-${index}`,
+        name: `Reading list ${index + 1}`,
+      }));
+      await resetAndSeed(extContext, extensionId, [
+        settingsCheckpoint(),
+        {
+          path: 'views/manifest/list-order.json',
+          data: listOrderFixture({
+            deviceTimestamp: 1_792_800_000_000,
+            tree: lists.map((list) => ({
+              id: `list:${list.slug}`,
+              children: [],
+            })),
+          }),
+        },
+        ...lists.map((list) => ({
+          path: `views/lists/${list.slug}.json`,
+          data: listEntityFixture({
+            ...list,
+            owner: 'test-device',
+            deviceTimestamp: 1_792_800_000_000,
+            pins: [],
+          }),
+        })),
+      ]);
+      const page = await extContext.newPage();
+      const helper = await openHelperPage(extContext, extensionId);
+      let popup;
+      try {
+        // A document opened while paused remains excluded until refreshed, so
+        // its dashboard legitimately has no visit-metric section after resume.
+        expect(
+          await helper.evaluate(() =>
+            chrome.runtime.sendMessage({
+              action: 'setRecordingPaused',
+              paused: true,
+            }),
+          ),
+        ).toMatchObject({ success: true });
+        await page.goto(url);
+        await waitForContentScript(helper, page, url);
+        expect(
+          await helper.evaluate(() =>
+            chrome.runtime.sendMessage({
+              action: 'setRecordingPaused',
+              paused: false,
+            }),
+          ),
+        ).toMatchObject({ success: true });
+        popup = await openPopupForUrl(extContext, extensionId, {
+          url,
+          title: 'Popup Content Size',
+          locale: 'en-US',
+        });
+        await popup.setViewportSize({ width: 296, height: 600 });
+        await expect(popup.locator('#listChips .list-chip')).toHaveCount(
+          Math.min(count, 10),
+        );
+        await expect(popup.locator('#visitsLikesSection')).toBeHidden();
+        await popup.evaluate(() => document.fonts.ready);
+        await popup.locator('body').screenshot({
+          path: testInfo.outputPath(`popup-${count}-lists.png`),
+        });
+        const size = await popup.evaluate(() => ({
+          body: document.body.getBoundingClientRect().toJSON(),
+          frame: document
+            .getElementById('dashboard')
+            .getBoundingClientRect()
+            .toJSON(),
+        }));
+        expect(size.body.width).toBe(size.frame.width);
+        expect(
+          size.body.bottom - size.frame.bottom,
+          `blank space below ${count} lists`,
+        ).toBeLessThan(1);
+        if (count <= 1) expect(size.body.height).toBeLessThan(320);
+        else expect(size.body.height).toBeGreaterThan(320);
+        await popup.close();
+        popup = null;
+
+        // A tab screenshot catches paint gaps; the real toolbar popup also
+        // verifies that Chromium resizes its window after the first reveal.
+        await page.bringToFront();
+        await helper.evaluate(async (pageUrl) => {
+          const [tab] = await chrome.tabs.query({ url: pageUrl });
+          const prepared = await chrome.runtime.sendMessage({
+            action: 'preparePopupBootstrapForTest',
+            tabId: tab.id,
+          });
+          if (!prepared.success) throw new Error(prepared.error);
+          await chrome.action.setPopup({
+            tabId: tab.id,
+            popup: prepared.popupPath,
+          });
+          await chrome.action.openPopup({ windowId: tab.windowId });
+        }, url);
+        await expect
+          .poll(() =>
+            helper.evaluate(() => {
+              const view = chrome.extension.getViews({ type: 'popup' })[0];
+              if (
+                !view ||
+                view.document.documentElement.hasAttribute('data-popup-hidden')
+              )
+                return null;
+              const frame = view.document
+                .getElementById('dashboard')
+                .getBoundingClientRect();
+              return (
+                Math.abs(view.innerHeight - frame.bottom) +
+                Math.abs(view.innerWidth - frame.right)
+              );
+            }),
+          )
+          .toBeLessThan(1);
+        if (count === 0) {
+          const initialHeight = await helper.evaluate(
+            () => chrome.extension.getViews({ type: 'popup' })[0].innerHeight,
+          );
+          const ids = await helper.evaluate(async () => {
+            const ids = [];
+            for (let index = 0; index < 12; index++) {
+              const saved = await chrome.runtime.sendMessage({
+                action: 'saveListMeta',
+                name: `Live reading ${index}`,
+              });
+              if (!saved.success) throw new Error(saved.error);
+              ids.push(saved.listId);
+            }
+            return ids;
+          });
+          await expect
+            .poll(() =>
+              helper.evaluate(() => {
+                const view = chrome.extension.getViews({ type: 'popup' })[0];
+                return view.document.querySelectorAll('#listChips .list-chip')
+                  .length;
+              }),
+            )
+            .toBe(10);
+          await expect
+            .poll(() =>
+              helper.evaluate(
+                () =>
+                  chrome.extension.getViews({ type: 'popup' })[0].innerHeight,
+              ),
+            )
+            .toBeGreaterThan(initialHeight + 50);
+          await helper.evaluate(async (ids) => {
+            for (const listId of ids) {
+              const deleted = await chrome.runtime.sendMessage({
+                action: 'deleteList',
+                listId,
+              });
+              if (!deleted.success) throw new Error(deleted.error);
+            }
+          }, ids);
+          await expect
+            .poll(() =>
+              helper.evaluate(() => {
+                const view = chrome.extension.getViews({ type: 'popup' })[0];
+                return {
+                  count: view.document.querySelectorAll('#listChips .list-chip')
+                    .length,
+                  height: view.innerHeight,
+                };
+              }),
+            )
+            .toEqual({ count: 0, height: initialHeight });
+        }
+      } finally {
+        await helper.evaluate(() =>
+          chrome.extension.getViews({ type: 'popup' })[0]?.close(),
+        );
+        await helper.close();
+        await popup?.close();
+        await page.close();
+      }
+    }
+  });
+
   for (const scenario of [
     {
       label: 'multi-word',
@@ -1296,9 +1580,11 @@ test.describe('Popup list chip behavior', () => {
               title: popup?.document
                 .getElementById('pageDiagnosticTitle')
                 ?.textContent.trim(),
-              fatal:
-                popup?.document.getElementById('fatalReloadBtn')?.parentElement
-                  ?.textContent || '',
+              fatal: popup?.document
+                .getElementById('fatalError')
+                ?.getBoundingClientRect().height
+                ? popup.document.getElementById('fatalError').textContent
+                : '',
             };
           }),
         )
@@ -1822,7 +2108,7 @@ test.describe('Popup list chip behavior', () => {
       await expect(recoveredPopup.locator('#pageDiagnosticTitle')).toHaveText(
         unavailableTitle,
       );
-      await expect(recoveredPopup.locator('#fatalReloadBtn')).toHaveCount(0);
+      await expect(recoveredPopup.locator('#fatalReloadBtn')).toBeHidden();
       await recoveredPopup.close();
     } finally {
       await helper.close();
@@ -2098,7 +2384,7 @@ test.describe('Popup list chip behavior', () => {
         'Resume page summary failed',
       );
       await expect(popup.locator('#pageHeader')).toBeHidden();
-      await expect(popup.locator('#fatalReloadBtn')).toHaveCount(0);
+      await expect(popup.locator('#fatalReloadBtn')).toBeHidden();
     } finally {
       await helper.evaluate(() =>
         chrome.runtime.sendMessage({

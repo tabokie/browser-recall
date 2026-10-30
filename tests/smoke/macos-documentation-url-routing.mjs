@@ -5,14 +5,13 @@ import { setTimeout } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { compileDocumentationWindow } from '../../scripts/lib/documentation-native-capture.mjs';
-import { buildAndRegisterMacosDocumentationApp } from './macos-documentation-app.mjs';
-import { withCleanup } from './desktop-test-cleanup.mjs';
 import {
-  macosAppRegistrar,
-  unregisterMacosTestApp,
-} from './macos-desktop-process.mjs';
+  assertMacosUrlHandler,
+  buildAndRegisterMacosDocumentationApp,
+} from './macos-documentation-app.mjs';
+import { withCleanup } from './desktop-test-cleanup.mjs';
+import { MacosAppRegistrations } from './macos-desktop-process.mjs';
 import { verifyMacosAppBundle } from '../../scripts/verify-macos-app-bundle.mjs';
-import { launchMacosDocumentationApp } from '../../scripts/lib/macos-native-session.mjs';
 
 if (process.platform !== 'darwin') {
   console.log('macOS documentation URL routing check skipped');
@@ -27,16 +26,17 @@ const app = path.join(
 const work = mkdtempSync(path.join(tmpdir(), 'browser-recall-url-routing-'));
 const testApp = path.join(work, 'Browser Recall URL Test.app');
 let pid;
-const expectedHandler = process.env.BROWSER_RECALL_DOCUMENTATION_PRODUCTION_APP;
+const registrations = new MacosAppRegistrations();
+const productionApp = process.env.BROWSER_RECALL_DOCUMENTATION_PRODUCTION_APP;
 await withCleanup(async () => {
-  if (expectedHandler) {
+  if (productionApp) {
     assert.equal(
       process.env.GITHUB_ACTIONS,
       'true',
       'Production URL handler provisioning requires a disposable GitHub runner',
     );
-    verifyMacosAppBundle(expectedHandler);
-    execFileSync(macosAppRegistrar, ['-f', expectedHandler]);
+    verifyMacosAppBundle(productionApp);
+    registrations.register(productionApp);
   }
   const helper = compileDocumentationWindow(work);
   const handler = () =>
@@ -46,7 +46,8 @@ await withCleanup(async () => {
   const previousHandler = await buildAndRegisterMacosDocumentationApp({
     app,
     readHandler: handler,
-    expectedHandler,
+    productionApp,
+    registrations,
     build: () =>
       new Promise((resolve, reject) => {
         const build = spawn(
@@ -88,7 +89,7 @@ await withCleanup(async () => {
     '-',
     testApp,
   ]);
-  launchMacosDocumentationApp(testApp, {
+  registrations.launchDocumentation(testApp, {
     BROWSER_RECALL_DESKTOP_TEST_PROFILE_DIR: path.join(work, 'profile'),
     BROWSER_RECALL_SKIP_DEEP_LINK_REGISTRATION: '1',
     BROWSER_RECALL_SKIP_LOGIN_ITEM_REGISTRATION: '1',
@@ -118,8 +119,8 @@ await withCleanup(async () => {
       { encoding: 'utf8' },
     ).trim(),
   );
-  assert.equal(
-    handler(),
+  assertMacosUrlHandler(
+    handler,
     previousHandler,
     'Native app activation changed URL routing',
   );
@@ -151,7 +152,6 @@ await withCleanup(async () => {
       if (pid) throw new Error('Isolated URL test app did not exit');
     }
   },
-  () => unregisterMacosTestApp(app),
-  () => unregisterMacosTestApp(testApp),
+  () => registrations.cleanup(),
   () => rmSync(work, { recursive: true, force: true }),
 ]);

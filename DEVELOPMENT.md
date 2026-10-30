@@ -45,8 +45,23 @@ entitlements, and submission remain distribution setup. Regular build and GitHub
 release commands omit `mac-app-store`. The native release-validation workflow
 compiles and tests the Mac App Store channel before building the GitHub artifacts.
 
-Review history is the required nullable `review_requests` field in local
-`config.json`. Mac App Store builds record `first_opened_at` and zero to two
+Configuration loading tolerates fields omitted by older releases. `ConfigStore`
+fills absent fields from fresh-install defaults and saves the complete
+configuration atomically. A missing `device_id` uses the machine-derived identity;
+a missing `data_dir` returns to setup; a missing `setup_complete` is inferred from
+the existing data-folder path. Existing settings, pairing credentials, and review
+history are preserved. Malformed supplied values and unknown fields remain errors.
+Missing connector metadata uses an unnamed `Browser`, an unknown approval time
+of `0`, or `null` for nullable metadata. Connector identities and pairing tokens
+remain required: configuration loading cannot invent an approved connection.
+Nested sync timestamps default to `null`. Missing review attempts default to an
+empty array. A missing first-opening timestamp uses the first request minus the
+shared seven-day delay, or the current time when no requests exist. Existing
+request timestamps and counts are preserved, and recovered values are persisted
+once.
+
+Review history is the nullable `review_requests` field in local `config.json`,
+defaulting to `null` when absent. Mac App Store builds record `first_opened_at` and zero to two
 `requested_at` timestamps in milliseconds. The first request requires seven days
 since first opening, and the second requires thirty days since the first request.
 A StoreKit call consumes the attempt even when StoreKit displays no dialog. The
@@ -58,8 +73,7 @@ production AppKit code with a recording presenter, preserving the content view a
 checking focus, visibility, sheets and native activity. The native review probe
 uses actual focus in an unlocked session; a locked session verifies rejection
 through the production focus gate and exercises remaining checks with controlled
-focus. No App Store rating dialog is shown. No configuration
-migration or legacy reader is provided.
+focus. No App Store rating dialog is shown.
 
 ### Product website
 
@@ -535,7 +549,9 @@ rejecting local connector endpoint so the extension cannot pair with a personal
 daemon. The full macOS documentation scenario runs inside native validation when
 selected, reuses the finalized production app, and builds only the no-tray
 documentation app. The scenario requires the production URL handler to remain
-selected. Release always runs both optional scenarios before publication.
+selected. Launch Services may select any extracted copy with the production
+bundle identifier; registration must preserve the selected application identity.
+Release always runs both optional scenarios before publication.
 
 `scripts/select-platform-checks.mjs` selects Windows extension rendering for
 extension/shared-core sources, rendering fixtures, browser/build configuration,
@@ -729,6 +745,12 @@ so the check cannot rescue failed automatic navigation. Every setup allocation
 shares the cleanup boundary, including daemon startup. The check runs in
 `ci:test-extension-e2e`, in both local CI
 and hosted CI, and verifies options-page messages in prepared and direct popups.
+The Firefox check opens actual toolbar popups to verify live resizing as daemon
+commands create and delete lists. Exact `getRecordingState` failures in disposable
+extension copies exercise short and long fatal-error messages; titles and Reload
+buttons must remain inside the window, and long messages must scroll without
+horizontal overflow. The same failure fixture is used by the Chromium popup E2E
+suite and is omitted from production bundles.
 On macOS and Linux, the launcher owns a separate process group so cleanup can
 terminate Firefox descendants even after `npx` exits. Cleanup closes HTTP
 connections and finishes before the check prints its success message.
@@ -849,10 +871,19 @@ verifies the retained bundle before launching the copy. Native macOS CI also
 checks that registering the retained bundle preserves Browser Recall URL routing
 and that app URL activation reopens a hidden window in the same process. The URL
 routing baseline is read after the build, immediately before registration, so
-production app discovery during the build cannot produce a false failure. A native
-regression forces production routing to become available during the build. The check
-uses a temporary app and profile, and targets the app explicitly to preserve the
-user's default URL handler:
+production app discovery during the build cannot produce a false failure. The
+production fixture check compares `CFBundleIdentifier` because release validation
+extracts multiple copies of the same app. The selected bundle identifier must
+remain unchanged across documentation registration and activation; paths appear
+in failure diagnostics. A native regression registers two discoverable production
+copies and forces Launch Services to switch copies between checks, using a unique
+URL scheme that does not affect personal routing. The regression also rejects a
+different application identity and verifies teardown after validation fails with
+a valid, unregistered documentation bundle on disk. `MacosAppRegistrations` owns
+successful registrations and unregisters only those bundles during cleanup.
+The check uses a
+temporary no-tray app and profile and targets the app explicitly to preserve the
+user's default URL handler. Neither documentation check requires a fresh account:
 
 ```bash
 npx vitest run tests/integration/macos-documentation-url-routing.test.js

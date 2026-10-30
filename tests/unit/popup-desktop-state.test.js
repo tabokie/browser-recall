@@ -488,7 +488,6 @@ describe('popup desktop state rendering', () => {
     );
 
     expect(document.getElementById('dashboard').style.display).toBe('flex');
-    expect(document.body.classList.contains('popup-compact')).toBe(true);
     expect(getComputedStyle(document.body).minHeight).toBe('0');
     expect(document.getElementById('recordingBar')).toBeTruthy();
     expect(document.getElementById('recordingToggle')).toBeTruthy();
@@ -539,7 +538,6 @@ describe('popup desktop state rendering', () => {
       () =>
         document.getElementById('dashboardContent')?.style.display === 'none',
     );
-    expect(document.body.classList.contains('popup-compact')).toBe(true);
     expect(getComputedStyle(document.body).minHeight).toBe('0');
     document.getElementById('recordingToggle').click();
 
@@ -596,7 +594,6 @@ describe('popup desktop state rendering', () => {
         document.getElementById('dashboardContent').style.display === 'block',
     );
     expect(document.getElementById('dashboardContent')).toBeTruthy();
-    expect(document.body.classList.contains('popup-compact')).toBe(false);
     expect(document.getElementById('pageTitle').textContent).toBe(
       effectiveTab.title,
     );
@@ -686,7 +683,6 @@ describe('popup desktop state rendering', () => {
         ([request]) => request.action === 'setRecordingPaused',
       ),
     ).toEqual([[{ action: 'setRecordingPaused', paused: true }]]);
-    expect(document.body.classList.contains('popup-compact')).toBe(true);
   });
 
   it('ignores list mutations while a recording toggle is committing', async () => {
@@ -937,7 +933,6 @@ describe('popup desktop state rendering', () => {
         document.getElementById('dashboardContent')?.style.display ===
           'block' && toggle.disabled === false,
     );
-    expect(document.body.classList.contains('popup-compact')).toBe(false);
   });
 
   it('queues a live list refresh behind an active recording mutation', async () => {
@@ -1027,7 +1022,6 @@ describe('popup desktop state rendering', () => {
           'block' && toggle.disabled === false,
     );
     await waitFor(() => summaryCalls === 3);
-    expect(document.body.classList.contains('popup-compact')).toBe(false);
     expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
   });
 
@@ -1060,7 +1054,6 @@ describe('popup desktop state rendering', () => {
 
     expect(document.getElementById('loading').style.display).toBe('none');
     expect(document.getElementById('dashboard').style.display).toBe('flex');
-    expect(document.body.classList.contains('popup-compact')).toBe(true);
     expect(getComputedStyle(document.body).minHeight).toBe('0');
     expect(document.getElementById('recordingBar')).toBeTruthy();
     expect(document.getElementById('recordingToggle')).toBeTruthy();
@@ -1129,7 +1122,6 @@ describe('popup desktop state rendering', () => {
         document.getElementById('dashboardContent')?.style.display === 'block',
     );
 
-    expect(document.body.classList.contains('popup-compact')).toBe(true);
     expect(document.getElementById('pageDiagnosticSection').style.display).toBe(
       '',
     );

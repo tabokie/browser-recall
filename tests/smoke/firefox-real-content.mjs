@@ -6,6 +6,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import { stopFirefoxProcess } from './firefox-process.mjs';
+import { installPopupStartupFailure } from '../fixtures/popup-startup-failure.mjs';
 import {
   canonicalizePageUrl,
   generateSlugFromUrl,
@@ -60,6 +61,7 @@ try {
     path.join(os.tmpdir(), 'browser-recall-firefox-real-extension-'),
   );
   stageFirefoxExtensionAssets(extensionDir);
+  installPopupStartupFailure(extensionDir);
   configDir = fs.mkdtempSync(
     path.join(os.tmpdir(), 'browser-recall-firefox-real-daemon-'),
   );
@@ -172,6 +174,10 @@ const waitForVisit = async (url) => {
   if (!response.ok || result.success !== true) throw new Error(result.error || 'Automatic capture failed');
 };
 try {
+  if (location.pathname === '/popup-sizing') {
+    await chrome.runtime.sendMessage({action:'firefoxSizingReady'});
+    return;
+  }
   if (location.pathname === '/paused') {
     const recording = await chrome.runtime.sendMessage({ action: 'getRecordingState' });
     if (recording?.mode === 'private') {
@@ -217,7 +223,13 @@ try {
   const flush = await chrome.runtime.sendMessage({ action: 'flushDesktopQueue' });
   if (!flush?.success) throw new Error(flush?.error || 'Could not flush captured visits');
   const options = await chrome.runtime.sendMessage({ action: 'firefoxRealContentProbe', phase: 'options' });
-  await report({ initial, destination, dormant, excluded, recovered, options, contentErrors: globalThis.firefoxRealContentErrors });
+  const pauseSizing = await chrome.runtime.sendMessage({action:'setRecordingPaused', paused:true});
+  if (!pauseSizing?.success) throw new Error(pauseSizing?.error || 'Could not pause the sizing document');
+  const sizing = await chrome.runtime.sendMessage({action:'firefoxRealContentProbe', phase:'openSizing'});
+  const resumeSizing = await chrome.runtime.sendMessage({action:'setRecordingPaused', paused:false});
+  if (!resumeSizing?.success) throw new Error(resumeSizing?.error || 'Could not resume the sizing document');
+  const nativePopups = await chrome.runtime.sendMessage({action:'firefoxRealContentProbe', phase:'native-popups', tabId:sizing.tabId});
+  await report({ initial, destination, dormant, excluded, recovered, options, nativePopups, contentErrors: globalThis.firefoxRealContentErrors });
 } catch (error) {
   await report({ error: error.message, contentErrors: globalThis.firefoxRealContentErrors });
 }
@@ -225,15 +237,45 @@ try {
   );
   fs.writeFileSync(
     path.join(extensionDir, 'firefox-real-background-probe.js'),
-    `globalThis.browserRecallBackgroundTestActions = new Set(['firefoxRealContentProbe', 'firefoxDormantReady', 'firefoxOptionsPopupReady']);
+    `globalThis.browserRecallBackgroundTestActions = new Set(['firefoxRealContentProbe', 'firefoxDormantReady', 'firefoxPopupReady', 'firefoxSizingReady']);
 let resolveDormant;
 const dormantReady = new Promise(resolve => { resolveDormant = resolve; });
+let resolveSizing;
+const sizingReady = new Promise(resolve => { resolveSizing = resolve; });
 const popupWaiters = new Map();
 chrome.runtime.onMessage.addListener((request, sender) => {
   if (request.action === 'firefoxDormantReady') { resolveDormant(); return Promise.resolve({ success: true }); }
-  if (request.action === 'firefoxOptionsPopupReady') { popupWaiters.get(request.phase)?.(request.snapshot); return Promise.resolve({ success: true }); }
+  if (request.action === 'firefoxSizingReady') { resolveSizing(); return Promise.resolve({success:true}); }
+  if (request.action === 'firefoxPopupReady') { popupWaiters.get(request.phase)?.(request.snapshot); return Promise.resolve({ success: true }); }
   if (request.action !== 'firefoxRealContentProbe') return false;
   return (async () => {
+    if (request.phase === 'openSizing') {
+      const tab = await chrome.tabs.create({url:'http://127.0.0.1:${port}/popup-sizing', active:true});
+      await sizingReady;
+      return {tabId:tab.id};
+    }
+    if (request.phase === 'native-popups') {
+      const tab = await chrome.tabs.get(request.tabId);
+      const prepared = await globalThis.browserRecallPreparedPopupForTest.prepare({tabId:tab.id});
+      const results = {};
+      for (const [phase, popupPath] of [['sizing',prepared.popupPath], ['fatal-short','popup.html?startupFailure=short'], ['fatal-long','popup.html?startupFailure=long']]) {
+        const ready = new Promise(resolve => popupWaiters.set(phase, resolve));
+        const popupUrl = new URL(chrome.runtime.getURL(popupPath));
+        popupUrl.searchParams.set('firefoxProbe',phase);
+        await chrome.tabs.update(tab.id,{active:true});
+        await chrome.windows.update(tab.windowId,{focused:true});
+        await chrome.action.setPopup({tabId:tab.id,popup:popupUrl.href});
+        await chrome.action.openPopup({windowId:tab.windowId});
+        results[phase] = await ready;
+        popupWaiters.delete(phase);
+        for (let attempt = 0; chrome.extension.getViews({type:'popup'}).length; attempt++) {
+          if (attempt === 100) throw new Error('Firefox popup did not close');
+          await new Promise(resolve => setTimeout(resolve,20));
+        }
+      }
+      await chrome.tabs.remove(tab.id);
+      return results;
+    }
     if (request.phase === 'options') {
       const optionsUrl = chrome.runtime.getURL('options-stub.html');
       const optionsTab = await chrome.tabs.create({ url: optionsUrl, active: true });
@@ -288,9 +330,65 @@ chrome.runtime.onMessage.addListener((request, sender) => {
     `(async () => {
 const phase = new URL(location.href).searchParams.get('firefoxProbe');
 if (!phase) return;
+const native = phase === 'sizing' || phase.startsWith('fatal-');
+const wait = async (name, read) => {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const value = read();
+    if (value) return value;
+    await new Promise(resolve => setTimeout(resolve,50));
+  }
+  throw new Error('Firefox popup timed out: ' + name);
+};
+if (native) {
+  let snapshot;
+  try {
+    await wait('reveal', () => !document.documentElement.hasAttribute('data-popup-hidden'));
+    await document.fonts.ready;
+    if (phase === 'sizing') {
+      const layout = () => {
+        const frame = document.getElementById('dashboard').getBoundingClientRect();
+        return {height:innerHeight,width:innerWidth,bottom:frame.bottom,right:frame.right,count:document.querySelectorAll('#listChips .list-chip').length};
+      };
+      const fitted = count => {
+        const size = layout();
+        globalThis.lastPopupLayout = size;
+        return (count === undefined || size.count === count) && Math.abs(size.height-size.bottom) < 1.1 && Math.abs(size.width-size.right) < 1.1 ? size : null;
+      };
+      const small = await wait('small frame',()=>fitted());
+      const ids = [];
+      for (let index = 0; index < 12; index++) {
+        const saved = await chrome.runtime.sendMessage({action:'saveListMeta',name:'Live reading '+index});
+        if (!saved.success) throw new Error(saved.error);
+        ids.push(saved.listId);
+      }
+      const large = await wait('grown frame',()=>{ const size=fitted(10); return size && size.height > small.height+50 ? size : null; });
+      for (const listId of ids) {
+        const deleted = await chrome.runtime.sendMessage({action:'deleteList',listId});
+        if (!deleted.success) throw new Error(deleted.error);
+      }
+      const restored = await wait('shrunk frame',()=>{const size=fitted(small.count); return size && size.height === small.height ? size : null;});
+      snapshot = {small,large,restored};
+    } else {
+      const reload = document.getElementById('fatalReloadBtn');
+      await wait('reload',()=>reload?.getBoundingClientRect().height);
+      const title = reload.parentElement.firstElementChild.getBoundingClientRect();
+      const message = reload.previousElementSibling;
+      const button = reload.getBoundingClientRect();
+      if (title.top < 0 || button.bottom > innerHeight || button.right > innerWidth) throw new Error('Fatal error controls are clipped');
+      if (document.documentElement.scrollWidth > innerWidth) throw new Error('Fatal error overflows horizontally');
+      if (getComputedStyle(document.getElementById('dashboard')).display !== 'none') throw new Error('Fatal error did not replace the dashboard');
+      const scrollable = message.scrollHeight > message.clientHeight;
+      if (scrollable !== (phase === 'fatal-long')) throw new Error('Fatal message scrolling is incorrect');
+      snapshot = {height:innerHeight,reloadBottom:button.bottom,scrollable,calls:globalThis.popupStartupFailureCalls};
+    }
+  } catch(error) { snapshot = {error:error.message,layout:globalThis.lastPopupLayout}; }
+  await chrome.runtime.sendMessage({action:'firefoxPopupReady',phase,snapshot});
+  window.close();
+  return;
+}
 for (let attempt = 0; attempt < 100; attempt += 1) {
   if (document.documentElement.dataset.popupHidden === undefined) {
-    await chrome.runtime.sendMessage({ action: 'firefoxOptionsPopupReady', phase, snapshot: {
+    await chrome.runtime.sendMessage({ action: 'firefoxPopupReady', phase, snapshot: {
       title: document.getElementById('pageDiagnosticTitle').textContent,
       message: document.getElementById('pageDiagnosticMessage').textContent,
       detail: document.getElementById('pageDiagnosticDetail').textContent,
@@ -428,6 +526,31 @@ console.error = (...args) => {
       JSON.stringify(result.options),
     );
   }
+  for (const phase of ['sizing', 'fatal-short', 'fatal-long']) {
+    assert.equal(
+      result.nativePopups?.[phase]?.error,
+      undefined,
+      JSON.stringify(result.nativePopups),
+    );
+    assert(
+      result.nativePopups?.[phase],
+      'Missing native Firefox popup result: ' + phase,
+    );
+  }
+  assert(
+    result.nativePopups.sizing.small.height < 320,
+    JSON.stringify(result.nativePopups),
+  );
+  assert(
+    result.nativePopups.sizing.large.height >
+      result.nativePopups.sizing.small.height + 50,
+  );
+  assert.equal(
+    result.nativePopups.sizing.restored.height,
+    result.nativePopups.sizing.small.height,
+  );
+  for (const phase of ['fatal-short', 'fatal-long'])
+    assert.equal(result.nativePopups[phase].calls, 1);
   // Graceful daemon shutdown flushes accepted visits before reading the logs.
   await stopTestDaemon(daemon);
   const records = readVisitRecords(configDir);
@@ -468,5 +591,5 @@ console.error = (...args) => {
     );
 }
 console.log(
-  'Real Firefox verified page capture, navigation, URL normalization, daemon persistence, paused-document exclusion until refresh, and options-page popup messages; process cleanup completed.',
+  'Real Firefox verified page capture, navigation, URL normalization, daemon persistence, paused-document exclusion until refresh, options-page messages, native popup growth and shrinkage, and fatal-error controls; process cleanup completed.',
 );

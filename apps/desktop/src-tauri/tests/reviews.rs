@@ -3,7 +3,7 @@ mod distribution;
 #[path = "../src/reviews.rs"]
 mod reviews;
 
-use browser_recall_daemon::ConfigStore;
+use browser_recall_daemon::{ConfigStore, DaemonConfig};
 use reviews::ReviewCoordinator;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -45,11 +45,20 @@ async fn review_requests_persist_across_restarts_collection_changes_and_suppress
     assert!(!github.enabled());
     github.initialize().await.expect("GitHub startup");
     assert!(!store.exists());
+    let mut older = serde_json::to_value(DaemonConfig::new_unconfigured().unwrap()).unwrap();
+    older.as_object_mut().unwrap().remove("review_requests");
+    std::fs::write(store.config_path(), serde_json::to_vec(&older).unwrap()).unwrap();
     let coordinator = ReviewCoordinator::new(store.clone(), true, OPENED);
     coordinator.initialize().await.expect("App Store startup");
     let calls = AtomicUsize::new(0);
     assert!(!attempt(&coordinator, OPENED + 7 * DAY - 1, &calls).await);
     assert!(attempt(&coordinator, OPENED + 7 * DAY, &calls).await);
+    let mut older = serde_json::to_value(store.load().unwrap().unwrap()).unwrap();
+    older["review_requests"]
+        .as_object_mut()
+        .unwrap()
+        .remove("first_opened_at");
+    std::fs::write(store.config_path(), serde_json::to_vec(&older).unwrap()).unwrap();
     let restarted = ReviewCoordinator::new(store.clone(), true, OPENED + 10 * DAY);
     restarted.initialize().await.expect("restart");
     store

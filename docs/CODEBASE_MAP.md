@@ -96,6 +96,7 @@ row. Data changes update affected rows without restarting the history search.
 | `apps/extension/browser-identity.js` | Detect the browser, including Orion |
 | `apps/extension/browser-build-target.js` | Chromium/Firefox target generated during the build |
 | `apps/extension/popup.js` | Current-page dashboard, list picker, and queue for edits |
+| `apps/extension/popup.html` | Popup layout, static fatal-error screen, reserved hidden startup size, and content-sized visible frame |
 | `apps/extension/popup-note-session.js` | In-memory note drafts and transfer of unsaved commands when the popup closes |
 | `apps/extension/extension-surface.js` | Shared highlight entries, editors, icons, and overlays isolated by shadow DOM |
 | `apps/extension/extension-surface.css`, `apps/extension/extension-ui-tokens.js` | Shared extension styles and error displays |
@@ -133,7 +134,7 @@ validation.
 | `crates/daemon/src/storage.rs` | Cache current data, read disk, index logs, write checkpoints in the background, and select files for sync |
 | `crates/daemon/src/read_projections.rs` | List/page/highlight/popup/tree/recycle-bin/settings reads |
 | `crates/daemon/src/mutations.rs` | Build change notifications, including affected URLs |
-| `crates/daemon/src/config.rs` | Save configuration with file locking and temporary-file replacement |
+| `crates/daemon/src/config.rs` | Fill missing configuration fields from canonical defaults, validate, and save with file locking and temporary-file replacement |
 | `crates/daemon/src/capture_policy.rs` | Blacklist and title-cleanup policy |
 | `crates/daemon/src/rules.rs` | Rule validation, previews, and automatic matching |
 | `crates/daemon/src/search.rs` | History streaming and note/snapshot search adapters |
@@ -223,7 +224,7 @@ do not maintain a second production copy.
 | Commands, write ordering, and change notifications | `crates/daemon/tests/commands.rs`, `crates/daemon/tests/command_authority.rs`, `crates/daemon/tests/runtime.rs` |
 | Replay schemas, idempotence, and verifier | `crates/replay/tests/` |
 | Background document eligibility at navigation start, pause-aware attention, and session recovery | `apps/extension/recording-controller.js`, `tests/e2e/recording-lifecycle.spec.js` |
-| Popup membership, prepared dashboard, recording toggles without tab notifications, and paused documents remaining excluded until refresh | `tests/e2e/popup-lists.spec.js` |
+| Popup membership, prepared dashboard, short-content sizing, native growth/shrinkage, fatal startup failures, recording toggles without tab notifications, and paused documents remaining excluded until refresh | `tests/e2e/popup-lists.spec.js`, `tests/fixtures/popup-startup-failure.mjs` |
 | Live navigation and correct URLs in visit records | `tests/e2e/extension-navigation-regressions.spec.js`, `tests/e2e/url-tracking.spec.js` |
 | Highlight creation, editing, and PDF behavior | `tests/e2e/highlight-note-edit.spec.js` |
 | Save when an editor or popup closes | `tests/e2e/note-dismiss-save.spec.js` |
@@ -231,17 +232,18 @@ do not maintain a second production copy.
 | Seeded cross-feature workflows | `tests/e2e/seeded-combination-workflows.spec.js`, `tests/e2e/manual-seed-workflow.spec.js` |
 | Desktop layout, navigation, search, and scroll retention | `tests/e2e/desktop-visual.spec.js` |
 | App Store review timing, persistence, cancellation, rollback and failed writes | `apps/desktop/src-tauri/tests/reviews.rs` |
+| Configuration upgrades with omitted top-level and nested metadata, persistent defaults, preserved request counts and credentials, and rejected malformed values | `crates/daemon/tests/config_upgrade.rs` |
 | Update signature validation, checkpoint failure, and native macOS update installation | `apps/desktop/src-tauri/tests/desktop_updates.rs`, `tests/e2e/desktop-visual.spec.js` |
 | Running native app upgrades, relaunch, retained configuration/data/pairing, and connector reconnection | `tests/smoke/desktop-update-lifecycle.mjs`, `tests/smoke/windows-desktop-update-ui.ps1` |
 | Release CI checks matching desktop/extension versions, packages production Chrome/Firefox extensions, and requires complete checksummed assets before publishing | `tests/integration/extension-release-workflow.test.js` |
 | Daemon shutdown closes connector sessions and saves accepted notes | `crates/daemon/tests/shutdown.rs` |
 | Native WKWebView chart layout | `tests/smoke/macos-wkwebview-chart-layout.mjs` |
-| Documentation bundles preserve macOS app URL routing, including production app discovery during the build, and URL activation reuses the running process | `tests/smoke/macos-documentation-url-routing.mjs`, `tests/smoke/macos-documentation-app.mjs`, `tests/integration/macos-documentation-url-routing.test.js` |
+| Documentation bundles preserve macOS handler identity when Launch Services switches production copies; validation failures preserve their error through registration cleanup; URL activation reuses the running process | `tests/smoke/macos-documentation-url-routing.mjs`, `tests/smoke/macos-documentation-app.mjs`, `tests/integration/macos-documentation-url-routing.test.js` |
 | macOS startup, tray, and window lifecycle | `tests/smoke/macos-desktop-window-lifecycle.mjs` |
 | Personal macOS sessions reject temporary tray app automation before native tools run | `tests/integration/macos-native-session.test.js` |
 | macOS frame restoration after hidden size and position changes with an inset content view | `crates/native-tests/tests/macos_window_frame.rs` |
 | Windows icons, single instance, and teardown | `tests/smoke/windows-desktop-single-instance.mjs`, `tests/integration/windows-desktop-cleanup.test.js` |
-| Native desktop cleanup preserves setup errors, completes teardown after failures, and stops original or relaunched update processes | `tests/smoke/desktop-test-cleanup.mjs`, `tests/smoke/macos-desktop-process.mjs`, `tests/integration/macos-desktop-cleanup.test.js`, `tests/integration/windows-desktop-cleanup.test.js` |
+| Native desktop cleanup preserves setup errors, owns successful macOS test app registrations, completes teardown after failures, and stops original or relaunched update processes | `tests/smoke/desktop-test-cleanup.mjs`, `tests/smoke/macos-desktop-process.mjs`, `tests/integration/macos-desktop-cleanup.test.js`, `tests/integration/windows-desktop-cleanup.test.js` |
 | Windows native update isolation survives token-based installer relaunch and restores the user environment; portable rollback JSON reader covers Windows PowerShell array behavior | `tests/smoke/windows-desktop-update-environment.ps1`, `tests/smoke/windows-update-environment-snapshot.ps1`, `tests/integration/windows-update-environment.test.js`, `tests/fixtures/windows-token-launch.cs` |
 | Mandatory PowerShell prerequisite and bounded asynchronous startup; subprocess regressions cover missing PowerShell, slow startup, and local CI fail-fast behavior | `scripts/check-test-prerequisites.mjs`, `tests/smoke/powershell-process.mjs`, `tests/integration/powershell-prerequisites.test.js`, `tests/integration/ci-release-validation.test.js` |
 | Windows validation gate blocks packaging and prints failed assertions from JSON reports | `scripts/verify-windows-validation.mjs`, `tests/integration/ci-release-validation.test.js` |
@@ -250,7 +252,7 @@ do not maintain a second production copy.
 | Native extension localization and system fonts | `tests/e2e/extension-localization.spec.js`, `tests/e2e/extension-font-fallback.spec.js` |
 | Browser-only extension font fixture with no daemon or Rust build and an isolated rejecting connector endpoint | `tests/fixtures/extension-rendering.mjs`, `tests/fixtures/test-extension.mjs` |
 | Shared pinned Chromium selection and real-process coverage that rejects unsupported extension browsers before launch, without browser installation | `tests/fixtures/extension-browser-channel.mjs`, `tests/integration/extension-browser-selection.test.js` |
-| Real Firefox automatic capture and navigation, daemon persistence before identity probes, paused-document exclusion until refresh, and options-page popup messages | `tests/smoke/firefox-real-content.mjs` |
+| Real Firefox automatic capture and navigation, daemon persistence before identity probes, paused-document exclusion until refresh, options-page messages, actual toolbar popup growth/shrinkage and fatal-error layout | `tests/smoke/firefox-real-content.mjs` |
 | Native popup shortcut | `tests/smoke/native-extension-shortcut.mjs` |
 | Documentation images match the recorded source files and capture results | `tests/integration/documentation-freshness.test.js` |
 | Browser documentation capture | `tests/e2e/documentation-browser.spec.js` |

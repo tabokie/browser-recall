@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { DAEMON_PORTS } from '../../scripts/lib/desktop-test-runtime.mjs';
+import { installPopupStartupFailure } from './popup-startup-failure.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '../..');
@@ -61,6 +62,7 @@ export function createTestExtensionDir(
   const extensionDir = createStagedExtensionDir(prefix);
   pinTestConnectorPorts(extensionDir, ports);
   enableBackgroundTestControl(extensionDir);
+  installPopupStartupFailure(extensionDir);
   return extensionDir;
 }
 

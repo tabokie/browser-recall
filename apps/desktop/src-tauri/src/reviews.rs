@@ -35,7 +35,9 @@ pub struct ReviewCoordinator {
 fn next_request_at(history: &ReviewRequestHistory) -> Option<i64> {
     const DAY: i64 = 86_400_000;
     match history.requested_at.as_slice() {
-        [] => history.first_opened_at.checked_add(7 * DAY),
+        [] => history
+            .first_opened_at
+            .checked_add(ReviewRequestHistory::FIRST_REQUEST_DELAY_MS),
         [first] => first.checked_add(30 * DAY),
         _ => None,
     }

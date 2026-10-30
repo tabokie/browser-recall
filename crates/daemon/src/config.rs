@@ -1,5 +1,5 @@
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
@@ -11,14 +11,6 @@ static CONFIG_WRITE_ID: AtomicU64 = AtomicU64::new(0);
 
 const DEVICE_ID_MAX_LEN: usize = 48;
 const DEVICE_ID_MACHINE_SUFFIX_LEN: usize = 12;
-
-fn deserialize_required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    Option::deserialize(deserializer)
-}
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(transparent)]
@@ -34,22 +26,20 @@ impl fmt::Debug for Token {
 #[serde(deny_unknown_fields)]
 pub struct ApprovedConnector {
     pub browser_id: String,
+    #[serde(default = "default_browser_name")]
     pub browser_name: String,
     pub extension_id: String,
-    #[serde(deserialize_with = "deserialize_required_option")]
     pub browser_profile: Option<String>,
     pub token: Token,
+    #[serde(default)]
     pub approved_at: u64,
-    #[serde(deserialize_with = "deserialize_required_option")]
     pub last_seen_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct SyncDeviceRecord {
-    #[serde(deserialize_with = "deserialize_required_option")]
     pub last_pushed: Option<i64>,
-    #[serde(deserialize_with = "deserialize_required_option")]
     pub last_pulled: Option<i64>,
 }
 
@@ -57,10 +47,42 @@ pub struct SyncDeviceRecord {
 #[serde(deny_unknown_fields)]
 pub struct ReviewRequestHistory {
     pub first_opened_at: i64,
+    #[serde(default)]
     pub requested_at: Vec<i64>,
 }
 
 impl ReviewRequestHistory {
+    pub const FIRST_REQUEST_DELAY_MS: i64 = 7 * 86_400_000;
+
+    fn fill_missing_fields(value: &mut serde_json::Value) -> std::io::Result<()> {
+        let Some(fields) = value.as_object_mut() else {
+            return Ok(()); // Typed deserialization rejects malformed history.
+        };
+        if !fields.contains_key("first_opened_at") {
+            let attempts: Vec<i64> = fields
+                .get("requested_at")
+                .map(|value| serde_json::from_value(value.clone()))
+                .transpose()
+                .map_err(invalid_data)?
+                .unwrap_or_default();
+            // Existing attempts determine the second request and the limit.
+            // Recover the latest possible first opening without resetting them.
+            let opened = if let Some(first) = attempts.first() {
+                first
+                    .checked_sub(Self::FIRST_REQUEST_DELAY_MS)
+                    .filter(|timestamp| *timestamp > 0)
+                    .ok_or_else(|| invalid_data("review request predates a valid first opening"))?
+            } else {
+                let elapsed = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(invalid_data)?;
+                i64::try_from(elapsed.as_millis()).map_err(invalid_data)?
+            };
+            fields.insert("first_opened_at".into(), opened.into());
+        }
+        Ok(())
+    }
+
     fn validate(&self) -> Result<(), String> {
         if self.first_opened_at <= 0 || self.requested_at.len() > 2 {
             return Err("review request history is invalid".into());
@@ -81,27 +103,27 @@ impl ReviewRequestHistory {
 pub struct DaemonConfig {
     pub device_id: String,
     pub data_dir: PathBuf,
-    #[serde(deserialize_with = "deserialize_required_option")]
     pub last_port: Option<u16>,
     pub launch_at_login: bool,
     pub log_level: String,
     pub setup_complete: bool,
     pub connectors: Vec<ApprovedConnector>,
-    #[serde(deserialize_with = "deserialize_required_option")]
     pub sync_github_token: Option<Token>,
-    #[serde(deserialize_with = "deserialize_required_option")]
     pub sync_github_user: Option<String>,
     pub sync_remember_token: bool,
     pub sync_paused_devices: Vec<String>,
     pub sync_devices: BTreeMap<String, SyncDeviceRecord>,
-    #[serde(deserialize_with = "deserialize_required_option")]
     pub review_requests: Option<ReviewRequestHistory>,
 }
 
 impl DaemonConfig {
     pub fn new_unconfigured() -> std::io::Result<Self> {
-        Ok(Self {
-            device_id: default_device_id()?,
+        Ok(Self::with_device_id(default_device_id()?))
+    }
+
+    fn with_device_id(device_id: String) -> Self {
+        Self {
+            device_id,
             data_dir: PathBuf::new(),
             last_port: None,
             launch_at_login: true,
@@ -114,7 +136,7 @@ impl DaemonConfig {
             sync_paused_devices: Vec::new(),
             sync_devices: BTreeMap::new(),
             review_requests: None,
-        })
+        }
     }
 
     pub fn new_configured(data_dir: PathBuf) -> std::io::Result<Self> {
@@ -191,6 +213,11 @@ pub struct ConfigStore {
     root_dir: PathBuf,
 }
 
+struct LoadedConfig {
+    config: DaemonConfig,
+    needs_defaults: bool,
+}
+
 impl ConfigStore {
     pub fn new(root_dir: impl Into<PathBuf>) -> Self {
         Self {
@@ -212,15 +239,69 @@ impl ConfigStore {
 
     pub fn load(&self) -> std::io::Result<Option<DaemonConfig>> {
         fs::create_dir_all(&self.root_dir)?;
-        let path = self.config_path();
-        if !path.exists() {
+        let Some(loaded) = self.read_config()? else {
             return Ok(None);
+        };
+        if !loaded.needs_defaults {
+            return Ok(Some(loaded.config));
         }
 
-        let raw = fs::read_to_string(path)?;
-        let config = serde_json::from_str::<DaemonConfig>(&raw).map_err(invalid_data)?;
+        // Re-read after acquiring the lock so defaults cannot overwrite a newer
+        // configuration written while this reader waited for another writer.
+        let _writer = self.lock_writer()?;
+        let Some(loaded) = self.read_config()? else {
+            return Ok(None);
+        };
+        if loaded.needs_defaults {
+            self.write_atomic(&loaded.config)?;
+        }
+        Ok(Some(loaded.config))
+    }
+
+    fn read_config(&self) -> std::io::Result<Option<LoadedConfig>> {
+        let raw = match fs::read_to_string(self.config_path()) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let ConfigJson(original) = serde_json::from_str(&raw).map_err(invalid_data)?;
+        let mut value = original.clone();
+        let fields = value
+            .as_object_mut()
+            .ok_or_else(|| invalid_data("config.json must contain an object"))?;
+        let missing_data_dir = !fields.contains_key("data_dir");
+        let device_id = match fields.get("device_id") {
+            Some(value) => serde_json::from_value(value.clone()).map_err(invalid_data)?,
+            None => default_device_id()?,
+        };
+        let mut defaults = DaemonConfig::with_device_id(device_id);
+        defaults.setup_complete = fields
+            .get("data_dir")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|path| !path.is_empty());
+        // Serializing the fresh-install defaults automatically covers future
+        // fields. Only absent fields receive defaults; present values stay strict.
+        let defaults = serde_json::to_value(defaults).map_err(invalid_data)?;
+        let defaults = defaults
+            .as_object()
+            .ok_or_else(|| invalid_data("configuration defaults must be an object"))?;
+        for (key, default) in defaults {
+            fields.entry(key.clone()).or_insert_with(|| default.clone());
+        }
+        if let Some(history) = fields.get_mut("review_requests") {
+            ReviewRequestHistory::fill_missing_fields(history)?;
+        }
+        let mut config: DaemonConfig = serde_json::from_value(value).map_err(invalid_data)?;
+        if missing_data_dir {
+            // An omitted data_dir requires setup even if setup_complete was true.
+            config.setup_complete = false;
+        }
         config.validate().map_err(invalid_data)?;
-        Ok(Some(config))
+        let needs_defaults = serde_json::to_value(&config).map_err(invalid_data)? != original;
+        Ok(Some(LoadedConfig {
+            config,
+            needs_defaults,
+        }))
     }
 
     fn lock_writer(&self) -> std::io::Result<fs::File> {
@@ -246,13 +327,16 @@ impl ConfigStore {
         edit: impl FnOnce(&mut DaemonConfig) -> std::io::Result<T>,
     ) -> std::io::Result<T> {
         let _writer = self.lock_writer()?;
-        let existing = self.load()?;
+        let existing = self.read_config()?;
+        let needs_defaults = existing
+            .as_ref()
+            .is_some_and(|loaded| loaded.needs_defaults);
         let mut config = match &existing {
-            Some(config) => config.clone(),
+            Some(loaded) => loaded.config.clone(),
             None => DaemonConfig::new_unconfigured()?,
         };
         let result = edit(&mut config)?;
-        if existing.as_ref() != Some(&config) {
+        if needs_defaults || existing.as_ref().map(|loaded| &loaded.config) != Some(&config) {
             self.write_atomic(&config)?;
         }
         Ok(result)
@@ -293,12 +377,81 @@ impl ConfigStore {
     }
 }
 
+// Preserve duplicate-key rejection while filling defaults in JSON objects.
+// Plain serde_json::Value would silently keep only the last duplicate value.
+struct ConfigJson(serde_json::Value);
+
+impl<'de> Deserialize<'de> for ConfigJson {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct JsonVisitor;
+        impl<'de> serde::de::Visitor<'de> for JsonVisitor {
+            type Value = ConfigJson;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("configuration JSON without duplicate fields")
+            }
+            fn visit_bool<E: serde::de::Error>(self, value: bool) -> Result<ConfigJson, E> {
+                Ok(ConfigJson(value.into()))
+            }
+            fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<ConfigJson, E> {
+                Ok(ConfigJson(value.into()))
+            }
+            fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<ConfigJson, E> {
+                Ok(ConfigJson(value.into()))
+            }
+            fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<ConfigJson, E> {
+                serde_json::Number::from_f64(value)
+                    .map(|number| ConfigJson(number.into()))
+                    .ok_or_else(|| E::custom("configuration number must be finite"))
+            }
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<ConfigJson, E> {
+                Ok(ConfigJson(value.into()))
+            }
+            fn visit_string<E: serde::de::Error>(self, value: String) -> Result<ConfigJson, E> {
+                Ok(ConfigJson(value.into()))
+            }
+            fn visit_unit<E: serde::de::Error>(self) -> Result<ConfigJson, E> {
+                Ok(ConfigJson(serde_json::Value::Null))
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut sequence: A,
+            ) -> Result<ConfigJson, A::Error> {
+                let mut values = Vec::new();
+                while let Some(ConfigJson(value)) = sequence.next_element()? {
+                    values.push(value);
+                }
+                Ok(ConfigJson(values.into()))
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<ConfigJson, A::Error> {
+                let mut fields = serde_json::Map::new();
+                while let Some((key, ConfigJson(value))) = map.next_entry::<String, ConfigJson>()? {
+                    if fields.insert(key.clone(), value).is_some() {
+                        return Err(serde::de::Error::custom(format!(
+                            "duplicate configuration field `{key}`"
+                        )));
+                    }
+                }
+                Ok(ConfigJson(fields.into()))
+            }
+        }
+        deserializer.deserialize_any(JsonVisitor)
+    }
+}
+
 fn invalid_data(error: impl ToString) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
 }
 
 fn default_log_level() -> String {
     "info".to_string()
+}
+
+fn default_browser_name() -> String {
+    "Browser".to_string()
 }
 
 pub fn random_string(len: usize) -> String {

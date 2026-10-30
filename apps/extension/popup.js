@@ -93,19 +93,17 @@ function nextCurrentPageGeneration() {
 // ─── Error UI ────────────────────────────────────────────────────────
 
 function showFatalError(message) {
-  const overlay = document.createElement('div');
-  overlay.style.cssText =
-    'position:fixed;inset:0;z-index:999999;background:#fff;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
-  overlay.innerHTML = `
-    <div style="color:#b41e1e;font-size:14px;font-weight:600;">${escapeHtml(tr('extensionStorageUnavailable', 'Storage Unavailable', undefined))}</div>
-    <div style="color:#555;font-size:12px;max-width:360px;text-align:center;">${escapeHtml(message)}</div>
-    <button id="fatalReloadBtn" style="margin-top:6px;padding:4px 12px;border:1px solid #ccc;border-radius:4px;background:#f5f5f5;cursor:pointer;font-size:12px;">${escapeHtml(tr('extensionReloadExtension', 'Reload Extension', undefined))}</button>
-  `;
-  document.body.appendChild(overlay);
-  overlay
-    .querySelector('#fatalReloadBtn')
-    .addEventListener('click', () => chrome.runtime.reload());
-  revealPopup();
+  closeListPicker();
+  document.getElementById('fatalErrorTitle').textContent = tr(
+    'extensionStorageUnavailable',
+    'Storage Unavailable',
+  );
+  document.getElementById('fatalErrorMessage').textContent = message;
+  const reload = document.getElementById('fatalReloadBtn');
+  reload.textContent = tr('extensionReloadExtension', 'Reload Extension');
+  reload.onclick = () => chrome.runtime.reload();
+  setPopupSurface('fatal');
+  reload.focus({ preventScroll: true });
 }
 
 let _errorBubbleTimer = null;
@@ -115,23 +113,20 @@ function revealPopup() {
   document.documentElement.style.opacity = '';
 }
 
-function setPopupCompact(compact) {
-  document.body?.classList.toggle('popup-compact', compact);
-}
-
 function renderPopupShell(options = {}) {
   const { reveal = true } = options;
   const loading = document.getElementById('loading');
   const dashboard = document.getElementById('dashboard');
   const content = document.getElementById('dashboardContent');
+  const fatal = document.getElementById('fatalError');
   const surface = popupShellState.surface;
   const contentVisible = surface === 'dashboard' || surface === 'diagnostic';
-  const compact = surface === 'banner' || surface === 'diagnostic';
 
   if (loading) loading.style.display = 'none';
-  if (dashboard) dashboard.style.display = 'flex';
+  if (dashboard)
+    dashboard.style.display = surface === 'fatal' ? 'none' : 'flex';
+  if (fatal) fatal.style.display = surface === 'fatal' ? 'flex' : 'none';
   if (content) content.style.display = contentVisible ? 'block' : 'none';
-  setPopupCompact(compact);
   applyRecordingBarState();
   if (reveal) revealPopup();
 }

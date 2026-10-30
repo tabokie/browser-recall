@@ -314,7 +314,6 @@ describe('extension staged assets', () => {
     expect(popupHtml).toContain('opacity: 0');
     expect(popupHtml).toContain('width: 296px');
     expect(popupHtml).toContain('min-height: 320px');
-    expect(popupHtml).toContain('body.popup-compact');
     expect(popupHtml).toContain('min-height: 0');
     expect(popupHtml).toContain('<div id="dashboard">');
     expect(popupHtml).toContain('@keyframes spin');

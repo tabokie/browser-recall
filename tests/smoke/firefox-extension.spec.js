@@ -1082,10 +1082,10 @@ test.describe('Firefox extension smoke', () => {
           }, 'popup desktop-offline diagnostic state');
 
           expect(
-            dom.window.document.body.textContent.includes(
-              'Storage Unavailable',
-            ),
-          ).toBe(false);
+            dom.window.getComputedStyle(
+              dom.window.document.getElementById('fatalError'),
+            ).display,
+          ).toBe('none');
           expect(
             dom.window.document.getElementById('pageDiagnosticTitle')
               .textContent,

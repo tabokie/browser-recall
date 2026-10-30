@@ -1,0 +1,85 @@
+- In the future we need to tolerate missing field in case the app updates from an old version.
+- Not just this field, but any field.
+- macOS validation CI is failing, why is it not caught locally? Does the failing case require a fresh account?
+     Finished 1 bundle at:
+        /Users/runner/work/browser-recall/browser-recall/target/release/bundle/macos/Browser Recall Documentation.app
+
+file:///Users/runner/work/browser-recall/browser-recall/tests/smoke/desktop-test-cleanup.mjs:17
+    throw new AggregateError(errors, 'Desktop smoke or teardown failed', {
+          ^
+
+AggregateError: Desktop smoke or teardown failed
+    at withCleanup (file:///Users/runner/work/browser-recall/browser-recall/tests/smoke/desktop-test-cleanup.mjs:17:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///Users/runner/work/browser-recall/browser-recall/tests/smoke/macos-documentation-url-routing.mjs:31:1 {
+  [cause]: AssertionError [ERR_ASSERTION]: Production URL handler fixture is missing
+  + actual - expected
+
+  + '/Users/runner/work/_temp/release-check/Browser Recall.app'
+  - '/Users/runner/work/browser-recall/browser-recall/dist/desktop/macos/app/Browser Recall.app'
+
+      at buildAndRegisterMacosDocumentationApp (file:///Users/runner/work/browser-recall/browser-recall/tests/smoke/macos-documentation-app.mjs:20:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async file:///Users/runner/work/browser-recall/browser-recall/tests/smoke/macos-documentation-url-routing.mjs:46:27
+      at async withCleanup (file:///Users/runner/work/browser-recall/browser-recall/tests/smoke/desktop-test-cleanup.mjs:4:5)
+      at async file:///Users/runner/work/browser-recall/browser-recall/tests/smoke/macos-documentation-url-routing.mjs:31:1 {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '/Users/runner/work/_temp/release-check/Browser Recall.app',
+    expected: '/Users/runner/work/browser-recall/browser-recall/dist/desktop/macos/app/Browser Recall.app',
+    operator: 'strictEqual',
+    diff: 'simple'
+  },
+  [errors]: [
+    AssertionError [ERR_ASSERTION]: Production URL handler fixture is missing
+    + actual - expected
+
+    + '/Users/runner/work/_temp/release-check/Browser Recall.app'
+    - '/Users/runner/work/browser-recall/browser-recall/dist/desktop/macos/app/Browser Recall.app'
+
+        at buildAndRegisterMacosDocumentationApp (file:///Users/runner/work/browser-recall/browser-recall/tests/smoke/macos-documentation-app.mjs:20:12)
+        at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        at async file:///Users/runner/work/browser-recall/browser-recall/tests/smoke/macos-documentation-url-routing.mjs:46:27
+        at async withCleanup (file:///Users/runner/work/browser-recall/browser-recall/tests/smoke/desktop-test-cleanup.mjs:4:5)
+        at async file:///Users/runner/work/browser-recall/browser-recall/tests/smoke/macos-documentation-url-routing.mjs:31:1 {
+      generatedMessage: false,
+      code: 'ERR_ASSERTION',
+      actual: '/Users/runner/work/_temp/release-check/Browser Recall.app',
+      expected: '/Users/runner/work/browser-recall/browser-recall/dist/desktop/macos/app/Browser Recall.app',
+      operator: 'strictEqual',
+      diff: 'simple'
+    },
+    Error: Command failed: /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u /Users/runner/work/browser-recall/browser-recall/target/release/bundle/macos/Browser Recall Documentation.app
+    failed to scan /Users/runner/work/browser-recall/browser-recall/target/release/bundle/macos/Browser Recall Documentation.app: -10814
+     from spotlight
+        at genericNodeError (node:internal/errors:986:15)
+        at wrappedFn (node:internal/errors:540:14)
+        at checkExecSyncError (node:child_process:942:11)
+        at execFileSync (node:child_process:978:15)
+        at unregisterMacosTestApp (file:///Users/runner/work/browser-recall/browser-recall/tests/smoke/macos-desktop-process.mjs:11:3)
+        at file:///Users/runner/work/browser-recall/browser-recall/tests/smoke/macos-documentation-url-routing.mjs:154:9
+        at withCleanup (file:///Users/runner/work/browser-recall/browser-recall/tests/smoke/desktop-test-cleanup.mjs:10:13)
+        at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        at async file:///Users/runner/work/browser-recall/browser-recall/tests/smoke/macos-documentation-url-routing.mjs:31:1 {
+      status: 1,
+      signal: null,
+      output: [
+        null,
+        '',
+        'failed to scan /Users/runner/work/browser-recall/browser-recall/target/release/bundle/macos/Browser Recall Documentation.app: -10814\n' +
+          ' from spotlight'
+      ],
+      pid: 38788,
+      stdout: '',
+      stderr: 'failed to scan /Users/runner/work/browser-recall/browser-recall/target/release/bundle/macos/Browser Recall Documentation.app: -10814\n' +
+        ' from spotlight'
+    }
+  ]
+}
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them all
+- The desktop app says "Could not fetch a valid release JSON from the remote". Is it because the current release on GitHub is not formatted correctly: https://github.com/tabokie/browser-recall/releases/tag/v1.0.1
+- I found an issue with an old version extension, not sure if it is still in the current code. When the list count is small, the extension popup's content is smaller than the default window, the window bleeds out into a blank square.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them all
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) co-author=GPT-6.1 Sol

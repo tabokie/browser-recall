@@ -214,6 +214,18 @@ Configuration changes use `ConfigStore::update`. A shared file lock prevents
 concurrent writers from overwriting each other's changes; temporary-file replacement
 prevents partial JSON reads. Each caller changes only the fields the caller manages.
 WebSocket handlers do not keep a separate editable copy of configuration.
+`ConfigStore` upgrades configurations from older releases by filling omitted
+fields from the same defaults used for a fresh installation. The complete
+configuration is validated and saved atomically under the writer lock; an upgrade
+re-reads the file after acquiring the lock to preserve concurrent changes. Present
+malformed values and unknown fields remain errors. Missing device identity is
+derived from the machine and persisted. A missing data-folder path returns to
+setup; a missing setup flag is inferred from the existing path.
+Nested configuration metadata has defaults too. Pairing identities and tokens
+remain required. Missing review attempt arrays default to empty; missing
+first-opening timestamps are recovered from the first request using the shared
+seven-day delay, or start at the current time when no requests exist. Recovery
+preserves existing request timestamps and the two-request limit.
 
 The desktop stores local configuration directly in `config.json` in Tauri's
 application configuration directory. The local configuration includes the selected
@@ -435,9 +447,15 @@ that summary. If preparation exceeds 1.5 seconds, the popup shows an error. Dire
 popup opens display the summary through the same code.
 
 The popup shows either the complete page dashboard or an error. Changing the target
-page cancels pending opens for the previous page. Daemon changes invalidate prepared
-summaries. Failed popup opens clear the prepared summary and popup mapping, then
-return an error. Popup opens never fall back to opening an extension tab.
+page cancels pending opens for the previous page. While hidden, the popup reserves
+its startup size; once revealed, the popup fits the visible dashboard, including
+short dashboards without visit metrics and with few lists. Daemon changes
+invalidate prepared summaries. Fatal startup errors use a static screen in normal
+layout flow, with a bounded scrollable message and a visible Reload button.
+The hidden attribute on the document owns the startup height reservation; visible
+screens need no separate compact-sizing state. Failed popup opens clear the
+prepared summary and popup mapping, then return an error. Popup opens never fall
+back to opening an extension tab.
 
 The popup processes edits and list refreshes one at a time. Toggling membership in
 an existing list sends one command; `createListAndPin` creates the list and pins

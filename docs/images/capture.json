@@ -95,7 +95,7 @@
     "apps/desktop/src-tauri/src/login_item.rs": "aa9885e65b905fa3f0a6dfa57b1b84fb867ccb89f3d2429ee0fd34206808e7ca",
     "apps/desktop/src-tauri/src/macos_window_frame.rs": "8b3257ad179a000a8811843fbbabf903c980aba692e9fcc6f1306ec39548efb5",
     "apps/desktop/src-tauri/src/main.rs": "9c63f023e1b7eec455ecc9ed97fa9359aa90488e456c0b7879e2c59709ebc50b",
-    "apps/desktop/src-tauri/src/reviews.rs": "1bfb298cf220984e070804376415ed5f75dfb3cb41487c8727f60cb765674e33",
+    "apps/desktop/src-tauri/src/reviews.rs": "ddca8d72fdd8779c33bf7cbea118eee5da36f1941cf562b0543ec7b78464aa2e",
     "apps/desktop/src-tauri/src/reviews.swift": "433ae57ba922872f63e50252ef9ec4192f442f394a6aa3304261a58653b68fbb",
     "apps/desktop/src-tauri/src/reviews_native.rs": "2dcb11a5433b6f9c55c0271cf54497198ddfe3c7e10a802cdfb70dffda860f12",
     "apps/desktop/src-tauri/src/search.rs": "4707640e5fbf270f6982c9949c2ae7c4acea60db6742e35076eac9eb40632e2d",
@@ -142,7 +142,7 @@
   },
   "screenshots": {
     "timeline.png": {
-      "sha256": "bf38ff69ba4459e0c122e9a99591ee378e01b89c9b084504450a0c8e47f68701",
+      "sha256": "1838a5f7f7368fcb0eee647b46fdb85bb9801c89a14031c5cedc5debf3b033f3",
       "width": 2080,
       "height": 1400
     },
@@ -152,19 +152,19 @@
       "height": 1400
     },
     "timeline-mono.png": {
-      "sha256": "361f8f8064623c2586193558633591fb84a9f02e47d51d6fcf4c8a8a44ed9971",
+      "sha256": "ef9649ba9d1a6c3b80574d73d49e8677e176d47154d6ce5380015e57bc2c46df",
       "width": 2080,
       "height": 1400
     },
     "timeline-styles.png": {
-      "sha256": "55c28b509d42c6fa7bc072853adcfca7971b4f8a9161e04d177febf98bb04645",
+      "sha256": "65eb49f3e52a65d8c9050e6433f01d6bdfa8e8348d7dbcf05dc09b30751dbd18",
       "width": 2080,
       "height": 1400,
       "composition": {
         "sources": ["timeline.png", "timeline-mono.png"],
         "sourceSha256": [
-          "bf38ff69ba4459e0c122e9a99591ee378e01b89c9b084504450a0c8e47f68701",
-          "361f8f8064623c2586193558633591fb84a9f02e47d51d6fcf4c8a8a44ed9971"
+          "1838a5f7f7368fcb0eee647b46fdb85bb9801c89a14031c5cedc5debf3b033f3",
+          "ef9649ba9d1a6c3b80574d73d49e8677e176d47154d6ce5380015e57bc2c46df"
         ],
         "split": { "top": 0.62, "bottom": 0.38 }
       }
