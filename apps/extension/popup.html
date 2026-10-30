@@ -8,7 +8,6 @@
       html,
       body {
         width: 296px;
-        min-width: 296px;
       }
 
       html {
@@ -113,13 +112,13 @@
       .fatal-error-title {
         color: #b41e1e;
         font-size: 14px;
-        line-height: 20px;
         font-weight: 600;
       }
 
       .fatal-error-message {
         min-width: 0;
-        max-height: 360px;
+        /* Leave room for error controls on a 600px screen. */
+        max-height: 320px;
         overflow-x: hidden;
         overflow-y: auto;
         overflow-wrap: anywhere;
