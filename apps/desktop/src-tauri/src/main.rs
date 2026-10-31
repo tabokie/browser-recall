@@ -23,6 +23,8 @@ mod snapshot_open;
 mod updates;
 #[cfg(target_os = "windows")]
 mod windows_icon;
+#[cfg(target_os = "windows")]
+mod windows_startup;
 
 use browser_recall_daemon::command_authority::CommandAuthority;
 use browser_recall_daemon::commands::{
@@ -2251,6 +2253,8 @@ fn configure_deep_links(app: &AppHandle) {
 }
 
 fn main() -> tauri::Result<()> {
+    #[cfg(target_os = "windows")]
+    windows_startup::record("main entered");
     // Check documentation binaries before initializing AppKit or any plugins.
     if std::env::args().any(|argument| argument == "--check-no-tray") {
         if cfg!(feature = "no-tray") {
@@ -2276,6 +2280,8 @@ fn main() -> tauri::Result<()> {
         tauri_plugin_autostart::MacosLauncher::LaunchAgent,
         None,
     ));
+    #[cfg(target_os = "windows")]
+    windows_startup::record("before Tauri build and webview creation");
     let app = builder
         .invoke_handler(tauri::generate_handler![
             bridge_action,
@@ -2292,6 +2298,8 @@ fn main() -> tauri::Result<()> {
             bridge_storage_broadcast
         ])
         .setup(|app| {
+            #[cfg(target_os = "windows")]
+            windows_startup::record("Tauri setup entered");
             app.manage(updates::DesktopUpdates::new(
                 app.package_info().version.to_string(),
             ));
@@ -2299,9 +2307,15 @@ fn main() -> tauri::Result<()> {
             if let Some(window) = app.get_webview_window("main") {
                 windows_icon::install_webview(&window).map_err(std::io::Error::other)?;
             }
+            #[cfg(target_os = "windows")]
+            windows_startup::record("Windows icons installed");
             let app_handle = app.handle().clone();
             let bootstrap = config::bootstrap(&app_handle)?;
+            #[cfg(target_os = "windows")]
+            windows_startup::record("configuration loaded");
             let logging = logging::init(&bootstrap.log_dir, &bootstrap.config.log_level)?;
+            #[cfg(target_os = "windows")]
+            windows_startup::record("application logging initialized");
             let review_coordinator = reviews::ReviewCoordinator::new(
                 bootstrap.config_store.clone(),
                 distribution::reviews_enabled(),
@@ -2454,6 +2468,8 @@ fn main() -> tauri::Result<()> {
             _ => {}
         })
         .build(tauri::generate_context!())?;
+    #[cfg(target_os = "windows")]
+    windows_startup::record("Tauri build finished");
     app.run(|app, event| match event {
         tauri::RunEvent::ExitRequested { api, .. } => {
             let quit_requested = app

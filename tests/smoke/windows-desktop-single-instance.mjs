@@ -315,6 +315,7 @@ const workDir = mkdtempSync(
   path.join(tmpdir(), 'browser-recall-windows-native-smoke-'),
 );
 const profileDir = path.join(workDir, 'profile');
+const startupTraceFile = `${profileDir}.startup-stages.log`;
 const logDir = isolatedDesktopLogDir(profileDir);
 const desktopEnvironment = isolatedDesktopEnvironment(process.env, profileDir);
 
@@ -327,7 +328,9 @@ async function waitFor(predicate, timeoutMs, failureMessage) {
     if (await predicate()) return;
     await delay(100);
   }
-  throw new Error(failureMessage);
+  throw typeof failureMessage === 'function'
+    ? await failureMessage()
+    : new Error(failureMessage);
 }
 
 function readNewLogs() {
@@ -343,23 +346,125 @@ function readNewLogs() {
 
 let first;
 let second;
+let startupOutput = '';
+let startupLogs = '';
+function readStartupStages() {
+  try {
+    return readFileSync(startupTraceFile, 'utf8');
+  } catch (error) {
+    return `Startup stages unavailable: ${error.message}`;
+  }
+}
+function startupDiagnostics() {
+  const details = [
+    `Startup stages (${startupTraceFile}):\n${readStartupStages()}`,
+  ];
+  try {
+    details.push(`Profile files:\n${readdirSync(profileDir).join('\n')}`);
+  } catch (error) {
+    details.push(`Profile files unavailable: ${error.message}`);
+  }
+  try {
+    const processes = execFileSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        String.raw`
+$ownerId = [int]$env:BROWSER_RECALL_STARTUP_PID
+Get-CimInstance Win32_Process -Filter "ProcessId = $ownerId OR ParentProcessId = $ownerId" |
+  Select-Object Name, ProcessId, ParentProcessId, KernelModeTime, UserModeTime |
+  ConvertTo-Json -Compress
+`,
+      ],
+      {
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 5000,
+        killSignal: 'SIGKILL',
+        env: {
+          ...desktopEnvironment,
+          BROWSER_RECALL_STARTUP_PID: String(first.pid),
+        },
+      },
+    );
+    details.push(`Startup processes:\n${processes.trim()}`);
+  } catch (error) {
+    details.push(`Startup process inspection failed: ${error.message}`);
+  }
+  return details.join('\n');
+}
+const startupFailure = (reason, followUp = '') => {
+  const message = `${reason}; exitCode=${first.exitCode}, signal=${first.signalCode}\nOutput:\n${startupOutput}\nLogs:\n${startupLogs}\n${startupDiagnostics()}${followUp ? `\n${followUp}` : ''}`;
+  if (process.env.GITHUB_ACTIONS === 'true') {
+    const annotation = message
+      .replaceAll('%', '%25')
+      .replaceAll('\r', '%0D')
+      .replaceAll('\n', '%0A');
+    console.log(`::error title=Windows native startup::${annotation}`);
+  }
+  return new Error(message);
+};
 await withCleanup(async () => {
+  const startupStarted = performance.now();
+  // windowsHide applies SW_HIDE to GUI apps too. Honor the application's first
+  // ShowWindow call, as the native update/relaunch scenario does.
   first = spawn(executable, [], {
-    stdio: 'ignore',
-    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
     env: desktopEnvironment,
   });
+  for (const stream of [first.stdout, first.stderr]) {
+    stream?.setEncoding('utf8');
+    stream?.on('data', (text) => (startupOutput += text));
+  }
   await once(first, 'spawn');
   await waitFor(
-    () => first.exitCode === null && readNewLogs().length > 0,
+    () => {
+      startupLogs = readNewLogs();
+      if (first.exitCode !== null || first.signalCode !== null) {
+        // Wait for inherited output pipes to drain before reporting the exit.
+        if (!first.stdout.readableEnded || !first.stderr.readableEnded)
+          return false;
+        throw startupFailure(
+          'The first desktop process exited during native startup',
+        );
+      }
+      return startupLogs.length > 0;
+    },
     15000,
-    'The first desktop process did not finish native startup',
+    async () => {
+      const stagesAtDeadline = readStartupStages();
+      const observationDeadline = performance.now() + 30_000;
+      let observation = 'Application logging remained unavailable';
+      // This follow-up only diagnoses a failed deadline; late startup still fails.
+      while (performance.now() < observationDeadline) {
+        try {
+          startupLogs = readNewLogs();
+        } catch (error) {
+          observation = `Diagnostic log inspection failed: ${error.message}`;
+          break;
+        }
+        if (startupLogs.length > 0) {
+          observation = `Application logging appeared after ${Math.round(performance.now() - startupStarted)}ms`;
+          break;
+        }
+        if (first.exitCode !== null || first.signalCode !== null) {
+          observation = 'The process exited during diagnostic observation';
+          break;
+        }
+        await delay(100);
+      }
+      return startupFailure(
+        'The first desktop process did not finish native startup',
+        `Post-timeout observation: ${observation}\nStages at the original deadline:\n${stagesAtDeadline}`,
+      );
+    },
   );
   const iconSizes = await waitForRuntimeWindowsIcons(first, 15000);
 
   second = spawn(executable, ['browser-recall://settings'], {
     stdio: 'ignore',
-    windowsHide: true,
     env: desktopEnvironment,
   });
   const secondExit = await waitForExit(second, 15000);

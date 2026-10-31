@@ -538,6 +538,24 @@ registration regressions. Windows extension rendering runs on relevant changes.
 Shared macOS window and routing scenarios run on arm64;
 macOS arm64 runs signed-package installation and real update/relaunch in regular
 CI. Release runs package and update validation on both macOS architectures.
+Windows installed-app validation runs three consecutive fresh-profile launches.
+A native GUI fixture also checks the smoke runner's first `ShowWindow` call:
+GUI launches preserve application visibility, while console helpers may use
+`windowsHide`. Node applies `SW_HIDE` to GUI processes when that option is set.
+An isolated Windows test records `profile.startup-stages.log` beside the profile
+before Tauri creates the webview and around icon, configuration and logging initialization.
+The recorder does not pre-create the profile or change cold WebView2 initialization. A startup
+failure reports those stages, profile filenames and owned process metadata in a
+GitHub annotation, including when a GUI executable has no standard output. The
+process inspection has a five-second deadline; the startup wait remains fifteen
+seconds. After a missed startup deadline, the test observes the process for up to
+thirty more seconds to distinguish late initialization from a hang; either result
+still fails the original deadline. Progress recording is disabled without an
+explicit test profile.
+Failed macOS validation records the Rust host, runner architecture, and build-script
+executable formats in `test-results/native-build/executables.txt`, alongside the
+existing native failure artifacts. This distinguishes incompatible executables
+and architecture mismatches without relying on Cargo's exit status alone.
 The macOS window frame check runs before release compilation in the minimal
 `browser-recall-native-tests` Cargo package, which imports the production frame
 module and depends only on AppKit bindings. Windows extension rendering keeps a
@@ -751,9 +769,29 @@ extension copies exercise short and long fatal-error messages; titles and Reload
 buttons must remain inside the window, and long messages must scroll without
 horizontal overflow. The same failure fixture is used by the Chromium popup E2E
 suite and is omitted from production bundles.
+The Chromium failure scenario also forces a 16px message scrollbar; fatal errors
+keep scrolling inside the message rather than the native popup viewport.
+The Chromium popup sizing check also starts in a wider provisional viewport;
+the document root must keep the same width as the content before native resizing.
+Standalone popup screenshots also keep a wider viewport: Playwright resizes the
+hosting browser window, and a 296px host can clip the next native toolbar popup.
+Native popup measurements are retained as JSON test attachments on failures.
+Popup diagnostics and Firefox teardown use `withCleanup` to preserve the original
+failure together with any diagnostic or cleanup errors, and attempt every cleanup.
 On macOS and Linux, the launcher owns a separate process group so cleanup can
 terminate Firefox descendants even after `npx` exits. Cleanup closes HTTP
 connections and finishes before the check prints its success message.
+Cleanup force-kills only a process group that remains after graceful shutdown;
+an exited process group must not receive a redundant `SIGKILL`.
+macOS can deny signals even after group members are defunct or exiting. Cleanup
+confirms those `Z`/`E` states through the native process table and still waits for
+output pipes to close. Permission errors for live or uninspectable groups remain
+failures.
+Firefox process inspection and pipe closure share an overall cleanup deadline.
+`timeoutMs` sets the graceful shutdown period; the total budget is twice that
+period, including any timed process inspection.
+The macOS native validation job runs these process-readiness integration tests,
+including denied signals against a real defunct process group.
 `test:firefox:smoke` uses simulated browser APIs and does not launch
 Firefox. `test:shortcut:native` sends Option+R to a temporary Chromium window on
 macOS.

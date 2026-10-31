@@ -63,6 +63,7 @@ Use this map to find the files that implement a feature. See
 | `apps/desktop/ui/desktop-reviews.js` | Register busy views and operations, wait for completed reading/editing tasks, and cancel pending or dispatched requests when interaction resumes |
 | `apps/desktop/src-tauri/src/login_item.rs` | Check and change launch-at-login registration; undo changes if saving fails |
 | `apps/desktop/src-tauri/src/windows_icon.rs` | Windows window and taskbar icons matched to display scale |
+| `apps/desktop/src-tauri/src/windows_startup.rs` | Early native startup stages in isolated Windows test profiles, before application logging exists |
 | `apps/desktop/src-tauri/src/macos_window_frame.rs` | Capture and restore the exact macOS AppKit window frame independently of webview insets |
 | `apps/desktop/src-tauri/src/search.rs` | Desktop search adapters |
 | `apps/desktop/src-tauri/src/logging.rs` | Native log output and retention |
@@ -244,6 +245,7 @@ do not maintain a second production copy.
 | macOS frame restoration after hidden size and position changes with an inset content view | `crates/native-tests/tests/macos_window_frame.rs` |
 | Windows icons, single instance, and teardown | `tests/smoke/windows-desktop-single-instance.mjs`, `tests/integration/windows-desktop-cleanup.test.js` |
 | Native desktop cleanup preserves setup errors, owns successful macOS test app registrations, completes teardown after failures, and stops original or relaunched update processes | `tests/smoke/desktop-test-cleanup.mjs`, `tests/smoke/macos-desktop-process.mjs`, `tests/integration/macos-desktop-cleanup.test.js`, `tests/integration/windows-desktop-cleanup.test.js` |
+| Popup diagnostics and Firefox teardown retain primary failures alongside cleanup errors; Firefox process inspection is bounded | `tests/fixtures/popup-layout.mjs`, `tests/integration/extension-test-cleanup.test.js`, `tests/smoke/firefox-process.mjs`, `tests/integration/smoke-process-readiness.test.js` |
 | Windows native update isolation survives token-based installer relaunch and restores the user environment; portable rollback JSON reader covers Windows PowerShell array behavior | `tests/smoke/windows-desktop-update-environment.ps1`, `tests/smoke/windows-update-environment-snapshot.ps1`, `tests/integration/windows-update-environment.test.js`, `tests/fixtures/windows-token-launch.cs` |
 | Mandatory PowerShell prerequisite and bounded asynchronous startup; subprocess regressions cover missing PowerShell, slow startup, and local CI fail-fast behavior | `scripts/check-test-prerequisites.mjs`, `tests/smoke/powershell-process.mjs`, `tests/integration/powershell-prerequisites.test.js`, `tests/integration/ci-release-validation.test.js` |
 | Windows validation gate blocks packaging and prints failed assertions from JSON reports | `scripts/verify-windows-validation.mjs`, `tests/integration/ci-release-validation.test.js` |

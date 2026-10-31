@@ -639,6 +639,9 @@ Windows signing, cleanup, and artifact checks all run before a combined gate
 requires every check to pass; failure artifacts include the individual JSON test
 reports. Native update teardown preserves the original error, continues cleanup
 after individual failures, and rediscovers the running executable after relaunch.
+Popup diagnostics and Firefox teardown share the same error-preserving cleanup
+helper. Firefox process inspection and output closure share a bounded deadline,
+including when macOS denies signals to an exiting process group.
 The Windows update fixture temporarily publishes isolation settings in the
 disposable user's environment registry, because the elevated installer's
 token-based relaunch rebuilds the environment from the Windows user profile.

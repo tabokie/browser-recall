@@ -14,6 +14,11 @@ export function installPopupStartupFailure(extensionDir) {
     `
 const failure = new URL(location.href).searchParams.get('startupFailure');
 if (failure) {
+  if (new URL(location.href).searchParams.get('scrollbars') === 'classic') {
+    const style = document.createElement('style');
+    style.textContent = '.fatal-error-message { scrollbar-color: auto; scrollbar-width: auto; } .fatal-error-message::-webkit-scrollbar { width: 16px; }';
+    document.head.append(style);
+  }
   const runtime = (globalThis.browser || globalThis.chrome).runtime;
   const send = runtime.sendMessage.bind(runtime);
   runtime.sendMessage = (request, ...args) => {
