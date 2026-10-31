@@ -538,6 +538,14 @@ registration regressions. Windows extension rendering runs on relevant changes.
 Shared macOS window and routing scenarios run on arm64;
 macOS arm64 runs signed-package installation and real update/relaunch in regular
 CI. Release runs package and update validation on both macOS architectures.
+Windows installed-app validation runs three consecutive fresh-profile launches.
+An isolated Windows test records `profile.startup-stages.log` beside the profile
+before Tauri creates the webview and around icon, configuration and logging initialization.
+The recorder does not pre-create the profile or change cold WebView2 initialization. A startup
+failure reports those stages, profile filenames and owned process metadata in a
+GitHub annotation, including when a GUI executable has no standard output. The
+process inspection has a five-second deadline; the startup wait remains fifteen
+seconds. Progress recording is disabled without an explicit test profile.
 Failed macOS validation records the Rust host, runner architecture, and build-script
 executable formats in `test-results/native-build/executables.txt`, alongside the
 existing native failure artifacts. This distinguishes incompatible executables

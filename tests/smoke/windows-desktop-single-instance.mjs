@@ -315,6 +315,7 @@ const workDir = mkdtempSync(
   path.join(tmpdir(), 'browser-recall-windows-native-smoke-'),
 );
 const profileDir = path.join(workDir, 'profile');
+const startupTraceFile = `${profileDir}.startup-stages.log`;
 const logDir = isolatedDesktopLogDir(profileDir);
 const desktopEnvironment = isolatedDesktopEnvironment(process.env, profileDir);
 
@@ -347,10 +348,62 @@ let first;
 let second;
 let startupOutput = '';
 let startupLogs = '';
-const startupFailure = (reason) =>
-  new Error(
-    `${reason}; exitCode=${first.exitCode}, signal=${first.signalCode}\nOutput:\n${startupOutput}\nLogs:\n${startupLogs}`,
-  );
+function startupDiagnostics() {
+  const details = [];
+  try {
+    details.push(
+      `Startup stages (${startupTraceFile}):\n${readFileSync(startupTraceFile, 'utf8')}`,
+    );
+  } catch (error) {
+    details.push(`Startup stages unavailable: ${error.message}`);
+  }
+  try {
+    details.push(`Profile files:\n${readdirSync(profileDir).join('\n')}`);
+  } catch (error) {
+    details.push(`Profile files unavailable: ${error.message}`);
+  }
+  try {
+    const processes = execFileSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        String.raw`
+$ownerId = [int]$env:BROWSER_RECALL_STARTUP_PID
+Get-CimInstance Win32_Process -Filter "ProcessId = $ownerId OR ParentProcessId = $ownerId" |
+  Select-Object Name, ProcessId, ParentProcessId, KernelModeTime, UserModeTime |
+  ConvertTo-Json -Compress
+`,
+      ],
+      {
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 5000,
+        killSignal: 'SIGKILL',
+        env: {
+          ...desktopEnvironment,
+          BROWSER_RECALL_STARTUP_PID: String(first.pid),
+        },
+      },
+    );
+    details.push(`Startup processes:\n${processes.trim()}`);
+  } catch (error) {
+    details.push(`Startup process inspection failed: ${error.message}`);
+  }
+  return details.join('\n');
+}
+const startupFailure = (reason) => {
+  const message = `${reason}; exitCode=${first.exitCode}, signal=${first.signalCode}\nOutput:\n${startupOutput}\nLogs:\n${startupLogs}\n${startupDiagnostics()}`;
+  if (process.env.GITHUB_ACTIONS === 'true') {
+    const annotation = message
+      .replaceAll('%', '%25')
+      .replaceAll('\r', '%0D')
+      .replaceAll('\n', '%0A');
+    console.log(`::error title=Windows native startup::${annotation}`);
+  }
+  return new Error(message);
+};
 await withCleanup(async () => {
   first = spawn(executable, [], {
     stdio: ['ignore', 'pipe', 'pipe'],

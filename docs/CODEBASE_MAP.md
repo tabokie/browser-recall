@@ -63,6 +63,7 @@ Use this map to find the files that implement a feature. See
 | `apps/desktop/ui/desktop-reviews.js` | Register busy views and operations, wait for completed reading/editing tasks, and cancel pending or dispatched requests when interaction resumes |
 | `apps/desktop/src-tauri/src/login_item.rs` | Check and change launch-at-login registration; undo changes if saving fails |
 | `apps/desktop/src-tauri/src/windows_icon.rs` | Windows window and taskbar icons matched to display scale |
+| `apps/desktop/src-tauri/src/windows_startup.rs` | Early native startup stages in isolated Windows test profiles, before application logging exists |
 | `apps/desktop/src-tauri/src/macos_window_frame.rs` | Capture and restore the exact macOS AppKit window frame independently of webview insets |
 | `apps/desktop/src-tauri/src/search.rs` | Desktop search adapters |
 | `apps/desktop/src-tauri/src/logging.rs` | Native log output and retention |

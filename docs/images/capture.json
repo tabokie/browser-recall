@@ -94,7 +94,7 @@
     "apps/desktop/src-tauri/src/logging.rs": "4e96947264d95534a12f69c0c53d9e8bde262ff6694a6e0d28527a2327704572",
     "apps/desktop/src-tauri/src/login_item.rs": "aa9885e65b905fa3f0a6dfa57b1b84fb867ccb89f3d2429ee0fd34206808e7ca",
     "apps/desktop/src-tauri/src/macos_window_frame.rs": "8b3257ad179a000a8811843fbbabf903c980aba692e9fcc6f1306ec39548efb5",
-    "apps/desktop/src-tauri/src/main.rs": "9c63f023e1b7eec455ecc9ed97fa9359aa90488e456c0b7879e2c59709ebc50b",
+    "apps/desktop/src-tauri/src/main.rs": "3a1721e4e5b91488d99057da4232609267c7af70a24a04ae09fa1d552b51a7dd",
     "apps/desktop/src-tauri/src/reviews.rs": "ddca8d72fdd8779c33bf7cbea118eee5da36f1941cf562b0543ec7b78464aa2e",
     "apps/desktop/src-tauri/src/reviews.swift": "433ae57ba922872f63e50252ef9ec4192f442f394a6aa3304261a58653b68fbb",
     "apps/desktop/src-tauri/src/reviews_native.rs": "2dcb11a5433b6f9c55c0271cf54497198ddfe3c7e10a802cdfb70dffda860f12",
@@ -103,6 +103,7 @@
     "apps/desktop/src-tauri/src/snapshot_open.rs": "e7e4e22dbff5efe0fa9085b4649be650de67779f0111835a84185f84285b95ec",
     "apps/desktop/src-tauri/src/updates.rs": "a3ef80bc4006ce67ef9ab29ab756adb780f6188b9c4fa14a6131aa0269351336",
     "apps/desktop/src-tauri/src/windows_icon.rs": "114c1dd99ab60d9d23eb7c88bc0ae435266222f6e8657a7db58bbfc99854ebd1",
+    "apps/desktop/src-tauri/src/windows_startup.rs": "eb3141b01e1232f6a023275839bdc5a24cf0ce95cdca6c472d90fafd3a175155",
     "apps/desktop/src-tauri/build.rs": "61814164f28bc0c52c8ee9459436eb690e137015835cb91f0343f1c54b4879f3",
     "apps/desktop/src-tauri/build_support.rs": "a3428b913d4e5557d61030c005533b75c78daef397e73cb7d0764d4321a47717",
     "apps/desktop/src-tauri/Cargo.toml": "73aa39b7a90b69a32a2e576357badbb63566a3c98d1a06ca21287fcc1684dc79",
@@ -142,7 +143,7 @@
   },
   "screenshots": {
     "timeline.png": {
-      "sha256": "1838a5f7f7368fcb0eee647b46fdb85bb9801c89a14031c5cedc5debf3b033f3",
+      "sha256": "a4f70a05f437c58a3490cd83e5c9d7bfc2df8e32b02b74e08f95fecc0dacabaa",
       "width": 2080,
       "height": 1400
     },
@@ -152,19 +153,19 @@
       "height": 1400
     },
     "timeline-mono.png": {
-      "sha256": "ef9649ba9d1a6c3b80574d73d49e8677e176d47154d6ce5380015e57bc2c46df",
+      "sha256": "cecef5d20144ea03151269cab4752ee791b532d5688be03e67ece20a63e4a9df",
       "width": 2080,
       "height": 1400
     },
     "timeline-styles.png": {
-      "sha256": "65eb49f3e52a65d8c9050e6433f01d6bdfa8e8348d7dbcf05dc09b30751dbd18",
+      "sha256": "eb4cda7fd2bb640eacc90ca02656ab21492dc9923fabcc04b8c67c30f6283d98",
       "width": 2080,
       "height": 1400,
       "composition": {
         "sources": ["timeline.png", "timeline-mono.png"],
         "sourceSha256": [
-          "1838a5f7f7368fcb0eee647b46fdb85bb9801c89a14031c5cedc5debf3b033f3",
-          "ef9649ba9d1a6c3b80574d73d49e8677e176d47154d6ce5380015e57bc2c46df"
+          "a4f70a05f437c58a3490cd83e5c9d7bfc2df8e32b02b74e08f95fecc0dacabaa",
+          "cecef5d20144ea03151269cab4752ee791b532d5688be03e67ece20a63e4a9df"
         ],
         "split": { "top": 0.62, "bottom": 0.38 }
       }

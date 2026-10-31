@@ -133,8 +133,11 @@ jobs:
             $env:BROWSER_RECALL_DESKTOP_TEST_EXECUTABLE = Join-Path $installed 'browser-recall-desktop.exe'
             node scripts/verify-windows-installed-executable.mjs $installer $env:BROWSER_RECALL_DESKTOP_TEST_EXECUTABLE
             if ($LASTEXITCODE -ne 0) { throw 'Installed executable differs from the installer payload' }
-            node tests/smoke/windows-desktop-single-instance.mjs
-            if ($LASTEXITCODE -ne 0) { throw 'Installed application smoke test failed' }
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              Write-Host "Installed application cold-profile launch $attempt/3"
+              node tests/smoke/windows-desktop-single-instance.mjs
+              if ($LASTEXITCODE -ne 0) { throw "Installed application smoke test failed on cold-profile launch $attempt/3" }
+            }
           } catch {
             $installedAppError = $_
           }
