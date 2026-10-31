@@ -539,6 +539,9 @@ Shared macOS window and routing scenarios run on arm64;
 macOS arm64 runs signed-package installation and real update/relaunch in regular
 CI. Release runs package and update validation on both macOS architectures.
 Windows installed-app validation runs three consecutive fresh-profile launches.
+A native GUI fixture also checks the smoke runner's first `ShowWindow` call:
+GUI launches preserve application visibility, while console helpers may use
+`windowsHide`. Node applies `SW_HIDE` to GUI processes when that option is set.
 An isolated Windows test records `profile.startup-stages.log` beside the profile
 before Tauri creates the webview and around icon, configuration and logging initialization.
 The recorder does not pre-create the profile or change cold WebView2 initialization. A startup

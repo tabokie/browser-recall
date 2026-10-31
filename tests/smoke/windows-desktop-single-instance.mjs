@@ -408,9 +408,10 @@ const startupFailure = (reason, followUp = '') => {
 };
 await withCleanup(async () => {
   const startupStarted = performance.now();
+  // windowsHide applies SW_HIDE to GUI apps too. Honor the application's first
+  // ShowWindow call, as the native update/relaunch scenario does.
   first = spawn(executable, [], {
     stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
     env: desktopEnvironment,
   });
   for (const stream of [first.stdout, first.stderr]) {
@@ -464,7 +465,6 @@ await withCleanup(async () => {
 
   second = spawn(executable, ['browser-recall://settings'], {
     stdio: 'ignore',
-    windowsHide: true,
     env: desktopEnvironment,
   });
   const secondExit = await waitForExit(second, 15000);
