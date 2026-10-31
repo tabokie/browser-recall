@@ -285,3 +285,102 @@ test.skipIf(process.platform !== 'win32').each(['terminate', 'release'])(
   },
   60_000,
 );
+
+test.skipIf(process.platform !== 'win32')(
+  'installed-app smoke runner allows the first native GUI window to be visible',
+  async () => {
+    const work = mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-gui-startup-'),
+    );
+    const executable = path.join(work, 'visibility-probe.exe');
+    const report = path.join(work, 'visibility.json');
+    try {
+      execFileSync(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          String.raw`
+$source = @'
+using System;
+using System.IO;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class BrowserRecallStartupVisibilityProbe {
+  [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+  private static extern IntPtr CreateWindowExW(uint extendedStyle, string className, string title, uint style, int x, int y, int width, int height, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr parameter);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+  private static extern IntPtr GetModuleHandleW(string name);
+  [DllImport("user32.dll")]
+  private static extern bool ShowWindow(IntPtr window, int command);
+  [DllImport("user32.dll")]
+  private static extern bool IsWindowVisible(IntPtr window);
+  [DllImport("user32.dll")]
+  private static extern bool DestroyWindow(IntPtr window);
+  public static void Main() {
+    IntPtr window = CreateWindowExW(0, "STATIC", "Browser Recall startup visibility probe", 0x00CF0000, 100, 100, 320, 200, IntPtr.Zero, IntPtr.Zero, GetModuleHandleW(null), IntPtr.Zero);
+    if (window == IntPtr.Zero) throw new Win32Exception();
+    try {
+      ShowWindow(window, 1);
+      File.WriteAllText(Environment.GetEnvironmentVariable("BROWSER_RECALL_VISIBILITY_PROBE_REPORT"), "{\"visible\":" + (IsWindowVisible(window) ? "true" : "false") + "}");
+    } finally {
+      DestroyWindow(window);
+    }
+  }
+}
+'@
+$parameters = New-Object System.CodeDom.Compiler.CompilerParameters
+$parameters.GenerateExecutable = $true
+$parameters.OutputAssembly = $env:BROWSER_RECALL_VISIBILITY_PROBE_EXE
+$parameters.CompilerOptions = '/target:winexe /win32icon:"' + $env:BROWSER_RECALL_VISIBILITY_PROBE_ICON + '"'
+[void]$parameters.ReferencedAssemblies.Add('System.dll')
+Add-Type -TypeDefinition $source -CompilerParameters $parameters
+`,
+        ],
+        {
+          encoding: 'utf8',
+          windowsHide: true,
+          timeout: 20_000,
+          env: {
+            ...process.env,
+            BROWSER_RECALL_VISIBILITY_PROBE_EXE: executable,
+            BROWSER_RECALL_VISIBILITY_PROBE_ICON: path.resolve(
+              'apps/desktop/src-tauri/icons/icon.ico',
+            ),
+          },
+        },
+      );
+      let failure;
+      try {
+        execFileSync(
+          process.execPath,
+          ['tests/smoke/windows-desktop-single-instance.mjs'],
+          {
+            encoding: 'utf8',
+            timeout: 20_000,
+            windowsHide: true,
+            env: {
+              ...process.env,
+              GITHUB_ACTIONS: 'false',
+              BROWSER_RECALL_DESKTOP_TEST_EXECUTABLE: executable,
+              BROWSER_RECALL_VISIBILITY_PROBE_REPORT: report,
+            },
+          },
+        );
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure?.status, failure?.stderr).toBe(1);
+      expect(failure.stderr).toContain(
+        'The first desktop process exited during native startup',
+      );
+      expect(JSON.parse(readFileSync(report, 'utf8'))).toEqual({
+        visible: true,
+      });
+    } finally {
+      await removeTestProfile(work);
+    }
+  },
+  45_000,
+);
