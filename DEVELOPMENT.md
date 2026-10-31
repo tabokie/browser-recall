@@ -545,7 +545,10 @@ The recorder does not pre-create the profile or change cold WebView2 initializat
 failure reports those stages, profile filenames and owned process metadata in a
 GitHub annotation, including when a GUI executable has no standard output. The
 process inspection has a five-second deadline; the startup wait remains fifteen
-seconds. Progress recording is disabled without an explicit test profile.
+seconds. After a missed startup deadline, the test observes the process for up to
+thirty more seconds to distinguish late initialization from a hang; either result
+still fails the original deadline. Progress recording is disabled without an
+explicit test profile.
 Failed macOS validation records the Rust host, runner architecture, and build-script
 executable formats in `test-results/native-build/executables.txt`, alongside the
 existing native failure artifacts. This distinguishes incompatible executables

@@ -329,7 +329,7 @@ async function waitFor(predicate, timeoutMs, failureMessage) {
     await delay(100);
   }
   throw typeof failureMessage === 'function'
-    ? failureMessage()
+    ? await failureMessage()
     : new Error(failureMessage);
 }
 
@@ -348,15 +348,17 @@ let first;
 let second;
 let startupOutput = '';
 let startupLogs = '';
-function startupDiagnostics() {
-  const details = [];
+function readStartupStages() {
   try {
-    details.push(
-      `Startup stages (${startupTraceFile}):\n${readFileSync(startupTraceFile, 'utf8')}`,
-    );
+    return readFileSync(startupTraceFile, 'utf8');
   } catch (error) {
-    details.push(`Startup stages unavailable: ${error.message}`);
+    return `Startup stages unavailable: ${error.message}`;
   }
+}
+function startupDiagnostics() {
+  const details = [
+    `Startup stages (${startupTraceFile}):\n${readStartupStages()}`,
+  ];
   try {
     details.push(`Profile files:\n${readdirSync(profileDir).join('\n')}`);
   } catch (error) {
@@ -393,8 +395,8 @@ Get-CimInstance Win32_Process -Filter "ProcessId = $ownerId OR ParentProcessId =
   }
   return details.join('\n');
 }
-const startupFailure = (reason) => {
-  const message = `${reason}; exitCode=${first.exitCode}, signal=${first.signalCode}\nOutput:\n${startupOutput}\nLogs:\n${startupLogs}\n${startupDiagnostics()}`;
+const startupFailure = (reason, followUp = '') => {
+  const message = `${reason}; exitCode=${first.exitCode}, signal=${first.signalCode}\nOutput:\n${startupOutput}\nLogs:\n${startupLogs}\n${startupDiagnostics()}${followUp ? `\n${followUp}` : ''}`;
   if (process.env.GITHUB_ACTIONS === 'true') {
     const annotation = message
       .replaceAll('%', '%25')
@@ -405,6 +407,7 @@ const startupFailure = (reason) => {
   return new Error(message);
 };
 await withCleanup(async () => {
+  const startupStarted = performance.now();
   first = spawn(executable, [], {
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
@@ -429,8 +432,33 @@ await withCleanup(async () => {
       return startupLogs.length > 0;
     },
     15000,
-    () =>
-      startupFailure('The first desktop process did not finish native startup'),
+    async () => {
+      const stagesAtDeadline = readStartupStages();
+      const observationDeadline = performance.now() + 30_000;
+      let observation = 'Application logging remained unavailable';
+      // This follow-up only diagnoses a failed deadline; late startup still fails.
+      while (performance.now() < observationDeadline) {
+        try {
+          startupLogs = readNewLogs();
+        } catch (error) {
+          observation = `Diagnostic log inspection failed: ${error.message}`;
+          break;
+        }
+        if (startupLogs.length > 0) {
+          observation = `Application logging appeared after ${Math.round(performance.now() - startupStarted)}ms`;
+          break;
+        }
+        if (first.exitCode !== null || first.signalCode !== null) {
+          observation = 'The process exited during diagnostic observation';
+          break;
+        }
+        await delay(100);
+      }
+      return startupFailure(
+        'The first desktop process did not finish native startup',
+        `Post-timeout observation: ${observation}\nStages at the original deadline:\n${stagesAtDeadline}`,
+      );
+    },
   );
   const iconSizes = await waitForRuntimeWindowsIcons(first, 15000);
 
