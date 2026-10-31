@@ -4187,9 +4187,11 @@ test.describe('desktop visual regression', () => {
         `.highlight-history-entry[data-note-slug="${fixtures.noteSlugs[10]}"]`,
       );
       await anchor.scrollIntoViewIfNeeded();
-      const before = await page
-        .locator('.main')
-        .evaluate((main) => (main.scrollTop += 200));
+      // The browser clamps scrolling at the document end; read back actual scrollTop.
+      const before = await page.locator('.main').evaluate((main) => {
+        main.scrollTop += main.scrollHeight;
+        return main.scrollTop;
+      });
       expect(before).toBeGreaterThan(0);
       await anchor.evaluate((entry) => (entry.dataset.refreshProbe = 'before'));
 
