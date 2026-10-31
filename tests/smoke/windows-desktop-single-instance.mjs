@@ -327,7 +327,9 @@ async function waitFor(predicate, timeoutMs, failureMessage) {
     if (await predicate()) return;
     await delay(100);
   }
-  throw new Error(failureMessage);
+  throw typeof failureMessage === 'function'
+    ? failureMessage()
+    : new Error(failureMessage);
 }
 
 function readNewLogs() {
@@ -343,17 +345,39 @@ function readNewLogs() {
 
 let first;
 let second;
+let startupOutput = '';
+let startupLogs = '';
+const startupFailure = (reason) =>
+  new Error(
+    `${reason}; exitCode=${first.exitCode}, signal=${first.signalCode}\nOutput:\n${startupOutput}\nLogs:\n${startupLogs}`,
+  );
 await withCleanup(async () => {
   first = spawn(executable, [], {
-    stdio: 'ignore',
+    stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
     env: desktopEnvironment,
   });
+  for (const stream of [first.stdout, first.stderr]) {
+    stream?.setEncoding('utf8');
+    stream?.on('data', (text) => (startupOutput += text));
+  }
   await once(first, 'spawn');
   await waitFor(
-    () => first.exitCode === null && readNewLogs().length > 0,
+    () => {
+      startupLogs = readNewLogs();
+      if (first.exitCode !== null || first.signalCode !== null) {
+        // Wait for inherited output pipes to drain before reporting the exit.
+        if (!first.stdout.readableEnded || !first.stderr.readableEnded)
+          return false;
+        throw startupFailure(
+          'The first desktop process exited during native startup',
+        );
+      }
+      return startupLogs.length > 0;
+    },
     15000,
-    'The first desktop process did not finish native startup',
+    () =>
+      startupFailure('The first desktop process did not finish native startup'),
   );
   const iconSizes = await waitForRuntimeWindowsIcons(first, 15000);
 
