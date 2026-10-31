@@ -406,13 +406,18 @@ test.describe('Popup list chip behavior', () => {
             .ready;
         });
         const readLayout = () =>
-          helper.evaluate(() => {
+          helper.evaluate(async () => {
             const view = chrome.extension.getViews({ type: 'popup' })[0];
+            const hostWindow = await chrome.windows.getCurrent();
             const reload = view.document.getElementById('fatalReloadBtn');
             const title = reload.parentElement.firstElementChild;
             const message = reload.previousElementSibling;
             return {
               calls: view.popupStartupFailureCalls,
+              hostWindow: {
+                width: hostWindow.width,
+                height: hostWindow.height,
+              },
               viewport: { width: view.innerWidth, height: view.innerHeight },
               visualViewport: {
                 width: view.visualViewport.width,
@@ -491,7 +496,9 @@ test.describe('Popup list chip behavior', () => {
         );
         const screenshot = await extContext.newPage();
         try {
-          await screenshot.setViewportSize({ width: 296, height: 600 });
+          // setViewportSize also resizes the hosting browser window. Keep room
+          // for the native toolbar popup opened in the next iteration.
+          await screenshot.setViewportSize({ width: 512, height: 600 });
           await screenshot.goto(
             `chrome-extension://${extensionId}/popup.html?startupFailure=${failure}&scrollbars=${scrollbars}`,
           );

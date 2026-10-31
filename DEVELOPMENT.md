@@ -759,6 +759,8 @@ The Chromium failure scenario also forces a 16px message scrollbar; fatal errors
 keep scrolling inside the message rather than the native popup viewport.
 The Chromium popup sizing check also starts in a wider provisional viewport;
 the document root must keep the same width as the content before native resizing.
+Standalone popup screenshots also keep a wider viewport: Playwright resizes the
+hosting browser window, and a 296px host can clip the next native toolbar popup.
 Native popup measurements are retained as JSON test attachments on failures.
 Popup diagnostics and Firefox teardown use `withCleanup` to preserve the original
 failure together with any diagnostic or cleanup errors, and attempt every cleanup.
