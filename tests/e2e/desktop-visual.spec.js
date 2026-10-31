@@ -327,6 +327,28 @@ async function serveDesktopUi(use) {
   }
 }
 
+// Keep pagination boundaries observable even when assertion scheduling is slow.
+async function holdHighlightHistoryContinuation(page) {
+  await page.evaluate(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    const continuation = new Promise((resolve) => {
+      window.__releaseHighlightHistoryContinuation = resolve;
+    });
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (
+        command === 'bridge_action' &&
+        payload?.request?.action === 'getHighlightHistoryPage' &&
+        payload.request.cursor
+      ) {
+        await continuation;
+      }
+      return invoke(command, payload);
+    };
+  });
+  return () =>
+    page.evaluate(() => window.__releaseHighlightHistoryContinuation());
+}
+
 async function installDesktopBridgeMock(page, options = {}) {
   const seed = desktopVisualSeed(options.colorScheme || 'amber', options);
   await page.addInitScript(
@@ -2697,8 +2719,8 @@ test.describe('desktop visual regression', () => {
       await openDesktopUi(page, desktopUrl, {
         setupComplete: true,
         ...fixtures,
-        highlightHistoryPageDelayMs: 150,
       });
+      const releaseContinuation = await holdHighlightHistoryContinuation(page);
       await page.locator('#highlightsHistoryBtn').click();
 
       const entries = page.locator('#results .highlight-history-entry');
@@ -2713,6 +2735,7 @@ test.describe('desktop visual regression', () => {
           );
       });
 
+      await releaseContinuation();
       await expect(entries).toHaveCount(101);
       expect(
         await page.evaluate(() => {
@@ -2738,9 +2761,9 @@ test.describe('desktop visual regression', () => {
       await openDesktopUi(page, desktopUrl, {
         setupComplete: true,
         ...fixtures,
-        highlightHistoryPageDelayMs: 80,
       });
 
+      const releaseContinuation = await holdHighlightHistoryContinuation(page);
       await page.locator('#highlightsHistoryBtn').click();
 
       await expect(
@@ -2748,6 +2771,7 @@ test.describe('desktop visual regression', () => {
       ).toBeVisible({ timeout: 500 });
       const entries = page.locator('#results .highlight-history-entry');
       await expect(entries).toHaveCount(100);
+      await releaseContinuation();
       await expect(entries).toHaveCount(205);
 
       const requests = await page.evaluate(() =>
@@ -4428,13 +4452,14 @@ test.describe('desktop visual regression', () => {
         colorScheme: 'amber',
         historyEntries: fixtures.historyEntries,
         extraSession: fixtures.extraSession,
-        highlightHistoryPageDelayMs: 150,
       });
       await page.setViewportSize({ width: 1280, height: 500 });
+      const releaseContinuation = await holdHighlightHistoryContinuation(page);
       await page.locator('#highlightsHistoryBtn').click();
 
       const entries = page.locator('.highlight-history-entry');
       await expect(entries).toHaveCount(100);
+      await releaseContinuation();
       await expect(entries).toHaveCount(240);
     });
   });
