@@ -1,274 +1,189 @@
 # Browser Recall — Codebase Map
 
-Use this map to find the files that implement a feature. See
-[ARCHITECTURE.md](ARCHITECTURE.md) for behavior and
-[DEVELOPMENT.md](../DEVELOPMENT.md) for build and verification commands.
+Use [Architecture](ARCHITECTURE.md) for behavior, [Development](../DEVELOPMENT.md)
+for commands, and [Testing](TESTING.md) for coverage boundaries.
 
 ## Repository layout
 
-| Path | Contents |
-| --- | --- |
-| `apps/desktop/ui/` | Main desktop interface |
-| `apps/desktop/src-tauri/` | Tauri shell and native integrations |
-| `apps/extension/` | Chromium/Firefox browser connector |
-| `crates/daemon/` | Commands, data reads and writes, pairing, rules, and sync |
-| `crates/replay/` | Apply logged events, define data formats, select saved page files, and verify stored data |
-| `crates/search/` | Native search implementation |
-| `crates/native-tests/` | Minimal native integration test package; imports production frame code without depending on the Tauri application |
-| `packages/core/` | Shared JavaScript, CSS, localization, and generated bridge factories |
-| `apps/desktop/src-tauri/src/updates.rs`, `apps/desktop/ui/desktop-updates.js` | Native update checks, authenticated installation, and desktop update controls |
-| `scripts/build-release-desktop.mjs`, `scripts/create-update-manifest.mjs` | Package installers, sign finalized updates, and create the GitHub-hosted update manifest |
-| `scripts/lib/product-version.mjs` | Shared product and lockfile version validation for CI and local releases |
-| `scripts/lib/build-timing.mjs` | Synchronous and asynchronous build phase durations and outcomes in logs and GitHub step summaries |
-| `docs/DESKTOP_RELEASE_VALIDATION_PERFORMANCE.md` | Hosted validation baseline, local link-time optimization benchmark, reproduction commands, and further optimization criteria |
-| `scripts/` | Builds, migrations, manual workflows, coverage, and documentation capture |
-| `tests/` | JavaScript unit/integration tests, Playwright scenarios, and native app tests |
-| `icons/` | SVG sources for generated runtime icons |
-| `docs/images/` | Documentation PNGs and capture manifests |
-| `website/` | Static product page, responsive styles, and in-memory interactive illustration |
-| `website/analytics.js` | GoatCounter page views for the HTTPS website; excludes local previews and embedded demos |
-| `website/demos/` | Selectable Timeline rows, Book interaction/typesetting, a display-only saved highlight, interactive list chips, and embedded document scroll styles |
-| `apps/desktop/ui/timeline-elements.js`, `apps/extension/popup-list-elements.js` | Production renderers shared with the website demos |
-| `apps/desktop/ui/book-typesetting.js` | Justif paragraph layout and English hyphenation shared by desktop Book and the website demo |
-| `apps/desktop/ui/book-elements.js` | Shared Book day, page, and highlight markup, with read-only website rendering from the documentation seed |
-| `scripts/build-website.mjs`, `scripts/serve-website.mjs` | Extract product HTML/CSS, copy presentation modules/public assets, and preview at the GitHub Pages project path |
-| `playwright.website.config.js`, `tests/website/` | Chromium and mobile WebKit product-page scenarios, fixed demo heights, scrolling, keyboard interaction, and no-JavaScript fallback |
-| `.github/workflows/website.yml` | One job builds and checks the product website, then publishes the built directory to GitHub Pages on `main`; pull requests only run checks |
-| `.github/workflows/ci.yml` | Six regular CI runner jobs: Tests, Coverage and Lint, extension E2E, desktop visuals, Windows extension rendering, and Windows x64/macOS arm64 release validations |
-| `.github/workflows/desktop-release-validation.yml` | Shared native packaging, installation, update/relaunch, and platform regressions; conditional browser-only Windows rendering and macOS documentation validation that reuses the packaged app; Release additionally validates macOS x64 and always runs both optional scenarios |
-| `scripts/select-platform-checks.mjs`, `tests/integration/platform-check-selection.test.js` | Select expensive platform scenarios from complete Git push/PR ranges, retain deleted/renamed inputs, and verify selection through real repositories and CLI output |
-| `.github/workflows/release.yml` | Manual native Windows/macOS and Chrome/Firefox builds, verified installers and extension archives, signed update packages, and GitHub Releases publishing |
-| `package.json` | Build, test, formatting, and analysis commands |
-| `rust-toolchain.toml` | Rust compiler and component pin |
-| `.gitattributes` | LF checkout policy across platforms |
+| Path                      | Responsibility                                            |
+| ------------------------- | --------------------------------------------------------- |
+| `apps/desktop/ui/`        | Desktop interface                                         |
+| `apps/desktop/src-tauri/` | Tauri shell and native integrations                       |
+| `apps/extension/`         | Chromium/Firefox connector                                |
+| `crates/daemon/`          | Commands, storage, pairing, rules, sync                   |
+| `crates/replay/`          | Schemas, replay, checkpoints, verification                |
+| `crates/search/`          | Native search                                             |
+| `crates/native-tests/`    | Minimal AppKit tests importing production code            |
+| `packages/core/`          | Shared JavaScript, CSS, localization, generated factories |
+| `scripts/`                | Builds, migrations, coverage, capture                     |
+| `tests/`                  | JavaScript, browser, and native scenarios                 |
+| `icons/`, `docs/images/`  | Icon sources, screenshots, capture manifests              |
+| `website/`                | Static product page and fictional demos                   |
+| `plans/`                  | Historical proposals and implementation records           |
 
 ## Desktop
 
-| File | Implements |
-| --- | --- |
-| `apps/desktop/ui/index.html` | Desktop markup, layout, and styles |
-| `apps/desktop/ui/index.js` | Timeline, Book, lists, search, settings, imports, recycle bin, and mutation refreshes |
-| `apps/desktop/ui/desktop-bridge.js` | Tauri product commands and strict response validation |
-| `apps/desktop/ui/desktop-platform.js` | UI storage, messages, opening external URLs, and checks that the native app is available |
-| `apps/desktop/ui/bookmark-parser.js` | Bookmark HTML parsing |
-| `apps/desktop/ui/shared.css`, `apps/desktop/ui/fonts/` | Bundled fonts and shared desktop typography |
-| `apps/desktop/src-tauri/src/main.rs` | Daemon lifecycle, Tauri commands/events, windows, tray, deep links, and single-instance handling |
-| `apps/desktop/src-tauri/src/config.rs` | Desktop configuration and saved setup choices in `config.json` at the application configuration directory or test-profile root |
-| `apps/desktop/src-tauri/src/shell_contract.rs` | Shell response types and route state |
-| `apps/desktop/src-tauri/src/snapshot_open.rs` | Open snapshot HTML or reveal and select snapshot HTML and optional Markdown files in the system file manager |
-| `apps/desktop/src-tauri/src/distribution.rs` | Identify the distribution channel and suppress reviews in desktop test profiles |
-| `apps/desktop/src-tauri/src/reviews.rs` | Coordinate review scheduling, worker persistence, request contexts, reservations and rollback |
-| `apps/desktop/src-tauri/src/reviews_native.rs` | Dispatch readiness and presentation checks to AppKit without file access |
-| `apps/desktop/src-tauri/src/reviews.swift`, `apps/desktop/src-tauri/storekit_build.rs` | Build native StoreKit presentation with focus, sheet, visibility and activity checks |
-| `apps/desktop/ui/desktop-reviews.js` | Register busy views and operations, wait for completed reading/editing tasks, and cancel pending or dispatched requests when interaction resumes |
-| `apps/desktop/src-tauri/src/login_item.rs` | Check and change launch-at-login registration; undo changes if saving fails |
-| `apps/desktop/src-tauri/src/windows_icon.rs` | Windows window and taskbar icons matched to display scale |
-| `apps/desktop/src-tauri/src/macos_window_frame.rs` | Capture and restore the exact macOS AppKit window frame independently of webview insets |
-| `apps/desktop/src-tauri/src/search.rs` | Desktop search adapters |
-| `apps/desktop/src-tauri/src/logging.rs` | Native log output and retention |
-| `apps/desktop/src-tauri/capabilities/main.json` | Main webview permissions |
+Paths below are relative to `apps/desktop/`.
 
-Desktop navigation and data refreshes have separate behavior in `index.js`.
-`refreshCurrentView()` selects the refresh operation and reports read failures.
-Navigation starts at the top; list, Timeline, category, and Book refreshes preserve
-reading position, including scrolling during Book loading. Fullscreen handling
-preserves main-pane and sidebar offsets.
-
-Book groups highlights by local date and page, requests successive batches, and
-updates edited entries in place. Justif lays out displayed text; opening the editor
-restores the original text.
-
-Desktop search starts on Enter. `index.js` combines page title and URL matches,
-history, notes, and snapshot text. As results arrive, search preserves the selected
-row. Data changes update affected rows without restarting the history search.
+| File                                                                | Responsibility                                                        |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `ui/index.html`, `ui/index.js`                                      | Layout, navigation, data views, refreshes                             |
+| `ui/desktop-bridge.js`, `ui/desktop-platform.js`                    | Validated Tauri commands and platform APIs                            |
+| `ui/book-elements.js`, `ui/book-typesetting.js`                     | Shared Book markup and Justif layout                                  |
+| `ui/timeline-elements.js`                                           | Timeline rows shared with website demos                               |
+| `ui/bookmark-parser.js`                                             | Bookmark HTML parsing                                                 |
+| `ui/shared.css`, `ui/fonts/`                                        | Typography and bundled fonts                                          |
+| `ui/desktop-reviews.js`, `ui/desktop-updates.js`                    | Review opportunities/cancellation and update controls                 |
+| `src-tauri/src/main.rs`                                             | Daemon lifecycle, commands, events, tray, deep links, single instance |
+| `src-tauri/src/config.rs`, `src-tauri/src/shell_contract.rs`        | Local setup and shell response types                                  |
+| `src-tauri/src/snapshot_open.rs`                                    | Open snapshots or select files in the file manager                    |
+| `src-tauri/src/distribution.rs`                                     | Distribution channel and test-profile restrictions                    |
+| `src-tauri/src/reviews.rs`, `src-tauri/src/reviews_native.rs`       | Review scheduling, persistence, AppKit dispatch                       |
+| `src-tauri/src/reviews.swift`, `src-tauri/storekit_build.rs`        | StoreKit bridge and build integration                                 |
+| `src-tauri/src/updates.rs`                                          | Authenticated update lifecycle                                        |
+| `src-tauri/src/login_item.rs`                                       | Launch-at-login registration and rollback                             |
+| `src-tauri/src/windows_icon.rs`, `src-tauri/src/windows_startup.rs` | Windows icons and early test-profile diagnostics                      |
+| `src-tauri/src/macos_window_frame.rs`                               | Exact AppKit frame preservation                                       |
+| `src-tauri/src/search.rs`, `src-tauri/src/logging.rs`               | Search adapter and native logs                                        |
+| `src-tauri/capabilities/main.json`                                  | Webview permissions                                                   |
 
 ## Browser connector
 
-| File | Implements |
-| --- | --- |
-| `apps/extension/manifest.json` | Permissions, entry points, and default shortcuts |
-| `apps/extension/background.js` | Track page URLs per tab, prepare popups, deliver navigation messages, route commands, capture pages, and report errors |
-| `apps/extension/recording-controller.js` | Session recording policy, navigation-start eligibility, pause-aware attention, and serialized command admission |
-| `apps/extension/content.js` | Visit, time-on-page, and scroll-depth capture; highlight integration with live pages |
-| `apps/extension/spa-navigation-bridge.js` | Detect navigation in the page's JavaScript environment from document start |
-| `apps/extension/browser-api.js` | Browser APIs available to the calling script and shadow-root lookup |
-| `apps/extension/browser-privileged-api.js` | Background-only API validation |
-| `apps/extension/browser-identity.js` | Detect the browser, including Orion |
-| `apps/extension/browser-build-target.js` | Chromium/Firefox target generated during the build |
-| `apps/extension/popup.js` | Current-page dashboard, list picker, and queue for edits |
-| `apps/extension/popup.html` | Popup layout, static fatal-error screen, reserved hidden startup size, and content-sized visible frame |
-| `apps/extension/popup-note-session.js` | In-memory note drafts and transfer of unsaved commands when the popup closes |
-| `apps/extension/extension-surface.js` | Shared highlight entries, editors, icons, and overlays isolated by shadow DOM |
-| `apps/extension/extension-surface.css`, `apps/extension/extension-ui-tokens.js` | Shared extension styles and error displays |
-| `apps/extension/connector/ws-client.js` | WebSocket sessions, message validation, requests, and draining queued commands before snapshots and direct commands |
-| `apps/extension/connector/state.js` | Read and validate saved connection status and errors |
-| `apps/extension/connector/pairing.js` | Pairing and authentication helpers |
-| `apps/extension/connector/command-buffer.js` | Size-limited pending-command queue and saved queue/byte counts |
-| `apps/extension/savepage-bridge.js` | Snapshot capture sessions and resource diagnostics |
-| `apps/extension/snapshot-resource-fetch.js` | Host-permission fetches, redirect/referrer policy, and temporary network rules |
-| `apps/extension/savepage/content.js`, `apps/extension/savepage/content-frame.js` | Save Page WE capture of page content, frames, shadow roots, and computed root and body font sizes |
-| `apps/extension/snapshot-viewer.js` | Saved-page preparation and highlight adapters |
-| `apps/extension/options-stub.html`, `apps/extension/options-stub.js` | Desktop app link and assigned browser shortcuts, including Open page details |
-| `apps/extension/background-test-control.js` | Test-only RPC handlers and extensions to the background test controls, omitted from production builds |
+Paths below are relative to `apps/extension/`.
 
-Opening from the toolbar determines the page URL and fetches the complete page
-summary from the daemon. Toolbar opens and direct opens use the same display code.
-The popup processes pin changes and list updates one at a time.
-
-Live pages, snapshots, the PDF panel, and the popup use shared highlight/editor
-implementations. Each page type supplies callbacks for saving data. Selection,
-saved text locations, saving, and deletion use shared code.
-Native PDF context-menu highlights use the browser-supplied selected text with an
-empty DOM location. `captureContextMenuSelection` returns the document's selection
-source and text locations in one response; PDF embeds do not change HTML selection
-validation.
+| File                                                                      | Responsibility                                                                             |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `manifest.json`                                                           | Permissions, entry points, shortcuts                                                       |
+| `background.js`                                                           | Navigation, popup preparation, command routing, capture                                    |
+| `recording-controller.js`                                                 | Recording eligibility, pause-aware attention, command admission                            |
+| `content.js`, `spa-navigation-bridge.js`                                  | Capture and page-world navigation detection                                                |
+| `browser-api.js`, `browser-privileged-api.js`                             | Browser APIs and background-only validation                                                |
+| `browser-identity.js`, `browser-build-target.js`                          | Browser identity and generated build target                                                |
+| `popup.js`, `popup.html`, `popup-note-session.js`                         | Dashboard, sizing, list edits, note drafts                                                 |
+| `popup-list-elements.js`                                                  | List markup shared with website demos                                                      |
+| `extension-surface.js`, `extension-surface.css`, `extension-ui-tokens.js` | Isolated editors, highlights, overlays, styles                                             |
+| `connector/ws-client.js`                                                  | Sessions, validation, requests, queue draining                                             |
+| `connector/state.js`, `connector/pairing.js`                              | Connection diagnostics and authentication                                                  |
+| `connector/command-buffer.js`                                             | Bounded temporary command storage                                                          |
+| `savepage-bridge.js`, `snapshot-resource-fetch.js`                        | Capture sessions, resource policy, diagnostics                                             |
+| `savepage/`                                                               | Maintained Save Page WE fork; see [Upstream notes](../apps/extension/savepage/UPSTREAM.md) |
+| `snapshot-viewer.js`                                                      | Snapshot preparation and highlight adapters                                                |
+| `options-stub.html`, `options-stub.js`                                    | Desktop link and shortcut display                                                          |
+| `background-test-control.js`                                              | Test-only handlers omitted from production                                                 |
 
 ## Daemon and replay
 
-| File | Implements |
-| --- | --- |
-| `crates/daemon/src/lib.rs`, `crates/daemon/src/main.rs` | Daemon startup API and standalone CLI |
-| `crates/daemon/src/command_authority.rs` | Parse and validate commands shared by Tauri and WebSocket; return write results |
-| `crates/daemon/src/commands.rs` | Execute commands and construct valid log events |
-| `crates/daemon/src/runtime.rs` | Apply command batches, order writes, install synced files, recover after crashes, and coordinate deletion/reset |
-| `crates/daemon/src/storage.rs` | Cache current data, read disk, index logs, write checkpoints in the background, and select files for sync |
-| `crates/daemon/src/read_projections.rs` | List/page/highlight/popup/tree/recycle-bin/settings reads |
-| `crates/daemon/src/mutations.rs` | Build change notifications, including affected URLs |
-| `crates/daemon/src/config.rs` | Fill missing configuration fields from canonical defaults, validate, and save with file locking and temporary-file replacement |
-| `crates/daemon/src/capture_policy.rs` | Blacklist and title-cleanup policy |
-| `crates/daemon/src/rules.rs` | Rule validation, previews, and automatic matching |
-| `crates/daemon/src/search.rs` | History streaming and note/snapshot search adapters |
-| `crates/daemon/src/protocol.rs` | Connector version 4 request/response types and test-control namespace |
-| `crates/daemon/src/ws_server.rs` | Authenticated sockets, visit reports, command requests, and notifications to extensions |
-| `crates/daemon/src/pairing.rs`, `crates/daemon/src/connectors.rs` | Pairing decisions and connector identities |
-| `crates/daemon/src/sync.rs` | GitHub requests, credentials, device state, and sync scheduling |
-| `crates/daemon/src/data_directory_docs.rs`, `crates/daemon/resources/data-AGENTS.md` | Generated data-folder guide and rules for external file writes |
-| `crates/replay/src/lib.rs`, `crates/replay/src/handlers/` | Validate log records and apply events without duplicating changes when an event is repeated |
-| `crates/replay/src/entities.rs` | Checkpoint schemas and relationships |
-| `crates/replay/src/settings.rs` | Setting names, types, allowed values, and defaults |
-| `crates/replay/src/bin/replay-tool.rs` | Command-line tool to replay logs and write rebuilt data |
-| `crates/replay/src/bin/replay-verify.rs` | Production replay verification CLI |
-| `crates/search/src/lib.rs` | Rank search matches and find searchable Browser Recall files |
+Paths below are relative to `crates/`.
 
-Tauri and WebSocket writes share `command_authority.rs` and `runtime.rs`.
-`read_projections.rs` combines records into responses for the UI, so callers do not
-need to construct internal record keys. The log index in `storage.rs` is used for
-crash recovery, history reads, ordering highlights by creation time, and sync.
+| File                                                                   | Responsibility                                                |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `daemon/src/lib.rs`, `daemon/src/main.rs`                              | Startup API and standalone CLI                                |
+| `daemon/src/command_authority.rs`, `daemon/src/commands.rs`            | Shared command validation and execution                       |
+| `daemon/src/runtime.rs`                                                | Transactions, write order, recovery, sync installation, reset |
+| `daemon/src/storage.rs`                                                | Cache, disk reads, log index, checkpoint writer               |
+| `daemon/src/read_projections.rs`, `daemon/src/mutations.rs`            | View responses and change notifications                       |
+| `daemon/src/config.rs`                                                 | Locked configuration upgrades and atomic persistence          |
+| `daemon/src/capture_policy.rs`, `daemon/src/rules.rs`                  | Recording policy, rule previews/matching                      |
+| `daemon/src/search.rs`                                                 | Search adapters                                               |
+| `daemon/src/protocol.rs`, `daemon/src/ws_server.rs`                    | Connector protocol and authenticated server                   |
+| `daemon/src/pairing.rs`, `daemon/src/connectors.rs`                    | Pairing and connector identities                              |
+| `daemon/src/sync.rs`                                                   | GitHub transport, credentials, scheduling                     |
+| `daemon/src/data_directory_docs.rs`, `daemon/resources/data-AGENTS.md` | Managed data-folder guide                                     |
+| `replay/src/lib.rs`, `replay/src/handlers/`                            | Strict parsing and idempotent replay                          |
+| `replay/src/entities.rs`, `replay/src/settings.rs`                     | Checkpoint/settings schemas                                   |
+| `replay/src/bin/replay-tool.rs`, `replay/src/bin/replay-verify.rs`     | Replay and production verification CLIs                       |
+| `search/src/lib.rs`                                                    | Search ranking and file discovery                             |
 
 ## Shared modules
 
-| File | Implements |
-| --- | --- |
-| `packages/core/page-identity.js` | Normalize URLs, generate file identifiers, classify unavailable browser pages, and distinguish URL changes from full page loads |
-| `packages/core/highlight-lifecycle.js` | Save block selections with literal offsets and explicit line breaks, reserve saved anchors before visible text fallback in reading order, preserve removed snapshot siblings, and repair marks after page content changes |
-| `packages/core/markdown-extractor.js` | Live DOM-to-Markdown conversion for searchable snapshots |
-| `packages/core/snapshot-html.js` | Validate saved URL/slug metadata, clean highlight markup, and prepare snapshots for reopening |
-| `packages/core/bounded-response.js` | Streamed resource byte limits |
-| `packages/core/snapshot-capture-budget.js` | Estimate snapshot message size, including embedded resources |
-| `packages/core/search-runtime.js` | Parse queries and rank page title/URL matches |
-| `packages/core/virtual-scroller.js` | Render rows near the visible area and preserve DOM state and reading position |
-| `packages/core/time-chart.js` | Charts, date selection, and result filtering |
-| `packages/core/attention-utils.js` | Attention scoring |
-| `packages/core/i18n.js`, `packages/core/locales/` | Locale registry, complete catalogs, and localization runtime |
-| `packages/core/utils.js`, `packages/core/entity-types.js` | Shared utilities and entity identifiers |
+Paths below are relative to `packages/core/`.
 
-URL handling, highlights, and Markdown extraction use shared factories to generate
-non-module content scripts. Change the shared code and check the build output;
-do not maintain a second production copy.
+| File                                                | Responsibility                                              |
+| --------------------------------------------------- | ----------------------------------------------------------- |
+| `page-identity.js`                                  | URL normalization, slugs, availability, navigation identity |
+| `highlight-lifecycle.js`                            | Selection, anchors, restoration, repair, mark ownership     |
+| `markdown-extractor.js`, `snapshot-html.js`         | Snapshot text and HTML preparation                          |
+| `bounded-response.js`, `snapshot-capture-budget.js` | Resource and transport byte limits                          |
+| `search-runtime.js`, `attention-utils.js`           | Search and attention calculations                           |
+| `virtual-scroller.js`, `time-chart.js`              | Virtual rows, scroll retention, time filtering              |
+| `i18n.js`, `locales/`                               | Locale registry, catalogs, runtime                          |
+| `utils.js`, `entity-types.js`                       | Shared utilities and entity identifiers                     |
 
-## Builds and operational scripts
+## Builds and scripts
 
-| Path | Purpose |
-| --- | --- |
-| `scripts/stage-app-assets.mjs` | Check translations and prepare extension/desktop assets |
-| `scripts/desktop-build-plan.mjs` | Select platform-specific desktop artifacts and build steps |
-| `scripts/dev-desktop.mjs` | Guard desktop development launches before starting Tauri |
-| `scripts/build-desktop.mjs` | Shared local, release, and disk-image builds; sign and verify staging before publishing artifacts; record phase timings |
-| `scripts/lib/desktop-signing.mjs`, `scripts/windows-code-signing.ps1` | Explicit macOS and Windows certificate selection, credential isolation, and signature verification |
-| `scripts/lib/desktop-disk-image.mjs` | Package verified macOS apps into disk images for local builds and Release |
-| `scripts/build-tauri-app.mjs` | Run the standard desktop build |
-| `scripts/collect-desktop-artifacts.mjs` | Verify staged output before replacement, restore previous output on failure, and clean up locked Windows files |
-| `scripts/finalize-desktop-build.mjs` | Desktop build finalization |
-| `scripts/finalize-macos-app-bundle.mjs` | Sign local macOS builds with a stable app identifier |
-| `scripts/verify-macos-app-bundle.mjs` | Bundle signature verification |
-| `scripts/prepare-ci-release.mjs` | Generate disposable updater signing keys and configure only a CI runner's checkout |
-| `scripts/verify-windows-installed-executable.mjs` | Compare installed executable bytes with the actual NSIS installer payload |
-| `scripts/generate-icons.mjs` | Native-size desktop slots, toolbar icons, and tray assets |
-| `scripts/manual-test-browser.mjs`, `scripts/lib/manual-seed.mjs` | Isolated manual browser/daemon workflow |
-| `scripts/lib/seed-builder.mjs` | Generate test data by applying log events |
-| `scripts/migrate-snapshot-identity.mjs` | Check and update snapshot URL/slug metadata through temporary-file replacement |
-| `scripts/rust-coverage.mjs`, `scripts/test-coverage-monitor.mjs` | Coverage generation, uncovered-line reporting, and test-growth guard |
-| `scripts/capture-documentation.mjs` | Native macOS desktop documentation capture |
-| `scripts/lib/macos-native-session.mjs` | Guard native tray launches and verify documentation apps before launching without a tray |
-| `scripts/documentation-tauri.conf.json`, `scripts/documentation-info.plist`, `scripts/verify-macos-documentation-app.mjs` | Documentation app configuration, no-tray build metadata, and verification that generated bundles omit tray items and URL schemes |
-| `scripts/capture-browser-documentation.mjs` | Native macOS browser documentation capture |
-| `scripts/lib/documentation-seed.mjs` | Fictional reading collection |
-| `scripts/lib/documentation-window.swift`, `scripts/lib/documentation-image-spec.mjs` | Operate native windows, capture screenshots, and define image dimensions |
-| `scripts/lib/documentation-native-capture.mjs` | Shared native helper compilation, capture arguments, and pixel-stability checks |
-| `scripts/assets/documentation-sonoma-light.png` | Fixed light Sonoma wallpaper, fingerprinted in documentation capture manifests |
-| `scripts/compose-documentation-hero.mjs` | Combined Amber/Mono Timeline image |
-| `scripts/lib/documentation-freshness.mjs`, `scripts/check-documentation-screenshots.mjs` | Check source-file hashes and saved documentation images |
-| `scripts/export-chrome-web-store-screenshots.mjs`, `scripts/lib/store-screenshot.swift` | Export opaque 1280 × 800 Chrome Web Store screenshots, staging on the destination volume |
-| `scripts/lib/store-screenshots.mjs` | Shared Chrome Web Store input fingerprints and PNG format validation for export and documentation checks |
+Paths below are relative to `scripts/` unless stated otherwise.
 
-## Verification map
+| File                                                                                              | Responsibility                                            |
+| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `stage-app-assets.mjs`, `desktop-build-plan.mjs`                                                  | Asset staging and platform selection                      |
+| `build-desktop.mjs`, `build-tauri-app.mjs`, `build-release-desktop.mjs`                           | Local/release build orchestration                         |
+| `collect-desktop-artifacts.mjs`, `finalize-desktop-build.mjs`                                     | Verified output replacement and recovery                  |
+| `lib/desktop-signing.mjs`, `windows-code-signing.ps1`                                             | Certificate selection and signing                         |
+| `finalize-macos-app-bundle.mjs`, `verify-macos-app-bundle.mjs`                                    | macOS signing and verification                            |
+| `lib/desktop-disk-image.mjs`, `create-update-manifest.mjs`                                        | Disk images and updater metadata                          |
+| `prepare-ci-release.mjs`, `verify-windows-installed-executable.mjs`                               | Disposable signing setup and installer payload comparison |
+| `lib/product-version.mjs`, `lib/build-timing.mjs`                                                 | Version validation and phase timing                       |
+| `dev-desktop.mjs`, `lib/macos-native-session.mjs`                                                 | Guarded native launches                                   |
+| `manual-test-browser.mjs`, `lib/manual-seed.mjs`, `lib/seed-builder.mjs`                          | Manual fixtures and daemon-backed seeding                 |
+| `migrate-snapshot-identity.mjs`                                                                   | Snapshot metadata migration                               |
+| `rust-coverage.mjs`, `test-coverage-monitor.mjs`                                                  | Coverage and test-growth guard                            |
+| `generate-icons.mjs`                                                                              | Native icon slots, extension/tray assets                  |
+| `capture-documentation.mjs`, `capture-browser-documentation.mjs`                                  | Desktop/browser captures                                  |
+| `documentation-tauri.conf.json`, `documentation-info.plist`, `verify-macos-documentation-app.mjs` | No-tray/no-URL-scheme capture bundles                     |
+| `lib/documentation-seed.mjs`, `lib/documentation-window.swift`                                    | Capture data and native window control                    |
+| `lib/documentation-native-capture.mjs`, `lib/documentation-image-spec.mjs`                        | Compilation, geometry, pixel stability                    |
+| `lib/documentation-freshness.mjs`, `check-documentation-screenshots.mjs`                          | Capture fingerprints and image checks                     |
+| `compose-documentation-hero.mjs`, `export-chrome-web-store-screenshots.mjs`                       | Hero composition and store exports                        |
+| `lib/store-screenshots.mjs`, `lib/store-screenshot.swift`                                         | Store provenance and RGB conversion                       |
+| `select-platform-checks.mjs`                                                                      | Relevant-change selection for expensive checks            |
+| `build-website.mjs`, `serve-website.mjs`                                                          | Static build and project-path preview                     |
 
-| Behavior | Primary coverage |
-| --- | --- |
-| Shared JavaScript and build rules | `tests/unit/` |
-| Pairing, command requests, events, and pending commands | `tests/integration/` |
-| Matching page identifiers in JavaScript and Rust | `tests/integration/page-identity-parity.test.js` |
-| Snapshot identity migration and CLI validation | `tests/integration/snapshot-identity-migration.test.js`, `tests/e2e/snapshot-slug-meta.spec.js` |
-| Screenshot provenance, store format, and export failure handling | `tests/integration/documentation-freshness.test.js`, `tests/integration/store-screenshot-export.test.js` |
-| Combined data reads and successful writes not yet saved to checkpoints | `crates/daemon/tests/read_projections.rs` |
-| Commands, write ordering, and change notifications | `crates/daemon/tests/commands.rs`, `crates/daemon/tests/command_authority.rs`, `crates/daemon/tests/runtime.rs` |
-| Replay schemas, idempotence, and verifier | `crates/replay/tests/` |
-| Background document eligibility at navigation start, pause-aware attention, and session recovery | `apps/extension/recording-controller.js`, `tests/e2e/recording-lifecycle.spec.js` |
-| Popup membership, prepared dashboard, short-content sizing, native growth/shrinkage, fatal startup failures, recording toggles without tab notifications, and paused documents remaining excluded until refresh | `tests/e2e/popup-lists.spec.js`, `tests/fixtures/popup-startup-failure.mjs` |
-| Live navigation and correct URLs in visit records | `tests/e2e/extension-navigation-regressions.spec.js`, `tests/e2e/url-tracking.spec.js` |
-| Highlight creation, editing, and PDF behavior | `tests/e2e/highlight-note-edit.spec.js` |
-| Save when an editor or popup closes | `tests/e2e/note-dismiss-save.spec.js` |
-| Snapshot URL/slug metadata, resources, frames, and shadow roots | `tests/e2e/snapshot-slug-meta.spec.js`, `tests/e2e/snapshot-resource-timeout.spec.js` |
-| Seeded cross-feature workflows | `tests/e2e/seeded-combination-workflows.spec.js`, `tests/e2e/manual-seed-workflow.spec.js` |
-| Desktop layout, navigation, search, and scroll retention | `tests/e2e/desktop-visual.spec.js` |
-| App Store review timing, persistence, cancellation, rollback and failed writes | `apps/desktop/src-tauri/tests/reviews.rs` |
-| Configuration upgrades with omitted top-level and nested metadata, persistent defaults, preserved request counts and credentials, and rejected malformed values | `crates/daemon/tests/config_upgrade.rs` |
-| Update signature validation, checkpoint failure, and native macOS update installation | `apps/desktop/src-tauri/tests/desktop_updates.rs`, `tests/e2e/desktop-visual.spec.js` |
-| Running native app upgrades, relaunch, retained configuration/data/pairing, and connector reconnection | `tests/smoke/desktop-update-lifecycle.mjs`, `tests/smoke/windows-desktop-update-ui.ps1` |
-| Release CI checks matching desktop/extension versions, packages production Chrome/Firefox extensions, and requires complete checksummed assets before publishing | `tests/integration/extension-release-workflow.test.js` |
-| Daemon shutdown closes connector sessions and saves accepted notes | `crates/daemon/tests/shutdown.rs` |
-| Native WKWebView chart layout | `tests/smoke/macos-wkwebview-chart-layout.mjs` |
-| Documentation bundles preserve macOS handler identity when Launch Services switches production copies; validation failures preserve their error through registration cleanup; URL activation reuses the running process | `tests/smoke/macos-documentation-url-routing.mjs`, `tests/smoke/macos-documentation-app.mjs`, `tests/integration/macos-documentation-url-routing.test.js` |
-| macOS startup, tray, and window lifecycle | `tests/smoke/macos-desktop-window-lifecycle.mjs` |
-| Personal macOS sessions reject temporary tray app automation before native tools run | `tests/integration/macos-native-session.test.js` |
-| macOS frame restoration after hidden size and position changes with an inset content view | `crates/native-tests/tests/macos_window_frame.rs` |
-| Windows icons, single instance, and teardown | `tests/smoke/windows-desktop-single-instance.mjs`, `tests/integration/windows-desktop-cleanup.test.js` |
-| Native desktop cleanup preserves setup errors, owns successful macOS test app registrations, completes teardown after failures, and stops original or relaunched update processes | `tests/smoke/desktop-test-cleanup.mjs`, `tests/smoke/macos-desktop-process.mjs`, `tests/integration/macos-desktop-cleanup.test.js`, `tests/integration/windows-desktop-cleanup.test.js` |
-| Windows native update isolation survives token-based installer relaunch and restores the user environment; portable rollback JSON reader covers Windows PowerShell array behavior | `tests/smoke/windows-desktop-update-environment.ps1`, `tests/smoke/windows-update-environment-snapshot.ps1`, `tests/integration/windows-update-environment.test.js`, `tests/fixtures/windows-token-launch.cs` |
-| Mandatory PowerShell prerequisite and bounded asynchronous startup; subprocess regressions cover missing PowerShell, slow startup, and local CI fail-fast behavior | `scripts/check-test-prerequisites.mjs`, `tests/smoke/powershell-process.mjs`, `tests/integration/powershell-prerequisites.test.js`, `tests/integration/ci-release-validation.test.js` |
-| Windows validation gate blocks packaging and prints failed assertions from JSON reports | `scripts/verify-windows-validation.mjs`, `tests/integration/ci-release-validation.test.js` |
-| Windows signing requires an unsigned compiled executable, rejects other signers and tampering, and uses disposable certificate stores | `tests/integration/windows-code-signing.test.js`, `scripts/windows-code-signing.ps1` |
-| Saved desktop language and right-to-left layout | `tests/e2e/desktop-locale-setting.spec.js` |
-| Native extension localization and system fonts | `tests/e2e/extension-localization.spec.js`, `tests/e2e/extension-font-fallback.spec.js` |
-| Browser-only extension font fixture with no daemon or Rust build and an isolated rejecting connector endpoint | `tests/fixtures/extension-rendering.mjs`, `tests/fixtures/test-extension.mjs` |
-| Shared pinned Chromium selection and real-process coverage that rejects unsupported extension browsers before launch, without browser installation | `tests/fixtures/extension-browser-channel.mjs`, `tests/integration/extension-browser-selection.test.js` |
-| Real Firefox automatic capture and navigation, daemon persistence before identity probes, paused-document exclusion until refresh, options-page messages, actual toolbar popup growth/shrinkage and fatal-error layout | `tests/smoke/firefox-real-content.mjs` |
-| Native popup shortcut | `tests/smoke/native-extension-shortcut.mjs` |
-| Documentation images match the recorded source files and capture results | `tests/integration/documentation-freshness.test.js` |
-| Browser documentation capture | `tests/e2e/documentation-browser.spec.js` |
+Website presentation lives in `website/demos/`; HTTPS page-view counting lives in
+`website/analytics.js`. `playwright.website.config.js` and `tests/website/` cover
+website behavior.
 
-Desktop visual tests check layout and command calls with simulated Tauri responses.
-Rust and native app tests check real daemon calls and operating-system behavior.
-Native window tests cover selected scenarios; browser-rendered UI tests do not
-exercise every native desktop interaction.
+| Workflow/configuration                                  | Responsibility                                               |
+| ------------------------------------------------------- | ------------------------------------------------------------ |
+| `.github/workflows/ci.yml`                              | Regular verification matrix                                  |
+| `.github/workflows/desktop-release-validation.yml`      | Native packages, installation, updates, platform regressions |
+| `.github/workflows/release.yml`                         | Manual verified release publication                          |
+| `.github/workflows/website.yml`                         | Website checks and GitHub Pages deployment                   |
+| `package.json`, `rust-toolchain.toml`, `.gitattributes` | Commands, Rust pin, checkout line endings                    |
 
-The no-tray native review probe is `tests/smoke/macos-review-presentation.mjs` with
-`macos-review-presentation.swift`; it exercises production AppKit code with a
-recording presenter and never displays an App Store rating dialog.
+## Verification
 
-## User documents
+Entry points in `apps/` and `crates/` are repository-relative; other paths are
+relative to `tests/`. Search neighboring scenarios before adding coverage.
 
-- [README.md](../README.md): product introduction and demonstrations.
-- [STORE_LISTING.md](STORE_LISTING.md): Chrome Web Store copy and shortcuts.
-- [PRIVACY.md](PRIVACY.md): collected data, storage, permissions, and deletion.
-- [AGENTS.md](../AGENTS.md): development rules and contribution workflow.
+| Behavior                                        | Entry point                                                                                                                                                                          |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Daemon commands, writes, projections, shutdown  | `crates/daemon/tests/`                                                                                                                                                               |
+| Replay, strict schemas, verifier                | `crates/replay/tests/`                                                                                                                                                               |
+| Config upgrades                                 | `crates/daemon/tests/config_upgrade.rs`                                                                                                                                              |
+| Cross-language page identity                    | `integration/page-identity-parity.test.js`                                                                                                                                           |
+| Recording and navigation                        | `e2e/recording-lifecycle.spec.js`, `e2e/extension-navigation-regressions.spec.js`                                                                                                    |
+| Popup membership, native sizing, startup errors | `e2e/popup-lists.spec.js`, `fixtures/popup-startup-failure.mjs`                                                                                                                      |
+| Highlights and editor closing                   | `e2e/highlight-note-edit.spec.js`, `e2e/note-dismiss-save.spec.js`                                                                                                                   |
+| Snapshots and migration                         | `e2e/snapshot-slug-meta.spec.js`, `e2e/snapshot-resource-timeout.spec.js`, `integration/snapshot-identity-migration.test.js`                                                         |
+| Combined workflows and manual seeds             | `e2e/seeded-combination-workflows.spec.js`, `e2e/manual-seed-workflow.spec.js`                                                                                                       |
+| Desktop layout, search, navigation, scroll      | `e2e/desktop-visual.spec.js`                                                                                                                                                         |
+| Review timing and native presentation           | `apps/desktop/src-tauri/tests/reviews.rs`, `smoke/macos-review-presentation.mjs`                                                                                                     |
+| Update signatures and real relaunch             | `apps/desktop/src-tauri/tests/desktop_updates.rs`, `smoke/desktop-update-lifecycle.mjs`                                                                                              |
+| macOS chart, tray, frame, URL routing           | `smoke/macos-wkwebview-chart-layout.mjs`, `smoke/macos-desktop-window-lifecycle.mjs`, `crates/native-tests/tests/macos_window_frame.rs`, `smoke/macos-documentation-url-routing.mjs` |
+| Native session guards and cleanup               | `integration/macos-native-session.test.js`, `integration/macos-desktop-cleanup.test.js`, `integration/windows-desktop-cleanup.test.js`                                               |
+| Windows icons, visibility, single instance      | `smoke/windows-desktop-single-instance.mjs`, `integration/windows-desktop-cleanup.test.js`                                                                                           |
+| Windows signing and update isolation            | `integration/windows-code-signing.test.js`, `integration/windows-update-environment.test.js`                                                                                         |
+| PowerShell prerequisites and validation gates   | `integration/powershell-prerequisites.test.js`, `integration/ci-release-validation.test.js`                                                                                          |
+| Diagnostic/cleanup error preservation           | `integration/extension-test-cleanup.test.js`, `integration/smoke-process-readiness.test.js`                                                                                          |
+| Startup deadlines and bounded native probes     | `smoke/desktop-process-readiness.mjs`, `integration/desktop-process-readiness.test.js`                                                                                               |
+| Localization and fonts                          | `e2e/desktop-locale-setting.spec.js`, `e2e/extension-localization.spec.js`, `e2e/extension-font-fallback.spec.js`                                                                    |
+| Real Firefox and native shortcuts               | `smoke/firefox-real-content.mjs`, `smoke/native-extension-shortcut.mjs`                                                                                                              |
+| Capture provenance and store export             | `integration/documentation-freshness.test.js`, `integration/store-screenshot-export.test.js`                                                                                         |
+
+## Reference documents
+
+- [Development](../DEVELOPMENT.md): setup, builds, releases, data maintenance.
+- [Testing](TESTING.md): fixture rules, platform boundaries, CI diagnosis.
+- [Documentation](DOCUMENTATION.md): editorial review and screenshot maintenance.
+- [Release validation performance](DESKTOP_RELEASE_VALIDATION_PERFORMANCE.md): measurements and decisions.
+- [Store listing](STORE_LISTING.md) and [Privacy](PRIVACY.md): publication copy.

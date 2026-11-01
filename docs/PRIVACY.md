@@ -2,105 +2,94 @@
 
 **Last updated:** October 24, 2026
 
-Browser Recall's desktop app and browser extension store product data locally
-and do not send analytics or browsing data to a developer-operated service.
-Optional GitHub sync uses a repository selected by the user.
+Browser Recall's desktop app and browser extension store data locally and send no
+analytics or browsing data to a developer-operated service. Optional GitHub sync
+uses a repository chosen by the user. Website analytics are described separately below.
 
 ## Data recorded
 
-When recording is enabled, Browser Recall records page URLs, titles, visit times,
-time on page, and scroll depth. User actions can add highlights, annotations,
-ratings, lists, rules, edited titles, and imported bookmarks or history.
+While recording is enabled, Browser Recall records page URLs, titles, visit times,
+time on page, and scroll depth. User actions add highlights, annotations, ratings,
+lists, rules, edited titles, and imported bookmarks or history. Stop recording
+pauses extension capture; the daemon, the desktop app's local data service, applies
+URL exclusions.
 
-Explicit snapshot capture saves page HTML, embedded resources, and extracted text.
-Snapshot content can include information displayed on the captured page.
-Snapshot capture preserves non-password form values and can include personal
-information, health information, financial information, personal communications,
-or location information present on the page. Password and file input values are
-cleared during capture; other sensitive page content is not automatically redacted.
+User-requested snapshots save page HTML, resources, extracted text, and non-password
+form values. Captured pages may contain personal, health, financial, communication,
+or location information. Password/file input values are cleared; other sensitive
+content is not automatically redacted.
 
-Local configuration stores a device ID, approved browser installations, connection
-tokens, and recent connection activity. Settings control recording, excluded URLs,
-display, and sync. Stop recording pauses capture across the browser extension.
-The daemon, the desktop app's local data service, applies URL exclusions.
+Local configuration stores device identity, approved browsers, connection tokens,
+and recent connection activity. Settings control recording, exclusions, display,
+and sync.
 
-## Local storage
+## Storage and connections
 
-The desktop app writes event logs, JSON files describing current pages and lists,
-notes, and snapshots to the folder chosen during setup. Product data uses JSON,
-JSONL, HTML, and Markdown files. The data folder can be copied or backed up directly.
+The chosen data folder contains logs, current page/list records, notes, and
+snapshots as JSON, JSONL, HTML, and Markdown. The folder can be copied or backed up.
+Desktop configuration and diagnostic logs are stored separately.
 
-Extension storage holds pairing details, connection details, recording status, and
-commands waiting briefly to be sent to the desktop. Snapshot HTML is sent directly
-to the desktop without being saved in extension storage. Desktop configuration and
-local diagnostic logs are stored separately from the product data folder.
-
-The browser extension communicates with the paired desktop daemon through a
-WebSocket connection on the same computer. Snapshot capture may request page resources from
-the servers that host those resources.
+Extension storage holds pairing/connection details, recording state, and commands
+waiting briefly for the desktop. Snapshot HTML goes directly to the desktop without
+being saved in extension storage. The paired extension connects to the daemon over
+a WebSocket on the same computer. Snapshot capture may fetch resources from their
+original hosting servers.
 
 ## Optional GitHub sync
 
-GitHub sync is disabled by default. When enabled, Browser Recall uses the supplied
-personal access token to contact GitHub and upload recent logs from the current
-device and note JSON files to the configured repository. Snapshot HTML and Markdown files are
-not uploaded by the current sync implementation.
+GitHub sync is disabled by default. When enabled, the supplied personal access
+token uploads recent current-device logs and note JSON to the configured repository.
+Snapshot HTML and Markdown are not uploaded.
 
-Repository permissions determine who can access synced data. Remembered GitHub
-tokens are stored in local desktop configuration; tokens can also be kept only for
-the current session. Browser Recall does not provide a hosted sync service.
+Repository permissions control access to synced data. Tokens may be saved in local
+desktop configuration or kept for the session. Browser Recall provides no hosted
+sync service.
 
 ## Browser permissions
 
-| Permission | Purpose |
-| --- | --- |
-| `storage` | Desktop connection credentials, recording status, and pending commands |
-| `tabs` | Identify tabs and perform current-page actions |
-| `scripting` | Run highlight and snapshot scripts; read the original page URL from saved snapshots |
-| `webNavigation` | Page and same-document navigation detection |
-| `contextMenus` | Highlight Selected right-click action |
-| `alarms` | Retry the desktop connection and send queued commands |
-| `declarativeNetRequestWithHostAccess` | Temporary rules allowing appropriate referrer headers when downloading snapshot resources |
-| `webRequest` | Snapshot redirect and response-header inspection |
-| `<all_urls>` host access | Page capture, highlights, and snapshot resources on supported pages |
+| Permission                            | Purpose                                                   |
+| ------------------------------------- | --------------------------------------------------------- |
+| `storage`                             | Connection credentials, recording state, pending commands |
+| `tabs`                                | Identify tabs and support current-page actions            |
+| `scripting`                           | Highlights, capture, original snapshot identity           |
+| `webNavigation`                       | Page and same-document navigation                         |
+| `contextMenus`                        | Highlight Selected action                                 |
+| `alarms`                              | Reconnect and deliver queued commands                     |
+| `declarativeNetRequestWithHostAccess` | Temporary referrer rules for snapshot downloads           |
+| `webRequest`                          | Snapshot redirect and response-header inspection          |
+| `<all_urls>`                          | Capture, highlights, and resources on supported pages     |
 
-Chrome's separate **Allow access to file URLs** setting enables extension actions
-on snapshots opened as local files.
+Chrome's **Allow access to file URLs** setting enables actions on local snapshots.
 
 ## Deletion
 
-Removing the extension removes the extension's stored data but leaves the desktop
-library intact. Quit Browser Recall and standalone daemons before deleting the
-selected data folder, or use Delete under desktop Settings → Data.
+Removing the extension removes extension storage but leaves the desktop library.
+Quit Browser Recall and standalone daemons before deleting the data folder, or use
+**Settings → Data → Delete**. Desktop configuration and logs require separate
+removal for a complete local uninstall.
 
-Local deletion does not remove copies in backups or GitHub repository history.
-Delete those copies separately when removing all retained data. Desktop
-configuration and diagnostic logs must also be removed separately for a complete
-local uninstall.
+Local deletion does not remove backups or GitHub repository history. Remove those
+copies separately when deleting all retained data.
 
 ## Limited use
 
-Browser Recall's use and transfer of information received from Chrome APIs adheres
-to the Chrome Web Store User Data Policy, including the Limited Use requirements.
-Browser Recall uses browsing data only to provide the user's browsing library.
-Browser Recall does not sell user data or use user data for advertising,
-creditworthiness, or lending. Optional GitHub sync transfers data only to the
-repository configured by the user for the browsing library.
+Browser Recall follows the Chrome Web Store User Data Policy, including Limited
+Use requirements. Browsing data serves the user's library. Browser Recall does
+not sell data or use data for advertising, creditworthiness, or lending. Optional
+GitHub sync transfers data only to the user's configured repository for the library.
 
 ## Website analytics
 
-The Browser Recall product website uses GoatCounter to measure page views.
-Website analytics are separate from the desktop app and browser extension.
-GoatCounter receives the product page's path and title, referring page, and
-basic visitor information such as browser, operating system, country, language,
-and screen size. The product page reports the fixed `/browser-recall/` path
-without query strings or fragment identifiers. Automatic click events are disabled.
+The product website uses GoatCounter for page views, separately from the desktop
+app and extension. GoatCounter receives the page path/title, referrer, and basic
+visitor information such as browser, operating system, country, language, and
+screen size. The page reports `/browser-recall/` without query strings or fragments;
+automatic click events are disabled.
 
-GoatCounter does not store cookies or other visitor information in the browser.
-See the [GoatCounter privacy policy](https://www.goatcounter.com/help/privacy)
-for details about GoatCounter's data handling. Local previews and embedded demos
-do not load GoatCounter. Website analytics do not receive Browser Recall browsing
-history, highlights, notes, lists, or snapshots from the user's collection.
+GoatCounter stores no cookies or visitor information in the browser. See the
+[GoatCounter privacy policy](https://www.goatcounter.com/help/privacy). Local previews
+and embedded demos load no analytics. Website analytics receive no history,
+highlights, notes, lists, or snapshots from Browser Recall collections.
 
 ## Contact
 

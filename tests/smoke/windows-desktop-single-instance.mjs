@@ -14,10 +14,15 @@ import path from 'node:path';
 import process from 'node:process';
 
 import {
+  runTestProcess,
   waitForExit,
   stopTestProcess,
   removeTestProfile,
 } from './windows-desktop-process.mjs';
+import {
+  waitForDesktopStartup,
+  waitForProcessProbe,
+} from './desktop-process-readiness.mjs';
 import { withCleanup } from './desktop-test-cleanup.mjs';
 
 import {
@@ -64,7 +69,7 @@ function extractIcoPngs(icoPath, outDir) {
   return sizes;
 }
 
-function verifyEmbeddedWindowsIcons() {
+async function verifyEmbeddedWindowsIcons() {
   const probeDir = mkdtempSync(
     path.join(tmpdir(), 'browser-recall-embedded-icons-'),
   );
@@ -73,13 +78,14 @@ function verifyEmbeddedWindowsIcons() {
     if (JSON.stringify(sizes) !== JSON.stringify(windowsIconSizes)) {
       throw new Error(`Unexpected Windows ICO sizes: ${sizes.join(', ')}`);
     }
-    const output = execFileSync(
-      'powershell.exe',
-      [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        String.raw`
+    const output = (
+      await runTestProcess(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          String.raw`
 Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition @'
 using System;
@@ -121,16 +127,15 @@ foreach ($size in $sizes) {
 }
 Write-Output ($sizes -join ',')
 `,
-      ],
-      {
-        encoding: 'utf8',
-        env: {
-          ...process.env,
-          BROWSER_RECALL_ICON_EXE: executable,
-          BROWSER_RECALL_ICON_SLOTS: probeDir,
+        ],
+        {
+          env: {
+            ...process.env,
+            BROWSER_RECALL_ICON_EXE: executable,
+            BROWSER_RECALL_ICON_SLOTS: probeDir,
+          },
         },
-        windowsHide: true,
-      },
+      )
     ).trim();
     if (output !== windowsIconSizes.join(',')) {
       throw new Error(`Unexpected native icon probe output: ${output}`);
@@ -140,14 +145,15 @@ Write-Output ($sizes -join ',')
   }
 }
 
-function verifyRuntimeWindowsIcons(processId) {
-  const output = execFileSync(
-    'powershell.exe',
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-Command',
-      String.raw`
+async function verifyRuntimeWindowsIcons(processId, timeoutMs = 15_000) {
+  const output = (
+    await runTestProcess(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        String.raw`
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -227,15 +233,15 @@ if ($actual[1] -ne $expectedBig) {
 }
 Write-Output "$dpi,$expectedSmall,$expectedBig"
 `,
-    ],
-    {
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        BROWSER_RECALL_ICON_PROCESS: String(processId),
+      ],
+      {
+        timeoutMs,
+        env: {
+          ...process.env,
+          BROWSER_RECALL_ICON_PROCESS: String(processId),
+        },
       },
-      windowsHide: true,
-    },
+    )
   ).trim();
   const [dpi, small, big] = output.split(',').map(Number);
   if (![dpi, small, big].every(Number.isInteger)) {
@@ -244,29 +250,7 @@ Write-Output "$dpi,$expectedSmall,$expectedBig"
   return { dpi, small, big };
 }
 
-async function waitForRuntimeWindowsIcons(child, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  let lastError;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(
-        'The desktop process exited before its native window was ready',
-      );
-    }
-    try {
-      return verifyRuntimeWindowsIcons(child.pid);
-    } catch (error) {
-      lastError = error;
-    }
-    await delay(100);
-  }
-  const detail = lastError instanceof Error ? `: ${lastError.message}` : '';
-  throw new Error(
-    `The desktop window icons were not ready within ${timeoutMs}ms${detail}`,
-  );
-}
-
-verifyEmbeddedWindowsIcons();
+await verifyEmbeddedWindowsIcons();
 if (process.argv.includes('--icons-only')) {
   console.log(
     `Executable contains exact generated icon representations: ${windowsIconSizes.join(', ')} px`,
@@ -284,29 +268,29 @@ if (
   const processId = runningIconProcessArgument
     ? Number(runningIconProcessArgument.split('=', 2)[1])
     : Number(
-        execFileSync(
-          'powershell.exe',
-          [
+        (
+          await runTestProcess('powershell.exe', [
             '-NoProfile',
             '-NonInteractive',
             '-Command',
             '(Get-Process browser-recall-desktop | Select-Object -First 1).Id',
-          ],
-          { encoding: 'utf8', windowsHide: true },
+          ])
         ).trim(),
       );
-  const iconSizes = verifyRuntimeWindowsIcons(processId);
+  const iconSizes = await verifyRuntimeWindowsIcons(processId);
   console.log(
     `Running desktop exposes ${iconSizes.small}px and ${iconSizes.big}px window icons at ${iconSizes.dpi} DPI`,
   );
   process.exit(0);
 }
 
-const taskList = execFileSync(
-  'tasklist.exe',
-  ['/FI', `IMAGENAME eq ${path.basename(executable)}`, '/FO', 'CSV', '/NH'],
-  { encoding: 'utf8', windowsHide: true },
-);
+const taskList = await runTestProcess('tasklist.exe', [
+  '/FI',
+  `IMAGENAME eq ${path.basename(executable)}`,
+  '/FO',
+  'CSV',
+  '/NH',
+]);
 if (taskList.toLowerCase().includes(path.basename(executable).toLowerCase())) {
   throw new Error('Close Browser Recall before running the native smoke test');
 }
@@ -315,6 +299,7 @@ const workDir = mkdtempSync(
   path.join(tmpdir(), 'browser-recall-windows-native-smoke-'),
 );
 const profileDir = path.join(workDir, 'profile');
+const startupTraceFile = `${profileDir}.startup-stages.log`;
 const logDir = isolatedDesktopLogDir(profileDir);
 const desktopEnvironment = isolatedDesktopEnvironment(process.env, profileDir);
 
@@ -343,23 +328,96 @@ function readNewLogs() {
 
 let first;
 let second;
+let startupOutput = '';
+function readStartupStages() {
+  try {
+    return readFileSync(startupTraceFile, 'utf8');
+  } catch (error) {
+    return `Startup stages unavailable: ${error.message}`;
+  }
+}
+function startupDiagnostics() {
+  const details = [
+    `Startup stages (${startupTraceFile}):\n${readStartupStages()}`,
+  ];
+  try {
+    details.push(`Profile files:\n${readdirSync(profileDir).join('\n')}`);
+  } catch (error) {
+    details.push(`Profile files unavailable: ${error.message}`);
+  }
+  try {
+    const processes = execFileSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        String.raw`
+$ownerId = [int]$env:BROWSER_RECALL_STARTUP_PID
+Get-CimInstance Win32_Process -Filter "ProcessId = $ownerId OR ParentProcessId = $ownerId" |
+  Select-Object Name, ProcessId, ParentProcessId, KernelModeTime, UserModeTime |
+  ConvertTo-Json -Compress
+`,
+      ],
+      {
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 5000,
+        killSignal: 'SIGKILL',
+        env: {
+          ...desktopEnvironment,
+          BROWSER_RECALL_STARTUP_PID: String(first.pid),
+        },
+      },
+    );
+    details.push(`Startup processes:\n${processes.trim()}`);
+  } catch (error) {
+    details.push(`Startup process inspection failed: ${error.message}`);
+  }
+  return details.join('\n');
+}
+const startupFailure = (error) => {
+  const message = `${error.message}; exitCode=${first.exitCode}, signal=${first.signalCode}\nOutput:\n${startupOutput}\nLogs:\n${error.startupLogs || ''}\n${startupDiagnostics()}${error.followUp ? `\n${error.followUp}` : ''}`;
+  if (process.env.GITHUB_ACTIONS === 'true') {
+    const annotation = message
+      .replaceAll('%', '%25')
+      .replaceAll('\r', '%0D')
+      .replaceAll('\n', '%0A');
+    console.log(`::error title=Windows native startup::${annotation}`);
+  }
+  return new Error(message, { cause: error });
+};
 await withCleanup(async () => {
+  // windowsHide applies SW_HIDE to GUI apps too. Honor the application's first
+  // ShowWindow call, as the native update/relaunch scenario does.
   first = spawn(executable, [], {
-    stdio: 'ignore',
-    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
     env: desktopEnvironment,
   });
+  for (const stream of [first.stdout, first.stderr]) {
+    stream?.setEncoding('utf8');
+    stream?.on('data', (text) => (startupOutput += text));
+  }
   await once(first, 'spawn');
-  await waitFor(
-    () => first.exitCode === null && readNewLogs().length > 0,
-    15000,
-    'The first desktop process did not finish native startup',
+  try {
+    await waitForDesktopStartup(first, {
+      readLogs: readNewLogs,
+      readStages: readStartupStages,
+    });
+  } catch (error) {
+    throw startupFailure(error);
+  }
+  const iconSizes = await waitForProcessProbe(
+    first,
+    verifyRuntimeWindowsIcons,
+    {
+      timeoutMs: 15_000,
+      description: 'The desktop window icons',
+    },
   );
-  const iconSizes = await waitForRuntimeWindowsIcons(first, 15000);
 
   second = spawn(executable, ['browser-recall://settings'], {
     stdio: 'ignore',
-    windowsHide: true,
     env: desktopEnvironment,
   });
   const secondExit = await waitForExit(second, 15000);

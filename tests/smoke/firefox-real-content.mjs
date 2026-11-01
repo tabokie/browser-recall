@@ -6,6 +6,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import { stopFirefoxProcess } from './firefox-process.mjs';
+import { withCleanup } from './desktop-test-cleanup.mjs';
 import { installPopupStartupFailure } from '../fixtures/popup-startup-failure.mjs';
 import {
   canonicalizePageUrl,
@@ -49,6 +50,14 @@ function readVisitRecords(configDir) {
   );
 }
 
+function closeServer(entry) {
+  if (!entry?.listening) return;
+  return new Promise((resolve, reject) => {
+    entry.close((error) => (error ? reject(error) : resolve()));
+    entry.closeAllConnections?.();
+  });
+}
+
 let extensionDir;
 let configDir;
 let portReservation;
@@ -56,7 +65,7 @@ let daemon;
 let server;
 let firefox;
 let timeout;
-try {
+await withCleanup(async () => {
   extensionDir = fs.mkdtempSync(
     path.join(os.tmpdir(), 'browser-recall-firefox-real-extension-'),
   );
@@ -564,32 +573,18 @@ console.error = (...args) => {
       'Firefox did not persist the visit: ' + url,
     );
   }
-} finally {
-  clearTimeout(timeout);
-  // Every allocation, including staging and daemon startup, is inside this boundary.
-  const cleanup = await Promise.allSettled([
-    stopFirefoxProcess(firefox),
-    stopTestDaemon(daemon),
-    ...[server, portReservation]
-      .filter((entry) => entry?.listening)
-      .map(
-        (entry) =>
-          new Promise((resolve, reject) => {
-            entry.close((error) => (error ? reject(error) : resolve()));
-            // A browser request must not hold cleanup open after the probe.
-            entry.closeAllConnections?.();
-          }),
-      ),
-  ]);
-  cleanupStagedAssets(extensionDir);
-  if (configDir) fs.rmSync(configDir, { recursive: true, force: true });
-  const failures = cleanup.filter((result) => result.status === 'rejected');
-  if (failures.length)
-    throw new AggregateError(
-      failures.map((result) => result.reason),
-      'Firefox check cleanup failed',
-    );
-}
+}, [
+  () => clearTimeout(timeout),
+  () => stopFirefoxProcess(firefox),
+  () => stopTestDaemon(daemon),
+  () => closeServer(server),
+  () => closeServer(portReservation),
+  () => cleanupStagedAssets(extensionDir),
+  () => {
+    if (configDir) fs.rmSync(configDir, { recursive: true, force: true });
+  },
+]);
+
 console.log(
   'Real Firefox verified page capture, navigation, URL normalization, daemon persistence, paused-document exclusion until refresh, options-page messages, native popup growth and shrinkage, and fatal-error controls; process cleanup completed.',
 );

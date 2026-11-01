@@ -1,68 +1,40 @@
 # Browser Recall — Architecture
 
 Browser Recall stores browsing history, highlights, lists, and snapshots in a
-user-selected local folder. The desktop app manages stored data and product settings.
-The browser extension captures pages and provides current-page actions.
+user-selected folder. The desktop app manages data and settings; the browser
+extension captures pages and provides current-page actions.
 
 ## Components
 
-The public product website in `website/` is a separate static page hosted on
-GitHub Pages. The website presents the product through a browser-local sample
-collection and verified documentation screenshots. The website has no backend
-or access to the daemon or a visitor's Browser Recall data. The HTTPS website
-uses GoatCounter for page views in the existing blog dashboard, under the
-`/browser-recall/` path. Local previews and embedded demos do not load GoatCounter,
-and automatic click events are disabled. Website
-builds copy the page and selected presentation modules/public assets to
-`dist/website/`. Timeline search and result renderers and popup list-chip markup
-are shared with the production interfaces. Highlighting uses the production
-highlight lifecycle and saved-note renderer in a display-only preview. Timeline
-search is display-only, Timeline rows support selection, and Book uses the
-documentation screenshot seed with production styles. Book retains the full
-multi-day content inside the same fixed-height iframe as Timeline, clipping
-content beyond the viewport. All feature panels retain the same 510px height,
-fitting interactive previews into the space below the phone copy. Desktop and
-website Book markup shares `book-elements.js`, a presentation module with a
-read-only option; hosts own data loading, grouping, and interactions. Book paragraphs share
-`book-typesetting.js`, using the same Justif version, English hyphenation, and
-punctuation settings. The website build includes Justif as local assets.
-The build extracts production
-HTML/CSS into iframe documents, keeping product styling independent of website
-styling. Embedded document styles let scrolling reach the main page. The demo
-keeps a compact sidebar visible down to a 320px embedded viewport; narrower
-viewports use the product's overlay navigation. Timeline site and time columns
-are hidden on compact phone layouts to leave room for page titles. The demo
-scripts supply fictional content and in-memory page and list selection only.
-
-The daemon is the Rust service that reads and writes Browser Recall data. The daemon
-runs inside the desktop app and accepts commands from the desktop interface and
-browser extension.
+The daemon is the Rust service inside the Tauri desktop process. Desktop commands
+call the daemon directly; extensions connect through authenticated local WebSockets.
 
 ```text
 desktop UI → Tauri commands/events → daemon → replay/search → data folder
 browser extension → authenticated local WebSocket → daemon
 ```
 
-| Component | Responsibility |
-| --- | --- |
-| `apps/desktop/ui/` | Timeline, Book, lists, search, imports, settings, and recycle bin |
-| `apps/desktop/src-tauri/` | Native windows, setup, deep links, launch at login, and calls to the daemon |
-| `crates/daemon/` | Commands, data reads and writes, recording policy, rules, pairing, and sync |
-| `crates/replay/` | Apply logged events, define data formats, decide which page files to save, and verify stored data |
-| `crates/search/` | Native history, note, and snapshot-text search |
-| `apps/extension/` | Capture, popup actions, pairing, and a size-limited queue of pending commands |
-| `packages/core/` | Shared URL handling, highlights, Markdown extraction, translations, and UI utilities |
+| Component                 | Responsibility                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------ |
+| `apps/desktop/ui/`        | Timeline, Book, search, lists, settings, imports, recycle bin                  |
+| `apps/desktop/src-tauri/` | Native windows, setup, deep links, login, reviews, updates, daemon integration |
+| `crates/daemon/`          | Storage, commands, recording policy, rules, pairing, sync                      |
+| `crates/replay/`          | Event schemas, replay, checkpoint selection, data verification                 |
+| `crates/search/`          | History, note, and snapshot-text search                                        |
+| `apps/extension/`         | Capture, popup, pairing, temporary command queue                               |
+| `packages/core/`          | Shared identity, highlights, extraction, translations, UI helpers              |
+| `website/`                | Static product page and fictional demos                                        |
 
-The Tauri desktop app starts one daemon in the same process. Desktop commands call
-the daemon directly; the browser extension connects through a local WebSocket.
-Storage, search, rules, title cleanup, blacklist policy, and automatic pinning stay
-in the daemon.
+The website shares presentation modules with the application but has no backend
+or access to user data. Isolated iframe demos use production styles, Book markup,
+Justif typesetting, and sample data. Demos keep a fixed 510 px height and leave
+scrolling to the outer page. GoatCounter page views run only on the hosted HTTPS
+page; see [Privacy](PRIVACY.md#website-analytics).
 
 ## Storage
 
-Setup requires the user to choose a data folder. Browser Recall does not choose a
-default folder. Standalone daemons and tests must also specify a folder or load an
-existing configuration.
+Setup requires an explicit data-folder choice. Standalone daemons and tests must
+also specify a folder or load an existing configuration.
 
 ```text
 <data-folder>/
@@ -81,591 +53,295 @@ existing configuration.
     replay-progress.json
 ```
 
-Each JSONL log contains one recorded event per line. Replay means applying those
-events in order to rebuild current data. Checkpoints are JSON files in `views/`
-that save the results of replay so the daemon can read data without rebuilding
-everything.
+Logs contain one event per JSONL line and are the source of truth. Replay applies
+those events to rebuild current state. Checkpoints in `views/` save replay results.
+A slug identifies a page or note; a shard is the first two hexadecimal characters
+of the SHA-256 hash of the page slug or snapshot stem. Record IDs omit the shard.
 
-The daemon saves a page checkpoint only when the page belongs to a list, has a note
-or snapshot, has a user-edited title, or has a rating. Browsing alone does not require
-a page checkpoint. The daemon and replay verifier use the same Rust function to
-decide which page checkpoints should exist.
+Save a page checkpoint only for list membership, notes, snapshots, a user-edited
+title, or a rating. The daemon and verifier share this decision in Rust replay.
+Note JSON stores highlights and annotations. Snapshot HTML cannot be rebuilt from
+logs; optional snapshot Markdown provides searchable text.
 
-Note JSON files contain highlights and annotations. Snapshot HTML files reopen
-saved pages; optional Markdown files provide searchable snapshot text.
+The daemon maintains a data-format guide in the data folder's AGENTS.md, preserving
+user-written text outside the managed section. The guide is not synced. External
+writers must follow [the data-folder contract](../crates/daemon/resources/data-AGENTS.md).
+Browser Recall has no general filesystem watcher: restart to apply external logs.
 
-A slug is the identifier used in a page or note filename. Page and snapshot files
-are divided into subdirectories called shards. A shard name is the first two
-hexadecimal characters of the SHA-256 hash of the slug or snapshot filename stem.
-Record identifiers do not include the shard name.
+### Identity and schemas
 
-The daemon writes a data-format guide to the data folder's `AGENTS.md`. Startup
-updates the generated section and local device ID while preserving user-written
-text. The guide is not synced; update errors produce a warning.
+`packages/core/page-identity.js` defines URL normalization and slugs. The extension
+removes query parameters beginning with `_`; other query parameters and fragments
+distinguish pages. Rust replay hashes the supplied URL, so migrations and external
+writers must use the same normalization.
 
-### URLs and data formats
+Rust replay rejects unknown fields, invalid values, and missing required fields,
+including nullable fields. Optional references may be absent for valid non-page
+URLs; malformed HTTP(S) references remain errors. Command previews, hints, legacy
+`items`, rule `fields`, and `case_sensitive` do not belong in logs.
 
-`packages/core/page-identity.js` normalizes URLs and generates page slugs. The
-extension removes query parameters beginning with `_` before reporting visits.
-Other query parameters and fragments distinguish pages. Rust replay hashes the URL
-received from the caller. Other tools that write events must normalize URLs the
-same way as the extension to refer to the same pages.
+`pin_to_list` and `unpin_from_list` use `urls`. Non-null `pin_to_list.titles` must
+align with `urls`; nullable `source` is required and must not become `manual` when
+absent. List `slug`, `name`, and `owner` must be nonempty. Live notes require
+nonempty, aligned `excerpt` and `cssPath` arrays; deleted notes may omit anchors.
 
-Log and checkpoint validation rejects unknown fields and invalid values. Required
-log fields must be present even when the value is `null`. Preview text and command
-hints are not saved in logs. Migrate stored data before running code that requires
-a changed data format.
+Migrate data before changing formats, then remove obsolete readers/writers.
+Malformed Browser Recall files cause explicit errors; unrelated files are ignored.
 
-`pin_to_list` and `unpin_from_list` use `urls`. The nullable `pin_to_list.titles`
-array, when populated, must align with `urls`; the nullable `source` field is also
-required in the log. A saved pin without a recorded source leaves the source absent
-rather than assigning `manual`. List `slug`, `name`, and `owner` must be non-empty
-strings.
+### Writes and recovery
 
-Notes that have not been deleted require non-empty `excerpt` and `cssPath` arrays
-of equal length. Each text excerpt has a matching location on the page. Deleted
-note records may omit those locations. Pages retain every list, note, and snapshot
-reference; references to pages that led to a visit have a size limit.
+`crates/daemon/src/runtime.rs` serializes writes:
 
-### Writes and crash recovery
-
-`crates/daemon/src/runtime.rs` processes writes one at a time:
-
-1. Read current data. For a batch, apply each command to the results of earlier commands.
-2. Reserve space in the background checkpoint writer's queue.
+1. Read current state, including results of earlier commands in a batch.
+2. Reserve space in the checkpoint writer's queue.
 3. Append validated events to the logs.
-4. Apply the events to the daemon's in-memory data.
-5. Queue checkpoint writes in the same order as the accepted commands.
+4. Apply events to in-memory state.
+5. Queue checkpoints in accepted-command order.
 
-Reads use the latest in-memory data. If a record is not cached, the daemon reads
-the record from disk through the storage layer. Checkpoint writes use a temporary
-file followed by a rename, so readers cannot see a partially written JSON file.
-Shutdown, deletion, and reset operations wait for or coordinate pending writes so
-older writes cannot recreate deleted data.
+Reads use current memory and storage-layer disk reads for uncached records.
+Checkpoints use temporary-file replacement. Shutdown, deletion, and reset coordinate
+pending writes so older work cannot recreate deleted records.
 
-`replay-progress.json` records how far each device's logs have been saved to
-checkpoints. Startup applies newer log entries before serving reads. This recovers
-commands that succeeded before a crash but whose checkpoint writes were unfinished.
-Applying the same event twice must produce the same result as applying the event
-once; this requirement is called idempotence.
+`replay-progress.json` records each device's checkpoint watermark. Startup replays
+newer accepted events before serving reads. Replay must be idempotent: applying an
+event twice has the same result as applying the event once. Rename handlers must
+recognize the destination through stable record identity or replay timestamps.
 
-Sync validates downloaded records and checks whether replay succeeds before
-installing the records. The daemon finishes earlier checkpoint writes, installs
-the downloaded files, and updates in-memory data. Downloaded events are not
-appended again as local events.
+Sync validates downloaded records and replay before installation, finishes earlier
+checkpoint work, then installs files and updates memory. Downloaded events are not
+appended again as local events. Notifications retain affected record IDs and change
+types, including visits versus metadata edits; deduplication compares contents too.
 
-Browser Recall validates log filenames, records, timestamps, checkpoint keys, and
-record slugs. Files outside the Browser Recall data layout are ignored. Missing
-required directories or invalid Browser Recall data cause explicit read errors.
+## Commands, reads, and configuration
 
-### External writers
+`command_authority.rs` validates semantic commands for Tauri and authenticated
+WebSocket callers. Commands describe actions such as pinning a page or creating a
+note. Invalid requests fail before mutation. Success and notifications follow log
+append and in-memory publication. Wrappers must reject `{ success: false }`.
 
-Stop Browser Recall and standalone daemons before appending to the current device's
-logs. Preserve existing records and use timestamps later than both the newest log
-entry and the saved replay progress.
-
-A separate device ID used by an external tool can publish complete dated log files
-while Browser Recall runs. Keep existing entries unchanged and write to a temporary
-file in the same directory, then rename the file into place. Appending directly to
-a file that Browser Recall can read risks exposing an incomplete log entry.
-
-Writing files externally does not immediately update the desktop's in-memory data.
-Restart Browser Recall to apply the new log entries. History reads may find new
-entries on disk before the rest of the interface reflects the entries. Browser
-Recall has no filesystem watcher or general API for external file changes. GitHub
-sync uploads the current device's recent logs; logs written under another device
-ID are not uploaded automatically.
-
-## Commands and data reads
-
-`crates/daemon/src/command_authority.rs` defines commands for both Tauri and
-authenticated WebSocket callers. Commands describe actions such as pinning a page
-or creating a note. Each request is parsed once into a supported command type.
-Invalid, missing, or unknown fields cause an error before any data changes.
-The daemon reports success and notifies clients after appending the events and
-updating in-memory data.
-
-`crates/daemon/src/read_projections.rs` builds responses for list display, page
-context, highlight history, page info, list trees, recycle-bin entries, popup lists,
-and settings. These responses are called projections: each response combines the
-records needed for one view. Referenced records are read through the storage layer.
-A missing or invalid reference causes an error for the whole response.
-
-Responses expose fields such as `kind`, `slug`, `listSlugs`, and `hasSnapshots`.
-Internal relationship IDs stay inside the daemon. Popup
-lists contain `slug`, `name`, `containsPage`, and `lastActivity`, without raw pins.
-The popup summary combines access policy, display title, page data, notes,
-snapshots, lists, and attention in one request.
+`read_projections.rs` combines records for page context, lists, highlights, trees,
+recycle bin, popup, and settings. Referenced records come through storage; invalid
+references fail the response. Internal relationship IDs stay in the daemon.
+Search and UI details use these APIs rather than reconstructing storage keys.
 
 Highlight history follows original `create_note` events through replacement chains.
-Concurrent replacements remain separate live highlights. Creation time comes from
-the note's original event, never the page's latest visit. A cursor lets the client
-request the next batch from a fixed, size-limited highlight index. Each batch reads
-current note and page data only for the requested highlights.
+Concurrent replacements remain visible. Cursor batches use creation time and read
+current note/page records for the requested highlights only.
 
-Folder selection, window control, language changes, opening external URLs, and sync
-are available through Tauri only. Pairing, extension connection status, visit reports,
-and checks of whether a page may be recorded are available through WebSocket only.
-Reading arbitrary records, submitting raw log events, resets, and other test
-operations require `test_control` and explicitly enabled test access. Production
-extension builds omit test request handlers.
+Native window/folder operations, language changes, external URLs, and sync use
+Tauri. Pairing, connection status, visits, and recording eligibility use WebSocket.
+Raw events, arbitrary record access, resets, and seeding require explicitly enabled
+`test_control`; production extensions omit test handlers.
 
-Configuration changes use `ConfigStore::update`. A shared file lock prevents
-concurrent writers from overwriting each other's changes; temporary-file replacement
-prevents partial JSON reads. Each caller changes only the fields the caller manages.
-WebSocket handlers do not keep a separate editable copy of configuration.
-`ConfigStore` upgrades configurations from older releases by filling omitted
-fields from the same defaults used for a fresh installation. The complete
-configuration is validated and saved atomically under the writer lock; an upgrade
-re-reads the file after acquiring the lock to preserve concurrent changes. Present
-malformed values and unknown fields remain errors. Missing device identity is
-derived from the machine and persisted. A missing data-folder path returns to
-setup; a missing setup flag is inferred from the existing path.
-Nested configuration metadata has defaults too. Pairing identities and tokens
-remain required. Missing review attempt arrays default to empty; missing
-first-opening timestamps are recovered from the first request using the shared
-seven-day delay, or start at the current time when no requests exist. Recovery
-preserves existing request timestamps and the two-request limit.
+### Local configuration
 
-The desktop stores local configuration directly in `config.json` in Tauri's
-application configuration directory. The local configuration includes the selected
-data-folder path, device identity, and connector credentials. Desktop test profiles
-use the same `config.json` layout at the profile root. The standalone daemon uses
-the directory passed through `--config-dir`.
+Desktop `config.json` lives directly in Tauri's application configuration directory,
+separate from the collection. The file stores the data-folder path, device identity,
+pairing credentials, sync metadata, and optional review history. Desktop test profiles
+use `config.json` at the profile root; standalone daemons use `--config-dir`.
+
+`ConfigStore::update` locks, re-reads, validates, and atomically replaces configuration.
+Callers change only owned fields. Missing fields from older releases receive
+canonical defaults; malformed supplied values and unknown fields remain errors.
+Missing device identity is machine-derived; a missing data path returns to setup;
+`setup_complete` is inferred from an existing path.
+
+Nested metadata also has upgrade defaults, but connector identities and pairing
+tokens remain required. Missing review attempts become an empty array. A missing
+first-opening timestamp is recovered from the first request minus seven days, or
+starts now when no requests exist. Recovery preserves request times/counts and
+persists completed configuration under the writer lock.
 
 ## Desktop app
 
-The `mac-app-store` Cargo feature selects the Mac App Store distribution channel.
-Only the Mac App Store channel initializes local `review_requests` history in
-`config.json` and can call StoreKit. The first request becomes eligible seven days
-after the first opening; the second request becomes eligible thirty days after the
-first request. There are at most two attempts, with no expiry windows. Atomic
-configuration updates on a blocking worker save an attempt before calling StoreKit, including when
-StoreKit suppresses the dialog. Collection changes and app updates retain the
-history. Invalid history is an explicit configuration error. Configuration writes
-that fail prevent the StoreKit call and are logged without interrupting the user.
+Closing the window hides the webview while the process stays running. Tray, Dock,
+and deep-link actions reopen the same window. Single-instance handling registers
+before other plugins. Off-screen saved positions are centered on an available
+display. On macOS, preserve the complete `NSWindow` frame rather than deriving the
+frame from webview size.
 
-Successful list, rule, page-title, and note edits, completed searches, completed
-navigation to Timeline, Book or a list, and closing page details create review
-opportunities. Views register busy editors, dialogs and visible errors with the
-frontend coordinator; imports and searches register pending work. The desktop
-waits for three seconds without interaction and requires a focused, visible window
-with no busy work or sync operation. Activity, focus loss, new busy work or a webview
-reload invalidates the frontend request context even after dispatch. The Rust review
-coordinator owns eligibility, durable reservation and cancellation; an unused
-reservation is rolled back on a worker. Native activity epochs reject delayed
-requests even if the cancellation message has not reached Rust. No configuration
-locking, JSON work or file writes run in the AppKit presentation callback.
-The native bridge invokes `AppStore.requestReview(in:)` on the AppKit main thread
-using a small Swift bridge; macOS versions before 13 do not request reviews.
-Desktop test profiles never invoke StoreKit. The Mac App Store channel also omits
-the GitHub updater plugin, rejects manual updater calls, and hides updater controls.
-Regular builds retain GitHub updates and cannot request App Store reviews.
-
-Local, release, and disk-image builds share desktop build orchestration: stage UI
-assets, compile with Tauri, sign, and verify staged artifacts before replacing
-previous output. Release packaging consumes the verified artifacts. Explicit
-unsigned builds use ad-hoc signing on macOS without an Apple certificate. Explicit
-signed builds resolve an installed Apple signing identity or Windows code-signing
-certificate before compilation and verify staged output against the selected
-certificate. Windows signing uses Authenticode for executables and installers.
-Both explicit local modes exclude notarization and update-package credentials;
-release packaging manages those credentials separately.
-
-Desktop and browser extension releases use a manual GitHub Actions workflow.
-Browser Recall uses one product version across desktop and extension manifests,
-desktop and extension npm packages, desktop Cargo metadata, and GitHub Release tags. Release preparation
-validates every product version against root `package.json` before building.
-`scripts/lib/product-version.mjs` supplies the same validation to local release
-builds and update manifest generation, including both lockfiles.
-Native Windows and macOS runners and a Linux extension runner build the dispatch
-commit. Windows ships a current-user Nullsoft Scriptable Install System (NSIS) installer;
-macOS ships Apple Silicon and Intel disk images containing Browser Recall.app.
-The release includes signed update packages and a Tauri update manifest hosted
-on GitHub Releases. Publishing waits for package, signature, and native
-installation checks, attaches SHA-256 checksums, and never replaces a release.
-Chrome and Firefox ship as separate ZIP archives with a manifest at the archive
-root. The workflow compares extracted archives with the production build output
-and requires both extension archives before publishing the combined release.
-
-`apps/desktop/src-tauri/src/updates.rs` owns update state and serializes checking,
-downloading, and installation through the Tauri updater. Release builds check
-GitHub's latest stable release on startup and every twelve hours. Users explicitly
-choose Update and restart. The updater verifies the package signature before
-stopping the daemon. The native command/sync gate excludes concurrent operations;
-daemon shutdown closes connector sessions, waits for accepted commands, and saves
-checkpoints. The update coordinator holds its operation lock through daemon
-recovery or restart, and publishes retryable failures only after recovery finishes.
-App updates do not depend on GitHub sync configuration. Update errors and
-progress appear in Settings; available updates also have a sidebar action.
-Application updates preserve configuration and collection storage.
-Release CI runs an older native app through a signed update and relaunch on both
-operating systems, retaining an authenticated connector, accepted note edits,
-settings, and the selected collection. The connector must reconnect and write
-successfully after relaunch.
-`ServerStartOptions::with_environment_ports` applies the same strict port override
-to desktop and standalone daemon startup; isolated native tests use a dedicated
-port instead of the browser-discoverable default ports.
-
-Closing the desktop window keeps the process and webview running. Tray actions,
-Dock actions, and deep links reopen and focus the same window. Single-instance
-handling registers before other plugins so launching the app again reaches the
-existing process. If a saved window position is off-screen after a display change,
-the app centers the window on an available display.
-
-On macOS, Control Center tracks menu bar ownership per login user. Temporary app
-identifiers and data folders do not isolate those records. Native lifecycle tests,
-update tests, and desktop development launches require an explicit disposable-account
-acknowledgement. The acknowledgement is a provisioning contract rather than an
-account-isolation detector. Documentation builds use the Cargo feature `no-tray` to
-omit the menu bar item. The shared documentation launcher verifies the compiled
-mode before initializing native application services. Browser-based visual tests
-do not create Browser Recall menu bar items.
-
-On macOS, `NSWindow` is the AppKit window that owns the webview. Closing saves the
-complete `NSWindow` frame; reopening restores that frame on the main thread if
-the frame changed while hidden. The webview's inner size can differ from the
-window's content size, so restoring from the webview size can shrink the window.
-
-A daemon startup failure leaves the window open with a visible error. Resume can
-start the daemon after storage is repaired. Simultaneous start requests share one
-startup attempt; reading storage never starts a second daemon. Rust errors are
-returned to callers, and locks remain usable after a thread panics.
+A daemon startup failure leaves a visible error with Resume after storage repair.
+Concurrent starts share one attempt; reads never start another daemon. Errors
+reach callers, and locks remain usable after a thread panic.
 
 Launch at login uses macOS `SMAppService`, Linux autostart, or a quoted Windows Run
-registration. If saving the setting fails, the app undoes the operating-system
-change. Startup checks the saved setting against the operating-system registration.
-Check failures appear beside the setting without blocking the rest of the app.
+registration. Failed persistence rolls back the operating-system change. Startup
+reconciles the registration and reports failures beside the setting.
 
-### Rendering and refreshes
+Tauri plugins generating permission schemas remain unconditional Cargo dependencies,
+even when runtime use is platform-specific. Generated schemas must match across hosts.
 
-Snapshot rows open saved HTML in the default application. The snapshot folder
-action reveals and selects the snapshot HTML file and optional Markdown file in
-the system file manager. Missing snapshot HTML produces an explicit error.
+### Reviews and updates
 
-Timeline and Book navigation activate the destination and title immediately, then
-wait for the navigation animations before rendering content. Unrelated or repeating
-animations cannot delay navigation. Loading a language updates the title of the
-active view.
+The `mac-app-store` Cargo feature enables StoreKit and disables GitHub updating.
+Only this channel initializes `review_requests` in `config.json`. The first attempt
+requires seven days after first opening; the second requires thirty days after
+the first attempt. At most two attempts are allowed, with no expiry windows.
+Collection changes and app updates preserve history.
 
-The main pane and sidebar scroll independently. `refreshCurrentView()` dispatches
-data refreshes and shows read failures. Data refreshes preserve reading
-position: list updates reload data from the daemon and restore the visible
-row; Timeline and category updates retain the existing layout; Book refreshes keep
-the latest offset, including scrolling while more highlights load. Destination
-changes start at the top. Fullscreen transitions
-preserve both scroll containers through resize and paint.
+Successful edits, searches, navigation, and closing details create review
+opportunities. Presentation requires three seconds without interaction, a focused
+visible window, and no busy editor, dialog, error, import, search, or sync. Activity,
+focus loss, new work, and webview reload cancel stale requests.
 
-Book requests successive batches of highlights without waiting for scrolling. Highlights
-are grouped by local date and page in one reading view. Notes use a two-column
-layout when present. Edits and deletes made in Book update the affected entries in
-place. Matching daemon notifications confirm those changes without reloading Book;
-changes made elsewhere refresh Book. Gentium Book Plus fonts and Justif provide
-text layout and hyphenation. Copying preserves the original text.
+The Rust coordinator owns eligibility, reservation, cancellation, and rollback.
+A blocking worker persists an attempt before StoreKit; suppression still consumes
+the attempt. Failed persistence prevents presentation. Native activity epochs
+reject delayed callbacks. The AppKit callback performs no configuration locking,
+JSON processing, or file I/O. The Swift bridge uses `AppStore.requestReview(in:)`
+on macOS 13+; test profiles never invoke StoreKit.
+
+Regular builds use the GitHub updater and cannot request App Store reviews.
+`updates.rs` serializes checking, download, and installation. Release builds check
+the latest stable release after startup and every twelve hours; users choose
+**Update and restart**. Signature verification precedes daemon shutdown. Installation
+waits for commands/sync, closes connectors, and saves accepted writes. The operation
+lock remains held through recovery/restart; errors become retryable afterward.
+Updates preserve configuration and collection data and do not require GitHub sync.
+
+### Rendering
+
+Timeline and Book activate navigation state synchronously, then wait only for named
+navigation transitions. Unrelated animations cannot delay content. Main/sidebar
+scroll independently; refreshes retain reading position, including scrolling during
+pagination. Destination changes start at the top.
+
+Virtual scrolling renders nearby rows. Use consistent viewport-relative coordinates
+for row positions and anchors, preserve computed padding, and avoid full `innerHTML`
+replacement during DOM-changing callbacks. Read back clamped scroll positions.
+
+Book loads successive highlight batches, groups by local date/page, and edits rows
+in place. Matching notifications confirm local changes; external changes refresh
+Book. Gentium Book Plus and Justif provide text layout while copying preserves the
+original text. Snapshot actions open HTML or reveal/select HTML and optional
+Markdown in the file manager; missing HTML is an explicit error.
 
 ## Browser connector
 
-The build scripts generate separate Chromium and Firefox extensions.
-`browser-api.js` exposes browser APIs usable from the calling script and locates
-shadow roots. `browser-privileged-api.js` checks APIs available only to background
-scripts. Orion uses the Chromium extension, but pairing records the browser as Orion.
+Separate Chromium/Firefox builds share capture and command code. Browser API
+adapters distinguish background-only capabilities and identify Orion explicitly.
+An injected page-world script detects History API changes; browser navigation events
+cover other transitions. Duplicate reports do not repeat leave/visit actions.
 
-Content scripts capture visits, time on page, and scroll depth. An injected script
-runs in the page's JavaScript environment from document start to detect History API
-and YouTube navigation. Browser history events detect navigation that bypasses the
-injected script. Both paths report leaving and visiting pages, reset highlights,
-and update the badge. Duplicate navigation reports do not repeat those actions.
+### Recording and delivery
 
-The background script owns session recording policy through `recording-controller.js`.
-Navigation starts, navigation commits, attention changes, pause changes, and admission
-of automatic commands share one operation queue. A pause can prevent a report that
-is still being prepared from entering the connector queue. Commands admitted before
-the pause remain accepted; connector delivery and daemon responses do not hold the
-recording operation queue open. Toolbar icons update without contacting content
-scripts, and recording changes do not broadcast messages to tabs.
+`recording-controller.js` serializes navigation, attention, pause changes, and
+command admission. Commands accepted before a pause remain accepted; delivery does
+not hold the recording queue open. Recording changes update icons without sending
+messages to every tab.
 
-The background fixes each document's automatic recording eligibility at the main
-frame's navigation start, before the page response arrives. Documents opened while
-paused stay excluded after resume, including slow loads, same-document navigation,
-and popup opens. Refreshing while recording is active creates an eligible document.
-The document token binds activity to the sending tab and browser document ID. Page
-identity and explicit page actions initialize in both states. A document injected
-before navigation listeners registered can be adopted only before the session's
-first pause; missing navigation history after a pause produces an explicit error.
+Automatic recording eligibility is fixed at main-frame navigation start. Documents
+opened while paused remain excluded after resume, including slow loads and
+same-document navigation; an active-recording refresh creates an eligible document.
+Document tokens bind reports to the tab/browser document. Explicit actions remain
+available. Missing navigation history after a pause is an error.
 
-Attention time uses a background clock that advances only while recording is active.
-Content scripts report foreground starts and leaves, rather than elapsed wall time;
-attention spanning pause and resume therefore excludes every paused interval.
-Recording policy, pending navigation starts, document tokens, and attention starts
-live in `storage.session`, survive background worker suspension, and are removed
-when their tab closes. Content scripts never read that storage directly. The popup
-reads complete daemon data after resume and does not synthesize visits.
-Shared page-availability classification excludes browser and extension pages,
-with explicit exceptions for snapshot viewers.
+A background attention clock excludes paused time. Recording state, pending
+navigation, tokens, and attention starts live in `storage.session`, survive worker
+suspension, and disappear when tabs close. The popup reads daemon data and never
+synthesizes visits. Navigation retries are bounded to the current document; newer
+navigation cancels older work. Leave reports retain the departing page's title.
 
-Navigation messages retry when a page script is temporarily unavailable. A newer
-navigation cancels pending work for an older navigation. Failed delivery produces
-an error for the affected tab. Leave reports keep the title of the page being left;
-a delayed title from the next page cannot overwrite that title.
+The connection phases are `offline`, `connecting`, `waiting_for_approval`,
+`synchronizing`, and `ready`. Authentication validates status and drains pending
+commands before `ready`; paused sessions defer draining. Socket session IDs prevent
+stale callbacks changing a newer session. Invalid messages close the connection.
 
-### Connection and pending commands
+The short-lived command queue persists commands and byte counts together, rolls
+back failed storage writes, and removes commands only after daemon success. Invalid
+commands block delivery with an explicit error. Direct commands and snapshots wait
+for draining, including commands arriving during a drain. Snapshot HTML goes
+directly to a ready daemon and is never persisted in extension storage.
 
-The extension's connection state has five phases: `offline`, `connecting`,
-`waiting_for_approval`, `synchronizing`, and `ready`. Only `ready` includes a confirmed
-daemon status (`running` or `paused`) and the operations allowed for the session.
-After authentication, the extension validates status and sends pending commands in
-order before entering `ready`. A paused daemon skips sending pending commands.
+Protocol version 4 requires matching pairing/authentication versions, browser name,
+and `browserProfile` even when null. Status supplies device/state/message-size
+limits. Wrapper extensions are allowed; changes to required fields or meaning need
+a protocol version change.
 
-Each socket has a session ID. Callbacks from an old socket cannot change the current
-connection or complete current requests. Connection and pending-command failures
-appear in connection diagnostics. Invalid WebSocket messages close the session.
+### Popup and editors
 
-`command-buffer.js` keeps a short-lived, size-limited queue of pending commands.
-The queue and byte count are saved together in extension storage; failed storage
-writes undo the queue change. Commands leave the queue only after the daemon reports
-success. An invalid command blocks the queue and produces an error. Snapshot HTML
-is sent directly to a ready daemon connection, with the page URL and slug, and is
-never saved in extension storage.
+Toolbar opens resolve the original page and fetch a complete daemon summary before
+opening. A single-use token transfers the result; preparation exceeding 1.5 seconds
+shows an error. Direct opens use the same renderer. Page changes and daemon updates
+invalidate prepared summaries; failed opens never fall back to an extension tab.
 
-Snapshot preparation and direct commands share a drain-wait operation. Commands
-arriving during or immediately after a successful drain are flushed before the
-operation proceeds. A failed drain returns an error without retrying invalid data.
+The hidden document reserves startup size. Visible dashboard/error content sizes
+the popup through normal layout flow. Fatal errors use a bounded scrollable message
+and visible Reload button. Popup edits and list refreshes serialize; `createListAndPin`
+creates and pins together. Keep the list input stable during typing/composition.
 
-Protocol version 4 is the only supported extension connection format. Pairing and
-authentication require matching versions, the detected browser name, and a
-`browserProfile` field even when the value is `null`. Status supplies the device ID, daemon state, and the
-maximum message size. Pending-command counts stay in extension storage. New fields
-in the message wrapper are allowed; changes to required fields or meaning require
-a new protocol version.
+Save, delete, and editor closing share one queue. Failed edits can retry; unchanged
+text creates no replacement. Before closing a popup, finish pending work and
+transfer unsaved commands before releasing drafts. Shared controls use closed
+shadow roots to isolate styles. Capture errors appear on the active page or popup;
+a missing page script prompts reload. Hiding marks does not delete saved notes.
 
-### Popup and notifications
+### Highlights and snapshots
 
-The background script determines the original page URL for live pages, saved files,
-and the snapshot viewer. Opening from the toolbar fetches the complete page summary
-from the daemon before opening the popup. A single-use token lets the popup retrieve
-that summary. If preparation exceeds 1.5 seconds, the popup shows an error. Direct
-popup opens display the summary through the same code.
+`highlight-lifecycle.js` is shared by live pages and snapshots; the build generates
+the non-module content script. Text anchors store block selectors, literal UTF-16
+offsets, and shadow-host sequences. Restoration reserves saved anchors before
+visible-text fallback, preserving reading order, whitespace equivalence, and block
+boundaries. Explicit `<br>` elements become newlines. Retries track restored parts
+to avoid duplicate marks. Selector-only older anchors remain supported.
 
-The popup shows either the complete page dashboard or an error. Changing the target
-page cancels pending opens for the previous page. While hidden, the popup reserves
-its startup size; once revealed, the popup fits the visible dashboard, including
-short dashboards without visit metrics and with few lists. Daemon changes
-invalidate prepared summaries. Fatal startup errors use a static screen in normal
-layout flow, with a bounded scrollable message and a visible Reload button.
-The hidden attribute on the document owns the startup height reservation; visible
-screens need no separate compact-sizing state. Failed popup opens clear the
-prepared summary and popup mapping, then return an error. Popup opens never fall
-back to opening an extension tab.
+Snapshot preparation reconstructs empty placeholders from Save Page WE removal
+comments to retain selector positions; removed content stays absent. Native PDF
+selections use the PDF document's MIME type and browser-supplied selection text
+with an empty DOM path. A PDF embed cannot bypass HTML selection validation or
+strip surrounding HTML anchors. Overlapping existing highlights are rejected.
 
-The popup processes edits and list refreshes one at a time. Toggling membership in
-an existing list sends one command; `createListAndPin` creates the list and pins
-the page together. The list picker uses data fetched for the current popup and
-keeps the same input element while typing, including input-method composition.
-Pin and list notifications update the memberships shown in an open popup.
+`savepage-bridge.js` owns one capture per tab. Save Page WE retains frames, supported
+shadow roots, and computed root/body font sizes. Host-permission retries use temporary
+exact-URL referrer rules, removed at completion. Downloads have timeouts and a
+50 MiB limit. The capture budget accounts for escaping, repeated resources, frames,
+and the final UTF-8 WebSocket message.
 
-Capture failures show a notification on the active page when possible; otherwise,
-the popup shows the error. If a page script is no longer available, the warning
-asks the user to reload. Hiding highlight marks affects only the current page
-display. Notes remain saved, and loading or navigating the page reapplies the marks.
+`snapshot-html.js` removes Browser Recall markup, writes one valid URL/slug metadata
+pair, and deactivates uncaptured stylesheets. The viewer blocks saved scripts and
+prepares embedded documents. Missing/invalid identity requires the explicit snapshot
+migration; runtime reads do not repair stored files. See the
+[Save Page WE maintenance notes](../apps/extension/savepage/UPSTREAM.md) for capture policy.
 
-### Highlights
+Chrome file snapshots require **Allow access to file URLs**. Desktop actions open
+HTML; extension actions use the viewer, including for `blob:` URLs. Saved snapshots
+retain the original page identity and never generate file-URL visits.
 
-`packages/core/highlight-lifecycle.js` saves selected text and the text's location,
-adds and removes highlight marks, restores highlights, and repairs highlights when
-the page replaces content. Live pages and snapshots use the same implementation.
-The build generates a non-module content script from that shared code.
+Extension Content Security Policy (CSP) requires packaged external scripts and
+blocks inline scripts and remote imports.
 
-A text anchor records where a highlight belongs. The current anchor format stores
-a block selector and exact UTF-16 text offsets. Anchors inside shadow DOM also
-record the sequence of host elements needed to reach the text. Restoration reserves
-all matching saved anchors before text search handles missing anchors. Text search
-restores the first available visible occurrence in reading order, including open
-shadow roots and assigned slots. Text search accepts equivalent whitespace, preserves
-BR and block boundaries, and excludes hidden content, scripts, Browser Recall controls,
-and existing marks. Saved offsets continue to count literal text-node characters.
-Selections are split by block element; BR line breaks within one block remain in a
-single excerpt. Restored parts are tracked individually
-so retries for a missing part do not duplicate parts that are already highlighted.
-Before applying snapshot highlights, the shared lifecycle reconstructs empty hidden
-elements from Save Page WE's removal comments. The placeholders preserve the original
-sibling positions used by selectors, including inside shadow roots. Removed content
-stays absent, and snapshot and note files remain unchanged.
+## Search, rules, settings, and sync
 
-Native PDF viewers do not expose the selected PDF text as a DOM range.
-One `captureContextMenuSelection` request returns the selection source and
-structured text locations together. A PDF document MIME type identifies native
-PDF selections, which use the browser's context-menu text. An empty CSS path
-records the absence of a DOM anchor; PDF highlights remain available in the
-highlights panel. HTML selections require matching structured DOM text and retain
-their anchors even when the HTML page contains a PDF embed.
+Desktop search combines page title/URL, history batches, note matches, and snapshot
+Markdown. New searches cancel obsolete history requests. Results remain interactive
+while streaming; notifications update affected rows without restarting search.
+Note search includes accepted edits awaiting checkpoints. Only desktop can request
+full history; popup reads stay page-scoped.
 
-Anchor offsets count literal text-node characters. Excerpts preserve explicit
-`<br>` elements as newlines, including consecutive breaks; restoration checks the
-range's literal text or its text with those explicit breaks.
+Filters use device directories and page properties. Multi-day membership comes
+from `visitDates`. Keyword rules match titles case-insensitively with exactly
+`{ pattern }`. Function-rule previews may inspect supplied page data, but previews
+are never stored in logs.
 
-Older anchors containing only a CSS selector remain explicitly supported.
-Selections overlapping an existing Browser Recall highlight are rejected before
-the note is saved.
+Product settings live in `views/manifest/settings.json`; Rust replay defines names,
+types, allowed values, and defaults. Startup/reset create complete settings and
+lists. Partial/invalid existing settings require migration. Failed UI writes reload
+authoritative settings. Shared locale catalogs generate desktop choices and
+extension translations; builds validate keys, placeholders, HTML, and fixed names.
 
-`extension-surface.js` provides highlight entries, editors, and controls. Page
-overlays use a closed shadow root to isolate styling. Save, delete, and closing the
-editor use the same operation queue. Failed edits can be retried; unchanged text
-does not create a replacement note. When the popup closes, pending operations
-finish and unsaved commands move to the extension's pending-command queue before
-in-memory drafts are released.
+Experimental GitHub sync runs in the daemon. Sync uploads current-device recent
+logs and note JSON; snapshot HTML/Markdown stay local. Downloaded events rebuild
+checkpoints. Extension code cannot access sync credentials or files.
 
-### Snapshots
+## Build and validation boundaries
 
-`savepage-bridge.js` manages one snapshot capture per tab. Save Page WE saves frames
-and supported shadow roots in the snapshot HTML. Capture preserves each document's
-computed root and body font sizes so inherited text and relative sizes remain
-unchanged by browser font defaults or the extension viewer's injected body style.
-Failed page resource requests can retry using the extension's host permissions. Temporary rules for exact URLs allow
-appropriate referrer headers during capture and are removed when capture ends.
-Redirects can further restrict which referrer information is sent.
+Local, release, and disk-image builds share staging, signing, verification, and
+atomic output replacement. One product version spans manifests, Cargo/npm metadata,
+lockfiles, and release tags. Release publishes Windows NSIS, macOS arm64/x64 disk
+images/updater archives, both extension ZIPs, signatures, update metadata, and
+checksums only after required checks pass.
 
-Resource downloads have a 50 MiB limit and timeouts. Capture estimates the final
-message size against the daemon's WebSocket limit, accounting for JSON escaping,
-embedded data, frames, and repeated resources. The extension measures the completed
-UTF-8 message before sending the snapshot.
-
-`snapshot-html.js` removes Browser Recall markup, writes exactly one pair of
-`x-browser-recall-slug` and `x-browser-recall-url` metadata fields, and disables
-unavailable external stylesheets. Opening a snapshot requires valid URL and slug
-metadata. The snapshot viewer prepares embedded documents and blocks saved scripts.
-
-`scripts/migrate-snapshot-identity.mjs` repairs older embedded metadata using the
-shared page identity and snapshot HTML functions. The migration reads authoritative
-page checkpoints, validates URL/slug agreement and snapshot paths, and replaces
-affected files through temporary files. Runtime readers continue to reject invalid
-snapshot identity rather than repairing stored data during reads.
-
-Chrome file snapshots require **Allow access to file URLs**. If permission is
-missing, the popup explains how to enable permission. Desktop snapshot actions
-open the saved HTML file; extension snapshot actions open the extension viewer.
-Both paths use the original page's identity for page details and highlight
-actions, including new highlights and rating shortcuts. Navigation from a live page to a file or extension document clears the
-live page's reported identity. Content scripts skip visit reporting for saved
-snapshots so file URLs never enter HTTP(S) page identity generation.
-`blob:` content uses the extension viewer because Chrome cannot inject content
-scripts into `blob:` URLs.
-
-## Search and rules
-
-Desktop search starts when the user presses Enter. Results combine cached page
-title and URL matches, history batches from Tauri, note matches, and snapshot
-Markdown matches. A new search can cancel the history request. Search renders
-result rows directly. Timeline without a search loads history as needed and renders
-only rows near the visible area.
-
-Initial results remain interactive as more results arrive. Visit and leave
-notifications update page recency. Renames and ratings update page details without
-creating visits. Notifications update affected search results without restarting
-the history search. Note search includes accepted edits still waiting to be saved
-to disk.
-
-Filters use daemon device directories and page properties: highlights, snapshots,
-likes, and visits on multiple days. Multi-day membership comes from page `visitDates`.
-Only the desktop can request the full history; the popup requests data for the
-current page.
-
-`crates/daemon/src/rules.rs` owns validation, previews, and automatic matching.
-Keyword rules are title-only, case-insensitive, and configured as `{ pattern }`.
-Function rules may inspect page preview data supplied with a command; the preview
-data is never saved in logs.
-
-## Settings, localization, and sync
-
-Product settings live in `views/manifest/settings.json`. The replay settings module
-defines every setting's name, type, allowed values, and default. Startup and reset create complete settings
-and default lists; partial or invalid existing settings require migration.
-Themes support `light`, `dark`, and `system`; color schemes support `amber` and `mono`.
-If a desktop settings write fails, the desktop reloads settings from the daemon.
-
-The shared language list generates desktop language choices and extension translation
-directories. Desktop language uses the system language or a saved override; the
-extension uses the browser's translation APIs. Builds check translation keys,
-placeholders, HTML, and text that must remain unchanged before packaging.
-
-GitHub sync is experimental and runs in the daemon. Sync manages tokens, scheduled
-runs, paused devices, and validation of downloaded data. Sync uploads recent logs
-from the current device and note JSON files. Snapshot HTML and Markdown files stay
-local. Downloaded events rebuild checkpoints. The extension cannot read or change
-sync files or credentials.
-
-## Verification
-
-Playwright tests desktop and extension user scenarios. Desktop visual tests use
-Chromium and selected WebKit cases with simulated Tauri responses. A native macOS
-WKWebView test also checks chart layout. Rust integration tests check real daemon
-commands and desktop integration.
-
-Native tests separately check macOS tray and window behavior and Windows handling
-of a second app instance. Browser-rendered UI tests do not provide complete coverage
-of the native desktop interface.
-
-Regular CI and Release use one reusable native release-validation workflow on
-Windows x64 and macOS arm64. Release also builds and validates macOS x64 packages;
-regular CI omits the Intel Mac runner. The workflow builds signed packages,
-verifies installation, and exercises updates, relaunch, collection retention, and
-connector reconnection. Regular CI uses temporary signing keys in disposable
-runner checkouts; only Release uses production signing keys and publishes assets.
-Windows extension rendering runs in a separate browser-only job, with no Rust
-toolchain or daemon. The rendering fixture reserves a rejecting connector port,
-loads the actual extension, and checks system fonts in the popup and shadow DOM.
-Both extension fixtures require pinned Chromium and reject unsupported browser
-choices before launch. JavaScript subprocess regressions check these errors
-without browser installation; the real font scenario runs after Playwright setup.
-Lightweight macOS documentation registration regressions always run in macOS arm64
-native validation. The full documentation scenario shares that job and reuses the
-finalized production bundle before building the no-tray app; the native routing
-scenario requires that production handler to remain selected.
-`scripts/select-platform-checks.mjs` limits the expensive Windows rendering and
-macOS documentation scenarios to relevant source, configuration, dependency, and
-workflow changes. Selection uses the complete push range or pull request merge-base
-diff, including removed source paths. Invalid events fail; an unavailable force-push
-predecessor explicitly runs both scenarios. Manual and release validation always
-run both scenarios, and release publication requires every selected check to pass.
-The macOS window frame check runs before release compilation in the minimal
-`browser-recall-native-tests` Cargo package. The native test imports the production
-frame module directly and declares only its AppKit dependencies, avoiding Tauri
-application builds for an invisible-window regression.
-Build, packaging, and native update phases share timing reporters that write
-duration and outcome to the job log and GitHub step summary. Native update fixture
-compilation is reported separately from installation and relaunch. The
-[performance record](DESKTOP_RELEASE_VALIDATION_PERFORMANCE.md) preserves the
-baseline and optimization decisions.
-Windows signing, cleanup, and artifact checks all run before a combined gate
-requires every check to pass; failure artifacts include the individual JSON test
-reports. Native update teardown preserves the original error, continues cleanup
-after individual failures, and rediscovers the running executable after relaunch.
-The Windows update fixture temporarily publishes isolation settings in the
-disposable user's environment registry, because the elevated installer's
-token-based relaunch rebuilds the environment from the Windows user profile.
-Teardown restores the previous values and registry types before removing the
-test profile; a failed restoration retains the rollback file for recovery.
-Tests, Coverage and Lint runs on an Ubuntu runner. Each JavaScript and Rust suite
-runs once with coverage, and Rust coverage reports reuse the same execution.
-Portable Windows environment rollback checks require PowerShell on every platform;
-the full local suite and hosted tests check availability before expensive work.
-Missing PowerShell is an error, and each portable invocation runs asynchronously
-with closed standard input and a 60-second deadline. Only the registry and native
-token-launch regression requires a disposable Windows GitHub runner.
-
-Local and hosted verification share `ci:*` scripts. Documentation captures are
-manual macOS workflows. Native window pixels are composited over a fixed light
-Sonoma wallpaper; capture manifests fingerprint the wallpaper asset and crop.
-The documentation app has a separate bundle identifier and declares no URL
-schemes in either the retained build or the temporary capture copy. A native
-check verifies that registering the retained bundle preserves the existing
-Browser Recall URL handler and that opening the app URL reopens a hidden window
-in the same isolated process. The process-reuse check targets the temporary app
-explicitly, so the user's default URL handler is unchanged.
-Desktop freshness also covers native shell source and Cargo dependencies; desktop
-and browser workflows share native compilation and pixel-stability checks.
-Chrome Web Store screenshots derive from verified browser captures. The exporter
-records source-image, conversion-source, and output hashes in an export manifest.
-The same documentation checker verifies the export manifest, dimensions, and
-opaque RGB format. Export staging stays on the destination filesystem.
-CI checks committed images. See [DEVELOPMENT.md](../DEVELOPMENT.md)
-for commands, platform prerequisites, visual baselines, and capture instructions.
+Native packaging and update checks run separately from browser simulations.
+macOS tray automation requires a disposable account; verified no-tray documentation
+builds do not. [Testing](TESTING.md) defines platform coverage and failure diagnostics;
+[Development](../DEVELOPMENT.md) provides commands and distribution setup.

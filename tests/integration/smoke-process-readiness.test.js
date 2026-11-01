@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
+import childProcess from 'node:child_process';
 import { once } from 'node:events';
 import {
   chmodSync,
@@ -9,7 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { frameNativeUpdateWindow } from '../smoke/native-update-window.mjs';
 import { stopFirefoxProcess } from '../smoke/firefox-process.mjs';
 
@@ -116,6 +117,150 @@ ${launcherExits ? 'descendant.unref();' : 'setInterval(() => {}, 1000);'}
           if (error.code !== 'ESRCH') throw error;
         }
       }
+      await closed;
+    }
+  },
+);
+
+test.skipIf(process.platform === 'win32').each([true, false])(
+  'Firefox cleanup preserves denied SIGKILL for live groups; graceful: %s',
+  async (graceful) => {
+    const child = spawn(
+      process.execPath,
+      [
+        '-e',
+        `process.on('SIGTERM', () => { ${graceful ? 'process.exit(0);' : ''} }); console.log('ready'); setInterval(() => {}, 1000)`,
+      ],
+      {
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    const closed = once(child, 'close');
+    const kill = process.kill.bind(process);
+    await once(child.stdout, 'data');
+    const signal = vi.spyOn(process, 'kill').mockImplementation((pid, name) => {
+      if (pid === -child.pid && name === 'SIGKILL')
+        throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+      return kill(pid, name);
+    });
+    try {
+      const stopping = stopFirefoxProcess(child, { timeoutMs: 100 });
+      if (graceful) {
+        await expect(stopping).resolves.toBeUndefined();
+        expect(signal.mock.calls).not.toContainEqual([-child.pid, 'SIGKILL']);
+      } else await expect(stopping).rejects.toMatchObject({ code: 'EPERM' });
+    } finally {
+      signal.mockRestore();
+      if (child.exitCode === null && child.signalCode === null)
+        child.kill('SIGKILL');
+      await closed;
+    }
+  },
+);
+
+test.skipIf(process.platform !== 'darwin')(
+  'Firefox cleanup accepts a confirmed dead macOS process group when signals are denied',
+  async () => {
+    const child = spawn(
+      process.execPath,
+      [
+        '-e',
+        "process.on('SIGTERM', () => process.exit(0)); console.log('ready'); setInterval(() => {}, 1000)",
+      ],
+      {
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    const closed = once(child, 'close');
+    await once(child.stdout, 'data');
+    const kill = process.kill.bind(process);
+    kill(-child.pid, 'SIGTERM');
+    // Hold the parent event loop until the real child is defunct. Reaping the
+    // child first would lose the macOS state that produced the permission error.
+    const deadline = performance.now() + 1000;
+    let state;
+    do {
+      state = spawnSync('/bin/ps', ['-o', 'stat=', '-p', String(child.pid)], {
+        encoding: 'utf8',
+      }).stdout.trim();
+      if (state.startsWith('Z')) break;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    } while (performance.now() < deadline);
+    const signal = vi.spyOn(process, 'kill').mockImplementation((pid, name) => {
+      if (pid === -child.pid)
+        throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+      return kill(pid, name);
+    });
+    try {
+      expect(state).toMatch(/^Z/);
+      await expect(stopFirefoxProcess(child)).resolves.toBeUndefined();
+    } finally {
+      signal.mockRestore();
+      if (child.exitCode === null && child.signalCode === null)
+        child.kill('SIGKILL');
+      await closed;
+    }
+  },
+);
+
+test.skipIf(process.platform !== 'darwin')(
+  'Firefox process inspection obeys the cleanup deadline and preserves EPERM',
+  async () => {
+    const child = spawn(
+      process.execPath,
+      [
+        '-e',
+        "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000)",
+      ],
+      {
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    const closed = once(child, 'close');
+    await once(child.stdout, 'data');
+    const kill = process.kill.bind(process);
+    const denied = Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+    const signal = vi.spyOn(process, 'kill').mockImplementation((pid, name) => {
+      if (pid === -child.pid && name === 'SIGKILL') throw denied;
+      return kill(pid, name);
+    });
+    let inspected;
+    const inspection = vi
+      .spyOn(childProcess, 'spawnSync')
+      .mockImplementation((file, args, options) => {
+        if (file !== '/bin/ps') return spawnSync(file, args, options);
+        // A real inspector that ignores SIGTERM. The fallback bounds the failing
+        // implementation too, so the regression cannot leak a hung test process.
+        inspected = spawnSync(
+          process.execPath,
+          [
+            '-e',
+            "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)",
+          ],
+          {
+            ...options,
+            timeout: options.timeout ?? 1500,
+            killSignal: 'SIGKILL',
+          },
+        );
+        return inspected;
+      });
+    const started = performance.now();
+    try {
+      await expect(stopFirefoxProcess(child, { timeoutMs: 100 })).rejects.toBe(
+        denied,
+      );
+      expect(performance.now() - started).toBeLessThan(1000);
+      expect(inspected.error.code).toBe('ETIMEDOUT');
+      expect(inspected.signal).toBe('SIGKILL');
+    } finally {
+      inspection.mockRestore();
+      signal.mockRestore();
+      if (child.exitCode === null && child.signalCode === null)
+        child.kill('SIGKILL');
       await closed;
     }
   },

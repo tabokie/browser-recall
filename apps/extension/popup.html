@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <title data-i18n="extensionShortName">browser-recall</title>
     <style>
+      /* Keep content width while the browser measures the native popup. */
+      html,
+      body {
+        width: 296px;
+      }
+
       html {
         background: #f7f4ea;
       }
@@ -73,7 +79,6 @@
         --font-body:
           SFMono-Regular, Menlo, Consolas, 'Liberation Mono', system-ui,
           -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        width: 296px;
         min-height: 0;
         font-family: var(--font-body);
         font-size: 12px;
@@ -111,7 +116,9 @@
       }
 
       .fatal-error-message {
+        min-width: 0;
         max-height: 360px;
+        overflow-x: hidden;
         overflow-y: auto;
         overflow-wrap: anywhere;
         white-space: pre-wrap;
