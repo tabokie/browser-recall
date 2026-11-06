@@ -1,4 +1,16 @@
 {
+  "extensionCopyErrorDetails": {
+    "message": "세부 정보 복사",
+    "description": "Copy popup error details button label."
+  },
+  "extensionErrorCopied": {
+    "message": "복사됨",
+    "description": "Popup error clipboard success status."
+  },
+  "extensionErrorCopyFailed": {
+    "message": "복사하지 못했습니다. 직접 복사할 수 있도록 메시지를 선택했습니다.",
+    "description": "Popup error clipboard failure status."
+  },
   "extensionPackageName": {
     "message": "Browser Recall Connector",
     "description": "Browser extension package name."
@@ -639,10 +651,6 @@
     "message": "다시 확인하세요",
     "description": "Extension setup retry button."
   },
-  "extensionActionFailedReload": {
-    "message": "$1 - 확장 프로그램을 다시 로드하세요.",
-    "description": "Popup error with reload hint."
-  },
   "extensionActionFailed": {
     "message": "작업 실패",
     "description": "Generic extension action failure."
@@ -738,14 +746,6 @@
   "extensionCheckAgainApproval": {
     "message": "승인을 요청하려면 다시 확인하세요.",
     "description": "Connector retry approval metadata."
-  },
-  "extensionConnectionResetActionFailed": {
-    "message": "Browser Recall 확장 연결이 재설정되었기 때문에 작업이 실패했습니다. 이 페이지를 새로고침하고 다시 시도하세요.",
-    "description": "Extension action runtime failure message."
-  },
-  "extensionContextInvalidated": {
-    "message": "확장 컨텍스트가 무효화되었습니다. 페이지를 새로고침한 후 다시 시도하세요.",
-    "description": "Popup runtime invalidated message."
   },
   "extensionCreateListNamed": {
     "message": "\"$1\" 생성",

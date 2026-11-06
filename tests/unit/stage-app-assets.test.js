@@ -516,6 +516,7 @@ describe('extension staged assets', () => {
       'browser-build-target.js',
       'browser-api.js',
       'extension-surface.js',
+      'browser-recall-error-bubble.js',
       'browser-recall-page-identity.js',
       'browser-recall-highlight-lifecycle.js',
       'browser-recall-markdown-extractor.js',
@@ -569,7 +570,13 @@ describe('extension staged assets', () => {
     expect(
       manifest.browser_specific_settings.gecko.data_collection_permissions,
     ).toEqual({
-      required: ['none'],
+      required: ['browsingActivity', 'websiteContent', 'websiteActivity'],
+    });
+    expect(manifest.browser_specific_settings.gecko.strict_min_version).toBe(
+      '140.0',
+    );
+    expect(manifest.browser_specific_settings.gecko_android).toEqual({
+      strict_min_version: '142.0',
     });
   });
 

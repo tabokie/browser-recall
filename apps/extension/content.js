@@ -5,6 +5,18 @@ const extensionSurface = globalThis.browserRecallExtensionSurface;
 const pageIdentity = globalThis.browserRecallPageIdentity;
 const highlightLifecycleModule = globalThis.browserRecallHighlightLifecycle;
 const markdownExtractorModule = globalThis.browserRecallMarkdownExtractor;
+const errorBubble = globalThis.browserRecallErrorBubble;
+// Capture these while the extension context is live, so errors remain readable
+// after an extension update invalidates the content script's browser API.
+const errorBubbleDefaults = errorBubble.options(
+  '',
+  tr,
+  chrome.runtime.getManifest().version,
+);
+const extensionReloadMessage = tr(
+  'extensionReloaded',
+  'Browser Recall extension reloaded. Please reload the page and try again.',
+);
 const transientUiHosts = (() => {
   if (globalThis.__browserRecallTransientUiHosts instanceof WeakSet) {
     return globalThis.__browserRecallTransientUiHosts;
@@ -509,13 +521,7 @@ function initContentScript({ recordingEligible, recordingDocumentToken }) {
   });
 
   // ─── Notification bubble factory ─────────────────────────────────────
-  function showNotificationBubble({
-    message,
-    duration,
-    fadeIn,
-    fadeHold,
-    tone = 'neutral',
-  }) {
+  function showNotificationBubble({ message, duration, fadeIn, fadeHold }) {
     const host = document.createElement('div');
     transientUiHosts.add(host);
     host.setAttribute('role', 'status');
@@ -551,10 +557,6 @@ function initContentScript({ recordingEligible, recordingDocumentToken }) {
         opacity: 0;
         animation: fadeInOut ${duration}s ease forwards;
       }
-      .bubble.error {
-        border-color: var(--br-accent-red);
-        color: var(--br-accent-red);
-      }
       @keyframes fadeInOut {
         0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.92); }
         ${fadeIn}%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
@@ -562,7 +564,7 @@ function initContentScript({ recordingEligible, recordingDocumentToken }) {
         100% { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
       }
     </style>
-    <div class="bubble ${tone}">${escapedMessage}</div>
+    <div class="bubble">${escapedMessage}</div>
   `;
     document.documentElement.appendChild(host);
     setTimeout(() => host.remove(), duration * 1000 + 100);
@@ -651,14 +653,8 @@ function initContentScript({ recordingEligible, recordingDocumentToken }) {
     });
   }
 
-  function showErrorNotification(message) {
-    showNotificationBubble({
-      message,
-      duration: 2.4,
-      fadeIn: 10,
-      fadeHold: 80,
-      tone: 'error',
-    });
+  function showErrorNotification(message, detail = message) {
+    errorBubble.render({ ...errorBubbleDefaults, message, detail });
   }
 
   function isExtensionRuntimeFailure(error) {
@@ -670,10 +666,8 @@ function initContentScript({ recordingEligible, recordingDocumentToken }) {
   function showExtensionReloadNotification(error) {
     if (!isExtensionRuntimeFailure(error)) return false;
     showErrorNotification(
-      tr(
-        'extensionReloaded',
-        'Browser Recall extension reloaded. Please reload the page and try again.',
-      ),
+      extensionReloadMessage,
+      error?.message || String(error),
     );
     return true;
   }
@@ -1111,6 +1105,7 @@ function initContentScript({ recordingEligible, recordingDocumentToken }) {
       showErrorNotification(
         request.message ||
           tr('extensionSomethingWentWrong', 'Something went wrong'),
+        request.detail || request.message,
       );
       sendResponse({ success: true });
     } else if (request.action === 'showLikeNotification') {

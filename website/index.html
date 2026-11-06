@@ -32,6 +32,7 @@
     />
     <link rel="stylesheet" href="./styles.css" />
     <script src="./main.js" defer></script>
+    <script src="./downloads.js" defer></script>
     <script src="./analytics.js" defer></script>
   </head>
   <body>
@@ -343,36 +344,50 @@
       >
         <h2 id="get-started-title">Make yourself a little library.</h2>
         <p>
-          Install the desktop app and browser extension, then connect them to
-          start your collection.
+          Install the desktop app and browser extension on the same computer,
+          then approve the browser connection in the desktop app.
         </p>
         <div class="install-options">
           <div class="install-option">
             <div>
-              <h3>The desktop app</h3>
+              <h3>1. Get the desktop app</h3>
               <p>For macOS and Windows.</p>
               <div class="install-links">
+                <!-- Replace this placeholder with the Mac App Store URL when published. -->
+                <button
+                  class="button button-unavailable"
+                  type="button"
+                  disabled
+                >
+                  Mac App Store <span class="coming-soon">Coming soon</span>
+                </button>
                 <a
+                  id="windows-download"
                   class="button button-primary"
-                  href="https://github.com/tabokie/browser-recall/releases"
-                  >Desktop releases <span aria-hidden="true">↗</span></a
+                  href="https://github.com/tabokie/browser-recall/releases/latest"
+                  >Windows installer <span aria-hidden="true">↓</span></a
                 >
               </div>
+              <a
+                class="text-link release-link"
+                href="https://github.com/tabokie/browser-recall/releases"
+                >All GitHub releases <span aria-hidden="true">↗</span></a
+              >
             </div>
           </div>
           <div class="install-option">
             <div>
-              <h3>The browser extension</h3>
-              <p>For Chrome, Firefox, Edge, and Orion.</p>
+              <h3>2. Add the browser extension</h3>
+              <p>For Firefox, Chrome, Edge, and Orion.</p>
               <div class="install-links">
                 <a
-                  class="text-link"
-                  href="https://chromewebstore.google.com/detail/bgghgkobpfgcinpjjeeconciefclpdgp"
-                  >Chrome <span aria-hidden="true">↗</span></a
-                ><a
-                  class="text-link"
+                  class="button button-secondary"
                   href="https://addons.mozilla.org/firefox/addon/browser-recall-connector/"
                   >Firefox <span aria-hidden="true">↗</span></a
+                ><a
+                  class="button button-secondary"
+                  href="https://chromewebstore.google.com/detail/bgghgkobpfgcinpjjeeconciefclpdgp"
+                  >Chrome and others <span aria-hidden="true">↗</span></a
                 >
               </div>
             </div>

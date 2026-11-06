@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 test('all feature demos keep the same viewport height on phones', async ({
   page,
@@ -325,7 +325,7 @@ test('view the sample collection and saved note, then organize one page into sev
       .toBe(true);
   }
   await expect(
-    page.getByRole('link', { name: 'Desktop releases' }),
+    page.getByRole('link', { name: 'All GitHub releases' }),
   ).toHaveAttribute(
     'href',
     'https://github.com/tabokie/browser-recall/releases',
@@ -416,5 +416,20 @@ test('product information, screenshots, and installation links work without Java
   await expect(
     page.getByRole('link', { name: 'Firefox', exact: false }),
   ).toBeVisible();
+  await expect(
+    page.getByRole('link', { name: 'Chrome and others' }),
+  ).toHaveAttribute(
+    'href',
+    'https://chromewebstore.google.com/detail/bgghgkobpfgcinpjjeeconciefclpdgp',
+  );
+  await expect(
+    page.getByRole('button', { name: 'Mac App Store Coming soon' }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole('link', { name: 'Windows installer' }),
+  ).toHaveAttribute(
+    'href',
+    'https://github.com/tabokie/browser-recall/releases/latest',
+  );
   await context.close();
 });

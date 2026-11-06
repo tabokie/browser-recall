@@ -8434,7 +8434,7 @@ function bindFilterEvents(container) {
 // Entity-scan filter: scan page checkpoints instead of all history JSONL files.
 // Page projections contain the materialized visit state and page properties
 // needed by filters without loading raw event logs.
-async function runEntityScanFilter(pinnedSlugs) {
+async function runEntityScanFilter() {
   showSearchSpinner();
   const contexts = await loadAllPageContext();
   const pages = Object.fromEntries(
@@ -8448,7 +8448,6 @@ async function runEntityScanFilter(pinnedSlugs) {
 
   for (const slug of slugs) {
     const page = pages[slug];
-    if (pinnedSlugs.has(slug)) continue;
     if (seenUrls.has(page.url)) continue;
     seenUrls.add(page.url);
 
@@ -8499,7 +8498,7 @@ async function runEntityScanFilter(pinnedSlugs) {
   for (const item of historyState.allEntries) {
     if (!item.url) continue;
     const slug = item.slug || generateSlugFromUrl(item.url);
-    if (pinnedSlugs.has(slug) || seenUrls.has(item.url)) continue;
+    if (seenUrls.has(item.url)) continue;
     seenUrls.add(item.url);
     const deviceIds = new Set();
     if (item.deviceId) deviceIds.add(item.deviceId);
@@ -8528,20 +8527,61 @@ async function runEntityScanFilter(pinnedSlugs) {
   return results;
 }
 
+function historyEntriesWithUrls(entries) {
+  return entries.filter((item) => {
+    if (!item.url) return false;
+    // Validate before sorting or reusing a cached slug, including duplicate rows.
+    generateSlugFromUrl(item.url);
+    return true;
+  });
+}
+
+async function loadMoreExploreHistory(scroller) {
+  // Filters may have changed since this pagination callback was attached.
+  const hasActiveFilters = !isDefaultFilterState(filterState);
+  if (hasActiveFilters) showSearchSpinner();
+  do {
+    const newItems = await loadHistoryBatch();
+    if (newItems.length === 0) break;
+    if (hasActiveFilters)
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    let newResults = processHistoryForDisplay(
+      historyEntriesWithUrls(newItems),
+    ).map((item) => ({ ...item, relevance: 0 }));
+    if (newResults.length === 0) continue;
+    if (hasActiveFilters) {
+      await enrichFromEntityStorage(newResults);
+      newResults = applyFilters(newResults);
+    }
+    if (newResults.length === 0) continue;
+
+    const sort = relatedSortState.column
+      ? relatedSortState
+      : { column: 'lastVisit', direction: 'desc' };
+    scroller.appendData(applySortOrder(newResults, sort));
+    if (!hasActiveFilters) {
+      enrichFromEntityStorage(newResults, {
+        includeVisitDates: false,
+      }).then(() => scroller.refreshVisible());
+    }
+    break;
+  } while (
+    hasActiveFilters &&
+    historyState.loadedFiles.size <
+      Math.min(historyState.files.length, HISTORY_MAX_FILES)
+  );
+  if (hasActiveFilters) hideSearchSpinner();
+}
+
 async function runSearchFilterPipeline() {
   if (activeView.type !== 'explore') return;
   cardDataByUrl.clear();
 
-  const pinnedSlugs = new Set();
-
-  const allQueries = committedSearchQuery.trim()
-    ? [committedSearchQuery.trim()]
-    : [];
-
-  if (allQueries.length > 0 && allQueries.some((q) => q.trim())) {
+  const query = committedSearchQuery.trim();
+  if (query) {
     // Progressive multi-phase search: Phase 0 (in-memory) renders instantly,
     // then Phase 1 (JSONL), 2a (notes), 2b (snapshots) fire concurrently.
-    await runProgressiveSearch(allQueries);
+    await runProgressiveSearch([query]);
     return;
   }
 
@@ -8550,18 +8590,14 @@ async function runSearchFilterPipeline() {
   const hasActiveFilters = !isDefaultFilterState(filterState);
 
   let results;
-  let entityScanUsed = false;
   if (hasActiveFilters) {
     // Page projections are the authoritative filter input.
-    results = await runEntityScanFilter(pinnedSlugs);
-    entityScanUsed = true;
+    results = await runEntityScanFilter();
     results = applyFilters(results);
     hideSearchSpinner();
   } else {
     results = processHistoryForDisplay(
-      historyState.allEntries.filter(
-        (item) => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)),
-      ),
+      historyEntriesWithUrls(historyState.allEntries),
     ).map((item) => ({ ...item, relevance: 0 }));
   }
 
@@ -8621,53 +8657,13 @@ async function runSearchFilterPipeline() {
 
   // Demand-load more history when scrolling (for all-history mode).
   // Skip when entity scan was used — all matching pages are already loaded.
-  vs.onLoadMore = entityScanUsed
-    ? null
-    : async () => {
-        const hasActiveFilters = !isDefaultFilterState(filterState);
-        if (hasActiveFilters) showSearchSpinner();
-        let loaded = false;
-        do {
-          const newItems = await loadHistoryBatch();
-          if (newItems.length === 0) break;
-          loaded = true;
-          if (hasActiveFilters) await new Promise((r) => setTimeout(r, 0));
-          const filtered = newItems.filter(
-            (item) =>
-              item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)),
-          );
-          let newResults = processHistoryForDisplay(filtered).map((item) => ({
-            ...item,
-            relevance: 0,
-          }));
-          if (newResults.length > 0) {
-            if (hasActiveFilters) {
-              await enrichFromEntityStorage(newResults);
-              newResults = applyFilters(newResults);
-            }
-            if (newResults.length > 0) {
-              const sort = relatedSortState.column
-                ? relatedSortState
-                : { column: 'lastVisit', direction: 'desc' };
-              vs.appendData(applySortOrder(newResults, sort));
-              if (!hasActiveFilters) {
-                enrichFromEntityStorage(newResults, {
-                  includeVisitDates: false,
-                }).then(() => vs.refreshVisible());
-              }
-              loaded = false;
-            }
-          }
-        } while (
-          hasActiveFilters &&
-          loaded &&
-          historyState.loadedFiles.size <
-            Math.min(historyState.files.length, HISTORY_MAX_FILES)
-        );
-        if (hasActiveFilters) hideSearchSpinner();
-      };
+  vs.onLoadMore = hasActiveFilters ? null : () => loadMoreExploreHistory(vs);
 
-  // Time chart for explore results (with estimated bars for unloaded files)
+  renderExploreHistoryChart(results);
+}
+
+function renderExploreHistoryChart(results) {
+  // Include estimated bars for unloaded history files.
   const chartData = results.map((r) => ({
     url: r.url,
     timestamp: r.timestamps?.[0] || Date.now(),

@@ -191,6 +191,22 @@ h1 em {
   background: var(--orange);
   color: white;
 }
+.button-secondary {
+  border-color: var(--line);
+}
+.button-secondary:hover {
+  border-color: var(--orange);
+}
+.button-unavailable {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: default;
+}
+.coming-soon {
+  font-size: 11px;
+  font-weight: 400;
+}
 .text-link {
   position: relative;
   display: inline-flex;
@@ -553,8 +569,16 @@ h1 em {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 28px;
+  gap: 12px;
   margin-top: 20px;
+}
+.install-links .button {
+  gap: 10px;
+  padding-inline: 16px;
+}
+.release-link {
+  margin-top: 12px;
+  font-size: 14px;
 }
 .site-footer {
   border-top: 1px solid var(--line);

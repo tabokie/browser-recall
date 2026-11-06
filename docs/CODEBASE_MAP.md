@@ -54,14 +54,15 @@ Paths below are relative to `apps/extension/`.
 | File                                                                      | Responsibility                                                                             |
 | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | `manifest.json`                                                           | Permissions, entry points, shortcuts                                                       |
-| `background.js`                                                           | Navigation, popup preparation, command routing, capture                                    |
+| `background.js`                                                           | Navigation, page identity inspection, popup preparation, command routing, capture          |
 | `recording-controller.js`                                                 | Recording eligibility, pause-aware attention, command admission                            |
 | `content.js`, `spa-navigation-bridge.js`                                  | Capture and page-world navigation detection                                                |
 | `browser-api.js`, `browser-privileged-api.js`                             | Browser APIs and background-only validation                                                |
+| `browser-capabilities.js`                                                 | Browser response capabilities and scripting error classification                           |
 | `browser-identity.js`, `browser-build-target.js`                          | Browser identity and generated build target                                                |
 | `popup.js`, `popup.html`, `popup-note-session.js`                         | Dashboard, sizing, list edits, note drafts                                                 |
 | `popup-list-elements.js`                                                  | List markup shared with website demos                                                      |
-| `extension-surface.js`, `extension-surface.css`, `extension-ui-tokens.js` | Isolated editors, highlights, overlays, styles                                             |
+| `extension-surface.js`, `extension-surface.css`, `extension-ui-tokens.js` | Isolated editors, highlights, overlays, shared persistent error renderer                   |
 | `connector/ws-client.js`                                                  | Sessions, validation, requests, queue draining                                             |
 | `connector/state.js`, `connector/pairing.js`                              | Connection diagnostics and authentication                                                  |
 | `connector/command-buffer.js`                                             | Bounded temporary command storage                                                          |
@@ -139,8 +140,8 @@ Paths below are relative to `scripts/` unless stated otherwise.
 | `build-website.mjs`, `serve-website.mjs`                                                          | Static build and project-path preview                     |
 
 Website presentation lives in `website/demos/`; HTTPS page-view counting lives in
-`website/analytics.js`. `playwright.website.config.js` and `tests/website/` cover
-website behavior.
+`website/analytics.js`. `website/downloads.js` resolves the latest Windows installer.
+`playwright.website.config.js` and `tests/website/` cover website behavior.
 
 | Workflow/configuration                                  | Responsibility                                               |
 | ------------------------------------------------------- | ------------------------------------------------------------ |

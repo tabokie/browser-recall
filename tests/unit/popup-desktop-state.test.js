@@ -144,6 +144,7 @@ function installChromeMock({ tab, responses }) {
     },
     runtime: {
       getURL: (resource) => `chrome-extension://abcdefghijklmnop/${resource}`,
+      getManifest: () => ({ version: '0.0.0' }),
       onMessage: runtimeMessages,
       reload: vi.fn(),
       connect: vi.fn(() => ({
@@ -1183,7 +1184,7 @@ describe('popup desktop state rendering', () => {
     expect(document.getElementById('blacklistSettingsLink')).toBeTruthy();
   });
 
-  it('falls back to a popup bubble when blacklisted capture cannot notify the page', async () => {
+  it('shows blacklisted capture errors in a copyable popup bubble', async () => {
     const tab = {
       id: 41,
       url: 'https://blocked.example.com/capture-failure',
@@ -1225,18 +1226,6 @@ describe('popup desktop state rendering', () => {
         getPopupLists: { success: true, lists: [] },
       },
     });
-    chrome.tabs.sendMessage.mockImplementation(async (_tabId, request) => {
-      if (request?.action === 'showErrorNotification') {
-        throw new Error('Receiving end does not exist.');
-      }
-      return {
-        success: true,
-        embedded: false,
-        slug: generateSlugFromUrl(tab.url),
-        url: tab.url,
-      };
-    });
-
     await import('../../apps/extension/popup.js');
 
     await waitFor(() => document.getElementById('captureOnceBtn'));
@@ -1245,8 +1234,10 @@ describe('popup desktop state rendering', () => {
     await waitFor(() => document.getElementById('errorBubble'));
     const errorBubble = document.getElementById('errorBubble');
     expect(errorBubble.textContent).toContain('Blacklisted capture failed');
-    expect(errorBubble.style.backgroundColor).toBe('rgb(247, 244, 234)');
-    expect(errorBubble.style.color).toBe('rgb(255, 45, 32)');
+    expect(getComputedStyle(errorBubble).backgroundColor).toBe(
+      'rgb(247, 244, 234)',
+    );
+    expect(getComputedStyle(errorBubble).color).toBe('rgb(255, 45, 32)');
   });
 
   it('shows connector diagnostics while desktop is not connected', async () => {
@@ -1641,7 +1632,7 @@ describe('popup desktop state rendering', () => {
     expect(inputRule?.style.color).toBe('var(--text-primary)');
   });
 
-  it('notifies the active page when popup capture fails because the extension context was invalidated', async () => {
+  it('preserves the original invalidated-context error in the popup', async () => {
     const tab = {
       id: 49,
       url: 'https://example.com/context-invalidated',
@@ -1689,17 +1680,12 @@ describe('popup desktop state rendering', () => {
     );
     document.getElementById('captureBtn').click();
 
-    await waitFor(() =>
-      chrome.tabs.sendMessage.mock.calls.some(
-        ([, request]) => request.action === 'showErrorNotification',
-      ),
+    await waitFor(() => document.getElementById('errorBubbleMessage'));
+    expect(document.getElementById('errorBubbleMessage').textContent).toBe(
+      'Extension context invalidated.',
     );
-    expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
-      tab.id,
-      expect.objectContaining({
-        action: 'showErrorNotification',
-        message: expect.stringContaining('Reload this page'),
-      }),
+    expect(document.getElementById('copyErrorDetailsBtn').textContent).toBe(
+      'Copy details',
     );
   });
 

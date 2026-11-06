@@ -1,4 +1,16 @@
 {
+  "extensionCopyErrorDetails": {
+    "message": "Salin detail",
+    "description": "Copy popup error details button label."
+  },
+  "extensionErrorCopied": {
+    "message": "Disalin",
+    "description": "Popup error clipboard success status."
+  },
+  "extensionErrorCopyFailed": {
+    "message": "Gagal menyalin. Pesan dipilih untuk disalin secara manual.",
+    "description": "Popup error clipboard failure status."
+  },
   "extensionPackageName": {
     "message": "Browser Recall Connector",
     "description": "Browser extension package name."
@@ -639,10 +651,6 @@
     "message": "Periksa Lagi",
     "description": "Extension setup retry button."
   },
-  "extensionActionFailedReload": {
-    "message": "$1 - harap muat ulang ekstensi.",
-    "description": "Popup error with reload hint."
-  },
   "extensionActionFailed": {
     "message": "Tindakan gagal",
     "description": "Generic extension action failure."
@@ -738,14 +746,6 @@
   "extensionCheckAgainApproval": {
     "message": "Periksa lagi untuk meminta persetujuan.",
     "description": "Connector retry approval metadata."
-  },
-  "extensionConnectionResetActionFailed": {
-    "message": "Tindakan Browser Recall gagal karena sambungan ekstensi disetel ulang. Muat ulang halaman ini dan coba lagi.",
-    "description": "Extension action runtime failure message."
-  },
-  "extensionContextInvalidated": {
-    "message": "Konteks ekstensi tidak valid. Silakan segarkan halaman dan coba lagi.",
-    "description": "Popup runtime invalidated message."
   },
   "extensionCreateListNamed": {
     "message": "Buat \"$1\"",

@@ -56,9 +56,9 @@ Browser Recall stores your data using readable formats such as JSON and Markdown
 
 Install both the desktop app and the browser extension.
 
-Desktop app is supported on macOS and on Windows. The signed macOS app is available as a paid download from the [App Store](https://apps.apple.com/app/idAPP_ID). You can also [build from source](DEVELOPMENT.md#build-and-run).
+Desktop app is supported on macOS and on Windows. The signed macOS app is available on the [App Store](https://apps.apple.com/app/idAPP_ID). You can also [download from GitHub releases](https://github.com/tabokie/browser-recall/releases) or [build from source](DEVELOPMENT.md#build-and-run).
 
-Browser extension is free on the [Chrome Web Store](https://chromewebstore.google.com/detail/bgghgkobpfgcinpjjeeconciefclpdgp) and [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/browser-recall-connector/). Edge and Orion are supported using the Chromium extension.
+Browser extension is available on the [Chrome Web Store](https://chromewebstore.google.com/detail/bgghgkobpfgcinpjjeeconciefclpdgp) and [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/browser-recall-connector/). Edge and Orion are supported using the Chromium extension.
 
 ## Alternatives
 

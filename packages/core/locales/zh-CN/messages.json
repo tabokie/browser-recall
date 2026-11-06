@@ -1,4 +1,16 @@
 {
+  "extensionCopyErrorDetails": {
+    "message": "复制详情",
+    "description": "Copy popup error details button label."
+  },
+  "extensionErrorCopied": {
+    "message": "已复制",
+    "description": "Popup error clipboard success status."
+  },
+  "extensionErrorCopyFailed": {
+    "message": "复制失败。已选中消息，请手动复制。",
+    "description": "Popup error clipboard failure status."
+  },
   "extensionPackageName": {
     "message": "Browser Recall Connector",
     "description": "Browser extension package name."
@@ -639,10 +651,6 @@
     "message": "重新检查",
     "description": "Extension setup retry button."
   },
-  "extensionActionFailedReload": {
-    "message": "$1 - 请重新加载扩展。",
-    "description": "Popup error with reload hint."
-  },
   "extensionActionFailed": {
     "message": "操作失败",
     "description": "Generic extension action failure."
@@ -738,14 +746,6 @@
   "extensionCheckAgainApproval": {
     "message": "再次检查以请求批准。",
     "description": "Connector retry approval metadata."
-  },
-  "extensionConnectionResetActionFailed": {
-    "message": "Browser Recall 操作失败，因为扩展连接已重置。请重新加载此页面后重试。",
-    "description": "Extension action runtime failure message."
-  },
-  "extensionContextInvalidated": {
-    "message": "扩展上下文已失效。请刷新页面后重试。",
-    "description": "Popup runtime invalidated message."
   },
   "extensionCreateListNamed": {
     "message": "创建“$1”",

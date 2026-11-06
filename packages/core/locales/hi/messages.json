@@ -1,4 +1,16 @@
 {
+  "extensionCopyErrorDetails": {
+    "message": "विवरण कॉपी करें",
+    "description": "Copy popup error details button label."
+  },
+  "extensionErrorCopied": {
+    "message": "कॉपी किया गया",
+    "description": "Popup error clipboard success status."
+  },
+  "extensionErrorCopyFailed": {
+    "message": "कॉपी नहीं हो सका। संदेश मैन्युअल रूप से कॉपी करने के लिए चुना गया है।",
+    "description": "Popup error clipboard failure status."
+  },
   "extensionPackageName": {
     "message": "Browser Recall Connector",
     "description": "Browser extension package name."
@@ -639,10 +651,6 @@
     "message": "दोबारा जांचें",
     "description": "Extension setup retry button."
   },
-  "extensionActionFailedReload": {
-    "message": "$1 - कृपया एक्सटेंशन पुनः लोड करें।",
-    "description": "Popup error with reload hint."
-  },
   "extensionActionFailed": {
     "message": "कार्रवाई विफल रही",
     "description": "Generic extension action failure."
@@ -738,14 +746,6 @@
   "extensionCheckAgainApproval": {
     "message": "अनुमोदन का अनुरोध करने के लिए पुनः जाँच करें।",
     "description": "Connector retry approval metadata."
-  },
-  "extensionConnectionResetActionFailed": {
-    "message": "Browser Recall कार्रवाई विफल रही क्योंकि एक्सटेंशन कनेक्शन रीसेट हो गया था। इस पृष्ठ को पुनः लोड करें और पुनः प्रयास करें।",
-    "description": "Extension action runtime failure message."
-  },
-  "extensionContextInvalidated": {
-    "message": "एक्सटेंशन संदर्भ अमान्य किया गया. पृष्ठ को रीफ्रेश करें और पुन: प्रयास करें।",
-    "description": "Popup runtime invalidated message."
   },
   "extensionCreateListNamed": {
     "message": "\"$1\" बनाएं",

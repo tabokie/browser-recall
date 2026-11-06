@@ -1,4 +1,16 @@
 {
+  "extensionCopyErrorDetails": {
+    "message": "Copier les détails",
+    "description": "Copy popup error details button label."
+  },
+  "extensionErrorCopied": {
+    "message": "Copié",
+    "description": "Popup error clipboard success status."
+  },
+  "extensionErrorCopyFailed": {
+    "message": "Échec de la copie. Le message est sélectionné pour une copie manuelle.",
+    "description": "Popup error clipboard failure status."
+  },
   "extensionPackageName": {
     "message": "Browser Recall Connector",
     "description": "Browser extension package name."
@@ -639,10 +651,6 @@
     "message": "Vérifiez à nouveau",
     "description": "Extension setup retry button."
   },
-  "extensionActionFailedReload": {
-    "message": "$1 - veuillez recharger l'extension.",
-    "description": "Popup error with reload hint."
-  },
   "extensionActionFailed": {
     "message": "L'action a échoué",
     "description": "Generic extension action failure."
@@ -738,14 +746,6 @@
   "extensionCheckAgainApproval": {
     "message": "Vérifiez à nouveau pour demander l’approbation.",
     "description": "Connector retry approval metadata."
-  },
-  "extensionConnectionResetActionFailed": {
-    "message": "L'action Browser Recall a échoué car la connexion de l'extension a été réinitialisée. Actualisez cette page et réessayez.",
-    "description": "Extension action runtime failure message."
-  },
-  "extensionContextInvalidated": {
-    "message": "Contexte d'extension invalidé. Veuillez actualiser la page et réessayer.",
-    "description": "Popup runtime invalidated message."
   },
   "extensionCreateListNamed": {
     "message": "Créer \"$1\"",

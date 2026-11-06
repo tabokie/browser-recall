@@ -233,17 +233,11 @@ async function restartBackgroundWorker(context, helper, extensionId) {
     await session.send('ServiceWorker.stopWorker', {
       versionId: version.versionId,
     });
-    await expect
-      .poll(async () => {
-        try {
-          return await helper.evaluate(() =>
-            chrome.runtime.sendMessage({ action: 'getRecordingState' }),
-          );
-        } catch {
-          return null;
-        }
-      })
-      .toMatchObject({ success: true });
+    expect(
+      await helper.evaluate(() =>
+        chrome.runtime.sendMessage({ action: 'getRecordingState' }),
+      ),
+    ).toMatchObject({ success: true });
     await expect
       .poll(async () => {
         try {

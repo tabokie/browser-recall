@@ -9,6 +9,7 @@ import {
   SUPPORTED_LOCALES,
   toWebExtensionLocale,
 } from '../packages/core/i18n.js';
+import { createErrorBubbleGlobalScript } from '../apps/extension/extension-ui-tokens.js';
 import { createPageIdentityGlobalScript } from '../packages/core/page-identity.js';
 import { createHighlightLifecycleGlobalScript } from '../packages/core/highlight-lifecycle.js';
 import { createMarkdownExtractorGlobalScript } from '../packages/core/markdown-extractor.js';
@@ -699,6 +700,15 @@ function writeExtensionBuildTarget(outDir, buildTarget) {
 function writeExtensionManifest(outDir, browser = 'chrome') {
   const manifestPath = path.join(outDir, 'manifest.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  const pageScript = manifest.content_scripts?.find((entry) =>
+    entry.js?.includes('content.js'),
+  );
+  if (pageScript && !pageScript.js.includes('browser-recall-error-bubble.js'))
+    pageScript.js.splice(
+      pageScript.js.indexOf('content.js'),
+      0,
+      'browser-recall-error-bubble.js',
+    );
   ensurePageIdentityContentScript(manifest);
   ensureHighlightLifecycleContentScript(manifest);
   ensureMarkdownExtractorContentScript(manifest);
@@ -714,9 +724,15 @@ function writeExtensionManifest(outDir, browser = 'chrome') {
     manifest.browser_specific_settings = {
       gecko: {
         id: 'browser-recall@example.invalid',
+        // Transfers to the local desktop app count as data transmission.
+        // Built-in consent requires Firefox 140 on desktop and 142 on Android.
+        strict_min_version: '140.0',
         data_collection_permissions: {
-          required: ['none'],
+          required: ['browsingActivity', 'websiteContent', 'websiteActivity'],
         },
+      },
+      gecko_android: {
+        strict_min_version: '142.0',
       },
     };
   } else {
@@ -748,6 +764,10 @@ function stageTarget(name, outDir = targets[name].defaultOutDir) {
 
 export function stageExtensionAssets(outDir = targets.extension.defaultOutDir) {
   const staged = stageTarget('extension', outDir);
+  fs.writeFileSync(
+    path.join(staged, 'browser-recall-error-bubble.js'),
+    createErrorBubbleGlobalScript(),
+  );
   writeExtensionBuildTarget(staged, 'chromium');
   writeExtensionLocales(staged);
   writeExtensionPageIdentityGlobal(staged);
@@ -761,6 +781,10 @@ export function stageExtensionAssets(outDir = targets.extension.defaultOutDir) {
 
 export function stageFirefoxExtensionAssets(outDir = firefoxExtensionOutDir) {
   const staged = stageTarget('extension', outDir);
+  fs.writeFileSync(
+    path.join(staged, 'browser-recall-error-bubble.js'),
+    createErrorBubbleGlobalScript(),
+  );
   writeExtensionBuildTarget(staged, 'firefox');
   writeExtensionLocales(staged);
   writeExtensionPageIdentityGlobal(staged);

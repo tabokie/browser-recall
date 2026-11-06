@@ -144,29 +144,6 @@ describe('capture paths send error notifications', () => {
   });
 });
 
-describe('popup.js shows capture errors via page notifications', () => {
-  const popupSource = readFileSync(resolve(extDir, 'popup.js'), 'utf-8');
-
-  it('capture button notifies the active page on failure response', () => {
-    // When captureCurrentPageFromPopup returns { success: false }, popup should
-    // notify the content script rather than silently logging
-    const captureHandler = popupSource.match(
-      /captureBtn[\s\S]*?btn\.textContent\s*=\s*tr\('extensionCaptureFrame'/,
-    );
-    expect(captureHandler).not.toBeNull();
-    expect(captureHandler[0]).toContain('notifyActivePageError');
-  });
-
-  it('"Capture It" button uses the shared page notification fallback on failure', () => {
-    // The blacklist bypass "Capture It" button should also show errors to user.
-    const captureOnceHandler = popupSource.match(
-      /captureOnceBtn[\s\S]*?showDashboard/,
-    );
-    expect(captureOnceHandler).not.toBeNull();
-    expect(captureOnceHandler[0]).toContain('notifyPageError');
-  });
-});
-
 describe('savepage/content.js guards against undefined resourceMimeType', () => {
   const spSource = readFileSync(
     resolve(extDir, 'savepage', 'content.js'),

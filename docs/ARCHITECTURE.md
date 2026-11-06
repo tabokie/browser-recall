@@ -29,7 +29,9 @@ The website shares presentation modules with the application but has no backend
 or access to user data. Isolated iframe demos use production styles, Book markup,
 Justif typesetting, and sample data. Demos keep a fixed 510 px height and leave
 scrolling to the outer page. GoatCounter page views run only on the hosted HTTPS
-page; see [Privacy](PRIVACY.md#website-analytics).
+page; see [Privacy](PRIVACY.md#website-connections). Installation links resolve the
+latest published Windows installer through GitHub's public API; unavailable
+metadata or disabled JavaScript leaves a link to the latest release page.
 
 ## Storage
 
@@ -265,6 +267,28 @@ opening. A single-use token transfers the result; preparation exceeding 1.5 seco
 shows an error. Direct opens use the same renderer. Page changes and daemon updates
 invalidate prepared summaries; failed opens never fall back to an extension tab.
 
+Popup identity reads prefer the page's content script, then inspect the live
+document if the receiver is missing. Known scripting denials on HTTP(S) pages
+allow URL-scoped daemon reads, including on Chrome Web Store pages. Content replies
+and inspection results are checked against a fresh tab; navigation restarts identity
+resolution within the existing retry bound. Other inspection failures remain
+explicit errors. File snapshots still require valid embedded identity;
+denied file access never falls back to a file URL as a saved-page identity.
+
+The dashboard has no separate restricted-page state. Page actions attempt their
+normal work and report failures in the popup without hiding saved records or list
+controls. Popup, webpage, snapshot viewer, and injected fallback errors share one
+renderer. Error bubbles remain until dismissed, with selectable, scrollable text
+and a Copy details button. Copied details include the page URL, extension version,
+browser information, and original error, including when a reload hint is shown.
+Webpage bubbles use closed shadow roots, preserve typing focus, and are excluded
+from snapshot capture. Notification delivery requires a success acknowledgement.
+If both content messaging and injection fail, the original error travels through
+the existing one-shot native popup handoff, independently of dashboard refreshes.
+The next normal popup opening has no pending error. Success notifications remain
+brief. Reading saved data does not reinstall capture or change recording
+eligibility.
+
 The hidden document reserves startup size. Visible dashboard/error content sizes
 the popup through normal layout flow. Fatal errors use a bounded scrollable message
 and visible Reload button. Popup edits and list refreshes serialize; `createListAndPin`
@@ -273,8 +297,7 @@ creates and pins together. Keep the list input stable during typing/composition.
 Save, delete, and editor closing share one queue. Failed edits can retry; unchanged
 text creates no replacement. Before closing a popup, finish pending work and
 transfer unsaved commands before releasing drafts. Shared controls use closed
-shadow roots to isolate styles. Capture errors appear on the active page or popup;
-a missing page script prompts reload. Hiding marks does not delete saved notes.
+shadow roots to isolate styles. Hiding marks does not delete saved notes.
 
 ### Highlights and snapshots
 

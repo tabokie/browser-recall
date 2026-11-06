@@ -1,3 +1,7 @@
+import {
+  errorBubbleOptions,
+  renderErrorBubble,
+} from './extension-ui-tokens.js';
 // Background service worker for Browser Recall.
 // Central authority for extension reads and mutations. Persistent data and
 // replay are owned by the desktop daemon.
@@ -18,7 +22,10 @@ import {
 } from './popup-note-session.js';
 import { createBadgeController } from './badge-controller.js';
 import { createRecordingController } from './recording-controller.js';
-import { getBrowserCapabilities } from './browser-capabilities.js';
+import {
+  getBrowserCapabilities,
+  normalizePageScriptError,
+} from './browser-capabilities.js';
 import {
   DEFAULT_ICON_PATHS,
   SPECIAL_LIST_ICON_PATHS,
@@ -419,10 +426,20 @@ async function injectUserActionNotification(
   });
 }
 
-async function injectUserActionErrorNotification(tabId, message) {
-  return injectUserActionNotification(tabId, {
-    id: 'browser-recall-user-action-error',
-    message,
+async function injectUserActionErrorNotification(tabId, message, detail) {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: renderErrorBubble,
+    args: [
+      {
+        ...errorBubbleOptions(
+          message,
+          tr,
+          chrome.runtime.getManifest().version,
+        ),
+        detail,
+      },
+    ],
   });
 }
 
@@ -448,20 +465,38 @@ async function notifyTabUserActionError(
 ) {
   if (!tabId || tabId <= 0) return;
   const message = userActionErrorMessage(error, fallback);
+  const detail = String(error?.message || error || message);
   try {
-    await chrome.tabs.sendMessage(tabId, {
+    const response = await chrome.tabs.sendMessage(tabId, {
       action: 'showErrorNotification',
       message,
+      detail,
     });
+    if (response?.success !== true) {
+      throw new Error(
+        response?.error || 'Error notification was not acknowledged',
+      );
+    }
   } catch (sendError) {
     try {
-      await injectUserActionErrorNotification(tabId, message);
+      await injectUserActionErrorNotification(tabId, message, detail);
     } catch (injectError) {
-      logDebug(
-        '[notification] user action error notification failed:',
-        sendError.message,
-        injectError.message,
-      );
+      // Restricted pages cannot host extension UI. Use the existing native
+      // popup handoff so a user action still receives visible feedback.
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        await openPreparedActionPopup(tab, {
+          errorNotification: { message, detail, pageUrl: tab.url },
+        });
+      } catch (popupError) {
+        logError(
+          '[notification] user action error notification failed:',
+          detail,
+          sendError.message,
+          injectError.message,
+          popupError.message,
+        );
+      }
     }
   }
 }
@@ -1450,6 +1485,7 @@ function storePopupBootstrap({
   mutationRevision,
   targetTabId,
   refreshAfterMutation = true,
+  errorNotification = null,
 }) {
   // The popup can only receive a URL from chrome.action.openPopup(), not an
   // object payload. Keep the prepared model in memory and pass a one-shot token
@@ -1460,6 +1496,7 @@ function storePopupBootstrap({
     mutationRevision,
     targetTabId: Number.isFinite(targetTabId) ? targetTabId : null,
     refreshAfterMutation,
+    errorNotification,
     lifecycleConnected: false,
     claimed: false,
     expiresAt: Date.now() + POPUP_BOOTSTRAP_TTL_MS,
@@ -1534,7 +1571,10 @@ async function handleConsumePopupBootstrap(request) {
   }
   entry.claimed = true;
   try {
-    return await resolvePopupBootstrapEntry(entry);
+    return {
+      ...(await resolvePopupBootstrapEntry(entry)),
+      errorNotification: entry.errorNotification,
+    };
   } finally {
     deletePopupBootstrap(token, entry);
   }
@@ -1663,8 +1703,31 @@ function popupTabIsUnavailable(tab) {
   );
 }
 
-async function loadingTabPageIdentity(tab) {
+async function readTabPageIdentity(tab) {
+  // Successful replies and failures can arrive after navigation. Recheck the
+  // tab URL and loading state before accepting either outcome.
+  if (tab.status !== 'loading') {
+    try {
+      const identity = await sendReadyContentMessage(tab.id, {
+        action: 'getPageIdentity',
+      });
+      const currentTab = await chrome.tabs.get(tab.id);
+      if (currentTab.url !== tab.url || currentTab.status !== tab.status) {
+        return { currentTab, identity: null };
+      }
+      return { currentTab, identity };
+    } catch (error) {
+      const currentTab = await chrome.tabs.get(tab.id);
+      if (currentTab.url !== tab.url || currentTab.status !== tab.status) {
+        return { currentTab, identity: null };
+      }
+      if (!isExtensionRuntimeFailure(error)) throw error;
+      // Reading daemon data must survive a missing page receiver. Inspect the
+      // live document without reinstalling capture or changing its eligibility.
+    }
+  }
   let pageIdentity = null;
+  let inspectionError = null;
   try {
     const [execution] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
@@ -1680,16 +1743,27 @@ async function loadingTabPageIdentity(tab) {
       }),
     });
     pageIdentity = execution?.result ?? null;
-  } catch {
-    // A loading tab may not have committed an injectable document yet. Its
-    // browser-reported URL is still the authoritative identity available now.
+  } catch (error) {
+    inspectionError = error;
   }
 
   const currentTab = await chrome.tabs.get(tab.id);
-  // Document inspection is asynchronous: always validate it against a fresh
-  // tab snapshot so a navigation cannot make the popup use stale identity.
-  if (currentTab.url !== tab.url || currentTab.status !== tab.status) {
+  if (
+    currentTab.url !== tab.url ||
+    currentTab.status !== tab.status ||
+    (pageIdentity && pageIdentity.documentUrl !== tab.url)
+  ) {
     return { currentTab, identity: null };
+  }
+  if (inspectionError) {
+    const error = normalizePageScriptError(inspectionError);
+    // A browser denial prevents page actions, not URL-scoped daemon reads.
+    // File snapshots use a separate strict metadata path below.
+    if (error?.code !== 'page-access-denied' || !/^https?:/.test(tab.url)) {
+      throw error;
+    }
+  } else if (!pageIdentity) {
+    throw new Error('Page identity inspection returned no result');
   }
 
   if (pageIdentity?.documentUrl === tab.url && pageIdentity.embeddedSlug) {
@@ -1734,25 +1808,33 @@ async function fileSnapshotPageIdentity(tab) {
       throw error;
     }
   }
-  const [execution] = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    injectImmediately: true,
-    func: () => {
-      const slugMetadata = document.querySelectorAll(
-        'meta[name="x-browser-recall-slug"]',
-      );
-      const urlMetadata = document.querySelectorAll(
-        'meta[name="x-browser-recall-url"]',
-      );
-      return {
-        documentUrl: window.location.href,
-        slugCount: slugMetadata.length,
-        urlCount: urlMetadata.length,
-        slug: slugMetadata[0]?.content ?? null,
-        url: urlMetadata[0]?.content ?? null,
-      };
-    },
-  });
+  const [execution] = await chrome.scripting
+    .executeScript({
+      target: { tabId: tab.id },
+      injectImmediately: true,
+      func: () => {
+        const slugMetadata = document.querySelectorAll(
+          'meta[name="x-browser-recall-slug"]',
+        );
+        const urlMetadata = document.querySelectorAll(
+          'meta[name="x-browser-recall-url"]',
+        );
+        return {
+          documentUrl: window.location.href,
+          slugCount: slugMetadata.length,
+          urlCount: urlMetadata.length,
+          slug: slugMetadata[0]?.content ?? null,
+          url: urlMetadata[0]?.content ?? null,
+        };
+      },
+    })
+    .catch(async (error) => {
+      const currentTab = await chrome.tabs.get(tab.id);
+      if (currentTab.url !== tab.url) {
+        throw new Error('Snapshot file navigated while identity was resolving');
+      }
+      throw normalizePageScriptError(error);
+    });
   const inspected = execution?.result;
   const currentTab = await chrome.tabs.get(tab.id);
   if (currentTab.url !== tab.url || inspected?.documentUrl !== tab.url) {
@@ -1802,27 +1884,23 @@ async function resolveTabPageIdentity(tab, navigationRetries = 0) {
     let identity;
     if (tab.url.startsWith('file:')) {
       identity = await fileSnapshotPageIdentity(tab);
-    } else if (tab.status === 'loading') {
-      const loadingIdentity = await loadingTabPageIdentity(tab);
-      if (!loadingIdentity.identity) {
+    } else {
+      const resolved = await readTabPageIdentity(tab);
+      if (!resolved.identity) {
         if (navigationRetries >= POPUP_IDENTITY_NAVIGATION_RETRIES) {
           throw new Error(
             'Page kept navigating while popup identity was resolving',
           );
         }
         return resolveTabPageIdentity(
-          loadingIdentity.currentTab,
+          resolved.currentTab,
           navigationRetries + 1,
         );
       }
-      identity = loadingIdentity.identity;
-      if (typeof loadingIdentity.currentTab.title === 'string') {
-        effectiveTitle = loadingIdentity.currentTab.title;
+      identity = resolved.identity;
+      if (typeof resolved.currentTab.title === 'string') {
+        effectiveTitle = resolved.currentTab.title;
       }
-    } else {
-      identity = await sendReadyContentMessage(tab.id, {
-        action: 'getPageIdentity',
-      });
     }
     if (
       identity?.success !== true ||
@@ -2058,6 +2136,7 @@ async function preparePopupOpenPayload(tab, options = {}) {
     mutationRevision,
     targetTabId: tab?.id,
     refreshAfterMutation: !options.preparedBootstrap,
+    errorNotification: options.errorNotification,
   });
   return {
     bootstrap,

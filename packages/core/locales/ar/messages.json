@@ -1,4 +1,16 @@
 {
+  "extensionCopyErrorDetails": {
+    "message": "نسخ التفاصيل",
+    "description": "Copy popup error details button label."
+  },
+  "extensionErrorCopied": {
+    "message": "تم النسخ",
+    "description": "Popup error clipboard success status."
+  },
+  "extensionErrorCopyFailed": {
+    "message": "تعذّر النسخ. تم تحديد الرسالة لنسخها يدويًا.",
+    "description": "Popup error clipboard failure status."
+  },
   "extensionPackageName": {
     "message": "Browser Recall Connector",
     "description": "Browser extension package name."
@@ -639,10 +651,6 @@
     "message": "تحقق مرة أخرى",
     "description": "Extension setup retry button."
   },
-  "extensionActionFailedReload": {
-    "message": "$1 - يرجى إعادة تحميل الامتداد.",
-    "description": "Popup error with reload hint."
-  },
   "extensionActionFailed": {
     "message": "فشل الإجراء",
     "description": "Generic extension action failure."
@@ -738,14 +746,6 @@
   "extensionCheckAgainApproval": {
     "message": "تحقق مرة أخرى لطلب الموافقة.",
     "description": "Connector retry approval metadata."
-  },
-  "extensionConnectionResetActionFailed": {
-    "message": "فشل الإجراء Browser Recall بسبب إعادة تعيين اتصال الامتداد. أعد تحميل هذه الصفحة وحاول مرة أخرى.",
-    "description": "Extension action runtime failure message."
-  },
-  "extensionContextInvalidated": {
-    "message": "تم إبطال سياق الإضافة. يرجى تحديث الصفحة والمحاولة مرة أخرى.",
-    "description": "Popup runtime invalidated message."
   },
   "extensionCreateListNamed": {
     "message": "إنشاء \"$1\"",

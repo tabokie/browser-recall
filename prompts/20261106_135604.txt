@@ -1,0 +1,25 @@
+- Is the "data_collection_permissions" in the firefox extension manifest set to none? Is this correct?
+- Fix it
+- Bump version to 1.0.2
+- Improve product website installation part: (1) Change extension buttons to "Firefox", "Chrome and others", (2) Change desktop buttons to (a) app store link (placeholder), (b) a direct link to latest GitHub release Windows installer, (c) a button to all github releases.
+
+You may improve over my proposals.
+- Update readme "You can also [build from source](https://github.com/tabokie/browser-recall/blob/main/DEVELOPMENT.md#build-and-run)." to include download from GitHub releases.
+- [$flatten](/Users/xyt/dev/skills/flatten/SKILL.md) pick a module you think is the most bloated and has opportunities to condense
+- I'm testing the latest app on Windows, the extension is working for a small period and then says "Could not establish connection. Receiving end does not exist."
+- It works reliably after I upgrade to latest Chrome. Is the extension depending on browser version?
+- Actually no, the latest Chrome still has issue
+- Continue
+- After a while it still fails to open popup, the error is "The extensions gallery cannot be scripted". It recovers after refreshing page but fails again after the same duration.
+- Is this treatment specifically for Chrome Web Store, what about other potential cases where script is banned?
+- Could we do that? What is the complexity of detecting them? I don't want to over complicate things just to handle these corner cases well.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- About Windows behavior, I wonder why the popup works for a while before showing scripting failure? Is the scripting failure not essential to the functionality?
+- I agree. In the partially failing state, we should show an error bubble when user uses the functionalities that require scripting (e.g. clicking a button). We should implement this improvement without complicating the dynamics of the popup states. While we are at this, we should make the error bubble window text easier to copy and sent to developers. Right now it lasts too short.
+- Now the popup on Chrome Web Store says popup-prepare-timeout consistently
+- What about the error bubble when popup is not opened? Is its style updated too?
+- Fix it
+- Continue
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them all. And check if the earlier "Completed-page navigation still interrupts recovery" still needs fixing.
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) co-author=GPT-6.1 Sol, GPT-6 Astra

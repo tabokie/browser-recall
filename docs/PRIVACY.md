@@ -1,6 +1,6 @@
 # Browser Recall — Privacy Policy
 
-**Last updated:** October 24, 2026
+**Last updated:** November 1, 2026
 
 Browser Recall's desktop app and browser extension store data locally and send no
 analytics or browsing data to a developer-operated service. Optional GitHub sync
@@ -61,6 +61,12 @@ sync service.
 
 Chrome's **Allow access to file URLs** setting enables actions on local snapshots.
 
+Firefox for desktop 140 or later is required. Firefox's installation prompt
+requests consent for browsing activity, website content, and website activity
+sent to the paired desktop app. Mozilla's
+[data-transmission policy](https://extensionworkshop.com/documentation/publish/add-on-policies/#6-data-collection-and-transmission-disclosure-and-control)
+includes transfers outside Firefox to a local application.
+
 ## Deletion
 
 Removing the extension removes extension storage but leaves the desktop library.
@@ -78,7 +84,12 @@ Use requirements. Browsing data serves the user's library. Browser Recall does
 not sell data or use data for advertising, creditworthiness, or lending. Optional
 GitHub sync transfers data only to the user's configured repository for the library.
 
-## Website analytics
+## Website connections
+
+The product website requests public release metadata from GitHub to link to the
+latest Windows installer. The request sends no Browser Recall library data,
+cookies, or page referrer. If the request fails, the download link opens GitHub's
+latest release page.
 
 The product website uses GoatCounter for page views, separately from the desktop
 app and extension. GoatCounter receives the page path/title, referrer, and basic

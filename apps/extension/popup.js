@@ -15,8 +15,8 @@ import {
   requestConnectorState,
 } from './connector/state.js';
 import {
-  applyPaperErrorPopoutStyle,
-  paperErrorPopoutCss,
+  errorBubbleOptions,
+  renderErrorBubble,
 } from './extension-ui-tokens.js';
 import {
   initializeExtensionI18n,
@@ -105,8 +105,6 @@ function showFatalError(message) {
   setPopupSurface('fatal');
   reload.focus({ preventScroll: true });
 }
-
-let _errorBubbleTimer = null;
 
 function revealPopup() {
   document.documentElement.removeAttribute('data-popup-hidden');
@@ -390,85 +388,20 @@ function openDesktopApp(route = 'open') {
 }
 
 function showErrorBubble(message, options = {}) {
-  const { appendReloadHint = true } = options;
-  let displayMessage = message;
-  if (globalThis.browserRecallWebExtension?.isRuntimeFailure?.(message)) {
-    displayMessage = tr(
-      'extensionContextInvalidated',
-      'Extension context invalidated. Please refresh the page and try again.',
-      undefined,
-    );
-  } else if (!appendReloadHint) {
-    displayMessage =
-      message || tr('extensionActionFailed', 'Action failed', undefined);
-  } else {
-    displayMessage = tr(
-      'extensionActionFailedReload',
-      `${message} - please reload the extension.`,
-      [message],
-    );
-  }
-  let bubble = document.getElementById('errorBubble');
-  if (!bubble) {
-    bubble = document.createElement('div');
-    bubble.id = 'errorBubble';
-    bubble.style.cssText = paperErrorPopoutCss({ includeFade: true });
-    applyPaperErrorPopoutStyle(bubble);
-    document.body.appendChild(bubble);
-  }
-  bubble.textContent = displayMessage;
-  bubble.style.opacity = '1';
-  clearTimeout(_errorBubbleTimer);
-  _errorBubbleTimer = setTimeout(() => {
-    bubble.style.opacity = '0';
-  }, 4000);
-}
-
-function userActionErrorMessage(
-  message,
-  fallback = tr('extensionActionFailed', 'Action failed', undefined),
-) {
-  if (globalThis.browserRecallWebExtension?.isRuntimeFailure?.(message)) {
-    return tr(
-      'extensionConnectionResetActionFailed',
-      'Browser Recall action failed because the extension connection was reset. Reload this page and try again.',
-      undefined,
-    );
-  }
-  return message || fallback;
-}
-
-async function notifyActivePageError(
-  message,
-  fallback = tr('extensionActionFailed', 'Action failed', undefined),
-) {
-  return notifyPageError({ message, fallback });
-}
-
-async function notifyPageError({
-  tabId = null,
-  message,
-  fallback = tr('extensionActionFailed', 'Action failed', undefined),
-}) {
-  const displayMessage = userActionErrorMessage(message, fallback);
-  try {
-    let targetTabId = tabId;
-    if (!targetTabId) {
-      const [tab] = await chrome.tabs.query({
-        active: true,
-        currentWindow: true,
-      });
-      targetTabId = tab?.id;
-    }
-    if (!targetTabId)
-      throw new Error(tr('extensionNoTargetTab', 'No target tab', undefined));
-    await chrome.tabs.sendMessage(targetTabId, {
-      action: 'showErrorNotification',
-      message: displayMessage,
-    });
-  } catch {
-    showErrorBubble(displayMessage, { appendReloadHint: false });
-  }
+  const displayMessage =
+    message || tr('extensionActionFailed', 'Action failed');
+  renderErrorBubble({
+    ...errorBubbleOptions(
+      displayMessage,
+      tr,
+      chrome.runtime.getManifest().version,
+    ),
+    id: 'errorBubble',
+    inline: true,
+    detail: options.detail || displayMessage,
+    pageUrl: options.pageUrl ?? currentPage.tab?.url ?? currentPage.url ?? '',
+    onDismiss: focusListSearchCapture,
+  });
 }
 
 function autoResizeTextarea(textarea) {
@@ -569,7 +502,7 @@ function showDesktopDataUnavailable(
                 })
                 .catch((error) => {
                   button.disabled = false;
-                  showErrorBubble(error.message, { appendReloadHint: false });
+                  showErrorBubble(error.message);
                 });
             },
           },
@@ -608,6 +541,15 @@ function formatDiagnosticDetail(diagnostic) {
   }
   if (diagnostic.error) lines.push(`error: ${diagnostic.error}`);
   return lines.join('\n');
+}
+
+function showPageIdentityFailure(error, tab) {
+  const diagnostic = {
+    reason: error.code || 'popup-page-identity-failed',
+    url: tab.url,
+    error: error.message || String(error),
+  };
+  showDesktopDataUnavailable(error.message, diagnostic);
 }
 
 function showSection(id) {
@@ -1754,6 +1696,8 @@ function shouldFocusListSearchCapture() {
   const doc = globalThis.document;
   if (!doc) return false;
   if (isPopupUiMutating()) return false;
+  if (doc.getElementById('errorBubble')?.contains(doc.activeElement))
+    return false;
   if (popupShellState.surface !== 'dashboard') return false;
   if (!doc.getElementById('dashboardContent')) return false;
   if (listPickerElement()) return false;
@@ -1881,6 +1825,7 @@ async function openListPickerFromTyping(
 
 function handleListSearchShortcut(event) {
   if (event.defaultPrevented) return;
+  if (event.target?.closest?.('#errorBubble')) return;
   if (isPopupUiMutating()) return;
   if (!isPrintableKeyEvent(event)) return;
   if (isImeCompositionKeyEvent(event)) return;
@@ -2107,20 +2052,18 @@ document.getElementById('captureBtn').addEventListener('click', () => {
       if (resp?.success === true) {
         await refreshCurrentPageSummary();
         if (resp.warning) {
-          await notifyActivePageError(resp.warning, resp.warning);
+          showErrorBubble(resp.warning);
         }
       } else {
         logDebug('[popup] Capture failed:', resp);
-        await notifyActivePageError(
-          resp?.error,
-          tr('extensionCaptureFailed', 'Capture failed', undefined),
+        showErrorBubble(
+          resp?.error || tr('extensionCaptureFailed', 'Capture failed'),
         );
       }
     } catch (error) {
       logError('[popup] Capture error:', error);
-      await notifyActivePageError(
-        error.message,
-        tr('extensionCaptureFailed', 'Capture failed', undefined),
+      showErrorBubble(
+        error.message || tr('extensionCaptureFailed', 'Capture failed'),
       );
     }
 
@@ -2426,10 +2369,7 @@ async function resumeDashboard(tab, generation) {
     await resolveEffectiveUrl(tab);
   } catch (error) {
     if (generation === currentPage.generation) {
-      showDesktopDataUnavailable(error.message, {
-        reason: 'popup-page-identity-failed',
-        url: tab.url,
-      });
+      showPageIdentityFailure(error, tab);
     }
     return;
   }
@@ -2559,34 +2499,18 @@ function renderBlacklistDiagnostic(tab, effectiveUrl) {
                 action: 'captureCurrentPageFromPopup',
               });
               if (resp?.success === true && resp.warning) {
-                await notifyPageError({
-                  tabId: tab.id,
-                  message: resp.warning,
-                  fallback: resp.warning,
-                });
+                showErrorBubble(resp.warning);
               } else if (resp?.success !== true) {
-                await notifyPageError({
-                  tabId: tab.id,
-                  message: resp.error,
-                  fallback: tr(
-                    'extensionCaptureFailed',
-                    'Capture failed',
-                    undefined,
-                  ),
-                });
+                showErrorBubble(
+                  resp?.error || tr('extensionCaptureFailed', 'Capture failed'),
+                );
               }
               logDebug('[popup] Capture once completed for blacklisted page');
             } catch (error) {
               logError('[popup] Capture once failed:', error);
-              await notifyPageError({
-                tabId: tab.id,
-                message: error.message,
-                fallback: tr(
-                  'extensionCaptureFailed',
-                  'Capture failed',
-                  undefined,
-                ),
-              });
+              showErrorBubble(
+                error.message || tr('extensionCaptureFailed', 'Capture failed'),
+              );
             }
 
             await showDashboard(tab);
@@ -2647,8 +2571,22 @@ async function consumePopupBootstrap() {
   ) {
     throw new Error('Popup bootstrap response is missing its prepared model');
   }
+  const notification = response.errorNotification;
+  if (
+    notification != null &&
+    (typeof notification !== 'object' ||
+      typeof notification.message !== 'string' ||
+      !notification.message ||
+      typeof notification.detail !== 'string' ||
+      !notification.detail ||
+      typeof notification.pageUrl !== 'string' ||
+      !notification.pageUrl)
+  ) {
+    throw new Error('Popup error notification is invalid');
+  }
   return {
     bootstrap: response.bootstrap,
+    errorNotification: notification,
   };
 }
 
@@ -2752,14 +2690,7 @@ async function loadConnectedDashboard(connector) {
   try {
     await resolveEffectiveUrl(tab);
   } catch (error) {
-    showDesktopDataUnavailable(error.message, {
-      reason:
-        error?.code === 'snapshot-file-access-required'
-          ? error.code
-          : 'popup-page-identity-failed',
-      url: tab.url,
-      error: error.message || String(error),
-    });
+    showPageIdentityFailure(error, tab);
     return;
   }
   await showDashboard(tab);
@@ -2774,7 +2705,16 @@ async function initPopup() {
   await loadRecordingState();
   const handoff = await consumePopupBootstrap();
   if (handoff) {
-    await renderPreparedPopup(handoff.bootstrap);
+    try {
+      await renderPreparedPopup(handoff.bootstrap);
+    } finally {
+      if (handoff.errorNotification) {
+        showErrorBubble(
+          handoff.errorNotification.message,
+          handoff.errorNotification,
+        );
+      }
+    }
     return;
   }
 

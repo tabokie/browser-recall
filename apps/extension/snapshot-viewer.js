@@ -1,14 +1,19 @@
 import { logDebug } from './logger.js';
 import { createHighlightLifecycle } from '../../packages/core/highlight-lifecycle.js';
 import {
-  applyPaperErrorPopoutStyle,
-  paperErrorPopoutCss,
+  errorBubbleOptions,
+  renderErrorBubble,
 } from './extension-ui-tokens.js';
 import { initializeExtensionI18n, tr } from '../../packages/core/i18n.js';
 
 const extensionSurface = globalThis.browserRecallExtensionSurface;
 
 await initializeExtensionI18n();
+const errorBubbleDefaults = errorBubbleOptions(
+  '',
+  tr,
+  chrome.runtime.getManifest().version,
+);
 
 const params = new URLSearchParams(location.search);
 const slug = params.get('slug');
@@ -23,21 +28,12 @@ function showSnapshotRuntimeError(error) {
     'Browser Recall extension reloaded. Please reload the page and try again.',
     undefined,
   );
-  let banner = document.getElementById('snapshotRuntimeError');
-  if (!banner) {
-    banner = document.createElement('div');
-    banner.id = 'snapshotRuntimeError';
-    banner.setAttribute('role', 'status');
-    banner.style.cssText = paperErrorPopoutCss({
-      zIndex: 2147483647,
-      fontSize: '13px',
-      padding: '8px 14px',
-      maxWidth: '420px',
-    });
-    applyPaperErrorPopoutStyle(banner);
-    document.body.appendChild(banner);
-  }
-  banner.textContent = message;
+  renderErrorBubble({
+    ...errorBubbleDefaults,
+    message,
+    id: 'snapshotRuntimeError',
+    detail: error?.message || String(error),
+  });
   return true;
 }
 
@@ -47,21 +43,11 @@ function showSnapshotError(error) {
     typeof error?.message === 'string' && error.message
       ? error.message
       : tr('extensionActionFailed', 'Action failed', undefined);
-  let banner = document.getElementById('snapshotRuntimeError');
-  if (!banner) {
-    banner = document.createElement('div');
-    banner.id = 'snapshotRuntimeError';
-    banner.setAttribute('role', 'alert');
-    banner.style.cssText = paperErrorPopoutCss({
-      zIndex: 2147483647,
-      fontSize: '13px',
-      padding: '8px 14px',
-      maxWidth: '420px',
-    });
-    applyPaperErrorPopoutStyle(banner);
-    document.body.appendChild(banner);
-  }
-  banner.textContent = message;
+  renderErrorBubble({
+    ...errorBubbleDefaults,
+    message,
+    id: 'snapshotRuntimeError',
+  });
   logDebug('[snapshot-viewer] operation failed:', message);
 }
 
@@ -208,6 +194,7 @@ if (
 }
 
 const pageUrl = pageResp.entry.url;
+errorBubbleDefaults.pageUrl = pageUrl;
 const html = htmlResp.html;
 const frame = document.getElementById('frame');
 const viewerTab = await chrome.tabs.getCurrent();

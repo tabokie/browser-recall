@@ -12,7 +12,7 @@ Use [Architecture](docs/ARCHITECTURE.md) for system contracts,
 - `cargo-llvm-cov` 0.8.5 for coverage and full local verification.
 - PowerShell 7.6.6 on macOS/Linux; Windows uses built-in Windows PowerShell 5.1.
   Set `BROWSER_RECALL_TEST_POWERSHELL` when the executable is outside `PATH`.
-- Firefox for real extension checks; CI pins Firefox 157.0.1. Set `FIREFOX_BINARY`
+- Firefox 140+ for real extension checks; CI pins Firefox 157.0.1. Set `FIREFOX_BINARY`
   when Firefox is outside the default system path.
 - Xcode Command Line Tools on macOS, MSVC/WebView2 on Windows, or the Linux system
   dependencies in `.github/workflows/ci.yml`.
@@ -319,8 +319,8 @@ Mobile WebKit wheel checks do not establish native Safari swipe behavior.
 `.github/workflows/website.yml` checks relevant pull requests and publishes checked
 `main` builds. Set **Settings → Pages → Source → GitHub Actions** before first
 publication. **Actions → Product Website → Run workflow** publishes current `main`.
-Only `dist/website/` is deployed. See [Privacy](docs/PRIVACY.md#website-analytics)
-for website analytics.
+Only `dist/website/` is deployed. See [Privacy](docs/PRIVACY.md#website-connections)
+for website connections.
 
 `npm run generate:icons` renders SVG sources into native slots, extension icons,
 and tray assets. Inspect actual target sizes, including 16 px, and commit generated

@@ -154,7 +154,747 @@ async function waitForContentScript(helper, page, url) {
     .toBe(true);
 }
 
-test('popup shows identity failure detail when the receiver is stale', async ({
+async function cleanupPopupScenario(operations, primaryFailure) {
+  const failures = [];
+  for (const operation of operations) {
+    try {
+      await operation();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length === 0) return;
+  const error = new AggregateError(failures, 'Popup scenario cleanup failed');
+  if (primaryFailure) console.error(error);
+  else throw error;
+}
+
+for (const scenario of [
+  {
+    name: 'current Chrome Web Store',
+    pageUrl: 'https://chromewebstore.google.com/detail/browser-recall/test',
+    error: 'The extensions gallery cannot be scripted.',
+  },
+  {
+    name: 'legacy Chrome Web Store',
+    pageUrl: 'https://chrome.google.com/webstore/detail/browser-recall/test',
+    error: 'The extensions gallery cannot be scripted.',
+  },
+  {
+    name: 'withheld host permission',
+    error:
+      'Cannot access contents of url "https://example.test/". Extension manifest must request permission to access this host.',
+  },
+  {
+    name: 'enterprise policy',
+    error: 'This page cannot be scripted due to an ExtensionsSettings policy.',
+  },
+  {
+    name: 'Firefox host permission',
+    error: 'Missing host permission for the tab or frames',
+  },
+  { name: 'user site block', error: 'Blocked' },
+  {
+    name: 'unexpected inspection error',
+    error: 'Unexpected page inspection failure',
+    mode: 'data-unavailable',
+  },
+]) {
+  test(`page access outcome stays consistent through loading: ${scenario.name}`, async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    const helper = await openHelperPage(extContext, extensionId);
+    const page = await extContext.newPage();
+    const sourceUrl = localServer.url('/gallery-fixture');
+    const storeUrl = scenario.pageUrl || sourceUrl;
+    const expectedMode = scenario.mode || 'dashboard';
+    const slug = getSlugForUrl(storeUrl);
+    await resetAndSeed(extContext, extensionId, [
+      settingsCheckpoint(),
+      {
+        path: pageCheckpointPath(slug),
+        data: pageEntityFixture({
+          slug,
+          url: storeUrl,
+          title: 'Saved restricted page',
+          childIds: ['note:restricted-note'],
+        }),
+      },
+      {
+        path: 'objects/notes/restricted-note.json',
+        data: noteEntityFixture({
+          slug: 'restricted-note',
+          url: storeUrl,
+          excerpt: ['Saved data survives denied scripting.'],
+          note: '',
+          cssPath: ['main'],
+        }),
+      },
+    ]);
+    const scriptUrl = localServer.url('/hold-gallery.js');
+    let releaseScript;
+    let scriptArrived;
+    const scriptBlocked = new Promise((resolve) => {
+      scriptArrived = resolve;
+    });
+    localServer.addRawPage(
+      '/gallery-fixture',
+      '<!doctype html><title>Browser Recall gallery fixture</title><main>Chrome Web Store</main><script src="/hold-gallery.js"></script>',
+    );
+    await page.route(scriptUrl, (route) => {
+      releaseScript = () => {
+        releaseScript = null;
+        return route.fulfill({ contentType: 'text/javascript', body: '' });
+      };
+      scriptArrived();
+    });
+    const worker = extContext.serviceWorkers()[0];
+    let popup;
+    let primaryFailure;
+    try {
+      await page.goto(sourceUrl, { waitUntil: 'commit' });
+      await scriptBlocked;
+      const tabId = await helper.evaluate(async (url) => {
+        const [tab] = await chrome.tabs.query({ url });
+        if (tab?.status !== 'loading')
+          throw new Error('Gallery fixture must still be loading');
+        return tab.id;
+      }, sourceUrl);
+      // Force Chrome's URL/permission boundary while keeping the fixture local.
+      await worker.evaluate(
+        ({ tabId, storeUrl, error }) => {
+          const get = chrome.tabs.get.bind(chrome.tabs);
+          const query = chrome.tabs.query.bind(chrome.tabs);
+          const executeScript = chrome.scripting.executeScript.bind(
+            chrome.scripting,
+          );
+          globalThis.__restoreGalleryApis = () => {
+            chrome.tabs.get = get;
+            chrome.tabs.query = query;
+            chrome.scripting.executeScript = executeScript;
+          };
+          chrome.tabs.get = async (id) => {
+            const tab = await get(id);
+            return id === tabId ? { ...tab, url: storeUrl } : tab;
+          };
+          chrome.tabs.query = (details) =>
+            details.active && details.currentWindow
+              ? chrome.tabs.get(tabId).then((tab) => [tab])
+              : query(details);
+          chrome.scripting.executeScript = (details, ...rest) => {
+            if (details.target?.tabId === tabId) {
+              return Promise.reject(new Error(error));
+            }
+            return executeScript(details, ...rest);
+          };
+        },
+        { tabId, storeUrl, error: scenario.error },
+      );
+      expect(
+        await helper.evaluate(
+          (tabId) =>
+            chrome.runtime.sendMessage({
+              action: 'failNextTabMessageForTest',
+              tabId,
+              messageAction: 'getPageIdentity',
+              repeat: true,
+              error:
+                'Could not establish connection. Receiving end does not exist.',
+            }),
+          tabId,
+        ),
+      ).toMatchObject({ success: true });
+      const prepare = () =>
+        helper.evaluate(
+          (tabId) =>
+            chrome.runtime.sendMessage({
+              action: 'preparePopupBootstrapForTest',
+              tabId,
+            }),
+          tabId,
+        );
+      const loading = await prepare();
+      await releaseScript();
+      await expect
+        .poll(() =>
+          helper.evaluate(
+            async (tabId) => (await chrome.tabs.get(tabId)).status,
+            tabId,
+          ),
+        )
+        .toBe('complete');
+      const complete = await prepare();
+      console.log(
+        'Page access popup evidence:',
+        JSON.stringify({ storeUrl, loading, complete }),
+      );
+      expect(loading).toMatchObject({ success: true, mode: expectedMode });
+      expect(complete).toMatchObject({ success: true, mode: expectedMode });
+
+      const assertPopup = async (popup) => {
+        if (expectedMode === 'dashboard') {
+          await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
+          await expect(popup.locator('#pageUrl')).toHaveText(storeUrl);
+          await expect(popup.locator('.highlight-excerpt')).toHaveText(
+            'Saved data survives denied scripting.',
+          );
+          await expect(popup.locator('#errorBubble')).toHaveCount(0);
+        } else {
+          await expect(popup.locator('#pageDiagnosticDetail')).toContainText(
+            scenario.error,
+          );
+        }
+      };
+      popup = await extContext.newPage();
+      await popup.goto(
+        `chrome-extension://${extensionId}/${complete.popupPath}`,
+      );
+      await assertPopup(popup);
+      await popup.close();
+      popup = await extContext.newPage();
+      await popup.addInitScript(
+        ({ tabId, storeUrl }) => {
+          const query = chrome.tabs.query.bind(chrome.tabs);
+          chrome.tabs.query = (details) =>
+            details.active && details.currentWindow
+              ? Promise.resolve([
+                  { id: tabId, url: storeUrl, status: 'complete' },
+                ])
+              : query(details);
+        },
+        { tabId, storeUrl },
+      );
+      await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+      await assertPopup(popup);
+      if (scenario.name === 'current Chrome Web Store') {
+        await popup.locator('#listAddBtn').click();
+        await popup.locator('#listSearchInput').fill('Restricted page reading');
+        await popup.locator('#listPickerCreate').click();
+        await expect(popup.locator('.list-chip.selected')).toContainText(
+          'Restricted page reading',
+        );
+        const summary = await helper.evaluate(
+          (url) =>
+            chrome.runtime.sendMessage({ action: 'getPageSummary', url }),
+          storeUrl,
+        );
+        expect(summary.lists).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              name: 'Restricted page reading',
+              containsPage: true,
+            }),
+          ]),
+        );
+        expect(
+          await helper.evaluate(
+            (tabId) =>
+              chrome.runtime.sendMessage({
+                action: 'failNextTabMessageForTest',
+                tabId,
+                messageAction: 'isPdfPage',
+                repeat: true,
+                error:
+                  'Could not establish connection. Receiving end does not exist.',
+              }),
+            tabId,
+          ),
+        ).toMatchObject({ success: true });
+        await popup.locator('#captureBtn').click();
+        await expect(popup.locator('#errorBubbleMessage')).toHaveText(
+          'Could not establish connection. Receiving end does not exist.',
+        );
+        await expect(popup.locator('.highlight-excerpt')).toHaveText(
+          'Saved data survives denied scripting.',
+        );
+        await expect(popup.locator('#captureBtn')).toBeEnabled();
+        await popup.locator('#dismissErrorBtn').click();
+        await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
+      }
+      await popup.close();
+      popup = null;
+      await worker.evaluate(() => {
+        globalThis.__restoreGalleryApis();
+        globalThis.browserRecallTabMessageFailuresForTest.length = 0;
+      });
+      popup = await openPreparedPopupForPage(
+        extContext,
+        extensionId,
+        page,
+        'Browser Recall gallery fixture',
+      );
+      await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
+    } catch (error) {
+      primaryFailure = error;
+      throw error;
+    } finally {
+      await cleanupPopupScenario(
+        [
+          () => releaseScript?.(),
+          () =>
+            worker.evaluate(() => {
+              globalThis.__restoreGalleryApis?.();
+              delete globalThis.__restoreGalleryApis;
+            }),
+          () => popup?.close(),
+          () => page.close(),
+          () => helper.close(),
+        ],
+        primaryFailure,
+      );
+    }
+  });
+}
+
+test('popup action errors remain copyable until dismissed', async ({
+  extContext,
+  extensionId,
+  setupDir,
+  localServer,
+}, testInfo) => {
+  void setupDir;
+  await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+  localServer.addPage('/popup-copy-error', {
+    title: 'Copy action error',
+    body: '<main>Page content</main>',
+  });
+  const page = await extContext.newPage();
+  const helper = await openHelperPage(extContext, extensionId);
+  let popup;
+  let primaryFailure;
+  const message =
+    'Cannot access contents of the page. Extension manifest must request permission to access this host.\nDiagnostic token: ' +
+    'long-detail-'.repeat(60);
+  try {
+    await page.goto(localServer.url('/popup-copy-error'));
+    popup = await openPreparedPopupForPage(
+      extContext,
+      extensionId,
+      page,
+      'Copy action error',
+    );
+    await popup.setViewportSize({ width: 296, height: 500 });
+    await popup.clock.install();
+    await popup.evaluate((message) => {
+      const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+      chrome.runtime.sendMessage = (request) =>
+        request.action === 'captureCurrentPageFromPopup'
+          ? Promise.resolve({ success: false, error: message })
+          : send(request);
+      chrome.tabs.sendMessage = async () => {
+        throw new Error('Receiving end does not exist.');
+      };
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          writeText: async (text) => {
+            if (window.failClipboard) throw new Error('Clipboard unavailable');
+            window.copiedError = text;
+          },
+        },
+      });
+    }, message);
+    await popup.locator('#captureBtn').click();
+    await expect(popup.locator('#errorBubble')).toBeVisible();
+    await popup.screenshot({ path: testInfo.outputPath('action-error.png') });
+    await popup.clock.fastForward(60_000);
+    await popup.clock.runFor(500);
+    await expect(popup.locator('#errorBubble')).toHaveCSS('opacity', '1');
+    await expect(popup.locator('#copyErrorDetailsBtn')).toBeVisible();
+    await popup.locator('#copyErrorDetailsBtn').click();
+    expect(await popup.evaluate(() => window.copiedError)).toContain(message);
+    expect(await popup.evaluate(() => window.copiedError)).toContain(
+      page.url(),
+    );
+    expect(await popup.evaluate(() => window.copiedError)).toContain(
+      'Browser Recall',
+    );
+    await popup.evaluate(() => {
+      window.failClipboard = true;
+    });
+    await popup.locator('#copyErrorDetailsBtn').click();
+    await expect(popup.locator('#errorCopyStatus')).not.toBeEmpty();
+    expect(await popup.evaluate(() => window.getSelection().toString())).toBe(
+      message,
+    );
+    await expect(popup.locator('#listPickerHost.list-picker')).toHaveCount(0);
+    await popup.locator('#dismissErrorBtn').click();
+    await expect(popup.locator('#errorBubble')).toHaveCount(0);
+    await expect(popup.locator('#captureBtn')).toBeEnabled();
+    await popup.setViewportSize({ width: 1280, height: 720 });
+    await popup.close();
+    popup = null;
+    await page.bringToFront();
+    expect(
+      await helper.evaluate(
+        (message) =>
+          chrome.runtime.sendMessage({
+            action: 'failNextTabMessageForTest',
+            messageAction: 'isPdfPage',
+            error: message,
+          }),
+        message,
+      ),
+    ).toMatchObject({ success: true });
+    expect(
+      await helper.evaluate(() =>
+        chrome.runtime.sendMessage({
+          action: 'triggerCommandForTest',
+          command: 'open-popup',
+        }),
+      ),
+    ).toMatchObject({ success: true });
+    await expect
+      .poll(() =>
+        helper.evaluate(() => {
+          const popup = chrome.extension.getViews({ type: 'popup' })[0];
+          const button = popup?.document.getElementById('captureBtn');
+          if (
+            !button ||
+            button.disabled ||
+            button.getBoundingClientRect().height === 0
+          )
+            return false;
+          button.click();
+          return true;
+        }),
+      )
+      .toBe(true);
+    await expect
+      .poll(() =>
+        helper.evaluate(() => {
+          const popup = chrome.extension.getViews({ type: 'popup' })[0];
+          const bubble = popup?.document.getElementById('errorBubble');
+          if (!bubble) return null;
+          const text = bubble.querySelector('#errorBubbleMessage');
+          const close = bubble
+            .querySelector('#dismissErrorBtn')
+            .getBoundingClientRect();
+          return {
+            message: text.textContent,
+            scrollable: text.scrollHeight > text.clientHeight,
+            closeVisible: close.height > 0 && close.bottom <= popup.innerHeight,
+            fitsWidth:
+              popup.document.documentElement.scrollWidth <= popup.innerWidth,
+          };
+        }),
+      )
+      .toMatchObject({
+        message,
+        scrollable: true,
+        closeVisible: true,
+        fitsWidth: true,
+      });
+  } catch (error) {
+    primaryFailure = error;
+    throw error;
+  } finally {
+    await cleanupPopupScenario(
+      [
+        () =>
+          helper.evaluate(() =>
+            chrome.extension.getViews({ type: 'popup' })[0]?.close(),
+          ),
+        () => popup?.setViewportSize({ width: 1280, height: 720 }),
+        () => popup?.close(),
+        () => page.close(),
+        () => helper.close(),
+      ],
+      primaryFailure,
+    );
+  }
+});
+
+test('popup reopens with daemon data when the page receiver disappears', async ({
+  extContext,
+  extensionId,
+  setupDir,
+  localServer,
+}) => {
+  void setupDir;
+  const title = 'Reopened Popup';
+  localServer.addPage('/reopened-popup', {
+    title,
+    body: '<main>Saved highlight remains available.</main><script src="/hold-popup-receiver.js"></script>',
+  });
+  const url = localServer.url('/reopened-popup');
+  const slug = getSlugForUrl(url);
+  const noteSlug = 'reopened-popup-highlight';
+  await resetAndSeed(extContext, extensionId, [
+    settingsCheckpoint(),
+    {
+      path: pageCheckpointPath(slug),
+      data: pageEntityFixture({
+        slug,
+        url,
+        title,
+        deviceTimestamp: Date.now(),
+        parentIds: [],
+        childIds: [`note:${noteSlug}`],
+      }),
+    },
+    {
+      path: `objects/notes/${noteSlug}.json`,
+      data: noteEntityFixture({
+        slug: noteSlug,
+        url,
+        excerpt: ['Saved highlight remains available.'],
+        note: '',
+        cssPath: ['main'],
+      }),
+    },
+  ]);
+  const helper = await openHelperPage(extContext, extensionId);
+  const page = await extContext.newPage();
+  let releaseParser;
+  let parserBlocked;
+  const parserArrived = new Promise((resolve) => {
+    parserBlocked = resolve;
+  });
+  await page.route('**/hold-popup-receiver.js', (route) => {
+    releaseParser = () => {
+      releaseParser = null;
+      return route.fulfill({ contentType: 'text/javascript', body: '' });
+    };
+    parserBlocked();
+  });
+  let primaryFailure;
+  try {
+    await page.goto(url, { waitUntil: 'commit' });
+    await parserArrived;
+    await helper.evaluate(async (url) => {
+      const [tab] = await chrome.tabs.query({ url });
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'ISOLATED',
+        injectImmediately: true,
+        func: () => {
+          const event = chrome.runtime.onMessage;
+          const addListener = event.addListener.bind(event);
+          globalThis.__popupPageReceivers = [];
+          event.addListener = (listener) => {
+            globalThis.__popupPageReceivers.push(listener);
+            addListener(listener);
+          };
+        },
+      });
+    }, url);
+    await releaseParser();
+    await waitForContentScript(helper, page, url);
+    for (let opening = 0; opening < 3; opening++) {
+      await page.bringToFront();
+      const opened = await helper.evaluate(() =>
+        chrome.runtime.sendMessage({
+          action: 'triggerCommandForTest',
+          command: 'open-popup',
+        }),
+      );
+      expect(opened).toMatchObject({ success: true });
+      await expect
+        .poll(() =>
+          helper.evaluate(() => {
+            const popup = chrome.extension.getViews({ type: 'popup' })[0];
+            if (!popup) return null;
+            const doc = popup.document;
+            return {
+              title: doc.getElementById('pageTitle')?.textContent,
+              url: doc.getElementById('pageUrl')?.textContent,
+              excerpt: doc.querySelector('.highlight-excerpt')?.textContent,
+              diagnostic: doc.getElementById('pageDiagnosticSection')?.style
+                .display,
+              error: doc.getElementById('pageDiagnosticMessage')?.textContent,
+              markupButtons: doc.querySelectorAll('#hideMarkupBtn').length,
+            };
+          }),
+        )
+        .toMatchObject({
+          title,
+          url,
+          excerpt: 'Saved highlight remains available.',
+          diagnostic: 'none',
+          ...(opening > 0 ? { markupButtons: 0 } : {}),
+        });
+      await helper.evaluate(() =>
+        chrome.extension.getViews({ type: 'popup' })[0].close(),
+      );
+      if (opening === 0) {
+        const receiverError = await helper.evaluate(async (url) => {
+          const [tab] = await chrome.tabs.query({ url });
+          const [removed] = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            world: 'ISOLATED',
+            func: () => {
+              const listeners = globalThis.__popupPageReceivers;
+              for (const listener of listeners) {
+                chrome.runtime.onMessage.removeListener(listener);
+              }
+              return listeners.length;
+            },
+          });
+          if (removed.result < 1)
+            throw new Error('No page receiver was removed');
+          try {
+            await chrome.tabs.sendMessage(tab.id, {
+              action: 'getPageIdentity',
+            });
+            return null;
+          } catch (error) {
+            return error.message;
+          }
+        }, url);
+        expect(receiverError).toBe(
+          'Could not establish connection. Receiving end does not exist.',
+        );
+      }
+    }
+  } catch (error) {
+    primaryFailure = error;
+    throw error;
+  } finally {
+    await cleanupPopupScenario(
+      [
+        () => releaseParser?.(),
+        () =>
+          !helper.isClosed() &&
+          helper.evaluate(() =>
+            chrome.extension.getViews({ type: 'popup' })[0]?.close(),
+          ),
+        () => page.close(),
+        () => helper.close(),
+      ],
+      primaryFailure,
+    );
+  }
+});
+
+for (const reply of ['missing receiver', 'successful stale reply']) {
+  test(`completed popup follows navigation during receiver recovery: ${reply}`, async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+    localServer.addPage('/popup-recovery-source', {
+      title: 'Source',
+      body: '<main>Source</main>',
+    });
+    localServer.addPage('/popup-recovery-destination', {
+      title: 'Destination',
+      body: '<main>Destination</main>',
+    });
+    const sourceUrl = localServer.url('/popup-recovery-source');
+    const destinationUrl = localServer.url('/popup-recovery-destination');
+    const page = await extContext.newPage();
+    const helper = await openHelperPage(extContext, extensionId);
+    const worker = extContext.serviceWorkers()[0];
+    let primaryFailure;
+    try {
+      await page.goto(sourceUrl);
+      await expect
+        .poll(() =>
+          helper.evaluate(async (url) => {
+            const [tab] = await chrome.tabs.query({ url });
+            return tab?.status;
+          }, sourceUrl),
+        )
+        .toBe('complete');
+      const tabId = await helper.evaluate(async (url) => {
+        const [tab] = await chrome.tabs.query({ url });
+        if (tab.status !== 'complete')
+          throw new Error('Source must be complete');
+        return tab.id;
+      }, sourceUrl);
+      await worker.evaluate(
+        ({ tabId, destinationUrl, reply }) => {
+          const original = chrome.tabs.sendMessage;
+          globalThis.restorePopupReceiverRecovery = () => {
+            chrome.tabs.sendMessage = original;
+          };
+          chrome.tabs.sendMessage = async (id, request, ...rest) => {
+            if (id === tabId && request.action === 'getPageIdentity') {
+              chrome.tabs.sendMessage = original;
+              if (reply === 'missing receiver') {
+                await chrome.tabs.update(tabId, { url: destinationUrl });
+                throw new Error(
+                  'Could not establish connection. Receiving end does not exist.',
+                );
+              }
+              const identity = await original.call(
+                chrome.tabs,
+                id,
+                request,
+                ...rest,
+              );
+              // Deliver a valid old-document reply after the new document commits.
+              await new Promise((resolve, reject) => {
+                const committed = (details) => {
+                  if (
+                    details.tabId !== tabId ||
+                    details.frameId !== 0 ||
+                    details.url !== destinationUrl
+                  )
+                    return;
+                  chrome.webNavigation.onCommitted.removeListener(committed);
+                  resolve();
+                };
+                chrome.webNavigation.onCommitted.addListener(committed);
+                chrome.tabs
+                  .update(tabId, { url: destinationUrl })
+                  .catch((error) => {
+                    chrome.webNavigation.onCommitted.removeListener(committed);
+                    reject(error);
+                  });
+              });
+              return identity;
+            }
+            return original.call(chrome.tabs, id, request, ...rest);
+          };
+        },
+        { tabId, destinationUrl, reply },
+      );
+      const result = await helper.evaluate(
+        (tabId) =>
+          chrome.runtime.sendMessage({
+            action: 'resolvePopupPageIdentity',
+            tabId,
+          }),
+        tabId,
+      );
+      console.log('Completed navigation evidence:', JSON.stringify(result));
+      await expect.poll(() => page.url()).toBe(destinationUrl);
+      expect(result).toMatchObject({
+        success: true,
+        identity: { url: destinationUrl },
+      });
+    } catch (error) {
+      primaryFailure = error;
+      throw error;
+    } finally {
+      const cleanup = await Promise.allSettled([
+        worker.evaluate(() => {
+          globalThis.restorePopupReceiverRecovery?.();
+          delete globalThis.restorePopupReceiverRecovery;
+        }),
+        page.close(),
+        helper.close(),
+      ]);
+      const errors = cleanup
+        .filter((entry) => entry.status === 'rejected')
+        .map((entry) => entry.reason);
+      if (errors.length && primaryFailure)
+        console.error('Review cleanup failures:', errors);
+      else if (errors.length)
+        throw new AggregateError(errors, 'Review cleanup failed');
+    }
+  });
+}
+
+test('popup preserves unexpected page inspection failure detail', async ({
   extContext,
   extensionId,
   setupDir,
@@ -172,65 +912,79 @@ test('popup shows identity failure detail when the receiver is stale', async ({
   await page.goto(url);
   await page.waitForLoadState('domcontentloaded');
   const helper = await openHelperPage(extContext, extensionId);
-  const reloadMessage = await getExtensionMessage(helper, 'extensionReloaded');
-  const receiverError =
-    'Could not establish connection. Receiving end does not exist.';
-  const prepared = await helper.evaluate(async (pageUrl) => {
-    const [tab] = await chrome.tabs.query({ url: pageUrl });
-    if (!tab?.id) throw new Error('Source tab not found');
-    const injected = await chrome.runtime.sendMessage({
-      action: 'failNextTabMessageForTest',
-      messageAction: 'getPageIdentity',
-      repeat: true,
-      tabId: tab.id,
-      error: 'Could not establish connection. Receiving end does not exist.',
-    });
-    if (!injected?.success) throw new Error(injected?.error);
-    return chrome.runtime.sendMessage({
-      action: 'preparePopupBootstrapForTest',
-      tabId: tab.id,
-    });
-  }, url);
+  const inspectionError = 'Unexpected page identity inspection failure';
+  const worker = extContext.serviceWorkers()[0];
+  await worker.evaluate((message) => {
+    globalThis.__popupOriginalExecuteScript = chrome.scripting.executeScript;
+    chrome.scripting.executeScript = async () => {
+      throw new Error(message);
+    };
+  }, inspectionError);
+  let popup;
+  let primaryFailure;
+  try {
+    const prepared = await helper.evaluate(async (pageUrl) => {
+      const [tab] = await chrome.tabs.query({ url: pageUrl });
+      if (!tab?.id) throw new Error('Source tab not found');
+      const injected = await chrome.runtime.sendMessage({
+        action: 'failNextTabMessageForTest',
+        messageAction: 'getPageIdentity',
+        repeat: true,
+        tabId: tab.id,
+        error: 'Could not establish connection. Receiving end does not exist.',
+      });
+      if (!injected?.success) throw new Error(injected?.error);
+      return chrome.runtime.sendMessage({
+        action: 'preparePopupBootstrapForTest',
+        tabId: tab.id,
+      });
+    }, url);
 
-  expect(prepared).toMatchObject({
-    success: true,
-    mode: 'data-unavailable',
-    error: reloadMessage,
-  });
-  // Force a revision between preparation and consumption, as a late visit
-  // notification does on CI. A stale receiver must remain stale on that read.
-  await helper.evaluate(() =>
-    chrome.runtime.sendMessage({ action: 'setRecordingPaused', paused: false }),
-  );
-  const popup = await extContext.newPage();
-  await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
-  await expectPopupRevealed(popup);
-  await expect(popup.locator('#pageDiagnosticSection')).toBeVisible();
-  await expect(popup.locator('#pageDiagnosticMessage')).toHaveText(
-    reloadMessage,
-  );
-  await expect(popup.locator('#pageDiagnosticDetail')).toContainText(
-    'reason: popup-page-identity-failed',
-  );
-  await expect(popup.locator('#pageDiagnosticDetail')).toContainText(
-    `error: ${receiverError}`,
-  );
-
-  await popup.close();
-  // Clearing test faults represents the receiver becoming available again.
-  // The next popup must query the real content script and recover.
-  await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
-  await waitForContentScript(helper, page, url);
-  const recovered = await openPreparedPopupForPage(
-    extContext,
-    extensionId,
-    page,
-    'Stale Popup Page Identity',
-  );
-  await expect(recovered.locator('#pageDiagnosticSection')).toBeHidden();
-  await recovered.close();
-  await helper.close();
-  await page.close();
+    expect(prepared).toMatchObject({
+      success: true,
+      mode: 'data-unavailable',
+      error: inspectionError,
+    });
+    // Force a revision between preparation and consumption, as a late visit
+    // notification does on CI. Failed inspection must remain an explicit error.
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'setRecordingPaused',
+        paused: false,
+      }),
+    );
+    popup = await extContext.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
+    await expectPopupRevealed(popup);
+    await expect(popup.locator('#pageDiagnosticSection')).toBeVisible();
+    await expect(popup.locator('#pageDiagnosticMessage')).toHaveText(
+      inspectionError,
+    );
+    await expect(popup.locator('#pageDiagnosticDetail')).toContainText(
+      'reason: popup-page-identity-failed',
+    );
+    await expect(popup.locator('#pageDiagnosticDetail')).toContainText(
+      `error: ${inspectionError}`,
+    );
+  } catch (error) {
+    primaryFailure = error;
+    throw error;
+  } finally {
+    await cleanupPopupScenario(
+      [
+        () =>
+          worker.evaluate(() => {
+            chrome.scripting.executeScript =
+              globalThis.__popupOriginalExecuteScript;
+            delete globalThis.__popupOriginalExecuteScript;
+          }),
+        () => popup?.close(),
+        () => helper.close(),
+        () => page.close(),
+      ],
+      primaryFailure,
+    );
+  }
 });
 
 test('popup uses the tab URL while the page content script is still loading', async ({
@@ -277,7 +1031,7 @@ test('popup uses the tab URL while the page content script is still loading', as
   await page.close();
 });
 
-test('loading popup follows navigation committed during identity resolution', async ({
+test('loading popup follows navigation despite a stale permission error', async ({
   extContext,
   extensionId,
   setupDir,
@@ -330,6 +1084,15 @@ test('loading popup follows navigation committed during identity resolution', as
   await page.goto(sourceUrl, { waitUntil: 'commit' });
 
   const helper = await openHelperPage(extContext, extensionId);
+  await extContext.serviceWorkers()[0].evaluate(() => {
+    const executeScript = chrome.scripting.executeScript.bind(chrome.scripting);
+    chrome.scripting.executeScript = async (...args) => {
+      chrome.scripting.executeScript = executeScript;
+      await executeScript(...args);
+      // Firefox can report this after the target document has navigated away.
+      throw new Error('Missing host permission for the tab or frames');
+    };
+  });
   const prepared = await helper.evaluate(
     async ({ sourceUrl, destinationUrl }) => {
       const [tab] = await chrome.tabs.query({ url: sourceUrl });
@@ -5125,7 +5888,7 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
-  test('capture invalidated response notifies the page', async ({
+  test('capture invalidated response preserves the browser error in the popup', async ({
     extContext,
     extensionId,
     setupDir,
@@ -5157,30 +5920,12 @@ test.describe('Popup list chip behavior', () => {
     const page = await extContext.newPage();
     await page.goto(url);
     await page.waitForLoadState('domcontentloaded');
-    const helper = await openHelperPage(extContext, extensionId);
-    await waitForContentScript(helper, page, url);
-    const activeTabId = await helper.evaluate(async (pageUrl) => {
-      const [tab] = await chrome.tabs.query({ url: pageUrl });
-      return tab.id;
-    }, url);
     const popup = await openPopupForUrl(extContext, extensionId, {
       url,
       title: 'Capture Invalidated',
     });
-    await popup.evaluate((tabId) => {
+    await popup.evaluate(() => {
       const original = chrome.runtime.sendMessage.bind(chrome.runtime);
-      chrome.tabs.query = async (queryInfo) => {
-        if (queryInfo?.active && queryInfo?.currentWindow) {
-          return [
-            {
-              id: tabId,
-              url: location.href,
-              title: 'Capture Invalidated',
-            },
-          ];
-        }
-        return [];
-      };
       chrome.runtime.sendMessage = async (request, ...rest) => {
         if (request?.action === 'captureCurrentPageFromPopup') {
           return {
@@ -5190,18 +5935,15 @@ test.describe('Popup list chip behavior', () => {
         }
         return original(request, ...rest);
       };
-    }, activeTabId);
-
-    await popup.locator('#captureBtn').click();
-    const resetMessage = await getExtensionMessage(
-      popup,
-      'extensionConnectionResetActionFailed',
-    );
-    await expect(page.getByLabel(resetMessage, { exact: true })).toBeVisible({
-      timeout: 5000,
     });
 
-    await helper.close();
+    await popup.locator('#captureBtn').click();
+    await expect(popup.locator('#errorBubbleMessage')).toHaveText(
+      'Extension context invalidated.',
+    );
+    await expect(popup.locator('#copyErrorDetailsBtn')).toBeVisible();
+    await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
+
     await popup.close();
     await page.close();
   });

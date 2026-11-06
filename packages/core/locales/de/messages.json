@@ -1,4 +1,16 @@
 {
+  "extensionCopyErrorDetails": {
+    "message": "Details kopieren",
+    "description": "Copy popup error details button label."
+  },
+  "extensionErrorCopied": {
+    "message": "Kopiert",
+    "description": "Popup error clipboard success status."
+  },
+  "extensionErrorCopyFailed": {
+    "message": "Kopieren fehlgeschlagen. Die Nachricht ist zum manuellen Kopieren markiert.",
+    "description": "Popup error clipboard failure status."
+  },
   "extensionPackageName": {
     "message": "Browser Recall Connector",
     "description": "Browser extension package name."
@@ -639,10 +651,6 @@
     "message": "Überprüfen Sie es erneut",
     "description": "Extension setup retry button."
   },
-  "extensionActionFailedReload": {
-    "message": "$1 – bitte laden Sie die Erweiterung neu.",
-    "description": "Popup error with reload hint."
-  },
   "extensionActionFailed": {
     "message": "Aktion fehlgeschlagen",
     "description": "Generic extension action failure."
@@ -738,14 +746,6 @@
   "extensionCheckAgainApproval": {
     "message": "Überprüfen Sie es erneut, um eine Genehmigung anzufordern.",
     "description": "Connector retry approval metadata."
-  },
-  "extensionConnectionResetActionFailed": {
-    "message": "Browser Recall Aktion fehlgeschlagen, da die Nebenstellenverbindung zurückgesetzt wurde. Laden Sie diese Seite neu und versuchen Sie es erneut.",
-    "description": "Extension action runtime failure message."
-  },
-  "extensionContextInvalidated": {
-    "message": "Erweiterungskontext ungültig. Bitte aktualisieren Sie die Seite und versuchen Sie es erneut.",
-    "description": "Popup runtime invalidated message."
   },
   "extensionCreateListNamed": {
     "message": "Erstellen Sie „$1“",
