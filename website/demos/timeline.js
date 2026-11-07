@@ -10,7 +10,7 @@ const samples = [
     title: 'A smaller, slower web',
     url: 'https://fieldnotes.example/a-smaller-web',
     note: 'Leave room for the unfinished things.',
-    listSlugs: ['small-web'],
+    listSlugs: ['reading-list-small-web'],
     hasHighlightNotes: true,
   },
   {
@@ -20,16 +20,16 @@ const samples = [
     hasHighlightNotes: true,
   },
   {
-    title: 'Good tools leave room for you',
-    url: 'https://workshop.example/good-tools',
-    note: 'Quiet places for a personal website.',
-    listSlugs: ['design-details'],
+    title: 'Type that feels like a conversation',
+    url: 'https://typefoundry.example/conversation',
+    note: 'Letterforms with a little warmth.',
+    listSlugs: ['reading-list-font'],
   },
   {
     title: 'Lemon and white bean soup',
     url: 'https://table.example/lemon-soup',
     note: 'A squeeze of lemon at the end.',
-    listSlugs: ['weekend-reading'],
+    listSlugs: ['reading-list-cooking'],
   },
   {
     title: 'Notes from the old coast path',
@@ -38,11 +38,12 @@ const samples = [
     hasSnapshots: true,
   },
 ];
-const listNameById = new Map([
-  ['small-web', 'Small web'],
-  ['design-details', 'Design details'],
-  ['weekend-reading', 'Weekend reading'],
-]);
+const listNameById = new Map(
+  Array.from(document.querySelectorAll('#listsList .sidebar-item'), (item) => [
+    item.dataset.listId,
+    item.querySelector('.label').textContent,
+  ]),
+);
 const cardDataByUrl = new Map();
 const container = document.querySelector('#results');
 document.querySelector('#demoSearch').innerHTML = searchDraftControlHtml(
@@ -188,3 +189,14 @@ document
   .addEventListener('click', () =>
     document.querySelector('.sidebar').classList.remove('sidebar-open'),
   );
+
+document.querySelector('#listsList').addEventListener('click', (event) => {
+  const toggle = event.target.closest('.fold-toggle');
+  if (!toggle) return;
+  const expanded = toggle.getAttribute('aria-expanded') !== 'true';
+  toggle.closest('.sidebar-item').nextElementSibling.hidden = !expanded;
+  toggle.classList.toggle('expanded', expanded);
+  toggle.setAttribute('aria-expanded', String(expanded));
+  toggle.title = expanded ? 'Collapse' : 'Expand';
+  toggle.setAttribute('aria-label', toggle.title);
+});

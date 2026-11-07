@@ -10,7 +10,7 @@ import {
 } from '../smoke/desktop-process-readiness.mjs';
 import { runTestProcess } from '../smoke/windows-desktop-process.mjs';
 
-test.each(['ready', 'late logging', 'exit', 'stall'])(
+test.each(['ready', 'early logging', 'late logging', 'exit', 'stall'])(
   'native startup observes a real process without accepting a missed deadline: %s',
   async (mode) => {
     const work = mkdtempSync(path.join(tmpdir(), 'browser-recall-startup-'));
@@ -21,19 +21,26 @@ test.each(['ready', 'late logging', 'exit', 'stall'])(
       [
         '-e',
         `const fs = require('node:fs');
-         const [logs, stages] = process.argv.slice(1);
+         const [logs, stages, initialLog] = process.argv.slice(1);
          fs.writeFileSync(stages, 'main entered');
          process.on('message', (action) => {
            if (action === 'log') {
              fs.appendFileSync(stages, '\\nlogging initialized');
-             fs.writeFileSync(logs, 'daemon initialized');
+             fs.writeFileSync(logs, initialLog);
              process.send('logged');
+           }
+           if (action === 'complete') {
+             fs.appendFileSync(stages, '\\nnative setup finished');
+             fs.appendFileSync(logs, '\\ndesktop native startup complete');
            }
            if (action === 'exit') process.exit(23);
          });
          process.send('ready');`,
         logs,
         stages,
+        mode === 'early logging'
+          ? 'starting browser recall desktop shell'
+          : 'desktop native startup complete',
       ],
       { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] },
     );
@@ -44,7 +51,7 @@ test.each(['ready', 'late logging', 'exit', 'stall'])(
           await once(child, 'message', { signal: AbortSignal.timeout(5000) })
         )[0],
       ).toBe('ready');
-      if (mode === 'ready') {
+      if (mode === 'ready' || mode === 'early logging') {
         const logged = once(child, 'message', {
           signal: AbortSignal.timeout(5000),
         });
@@ -68,30 +75,39 @@ test.each(['ready', 'late logging', 'exit', 'stall'])(
           deadlineStages = readFileSync(stages, 'utf8');
           // Release the child only after the original deadline is observed.
           if (mode === 'late logging') child.send('log');
+          if (mode === 'early logging') child.send('complete');
           if (mode === 'exit') child.send('exit');
           return deadlineStages;
         },
       }).catch((error) => error);
       if (mode === 'ready') {
-        expect(result).toBe('daemon initialized');
+        expect(result).toBe('desktop native startup complete');
         expect(deadlineStages).toBeUndefined();
       } else {
         expect(result).toBeInstanceOf(Error);
         expect(result.message).toContain('did not finish native startup');
-        expect(deadlineStages).toBe('main entered');
+        expect(deadlineStages).toBe(
+          mode === 'early logging'
+            ? 'main entered\nlogging initialized'
+            : 'main entered',
+        );
         expect(result.followUp).toContain(
           'Stages at the original deadline:\nmain entered',
         );
-        expect(result.followUp).not.toContain('logging initialized');
-        if (mode === 'late logging') {
-          expect(result.startupLogs).toBe('daemon initialized');
-          expect(result.followUp).toMatch(/logging appeared after \d+ms/);
+        if (mode !== 'early logging') {
+          expect(result.followUp).not.toContain('logging initialized');
+        }
+        if (mode === 'late logging' || mode === 'early logging') {
+          expect(result.startupLogs).toContain(
+            'desktop native startup complete',
+          );
+          expect(result.followUp).toMatch(/startup completed after \d+ms/);
           expect(readFileSync(stages, 'utf8')).toContain('logging initialized');
         } else if (mode === 'exit') {
           expect(result.followUp).toContain('process exited during diagnostic');
           expect(child.exitCode).toBe(23);
         } else {
-          expect(result.followUp).toContain('logging remained unavailable');
+          expect(result.followUp).toContain('startup remained incomplete');
           expect(child.exitCode).toBeNull();
           expect(performance.now() - started).toBeLessThan(2000);
         }

@@ -7,6 +7,11 @@ import { test, expect } from './fixtures.js';
 import { openHelperPage, getSlugForUrl } from './helpers.js';
 import { documentationSeed } from '../../scripts/lib/documentation-seed.mjs';
 import { seedManualData } from '../../scripts/lib/manual-seed.mjs';
+import {
+  detailTimeline,
+  encodeDetailMedia,
+  nativeDetailCrop,
+} from '../../scripts/lib/documentation-detail-media.mjs';
 
 import {
   captureInputs,
@@ -39,6 +44,7 @@ test('browser documentation separates the clean popup from note taking', async (
     helper.evaluate((message) => chrome.runtime.sendMessage(message), payload);
   const page = await extContext.newPage();
   let popup;
+  let detailMedia;
   try {
     expect(await sendMessage({ action: 'resetForTest' })).toMatchObject({
       success: true,
@@ -63,7 +69,7 @@ test('browser documentation separates the clean popup from note taking', async (
         !(event.action === 'create_note' && event.url === url) &&
         !(
           ['create_list', 'pin_to_list'].includes(event.action) &&
-          event.name === 'Design details'
+          !['Small web', 'Writing'].includes(event.name)
         ),
     );
     await seedManualData({
@@ -272,6 +278,112 @@ test('browser documentation separates the clean popup from note taking', async (
         });
       };
       await captureWindow('browser-popup-window.png');
+      const popupLeft = await helper.evaluate(
+        (browserLeft) =>
+          chrome.extension.getViews({ type: 'popup' })[0].screenX - browserLeft,
+        browserBounds.left,
+      );
+      const overview = nativeDetailCrop({
+        x: 0,
+        y: 0,
+        ...browserSpec.layoutPoints,
+      });
+      const pauseCrop = nativeDetailCrop({
+        x: Math.min(popupLeft - 24, browserSpec.layoutPoints.width - 480),
+        y: 32,
+        width: 480,
+        height: 293,
+      });
+      async function recordingPoint() {
+        return helper.evaluate((bounds) => {
+          const view = chrome.extension.getViews({ type: 'popup' })[0];
+          const rect = view.document
+            .getElementById('recordingToggle')
+            .getBoundingClientRect();
+          return {
+            x: view.screenX - bounds.left + rect.x + rect.width / 2,
+            y: view.screenY - bounds.top + rect.y + rect.height / 2,
+          };
+        }, browserBounds);
+      }
+      async function pauseFrame(name, crop, cursor) {
+        const filename = testInfo.outputPath(`${name}.png`);
+        await captureDocumentationWindow({
+          helper: nativeHelper,
+          pid,
+          filename,
+          spec: browserSpec,
+          browserTitle: 'A smaller, slower web',
+        });
+        return { path: filename, crop, cursor };
+      }
+      async function toggleRecording(paused, point) {
+        native(
+          'tap-browser',
+          'A smaller, slower web',
+          String(point.x),
+          String(point.y),
+        );
+        await expect
+          .poll(() => sendMessage({ action: 'getRecordingState' }))
+          .toMatchObject({
+            success: true,
+            mode: paused ? 'private' : 'default',
+          });
+        await expect
+          .poll(() =>
+            helper.evaluate(() => {
+              const view = chrome.extension.getViews({ type: 'popup' })[0];
+              return view.document
+                .getElementById('recordingBar')
+                .classList.contains('is-paused');
+            }),
+          )
+          .toBe(paused);
+        await expect
+          .poll(() =>
+            helper.evaluate(async (pageUrl) => {
+              const [tab] = await chrome.tabs.query({ url: pageUrl });
+              return (
+                (await chrome.action.getTitle({ tabId: tab.id })) ===
+                'Browser Recall recording is paused'
+              );
+            }, url),
+          )
+          .toBe(paused);
+      }
+      const initial = await pauseFrame(
+        'recording-active',
+        overview,
+        nativeDetailCrop(await recordingPoint()),
+      );
+      const pause = detailTimeline(initial);
+      pause.hold(initial, 0.8);
+      pause.transition({ crop: pauseCrop });
+      for (const [index, paused] of [true, false, true].entries()) {
+        const point = await recordingPoint();
+        const cursor = nativeDetailCrop(point);
+        pause.transition({ cursor }, 5);
+        await toggleRecording(paused, point);
+        const state = await pauseFrame(
+          `recording-state-${index}`,
+          pauseCrop,
+          cursor,
+        );
+        if (index === 0) state.poster = true;
+        pause.click(state);
+        pause.hold(undefined, index === 0 ? 1 : 0.4);
+      }
+      pause.transition({ crop: overview });
+      pause.hold(undefined, 2.3);
+      // Leave the source tab ready for the existing highlight capture.
+      await toggleRecording(false, await recordingPoint());
+      detailMedia = await encodeDetailMedia({
+        kind: 'browser',
+        work: testInfo.outputPath(),
+        inputs,
+        clips: { 'recording-pause': pause.frames },
+      });
       await helper.evaluate(() =>
         chrome.extension.getViews({ type: 'popup' })[0].close(),
       );
@@ -376,6 +488,12 @@ test('browser documentation separates the clean popup from note taking', async (
         path.join(output, 'browser-capture.json'),
         await format(JSON.stringify(manifest), { parser: 'json' }),
       );
+      fs.mkdirSync(path.join(output, 'details'), { recursive: true });
+      for (const name of detailMedia.files)
+        fs.copyFileSync(
+          path.join(detailMedia.directory, name),
+          path.join(output, 'details', name),
+        );
     }
   } finally {
     await popup?.close();

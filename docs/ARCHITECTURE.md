@@ -28,8 +28,11 @@ browser extension → authenticated local WebSocket → daemon
 The website shares presentation modules with the application but has no backend
 or access to user data. Isolated iframe demos use production styles, Book markup,
 Justif typesetting, and sample data. Demos keep a fixed 510 px height and leave
-scrolling to the outer page. GoatCounter page views run only on the hosted HTTPS
-page; see [Privacy](PRIVACY.md#website-connections). Installation links resolve the
+scrolling to the outer page. Small feature previews use the same looping GIFs as
+the README, captured from the native app and browser extension; reduced-motion
+preferences select still images on the website. GoatCounter page views run only
+on the hosted HTTPS page; see [Privacy](PRIVACY.md#website-connections).
+Installation links resolve the
 latest published Windows installer through GitHub's public API; unavailable
 metadata or disabled JavaScript leaves a link to the latest release page.
 
@@ -148,6 +151,9 @@ canonical defaults; malformed supplied values and unknown fields remain errors.
 Missing device identity is machine-derived; a missing data path returns to setup;
 `setup_complete` is inferred from an existing path.
 
+Windows derives missing device identity from `MachineGuid` through native registry
+access, preserving the device identifier format used by existing configurations.
+
 Nested metadata also has upgrade defaults, but connector identities and pairing
 tokens remain required. Missing review attempts become an empty array. A missing
 first-opening timestamp is recovered from the first request minus seven days, or
@@ -161,6 +167,10 @@ and deep-link actions reopen the same window. Single-instance handling registers
 before other plugins. Off-screen saved positions are centered on an available
 display. On macOS, preserve the complete `NSWindow` frame rather than deriving the
 frame from webview size.
+
+Windows native verification waits for a completion log after shell state, tray,
+deep links, and main window setup finish. Earlier application logging does not
+establish native readiness.
 
 A daemon startup failure leaves a visible error with Resume after storage repair.
 Concurrent starts share one attempt; reads never start another daemon. Errors

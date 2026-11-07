@@ -3,8 +3,13 @@ import { listChipHtml } from '../../apps/extension/popup-list-elements.js';
 document.body.classList.add('popup-compact');
 const lists = [
   { slug: 'small-web', name: 'Small web', containsPage: true },
-  { slug: 'weekend-reading', name: 'Weekend reading', containsPage: true },
-  { slug: 'design-details', name: 'Design details', containsPage: false },
+  { slug: 'design', name: 'Design', containsPage: false },
+  { slug: 'font', name: 'Font', containsPage: false },
+  { slug: 'cinema', name: 'Cinema', containsPage: false },
+  { slug: 'writing', name: 'Writing', containsPage: true },
+  { slug: 'music', name: 'Music', containsPage: false },
+  { slug: 'drumming', name: 'Drumming', containsPage: false },
+  { slug: 'cooking', name: 'Cooking', containsPage: false },
 ];
 const container = document.querySelector('#listChips');
 container.innerHTML = lists.map(listChipHtml).join('');

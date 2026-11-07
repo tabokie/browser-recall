@@ -16,6 +16,7 @@ import { crc32 } from 'node:zlib';
 import { expect, test } from 'vitest';
 import { captureInputs } from '../../scripts/lib/documentation-freshness.mjs';
 import { documentationWallpaper } from '../../scripts/lib/documentation-image-spec.mjs';
+import { detailMediaNames } from '../../scripts/lib/documentation-detail-media.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const checker = path.join(root, 'scripts/check-documentation-screenshots.mjs');
@@ -35,6 +36,9 @@ test('screenshot CI checks actual files, capture provenance, and README referenc
     for (const message of messages) expect(result.stderr).toContain(message);
   };
   try {
+    const detailReferences = Object.values(detailMediaNames)
+      .flat()
+      .map((name) => `docs/images/details/${name}.gif`);
     // A disposable source tree exercises the same CLI used by hosted CI.
     const inputs = new Set([
       'README.md',
@@ -52,6 +56,17 @@ test('screenshot CI checks actual files, capture provenance, and README referenc
     for (const name of inputs) {
       mkdirSync(path.dirname(file(name)), { recursive: true });
       cpSync(path.join(root, name), file(name));
+    }
+    cpSync(
+      path.join(root, 'docs/images/details'),
+      file('docs/images/details'),
+      { recursive: true },
+    );
+    for (const kind of Object.keys(detailMediaNames)) {
+      const manifestPath = `docs/images/details/${kind}-capture.json`;
+      const manifest = JSON.parse(readFileSync(file(manifestPath)));
+      manifest.inputs = captureInputs(work, kind);
+      write(manifestPath, JSON.stringify(manifest));
     }
     const png = Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a4AAAAABJRU5ErkJggg==',
@@ -158,9 +173,39 @@ test('screenshot CI checks actual files, capture provenance, and README referenc
       'README.md',
       readmeImages
         .map((name) => `![Screenshot](docs/images/${name})`)
+        .concat(detailReferences.map((name) => `![Detail](${name})`))
         .join('\n'),
     );
     expect(run().status).toBe(0);
+
+    const detailGif = 'docs/images/details/bookmark-import.gif';
+    const detailManifest = 'docs/images/details/desktop-capture.json';
+    const originalGif = readFileSync(file(detailGif));
+    const originalDetailManifest = readFileSync(file(detailManifest));
+    for (const field of ['cursorFrames', 'clicks', 'endingWidth']) {
+      const incomplete = JSON.parse(originalDetailManifest);
+      incomplete.media['bookmark-import.gif'].interaction[field] = 0;
+      write(detailManifest, JSON.stringify(incomplete));
+      fails('Detail GIF must show clicks, a cursor, and an ending zoom out');
+    }
+    write(detailManifest, originalDetailManifest);
+    const finiteGif = Buffer.from(originalGif);
+    const loopOffset = finiteGif.indexOf(Buffer.from('NETSCAPE2.0'));
+    expect(loopOffset).toBeGreaterThan(0);
+    finiteGif.writeUInt16LE(1, loopOffset + 13);
+    write(detailGif, finiteGif);
+    const finiteManifest = JSON.parse(originalDetailManifest);
+    finiteManifest.media['bookmark-import.gif'].sha256 = createHash('sha256')
+      .update(finiteGif)
+      .digest('hex');
+    write(detailManifest, JSON.stringify(finiteManifest));
+    fails('Detail GIF must loop forever: bookmark-import.gif');
+    expect(run('--images-only').status).toBe(1);
+    write(detailGif, originalGif);
+    write(detailManifest, originalDetailManifest);
+    rmSync(file(detailGif));
+    fails('bookmark-import.gif');
+    write(detailGif, originalGif);
 
     for (const manifest of ['package.json', 'apps/desktop/package.json']) {
       const original = readFileSync(file(manifest), 'utf8');
@@ -283,6 +328,7 @@ test('screenshot CI checks actual files, capture provenance, and README referenc
         .filter((name) => name !== 'book.png')
         .map((name) => `<img alt="Screenshot" src='docs/images/${name}'>`),
       '</td></tr></table>',
+      ...detailReferences.map((name) => `<img src="${name}" alt="Detail">`),
     ].join('\n');
     write('README.md', gallery);
     expect(run().status).toBe(0);

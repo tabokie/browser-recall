@@ -28,7 +28,41 @@ if args.count == 3 && args[1] == "pid" {
     print(running.processIdentifier)
     exit(0)
 }
+if args.count == 3 && args[1] == "open-editor" {
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.createsNewApplicationInstance = true
+    configuration.arguments = ["-ApplePersistenceIgnoreState", "YES", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+    var opened: NSRunningApplication?
+    var launchError: Error?
+    var finished = false
+    NSWorkspace.shared.open([URL(fileURLWithPath: args[2])], withApplicationAt: URL(fileURLWithPath: "/System/Applications/TextEdit.app"), configuration: configuration) { running, error in
+        opened = running
+        launchError = error
+        finished = true
+    }
+    let deadline = Date().addingTimeInterval(10)
+    while !finished && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+    guard let running = opened else { fail("Cannot open temporary TextEdit document: \(String(describing: launchError))") }
+    print(running.processIdentifier)
+    exit(0)
+}
 guard args.count >= 3, let pid = Int32(args[1]) else { fail("Expected PID and operation") }
+if args.count == 4 && ["quit", "quit-pid"].contains(args[2]) {
+    let expected = URL(fileURLWithPath: args[3]).resolvingSymlinksInPath().path
+    let matches = NSWorkspace.shared.runningApplications.filter {
+        $0.bundleURL?.resolvingSymlinksInPath().path == expected && (args[2] == "quit" || $0.processIdentifier == pid)
+    }
+    for running in matches {
+        running.terminate()
+        let gracefulDeadline = Date().addingTimeInterval(2)
+        while !running.isTerminated && Date() < gracefulDeadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+        if !running.isTerminated { running.forceTerminate() }
+        let forceDeadline = Date().addingTimeInterval(2)
+        while !running.isTerminated && Date() < forceDeadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+        guard running.isTerminated else { fail("Documentation app did not terminate") }
+    }
+    exit(0)
+}
 let app = AXUIElementCreateApplication(pid)
 AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
 AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
@@ -40,16 +74,18 @@ func attribute(_ element: AXUIElement, _ name: String) -> AnyObject? {
 }
 
 func descendants(_ element: AXUIElement) -> [AXUIElement] {
-    [element] + ((attribute(element, "AXChildren") as? [AXUIElement]) ?? []).flatMap { descendants($0) }
+    let children = (attribute(element, "AXChildren") as? [AXUIElement]) ?? []
+    let sheets = (attribute(element, "AXSheets") as? [AXUIElement]) ?? []
+    return [element] + (children + sheets).flatMap { descendants($0) }
 }
 
 func label(_ element: AXUIElement) -> String {
-    ["AXRole", "AXTitle", "AXDescription", "AXValue", "AXIdentifier", "AXDOMIdentifier"]
+    ["AXRole", "AXTitle", "AXDescription", "AXValue", "AXIdentifier", "AXDOMIdentifier", "AXPlaceholderValue"]
         .compactMap { attribute(element, $0) as? String }.joined(separator: " | ")
 }
 
 let appWindows = (attribute(app, "AXWindows") as? [AXUIElement]) ?? []
-let selectedWindow = args[2] == "frame-browser" && args.count == 6
+let selectedWindow = ["frame-browser", "tap-browser"].contains(args[2]) && args.count == 6
     ? appWindows.first(where: { label($0).contains(args[3]) })
     : appWindows.first
 guard let window = selectedWindow else {
@@ -58,6 +94,7 @@ guard let window = selectedWindow else {
 
 func clickPoint(_ point: CGPoint) {
     CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
+    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
     CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
 }
 
@@ -72,9 +109,9 @@ func point(_ element: AXUIElement) -> CGPoint {
     return CGPoint(x: position.x + size.width / 2, y: position.y + size.height / 2)
 }
 
-func control(_ name: String) -> AXUIElement {
-    let candidates = descendants(window).filter { element in
-        ["AXTitle", "AXDescription", "AXValue", "AXIdentifier", "AXDOMIdentifier"].contains {
+func control(_ name: String, inside container: AXUIElement? = nil) -> AXUIElement {
+    let candidates = descendants(container ?? window).filter { element in
+        ["AXTitle", "AXDescription", "AXValue", "AXIdentifier", "AXDOMIdentifier", "AXPlaceholderValue"].contains {
             attribute(element, $0) as? String == name
         }
     }
@@ -85,6 +122,143 @@ func control(_ name: String) -> AXUIElement {
 }
 
 switch args[2] {
+case "tap-browser":
+    guard args.count == 6, let x = Double(args[4]), let y = Double(args[5]),
+          let raw = attribute(window, "AXPosition") else { fail("Expected browser title and click coordinates") }
+    var origin = CGPoint.zero
+    guard AXValueGetValue(raw as! AXValue, .cgPoint, &origin) else { fail("No browser window position") }
+    clickPoint(CGPoint(x: origin.x + x, y: origin.y + y))
+case "enabled":
+    guard args.count == 4 else { fail("Expected accessible label") }
+    print(attribute(control(args[3]), "AXEnabled") as? Bool == true ? "true" : "false")
+case "bounds":
+    guard args.count == 4 else { fail("Expected accessible label") }
+    let target = control(args[3])
+    var origin = CGPoint.zero
+    var size = CGSize.zero
+    var windowOrigin = CGPoint.zero
+    guard let rawPosition = attribute(target, "AXPosition"), let rawSize = attribute(target, "AXSize"),
+          let rawWindowPosition = attribute(window, "AXPosition"),
+          AXValueGetValue(rawPosition as! AXValue, .cgPoint, &origin),
+          AXValueGetValue(rawSize as! AXValue, .cgSize, &size),
+          AXValueGetValue(rawWindowPosition as! AXValue, .cgPoint, &windowOrigin) else { fail("Control has no accessible bounds") }
+    let data = try JSONSerialization.data(withJSONObject: ["x": origin.x - windowOrigin.x, "y": origin.y - windowOrigin.y, "width": size.width, "height": size.height])
+    print(String(data: data, encoding: .utf8)!)
+case "reveal":
+    guard args.count == 4 else { fail("Expected accessible label") }
+    let target = control(args[3])
+    let scrolled = AXUIElementPerformAction(target, "AXScrollToVisible" as CFString)
+    let focused = AXUIElementSetAttributeValue(target, "AXFocused" as CFString, kCFBooleanTrue)
+    guard scrolled == .success || focused == .success else { fail("Cannot reveal \(args[3])") }
+case "tap":
+    guard args.count >= 4 && args.count <= 6 else { fail("Expected label, optional container and modifier") }
+    if !label(window).contains("open-panel") {
+        guard let running = NSRunningApplication(processIdentifier: pid) else { fail("Click target is unavailable") }
+        running.activate(options: [.activateIgnoringOtherApps])
+        let deadline = Date().addingTimeInterval(2)
+        while !running.isActive && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+        guard running.isActive else { fail("Cannot focus click target") }
+        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+    }
+    let container = args.count >= 5 && args[4] != "window" ? control(args[4]) : window
+    let center = point(control(args[3], inside: container))
+    for type in [CGEventType.leftMouseDown, .leftMouseUp] {
+        let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: center, mouseButton: .left)
+        event?.setIntegerValueField(.mouseEventClickState, value: 1)
+        if args.count == 6 && args[5] == "command" { event?.flags = .maskCommand }
+        event?.post(tap: .cghidEventTap)
+        if type == .leftMouseDown { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+    }
+case "toggle-checkbox", "checkbox-point":
+    guard args.count == 4 else { fail("Expected checkbox row label") }
+    let controls = descendants(control("settingsModal"))
+    guard let folderLabel = controls.first(where: {
+        attribute($0, "AXRole") as? String == "AXStaticText" && attribute($0, "AXValue") as? String == args[3]
+    }) else { fail("Missing bookmark folder: \(args[3])") }
+    let labelPoint = point(folderLabel)
+    let candidates = controls.filter { element in
+        guard attribute(element, "AXRole") as? String == "AXCheckBox" else { return false }
+        let checkboxPoint = point(element)
+        return abs(checkboxPoint.y - labelPoint.y) < 3 && checkboxPoint.x < labelPoint.x
+    }
+    guard let checkbox = candidates.min(by: { abs(point($0).x - labelPoint.x) < abs(point($1).x - labelPoint.x) }) else { fail("Cannot find checkbox for \(args[3])") }
+    if args[2] == "toggle-checkbox" { clickPoint(point(checkbox)) }
+    else {
+        var origin = CGPoint.zero
+        guard let raw = attribute(window, "AXPosition"), AXValueGetValue(raw as! AXValue, .cgPoint, &origin) else { fail("No window position") }
+        let center = point(checkbox)
+        let data = try JSONSerialization.data(withJSONObject: ["x": center.x - origin.x, "y": center.y - origin.y])
+        print(String(data: data, encoding: .utf8)!)
+    }
+case "set-value":
+    guard args.count == 5 else { fail("Expected field and value") }
+    let field = control(args[3])
+    guard AXUIElementSetAttributeValue(field, "AXFocused" as CFString, kCFBooleanTrue) == .success,
+          AXUIElementSetAttributeValue(field, "AXValue" as CFString, args[4] as CFString) == .success else { fail("Cannot enter value in \(args[3])") }
+case "key":
+    guard args.count == 4 else { fail("Expected key") }
+    guard let running = NSRunningApplication(processIdentifier: pid) else { fail("Documentation app is unavailable") }
+    running.activate(options: [.activateIgnoringOtherApps])
+    AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+    let activationDeadline = Date().addingTimeInterval(2)
+    while !running.isActive && Date() < activationDeadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+    guard running.isActive else { fail("Cannot focus documentation app for keyboard input") }
+    let keys: [String: (CGKeyCode, CGEventFlags)] = [
+        "enter": (36, []), "escape": (53, []), "copy": (8, .maskCommand),
+        "paste": (9, .maskCommand), "select-all": (0, .maskCommand), "save": (1, .maskCommand),
+        "go-to-folder": (5, [.maskCommand, .maskShift])
+    ]
+    guard let (code, flags) = keys[args[3]] else { fail("Unknown key") }
+    let source = CGEventSource(stateID: .hidSystemState)
+    let modifiers: [(CGKeyCode, CGEventFlags)] = [(55, .maskCommand), (56, .maskShift)].filter { flags.contains($0.1) }
+    var pressedFlags: CGEventFlags = []
+    for (modifier, flag) in modifiers {
+        pressedFlags.insert(flag)
+        let event = CGEvent(keyboardEventSource: source, virtualKey: modifier, keyDown: true)
+        event?.flags = pressedFlags
+        event?.post(tap: .cghidEventTap)
+    }
+    for down in [true, false] {
+        let event = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: down)
+        event?.flags = flags
+        if let character = ["enter": "\r", "copy": "c", "paste": "v", "select-all": "a", "save": "s"][args[3]] {
+            let text = Array(character.utf16)
+            event?.keyboardSetUnicodeString(stringLength: text.count, unicodeString: text)
+        }
+        event?.post(tap: .cghidEventTap)
+        // Hold a real down/up gesture, rather than posting both simultaneously.
+        if down { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+    }
+    for (modifier, flag) in modifiers.reversed() {
+        pressedFlags.remove(flag)
+        let event = CGEvent(keyboardEventSource: source, virtualKey: modifier, keyDown: false)
+        event?.flags = pressedFlags
+        event?.post(tap: .cghidEventTap)
+    }
+case "clipboard":
+    print(NSPasteboard.general.string(forType: .string) ?? "")
+case "editor-text":
+    guard let editor = descendants(window).first(where: { attribute($0, "AXRole") as? String == "AXTextArea" }),
+          let text = attribute(editor, "AXValue") as? String else { fail("No native text editor") }
+    print(text)
+case "editor-command":
+    guard args.count == 4,
+          let character = ["paste": "V", "copy": "C", "select-all": "A", "save": "S"][args[3]],
+          let menu = attribute(app, "AXMenuBar") else { fail("Expected a native editor command") }
+    // Menu validation follows the actual mouse focus change asynchronously.
+    // Wait for readiness before issuing the command once.
+    let deadline = Date().addingTimeInterval(3)
+    var readyItem: AXUIElement?
+    repeat {
+        readyItem = descendants(menu as! AXUIElement).first(where: {
+            (attribute($0, "AXMenuItemCmdChar") as? String)?.uppercased() == character &&
+            attribute($0, "AXMenuItemCmdModifiers") as? Int == 0 &&
+            attribute($0, "AXEnabled") as? Bool == true
+        })
+        if readyItem != nil { break }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+    } while Date() < deadline
+    guard let item = readyItem, AXUIElementPerformAction(item, kAXPressAction as CFString) == .success else { fail("Cannot invoke native editor command: \(args[3])") }
 case "reuse-url":
     guard args.count == 5, let url = URL(string: args[3]),
           let running = NSRunningApplication(processIdentifier: pid),
@@ -127,7 +301,7 @@ case "reuse-url":
     }
     print("App URL reopened the existing process \(pid)")
 case "dump":
-    print(descendants(window).map { element in
+    print(appWindows.flatMap { descendants($0) }.map { element in
         "\(label(element)) | \(String(describing: attribute(element, "AXPosition"))) | \(String(describing: attribute(element, "AXSize")))"
     }.joined(separator: "\n"))
 case "frame", "frame-browser":
@@ -192,12 +366,12 @@ case "scroll-start":
     scroll.location = center
     scroll.post(tap: .cghidEventTap)
     Thread.sleep(forTimeInterval: 0.1)
-case "unfocus":
+case "unfocus", "park":
     guard let rawPosition = attribute(window, "AXPosition") else { fail("No window position") }
     var position = CGPoint.zero
     AXValueGetValue(rawPosition as! AXValue, .cgPoint, &position)
     // The content gutter takes keyboard focus out of search; the titlebar does not.
-    clickPoint(CGPoint(x: position.x + 282, y: position.y + 180))
+    if args[2] == "unfocus" { clickPoint(CGPoint(x: position.x + 282, y: position.y + 180)) }
     // Park the pointer outside the captured window to avoid hover-only controls.
     CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
             mouseCursorPosition: CGPoint(x: position.x - 10, y: position.y - 10), mouseButton: .left)?.post(tap: .cghidEventTap)

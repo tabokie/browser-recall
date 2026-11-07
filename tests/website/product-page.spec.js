@@ -1,5 +1,56 @@
 import { test, expect } from './fixtures.js';
 
+test('small feature previews load looping GIFs and honor reduced motion', async ({
+  page,
+}, testInfo) => {
+  await page.goto('./');
+  const gallery = page.locator('.detail-gallery');
+  await gallery.scrollIntoViewIfNeeded();
+  await expect(gallery.locator('button')).toHaveCount(0);
+  await expect(gallery.getByRole('heading', { level: 3 })).toHaveText([
+    'Bring your bookmarks',
+    'Share a reading list',
+    'Give recording a rest',
+  ]);
+  const viewport = page.viewportSize();
+  for (const width of [viewport.width, 375, 320]) {
+    await page.setViewportSize({ ...viewport, width });
+    for (const image of await gallery.locator('img').all()) {
+      await image.scrollIntoViewIfNeeded();
+      await expect
+        .poll(() =>
+          image.evaluate(
+            (el) =>
+              el.complete &&
+              el.naturalWidth === 720 &&
+              el.naturalHeight === 440,
+          ),
+        )
+        .toBe(true);
+      expect(await image.evaluate((el) => el.currentSrc)).toMatch(/\.gif$/);
+    }
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width);
+  }
+  await page.setViewportSize(viewport);
+  await gallery.screenshot({
+    path: testInfo.outputPath('detail-previews.png'),
+  });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  for (const image of await gallery.locator('img').all()) {
+    await image.scrollIntoViewIfNeeded();
+    await expect
+      .poll(() => image.evaluate((el) => el.currentSrc))
+      .toMatch(/\.png$/);
+    await expect
+      .poll(() =>
+        image.evaluate((el) => el.complete && el.naturalWidth === 720),
+      )
+      .toBe(true);
+  }
+});
+
 test('all feature demos keep the same viewport height on phones', async ({
   page,
 }, testInfo) => {
@@ -48,6 +99,40 @@ test('select Timeline pages, read the fixed-height Book sample, and return to Ti
   await page.goto('./');
   const timeline = page.frameLocator('.timeline-frame');
   await expect(timeline.locator('.result-item')).toHaveCount(5);
+  await expect(timeline.locator('.result-item').first()).toContainText(
+    'Small web',
+  );
+  const lists = timeline.locator('#listsList');
+  const nestedLists = lists.locator('.sidebar-children');
+  await expect(lists.locator(':scope > .sidebar-item .label')).toHaveText([
+    'Small web',
+    'Design',
+    'Cinema',
+    'Writing',
+    'Music',
+    'Cooking',
+  ]);
+  await expect(nestedLists.locator('.label')).toHaveText(['Font', 'Drumming']);
+  for (const name of ['Design', 'Music']) {
+    const parent = lists.locator(
+      `.sidebar-item[data-list-id="reading-list-${name.toLowerCase()}"]`,
+    );
+    const children = lists.locator(
+      `.sidebar-children[data-parent-slug="reading-list-${name.toLowerCase()}"]`,
+    );
+    await expect(children).toBeVisible();
+    const parentInset = await parent.evaluate((item) =>
+      parseFloat(getComputedStyle(item).paddingLeft),
+    );
+    const childInset = await children
+      .locator('.sidebar-item')
+      .evaluate((item) => parseFloat(getComputedStyle(item).paddingLeft));
+    expect(childInset - parentInset).toBe(16);
+    await parent.getByRole('button', { name: 'Collapse', exact: true }).click();
+    await expect(children).toBeHidden();
+    await parent.getByRole('button', { name: 'Expand', exact: true }).click();
+    await expect(children).toBeVisible();
+  }
   const rows = timeline.locator('.result-row');
   const selected = timeline.locator('.result-row.selected');
   await rows.nth(0).click();
@@ -285,12 +370,12 @@ test('view the sample collection and saved note, then organize one page into sev
     .locator('.demo-window')
     .screenshot({ path: testInfo.outputPath('highlights.png') });
   await page.getByRole('tab', { name: 'Organize', exact: true }).click();
-  await organize.getByRole('button', { name: 'Design details' }).click();
+  await organize.getByRole('button', { name: 'Music', exact: true }).click();
   await expect(organize.locator('#listCount')).toHaveText('03');
   await expect(
     page.getByText('One page, at home in 3 lists.', { exact: true }),
   ).toHaveText('One page, at home in 3 lists.');
-  for (const name of ['Small web', 'Design details', 'Weekend reading']) {
+  for (const name of ['Small web', 'Writing', 'Music']) {
     await organize.getByRole('button', { name, exact: true }).click();
   }
   await expect(

@@ -50,6 +50,28 @@ Browser Recall stores your data using readable formats such as JSON and Markdown
   </tr>
 </table>
 
+<details>
+<summary>A few useful details</summary>
+
+<table>
+  <tr>
+    <td width="33%">
+      <img src="docs/images/details/bookmark-import.gif" alt="Choosing bookmark folders and importing the folders as nested lists">
+      <strong>Bring your bookmarks.</strong> Choose which folders to import as lists.
+    </td>
+    <td width="33%">
+      <img src="docs/images/details/page-copy-paste.gif" alt="Selecting pages, pasting readable titles and URLs into TextEdit, and pasting the text back into a Browser Recall list">
+      <strong>Share a reading list.</strong> Copy readable titles and URLs into your notes. Paste a text list back into Browser Recall.
+    </td>
+    <td width="33%">
+      <img src="docs/images/details/recording-pause.gif" alt="Pausing recording in the browser extension makes the toolbar icon close its eyes">
+      <strong>Give recording a rest.</strong> Pause from the browser extension. The toolbar icon closes its eyes.
+    </td>
+  </tr>
+</table>
+
+</details>
+
 ## Install
 
 <!-- Replace APP_ID before publishing. -->

@@ -31,6 +31,7 @@ Paths below are relative to `apps/desktop/`.
 | `ui/desktop-bridge.js`, `ui/desktop-platform.js`                    | Validated Tauri commands and platform APIs                            |
 | `ui/book-elements.js`, `ui/book-typesetting.js`                     | Shared Book markup and Justif layout                                  |
 | `ui/timeline-elements.js`                                           | Timeline rows shared with website demos                               |
+| `ui/sidebar-elements.js`                                            | List controls shared with website demos                               |
 | `ui/bookmark-parser.js`                                             | Bookmark HTML parsing                                                 |
 | `ui/shared.css`, `ui/fonts/`                                        | Typography and bundled fonts                                          |
 | `ui/desktop-reviews.js`, `ui/desktop-updates.js`                    | Review opportunities/cancellation and update controls                 |
@@ -130,6 +131,9 @@ Paths below are relative to `scripts/` unless stated otherwise.
 | `rust-coverage.mjs`, `test-coverage-monitor.mjs`                                                  | Coverage and test-growth guard                            |
 | `generate-icons.mjs`                                                                              | Native icon slots, extension/tray assets                  |
 | `capture-documentation.mjs`, `capture-browser-documentation.mjs`                                  | Desktop/browser captures                                  |
+| `lib/documentation-details.mjs`                                                                   | Native bookmark import and clipboard scenarios            |
+| `lib/documentation-detail-media.mjs`, `lib/documentation-detail-media.swift`                      | Cropped GIFs, still images, and capture provenance        |
+| `lib/documentation-detail-check.mjs`                                                              | GIF structure, looping, and provenance checks             |
 | `documentation-tauri.conf.json`, `documentation-info.plist`, `verify-macos-documentation-app.mjs` | No-tray/no-URL-scheme capture bundles                     |
 | `lib/documentation-seed.mjs`, `lib/documentation-window.swift`                                    | Capture data and native window control                    |
 | `lib/documentation-native-capture.mjs`, `lib/documentation-image-spec.mjs`                        | Compilation, geometry, pixel stability                    |
@@ -155,6 +159,10 @@ Website presentation lives in `website/demos/`; HTTPS page-view counting lives i
 
 Entry points in `apps/` and `crates/` are repository-relative; other paths are
 relative to `tests/`. Search neighboring scenarios before adding coverage.
+
+`crates/daemon/tests/windows_device_identity.rs` verifies that Windows device
+identity matches `MachineGuid` when registry subprocesses are unavailable. The
+Windows native job runs this check before packaging.
 
 | Behavior                                        | Entry point                                                                                                                                                                          |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

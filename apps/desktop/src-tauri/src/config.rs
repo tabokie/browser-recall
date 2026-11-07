@@ -16,9 +16,15 @@ pub struct DesktopBootstrap {
 }
 
 pub fn bootstrap<R: Runtime>(app: &AppHandle<R>) -> Result<DesktopBootstrap, BoxError> {
+    #[cfg(target_os = "windows")]
+    crate::windows_startup::record("configuration paths resolving");
     let config_store = daemon_config_store(app)?;
     let log_dir = desktop_log_dir(app)?;
+    #[cfg(target_os = "windows")]
+    crate::windows_startup::record("configuration load/create entered");
     let mut config = config_store.load_or_create()?;
+    #[cfg(target_os = "windows")]
+    crate::windows_startup::record("configuration load/create finished");
     let login_item = login_item::SystemLoginItem::new(app);
 
     if !login_item.supported() && config.launch_at_login {
@@ -28,12 +34,16 @@ pub fn bootstrap<R: Runtime>(app: &AppHandle<R>) -> Result<DesktopBootstrap, Box
         })?;
     }
 
+    #[cfg(target_os = "windows")]
+    crate::windows_startup::record("login item reconciliation entered");
     let login_item_error = if config.is_configured() {
         fs::create_dir_all(&config.data_dir)?;
         login_item::reconcile_for_startup(&login_item, config.launch_at_login)
     } else {
         None
     };
+    #[cfg(target_os = "windows")]
+    crate::windows_startup::record("login item reconciliation finished");
 
     Ok(DesktopBootstrap {
         config_store,

@@ -1,9 +1,15 @@
-export async function withCleanup(run, cleanups) {
+export async function withCleanup(run, cleanups, { onFailure } = {}) {
   const errors = [];
   try {
     await run();
   } catch (error) {
     errors.push(error);
+    // Evidence must be retained while the failing process's resources exist.
+    try {
+      await onFailure?.(error);
+    } catch (diagnosticsError) {
+      errors.push(diagnosticsError);
+    }
   }
   for (const cleanup of cleanups) {
     try {

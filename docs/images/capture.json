@@ -49,11 +49,13 @@
     "packages/core/virtual-scroller.js": "4498103f7f7b18fa6d5a4b246a701c026811fb65cea085e98cdd410a6efde216",
     "apps/extension/utils.js": "eea5cc2425981454fde629445ca28c0f4eb3aa42f9b39a4f9de9ce4ba17e4ad0",
     "scripts/stage-app-assets.mjs": "c56e699665110be082a74f48cec4970aca7844629382cf78317ded7b217b5c6d",
-    "scripts/lib/documentation-seed.mjs": "30ede382fce3d4551e36a0e50cb9933507ae4d2bcec67f63f9ba32dca8a1c064",
+    "scripts/lib/documentation-seed.mjs": "903a81e4910c077b5b96f4a76059ddf38d1cdb8759b422fb97f698f5f2c45c03",
     "scripts/lib/documentation-image-spec.mjs": "7a1de6de100b7db96fc50434547b940db2fe4d2cf0421dc3f3b9e69d935735c4",
-    "scripts/lib/documentation-window.swift": "1428540506c826312d18cf0d5d0c05c82775cad6224578afc85c689115b560a4",
+    "scripts/lib/documentation-window.swift": "0f14f63025bb96341b827fa38b4606f4a2fb3ad4afca263c03f4839b95b4b433",
     "scripts/lib/documentation-native-capture.mjs": "13bf01e22d8affd2ba5aa7882cba0452a09d44f24f5742a308cc4ac705258049",
-    "scripts/lib/documentation-freshness.mjs": "139a4b24598ada8db0e79c8861eeb58437c23bd18b510c3f9068c917e5157324",
+    "scripts/lib/documentation-detail-media.mjs": "59f1363cdfe3195bee8eb3d4b78cab23f4510aeaf1ae94a89da6e9f4aa703dfa",
+    "scripts/lib/documentation-detail-media.swift": "90e7c4d11c26499693c28946bec45de5166f7aed91f77f1759507098dd54a1fc",
+    "scripts/lib/documentation-freshness.mjs": "1bf6d7361e4f6b5a43743824f0030b293f772d7fec70ce10f9152c6aeabf060c",
     "scripts/lib/manual-seed.mjs": "2495a12d302cbacaf866d71ea89ae20afd1269d4ab767e1139226642604a9e97",
     "scripts/lib/seed-builder.mjs": "d7ab1c2e8b939ed65ee7f6fd1223ab8a12f20d384bb4ac013cdda75016655e64",
     "scripts/lib/replay-store.mjs": "4d6cb0c15dc4d9cb45b59de44a115acb222b5e09bfc2a4e04b7d91d05f96d82b",
@@ -78,11 +80,12 @@
     "apps/desktop/ui/fonts/nunito.woff2": "f85212b2392aff6c178df5c0c6176fe341785ba641e6ec4ab0c80fb10dc38e0c",
     "apps/desktop/ui/highlight-format.js": "9e5be7cc41e99dbfa9f5262aebacfe77da0cbca58416e6e53536cb01abd6f00d",
     "apps/desktop/ui/index.html": "d3be75c0ecfec2d1b4c799b0b969a49e471003ea0f397e992df2c6e4ca7673be",
-    "apps/desktop/ui/index.js": "dcc28d79b0ef0443d10848230ed2b71de8a0d20309e2775380d57d102be33695",
+    "apps/desktop/ui/index.js": "f41911d5ef1823c214f5f91771bc542b9ab0be223093525be1e12873aae17acd",
     "apps/desktop/ui/logger.js": "73939f96285999acfd96bf693d081955a6be4cb6929f17b2aeea59774b632f8c",
     "apps/desktop/ui/search-runtime.d.ts": "4c41e73480a780bc85d7e8f8279c87ba00e8b0753a52ca82375aca32baa1d797",
     "apps/desktop/ui/search-runtime.js": "68b8a6cd99b5b64628df2c8f86224a80a5eca025dd3c77cdab1e315f409dadf7",
     "apps/desktop/ui/shared.css": "7a1f0a695b89f29349af111d134a169bb309b15d8b904741fc88616a9d80eb38",
+    "apps/desktop/ui/sidebar-elements.js": "450cb1399f8976bfff4aa15bd49f280a1eb7dd092ea4df7a017689831b21b677",
     "apps/desktop/ui/theme.js": "1b00783e53576694e49414c5e7862db7cce928e59f39a72f918a5f27f4a0d488",
     "apps/desktop/ui/time-chart.js": "c3951dc6485faa02d9a43b19625eac0b86cc973709e3cddd0bfa0813467646bf",
     "apps/desktop/ui/timeline-elements.js": "5e3850f59810711c96acb2f5177d176e395bfed2106dd922827d89affbe22dd5",
@@ -116,7 +119,10 @@
     "apps/desktop/src-tauri/icons/icon.png": "3a146dacc860f8de268cf6bb8615a0dca0232485a396d2c5ccba815522db10be",
     "apps/desktop/src-tauri/icons/tray-icon.png": "047da4fdb0b2cfdbf0511decfdea7cfe316f4ea2d2badc0149879ed0ba10c732",
     "apps/desktop/src-tauri/tauri.conf.json": "d1b5a9a6a96330e9e3af4ac4a50c3233ee8bdfd8a1baeefec4f621af0377fe2c",
-    "scripts/capture-documentation.mjs": "b42c8951a41801c6a39a9432c253e811e6bdf13bb15eef6a50b382712d689b9e",
+    "scripts/capture-documentation.mjs": "55c87e14f761dc81da6acce3677aeef72d28691d9ec8afa8c9c57ba9164e9d28",
+    "scripts/lib/documentation-details.mjs": "97b17bb82546527acdadd2466e742e5801239b30bdc66b51d3f4f5b3805d67e5",
+    "tests/smoke/desktop-test-cleanup.mjs": "b4aef5caa392de91346fc7428799d1494a8f43446329363382d79b54c74bbc85",
+    "tests/fixtures/documentation-bookmarks.html": "412219c7c237bafd74494de26ef768f2296924b9c90751c387ff55424d10c338",
     "scripts/lib/macos-native-session.mjs": "91e0705427e508601aad9e5dc011b5c1dd76b8dff14272465d8380e79597cc9b",
     "scripts/documentation-tauri.conf.json": "77b121460707553df53cbfa24c4e9717e6d5840f0c7dc32d5087247f6e94665d",
     "scripts/documentation-info.plist": "4aae6bb6408ed6927d9d9f7cce7590651f9b7e98a1b1ee0aee34d2478e047429",
@@ -124,7 +130,7 @@
     "scripts/compose-documentation-hero.mjs": "4e735e9f9e61d8c07f3b4c14df0df56dd9e75c8d167b16fe2ad3ffb72464b394"
   },
   "platform": "macOS / native Tauri WKWebView",
-  "seedSha256": "30ede382fce3d4551e36a0e50cb9933507ae4d2bcec67f63f9ba32dca8a1c064",
+  "seedSha256": "903a81e4910c077b5b96f4a76059ddf38d1cdb8759b422fb97f698f5f2c45c03",
   "colorSchemes": ["amber", "mono"],
   "paddingPoints": 40,
   "wallpaper": {
@@ -143,29 +149,29 @@
   },
   "screenshots": {
     "timeline.png": {
-      "sha256": "f4f137baea6007b4033dbadece164fef7843b837ccc12a780d4d1e7a5961f653",
+      "sha256": "8b1556ac03034e500e0cd7a70bbdea7cb0c6d9b0358804031dc0b09c58966332",
       "width": 2080,
       "height": 1400
     },
     "book.png": {
-      "sha256": "7b6653c203d96c372528b9c613acd189b58b7a90f316c2498f9b549e3a246821",
+      "sha256": "4d1fcff90a70a45cd31c688a9f63d8a03415f7ea91992603000618170572e3cc",
       "width": 2080,
       "height": 1400
     },
     "timeline-mono.png": {
-      "sha256": "85c8c2b1ceb14730075ba990dac6e7f9c90696fd936dc6284f48d0efb28512c5",
+      "sha256": "efa8cb5f23377b1a4f47242c0b4749820f8dbdb054ec1378fe2c098cc5fdc5cc",
       "width": 2080,
       "height": 1400
     },
     "timeline-styles.png": {
-      "sha256": "b5f952ef4f5d45ca6346b232d933197b99478dd38a40aaa8dae3d81c1db848d0",
+      "sha256": "6e240193807d52128a5b814fecfe6327e2570f9a7fb57c67e8045e00ade2e1cf",
       "width": 2080,
       "height": 1400,
       "composition": {
         "sources": ["timeline.png", "timeline-mono.png"],
         "sourceSha256": [
-          "f4f137baea6007b4033dbadece164fef7843b837ccc12a780d4d1e7a5961f653",
-          "85c8c2b1ceb14730075ba990dac6e7f9c90696fd936dc6284f48d0efb28512c5"
+          "8b1556ac03034e500e0cd7a70bbdea7cb0c6d9b0358804031dc0b09c58966332",
+          "efa8cb5f23377b1a4f47242c0b4749820f8dbdb054ec1378fe2c098cc5fdc5cc"
         ],
         "split": { "top": 0.62, "bottom": 0.38 }
       }

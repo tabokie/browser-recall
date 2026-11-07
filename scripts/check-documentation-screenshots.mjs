@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertCaptureInputs } from './lib/documentation-freshness.mjs';
+import { checkDetailMedia } from './lib/documentation-detail-check.mjs';
 import {
   storeScreenshotNames,
   assertStoreScreenshotInputs,
@@ -41,6 +42,18 @@ const captures = [
 ];
 const errors = [];
 const available = new Set();
+const detailImages = [
+  'docs/images/details/bookmark-import.gif',
+  'docs/images/details/page-copy-paste.gif',
+  'docs/images/details/recording-pause.gif',
+];
+try {
+  for (const name of checkDetailMedia(root, imagesOnly)) available.add(name);
+} catch (error) {
+  errors.push(
+    `${error.message}\nRegenerate detail GIFs with npm run docs:screenshots and npm run docs:screenshots:browser.`,
+  );
+}
 for (const capture of captures) {
   try {
     const manifest = JSON.parse(
@@ -171,13 +184,14 @@ try {
     'docs/images/browser-popup-window.png',
     'docs/images/browser-note-window.png',
     'docs/images/book.png',
+    ...detailImages,
   ];
   if (
     JSON.stringify(images.sort()) !== JSON.stringify(expected.sort()) ||
     images.some((name) => !available.has(name))
   )
     throw new Error(
-      'README must reference each of the four verified documentation images exactly once',
+      'README must reference each verified documentation image and detail GIF exactly once',
     );
 } catch (error) {
   errors.push(error.message);
@@ -189,6 +203,6 @@ if (errors.length) {
   console.log(
     imagesOnly
       ? 'Documentation and Chrome Web Store image integrity verified; run the full check locally for source freshness.'
-      : 'Documentation and Chrome Web Store screenshots are current: source fingerprints, PNG hashes, dimensions, composition, formats, and references verified.',
+      : 'Documentation media and Chrome Web Store screenshots are current: source fingerprints, PNG/GIF hashes, dimensions, composition, looping, formats, and references verified.',
   );
 }

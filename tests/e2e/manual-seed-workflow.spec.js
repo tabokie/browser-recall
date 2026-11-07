@@ -96,13 +96,51 @@ test('documentation reading collection loads through the real daemon', async ({
       currentSettings: settings.value,
       sendMessage,
     });
-    const list = await sendMessage({
+    for (const name of [
+      'Small web',
+      'Design',
+      'Font',
+      'Cinema',
+      'Writing',
+      'Music',
+      'Drumming',
+      'Cooking',
+    ]) {
+      const list = await sendMessage({
+        action: 'readDesktopValue',
+        key: `list:reading-list-${name.toLowerCase().replaceAll(' ', '-')}`,
+      });
+      expect(list).toMatchObject({ success: true, value: { name } });
+      expect(list.value.pins).toHaveLength(1);
+      if (name === 'Small web') {
+        expect(list.value.pins[0].id).toBe(
+          `page:${generateSlugFromUrl('https://fieldnotes.example/a-smaller-web')}`,
+        );
+      }
+    }
+    const tree = await sendMessage({
       action: 'readDesktopValue',
-      key: 'list:reading-list-0',
+      key: 'manifest:list-order',
     });
-    expect(list).toMatchObject({ success: true });
-    expect(list.value.name).toBe('Small web');
-    expect(list.value.pins).toHaveLength(4);
+    expect(tree).toMatchObject({
+      success: true,
+      value: {
+        tree: [
+          { id: 'list:reading-list-small-web', children: [] },
+          {
+            id: 'list:reading-list-design',
+            children: [{ id: 'list:reading-list-font', children: [] }],
+          },
+          { id: 'list:reading-list-cinema', children: [] },
+          { id: 'list:reading-list-writing', children: [] },
+          {
+            id: 'list:reading-list-music',
+            children: [{ id: 'list:reading-list-drumming', children: [] }],
+          },
+          { id: 'list:reading-list-cooking', children: [] },
+        ],
+      },
+    });
     const notes = await Promise.all(
       Array.from({ length: 9 }, (_, index) =>
         sendMessage({
@@ -138,7 +176,7 @@ test('documentation reading collection loads through the real daemon', async ({
     );
     const highlighted = new Set(notes.map(({ value }) => value.url));
     expect(visited.size).toBe(40);
-    expect(pinned.size / visited.size).toBeLessThan(0.2);
+    expect(pinned.size).toBe(8);
     expect(highlighted.size / visited.size).toBeLessThan(0.1);
     const timelineDates = new Map();
     for (const event of seed.events.filter(

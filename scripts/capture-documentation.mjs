@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -20,9 +21,11 @@ import { fileURLToPath } from 'node:url';
 import { format } from 'prettier';
 import { buildManualSeedFiles } from './lib/manual-seed.mjs';
 import { documentationSeed } from './lib/documentation-seed.mjs';
+import { captureDesktopDetails } from './lib/documentation-details.mjs';
 import { composeDocumentationHero } from './compose-documentation-hero.mjs';
 import { verifyMacosDocumentationApp } from './verify-macos-documentation-app.mjs';
 import { launchMacosDocumentationApp } from './lib/macos-native-session.mjs';
+import { withCleanup } from '../tests/smoke/desktop-test-cleanup.mjs';
 import {
   captureInputs,
   assertCaptureInputs,
@@ -49,6 +52,34 @@ if (process.platform !== 'darwin') {
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 process.chdir(root);
 const inputs = captureInputs(root, 'desktop');
+const reuseBuild = process.argv.includes('--reuse-build');
+if (process.argv.slice(2).some((arg) => arg !== '--reuse-build'))
+  throw new Error('Unknown documentation capture argument');
+const retainedApp = path.join(
+  root,
+  'target/release/bundle/macos/Browser Recall Documentation.app',
+);
+const buildRecord = path.join(root, 'target/documentation-native-build.json');
+const compiledInputs = Object.fromEntries(
+  Object.entries(inputs).filter(([name]) =>
+    /^(apps\/desktop\/|packages\/core\/|Cargo\.|rust-toolchain\.|package(?:-lock)?\.json$|scripts\/stage-app-assets\.mjs$|scripts\/documentation-(?:tauri\.conf\.json|info\.plist)$)/.test(
+      name,
+    ),
+  ),
+);
+function compiledDirectory(relative) {
+  for (const entry of readdirSync(path.join(root, relative), {
+    withFileTypes: true,
+  }).sort((a, b) => a.name.localeCompare(b.name))) {
+    const name = `${relative}/${entry.name}`;
+    if (entry.isDirectory()) compiledDirectory(name);
+    else if (entry.isFile() && entry.name !== '.DS_Store')
+      compiledInputs[name] = createHash('sha256')
+        .update(readFileSync(path.join(root, name)))
+        .digest('hex');
+  }
+}
+compiledDirectory('crates');
 const work = realpathSync(
   mkdtempSync(path.join(tmpdir(), 'browser-recall-documentation-')),
 );
@@ -58,6 +89,8 @@ const app = path.join(work, 'Browser Recall Documentation.app');
 let helper;
 let daemon;
 let pid;
+let appLaunched = false;
+let primaryFailure;
 const run = (command, args, options = {}) =>
   execFileSync(command, args, {
     encoding: 'utf8',
@@ -142,26 +175,41 @@ async function capture(name, includes, spec, excludes = []) {
 
 try {
   // A distinct compiled identifier isolates Tauri's single-instance socket too.
-  await build('npm', ['run', 'build:desktop-ui']);
-  await build('npm', ['run', 'build:test-daemon']);
-  await build(
-    process.execPath,
-    [
-      path.join(root, 'node_modules/@tauri-apps/cli/tauri.js'),
-      'build',
-      '--bundles',
-      'app',
-      '--config',
-      path.join(root, 'scripts/documentation-tauri.conf.json'),
-    ],
-    path.join(root, 'apps/desktop'),
-  );
-  verifyMacosDocumentationApp(
-    path.join(
-      root,
-      'target/release/bundle/macos/Browser Recall Documentation.app',
+  if (!reuseBuild) {
+    await build('npm', ['run', 'build:desktop-ui']);
+    await build('npm', ['run', 'build:test-daemon']);
+    await build(
+      process.execPath,
+      [
+        path.join(root, 'node_modules/@tauri-apps/cli/tauri.js'),
+        'build',
+        '--bundles',
+        'app',
+        '--config',
+        path.join(root, 'scripts/documentation-tauri.conf.json'),
+      ],
+      path.join(root, 'apps/desktop'),
+    );
+  }
+  verifyMacosDocumentationApp(retainedApp);
+  const currentBuild = {
+    inputs: compiledInputs,
+    executable: hash(
+      readFileSync(
+        path.join(retainedApp, 'Contents/MacOS/browser-recall-desktop'),
+      ),
     ),
-  );
+    plist: hash(readFileSync(path.join(retainedApp, 'Contents/Info.plist'))),
+  };
+  if (reuseBuild) {
+    if (
+      JSON.stringify(JSON.parse(readFileSync(buildRecord))) !==
+      JSON.stringify(currentBuild)
+    )
+      throw new Error(
+        'Documentation app or compiled inputs changed; rerun without --reuse-build',
+      );
+  } else writeFileSync(buildRecord, JSON.stringify(currentBuild));
 
   const server = net.createServer();
   await new Promise((resolve, reject) => {
@@ -243,6 +291,7 @@ try {
     BROWSER_RECALL_SKIP_LOGIN_ITEM_REGISTRATION: '1',
     BROWSER_RECALL_PORTS: String(port),
   });
+  appLaunched = true;
   pid = Number(
     await waitFor('documentation app launch', () => run(helper, ['pid', app])),
   );
@@ -293,14 +342,24 @@ try {
       'A smaller, slower web',
       'Why I still keep a personal website',
     ];
+    const listLabels = [
+      'Small web',
+      'Design',
+      'Font',
+      'Cinema',
+      'Writing',
+      'Music',
+      'Drumming',
+      'Cooking',
+    ];
     await capture(
       name('timeline'),
-      [...labeledPages, 'exploreBtn'],
+      [...labeledPages, ...listLabels, 'exploreBtn'],
       timelineSpec,
     );
-    for (const title of labeledPages) {
+    for (const title of [...labeledPages, ...listLabels]) {
       if (native('visible-text', title) !== 'true')
-        throw new Error(`${scheme} Timeline clips labeled page ${title}`);
+        throw new Error(`${scheme} Timeline clips ${title}`);
     }
     if (scheme === 'mono') continue;
     const bookSpec = documentationCaptureSpec.desktop.book;
@@ -333,6 +392,18 @@ try {
     }
   }
 
+  native('click', 'settingsBtn');
+  native('click', 'Amber');
+  native('click', 'settingsClose');
+  const details = await captureDesktopDetails({
+    native,
+    helper,
+    pid,
+    work,
+    inputs,
+    waitFor,
+    dataDir: config.data_dir,
+  });
   const screenshots = Object.fromEntries(
     names.map((name) => {
       const bytes = readFileSync(path.join(output, `${name}.png`));
@@ -384,12 +455,25 @@ try {
     cpSync(path.join(output, name), `${destination}.tmp`);
     renameSync(`${destination}.tmp`, destination);
   }
+  mkdirSync(path.join(root, 'docs/images/details'), { recursive: true });
+  for (const name of details.files) {
+    const destination = path.join(root, 'docs/images/details', name);
+    cpSync(path.join(details.directory, name), `${destination}.tmp`);
+    renameSync(`${destination}.tmp`, destination);
+  }
   console.log('Documentation screenshots saved to docs/images/');
 } catch (error) {
+  primaryFailure = error;
   if (pid) {
     const failureDir = path.join(root, 'test-results/documentation');
     mkdirSync(failureDir, { recursive: true });
     try {
+      const frameEvidence = path.join(failureDir, path.basename(work));
+      mkdirSync(frameEvidence, { recursive: true });
+      for (const name of readdirSync(work).filter((name) =>
+        /^(import-|copy-).*\.(png|txt)$/.test(name),
+      ))
+        cpSync(path.join(work, name), path.join(frameEvidence, name));
       writeFileSync(path.join(failureDir, 'accessibility.txt'), native('dump'));
       await captureDocumentationWindow({
         helper,
@@ -404,20 +488,18 @@ try {
   }
   throw error;
 } finally {
-  if (pid) {
-    try {
-      process.kill(pid, 'SIGTERM');
-    } catch (error) {
-      if (error.code !== 'ESRCH') throw error;
-    }
-  }
-  await stopTestDaemon(daemon);
   const unregister =
     '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister';
-  try {
-    run(unregister, ['-u', app]);
-  } catch (error) {
-    console.error(`Could not unregister documentation app: ${error.message}`);
-  }
-  rmSync(work, { recursive: true, force: true });
+  await withCleanup(async () => {
+    if (primaryFailure) throw primaryFailure;
+  }, [
+    () => {
+      if (appLaunched) run(helper, [String(pid ?? 0), 'quit', app]);
+    },
+    () => stopTestDaemon(daemon),
+    () => {
+      if (appLaunched) run(unregister, ['-u', app]);
+    },
+    () => rmSync(work, { recursive: true, force: true }),
+  ]);
 }

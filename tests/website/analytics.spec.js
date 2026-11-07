@@ -62,7 +62,7 @@ test('the HTTPS page configures one tracker and works when the tracker is blocke
 
   await page.getByRole('tab', { name: 'Organize', exact: true }).click();
   const organize = page.frameLocator('.organize-frame');
-  await organize.getByRole('button', { name: 'Design details' }).click();
+  await organize.getByRole('button', { name: 'Music', exact: true }).click();
   await expect(organize.locator('#listCount')).toHaveText('03');
   await page.getByRole('tab', { name: 'Highlight', exact: true }).click();
   await expect(

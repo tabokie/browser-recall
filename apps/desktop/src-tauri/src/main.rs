@@ -2281,6 +2281,14 @@ fn main() -> tauri::Result<()> {
         None,
     ));
     #[cfg(target_os = "windows")]
+    let builder = builder.on_page_load(|webview, payload| {
+        windows_startup::record(&format!(
+            "webview {} page load {:?}",
+            webview.label(),
+            payload.event()
+        ));
+    });
+    #[cfg(target_os = "windows")]
     windows_startup::record("before Tauri build and webview creation");
     let app = builder
         .invoke_handler(tauri::generate_handler![
@@ -2448,6 +2456,11 @@ fn main() -> tauri::Result<()> {
                         tokio::time::sleep(std::time::Duration::from_secs(12 * 60 * 60)).await;
                     }
                 });
+            }
+            #[cfg(target_os = "windows")]
+            {
+                windows_startup::record("native setup finished");
+                info!("desktop native startup complete");
             }
             Ok(())
         })

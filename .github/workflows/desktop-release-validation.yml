@@ -101,6 +101,10 @@ jobs:
           WINDOWS_ARTIFACTS_RESULT: ${{ steps.windows_artifacts.outcome }}
         run: node scripts/verify-windows-validation.mjs
 
+      - name: Verify Windows device identity without registry subprocesses
+        if: matrix.platform == 'windows'
+        run: cargo test --locked --release -p browser-recall-daemon --test windows_device_identity
+
       - name: Verify macOS signing, session guards, documentation registration and process cleanup
         if: matrix.platform == 'macos' && matrix.arch == 'arm64'
         run: npx vitest run tests/integration/macos-native-session.test.js tests/integration/desktop-signing.test.js tests/integration/macos-documentation-url-routing.test.js tests/integration/smoke-process-readiness.test.js
@@ -215,6 +219,15 @@ jobs:
             test-results/native-update/
             test-results/native-lifecycle/
             test-results/windows-validation/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Preserve Windows startup timings and diagnostics
+        if: always() && matrix.platform == 'windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-startup-diagnostics
+          path: test-results/native-lifecycle/browser-recall-windows-native-smoke-*/
           if-no-files-found: ignore
           retention-days: 7
 

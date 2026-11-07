@@ -128,8 +128,18 @@ Cross-compilation cannot establish this runtime behavior.
 Startup stages are written beside an explicit test profile before application
 logging starts. Failure annotations include stages, elapsed time, profile entries,
 exit status, output, and owned process metadata. Process inspection has a five-second
-deadline; startup has fifteen seconds. A further observation window of up to thirty
-seconds diagnoses late initialization but still fails the original deadline.
+deadline; native setup must emit `desktop native startup complete` within fifteen
+seconds. Earlier application logs do not establish readiness. A further observation
+window of up to thirty seconds diagnoses late initialization but still fails the
+original deadline.
+
+Every installed-app smoke run retains startup stages, application logs, process
+output, source revision, runner image version, live WebView2 process versions, and
+readiness timing in `test-results/native-lifecycle/`. Both regular CI and Release upload the
+`windows-startup-diagnostics` artifact even when Windows verification passes.
+Compare the same source revision across both workflows; a passing run alone does
+not identify the cause of a slow run. Evidence capture runs before profile cleanup,
+and capture failures preserve the original error.
 
 The shared startup observer has real subprocess coverage for timely startup, late
 logging, exit, and stalls. Icon probes use asynchronous subprocesses bounded by

@@ -9,6 +9,7 @@ import {
   highlightHistoryEntryHtml,
   highlightHistoryPageGroupHtml,
 } from '../apps/desktop/ui/book-elements.js';
+import { sidebarListItemHtml } from '../apps/desktop/ui/sidebar-elements.js';
 
 // Browser Recall website demos must reuse production renderers and typesetting.
 // Test every demo tab at phone widths and keep scrolling on the outer page.
@@ -27,6 +28,7 @@ for (const name of ['timeline', 'organize', 'highlight']) {
   );
 }
 await mkdir(path.join(output, 'assets'), { recursive: true });
+await mkdir(path.join(output, 'assets/details'), { recursive: true });
 
 const assets = [
   ['icons/browser-recall-default.svg', 'icon.svg'],
@@ -39,6 +41,12 @@ const assets = [
     'browser-note-window.png',
     'browser-popup-window.png',
   ].map((name) => [`docs/images/${name}`, name]),
+  ...['bookmark-import', 'page-copy-paste', 'recording-pause'].flatMap((name) =>
+    ['gif', 'png'].map((extension) => [
+      `docs/images/details/${name}.${extension}`,
+      `details/${name}.${extension}`,
+    ]),
+  ),
 ];
 
 for (const [source, destination] of assets) {
@@ -51,6 +59,7 @@ await writeFile(path.join(output, '.nojekyll'), '');
 const productFiles = [
   'apps/desktop/ui/book-typesetting.js',
   'apps/desktop/ui/timeline-elements.js',
+  'apps/desktop/ui/sidebar-elements.js',
   'apps/desktop/ui/utils.js',
   'apps/desktop/ui/shared.css',
   'apps/desktop/ui/fonts',
@@ -105,9 +114,10 @@ async function demoDocument(name, head, body) {
   );
 }
 
+const seed = documentationSeed();
 const days = new Map();
-const highlights = documentationSeed()
-  .events.filter((event) => event.action === 'create_note')
+const highlights = seed.events
+  .filter((event) => event.action === 'create_note')
   .sort((a, b) => b.timestamp - a.timestamp);
 for (const highlight of highlights) {
   const date = formatHighlightHistoryDate(highlight.timestamp);
@@ -148,9 +158,41 @@ const desktop = await productDocument('apps/desktop/ui/index.html');
 const sidebar = fragment(desktop, '.sidebar');
 sidebar
   .querySelectorAll(
-    '#settingsBtn, #desktopUpdateNotice, #recycleBinBtn, .sidebar-content',
+    '#settingsBtn, #desktopUpdateNotice, #recycleBinBtn, #createListBtn, #listsEmpty',
   )
   .forEach((element) => element.remove());
+// Share the capture's list hierarchy and the desktop's list controls.
+// Creating a list prepends the list among its siblings in production replay.
+const sampleLists = seed.events
+  .filter((event) => event.action === 'create_list')
+  .toReversed();
+function appendLists(container, parentListId = null, depth = 0) {
+  for (const list of sampleLists.filter(
+    (item) => item.parentListId === parentListId,
+  )) {
+    const hasChildren = sampleLists.some(
+      (item) => item.parentListId === list.listId,
+    );
+    const item = desktop.createElement('div');
+    item.className = 'sidebar-item';
+    item.dataset.listId = list.listId;
+    item.style.paddingLeft = `calc(var(--sidebar-item-inset) + ${depth * 16}px)`;
+    item.innerHTML = sidebarListItemHtml(list.name, {
+      hasChildren,
+      readOnly: true,
+      tr: (_key, fallback) => fallback,
+    });
+    container.appendChild(item);
+    if (hasChildren) {
+      const children = desktop.createElement('div');
+      children.className = 'sidebar-children';
+      children.dataset.parentSlug = list.listId;
+      appendLists(children, list.listId, depth + 1);
+      container.appendChild(children);
+    }
+  }
+}
+appendLists(sidebar.querySelector('#listsList'));
 sidebar.querySelector('#exploreBtn').classList.add('active');
 const header = fragment(desktop, '.main-header');
 header

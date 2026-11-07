@@ -8,20 +8,15 @@ const pages = [
     'https://fieldnotes.example/a-smaller-web',
     'Small web',
   ],
-  [
-    'Making a home on the internet',
-    'https://garden.example/a-home-online',
-    'Small web',
-  ],
+  ['Making a home on the internet', 'https://garden.example/a-home-online'],
   [
     'Good tools leave room for you',
     'https://workshop.example/good-tools',
-    'Small web',
+    'Design',
   ],
   [
     'A reading list for rainy afternoons',
     'https://margin.example/reading-list',
-    'Weekend reading',
   ],
   [
     'The quiet work of keeping a notebook',
@@ -30,18 +25,22 @@ const pages = [
   [
     'Type that feels like a conversation',
     'https://typefoundry.example/conversation',
-    'Design details',
+    'Font',
   ],
   ['Designing for the second visit', 'https://workshop.example/second-visit'],
   ['A garden is never quite finished', 'https://garden.example/never-finished'],
   [
     'Why I still keep a personal website',
     'https://margin.example/personal-website',
-    'Small web',
+    'Writing',
   ],
   ['A little space between things', 'https://typefoundry.example/white-space'],
   ['How to repot a rubber plant', 'https://leaf.example/guides/rubber-plant'],
-  ['Lemon and white bean soup', 'https://table.example/lemon-bean-soup'],
+  [
+    'Lemon and white bean soup',
+    'https://table.example/lemon-bean-soup',
+    'Cooking',
+  ],
   ['Saturday opening hours', 'https://library.example/visit'],
   ['Train times: Central to the coast', 'https://rail.example/journey/coast'],
   ['A walk along the old canal', 'https://footpath.example/canal-walk'],
@@ -53,11 +52,15 @@ const pages = [
   ['The bookshop on the corner', 'https://bookshop.example/about'],
   ['Miso mushrooms on toast', 'https://table.example/miso-mushrooms'],
   ['A short history of the city tram', 'https://museum.example/journal/tram'],
-  ['Coffee filters, size 02', 'https://supply.example/coffee/filters'],
+  [
+    'Practice a relaxed single-stroke roll',
+    'https://rhythm.example/single-stroke-roll',
+    'Drumming',
+  ],
   ['Repair café: what to bring', 'https://repair.example/visit'],
   ['Native plants for a small balcony', 'https://leaf.example/balcony'],
   ['Finding the right line height', 'https://typefoundry.example/line-height'],
-  ['An evening of piano music', 'https://venue.example/piano-evening'],
+  ['An evening of piano music', 'https://venue.example/piano-evening', 'Music'],
   ['Map of the riverside path', 'https://footpath.example/riverside'],
   ['How long does opened miso keep?', 'https://table.example/pantry/miso'],
   [
@@ -66,7 +69,7 @@ const pages = [
   ],
   ['Local swimming pool timetable', 'https://pool.example/timetable'],
   ['Simple shelves for a narrow room', 'https://workshop.example/shelves'],
-  ['Film notes: Perfect Days', 'https://screen.example/perfect-days'],
+  ['Film notes: Perfect Days', 'https://screen.example/perfect-days', 'Cinema'],
   [
     'A small desk lamp in warm white',
     'https://supply.example/lighting/desk-lamp',
@@ -86,18 +89,25 @@ const pages = [
 
 export function documentationSeed() {
   const events = [];
-  for (const [index, name] of [
-    'Small web',
-    'Weekend reading',
-    'Design details',
+  // Replay prepends new siblings. Create roots in reverse display order,
+  // with each parent created before its child.
+  for (const [index, [name, parent]] of [
+    ['Cooking', null],
+    ['Music', null],
+    ['Drumming', 'Music'],
+    ['Writing', null],
+    ['Cinema', null],
+    ['Design', null],
+    ['Font', 'Design'],
+    ['Small web', null],
   ].entries()) {
     events.push({
       action: 'create_list',
       timestamp: base - 36 * day + index,
       name,
       listOwner: documentationDevice,
-      listId: `reading-list-${index}`,
-      parentListId: null,
+      listId: `reading-list-${name.toLowerCase().replaceAll(' ', '-')}`,
+      parentListId: parent ? `reading-list-${parent.toLowerCase()}` : null,
     });
   }
   function visit(pageIndex, timestamp, duration) {

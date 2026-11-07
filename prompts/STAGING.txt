@@ -1,0 +1,38 @@
+- Let's improve the demos, including README screenshots and the product website. Firstly, I want the desktop app to have one nested list to showcase list can have hierarchy.
+- I don't like this arrangement. I propose removing "Design details", add more single-word lists, suggestions: "Design > Font", "Cinema", "Writing", "Music > Drumming", "Cooking"
+- "Small web" should be kept, and the original page that belongs to "Small web".
+- There are a few selling points that I think deserves to be mentioned in the product website and README, but they are small compared to the main features. I am not sure how to present them without drawing too much attention. (1) The "Import from bookmarks" UI, (2) paste and copy the selected pages is a formatted plaintext list, (3) User can pause recording in browser and the icon closes its eyes. You can propose more details like these if you want.
+- But I want to showcase the details using visuals or even animations (GIFs).
+- Looks good. We can use the same GIFs for both README and website. Is it tricky to build them programmatically?
+- No need for click-to-play, it can loop directly
+- No... I want you to build the actual things, the preview has made the point.
+- Continue
+- Not good enough. (1) The mouse cursor should be presented to illustrate user actions. For select, the mouse should click multiple times to mimic actual user operation. (2) There are too many close-ups without enough surrounding context, the camera should zoom out at the end of the recording. (3) The copy-and-paste demo looks rather thin. Do you think it's worth keeping? Or how can we improve it to enhance the product strength?
+- Desktop Visual Regression is failing:
+  1) [webkit] › tests/e2e/desktop-visual.spec.js:2480:3 › desktop visual regression › main shell and search panel keep their width before initial history data finishes loading @webkit 
+
+    Error: Timeout 1000ms exceeded while waiting on the predicate
+
+      2507 |           { timeout: 1000 },
+      2508 |         )
+    > 2509 |         .toBe('1');
+           |          ^
+      2510 |       await expect(page.locator('#searchDraftInput')).toBeVisible({
+      2511 |         timeout: 1000,
+      2512 |       });
+        at /Users/runner/work/browser-recall/browser-recall/tests/e2e/desktop-visual.spec.js:2509:10
+        at serveDesktopUi (/Users/runner/work/browser-recall/browser-recall/tests/e2e/desktop-visual.spec.js:319:5)
+        at /Users/runner/work/browser-recall/browser-recall/tests/e2e/desktop-visual.spec.js:2491:5
+
+    Error Context: test-results/desktop-visual-desktop-vis-b637f-ata-finishes-loading-webkit-webkit/error-context.md
+
+  1 failed
+    [webkit] › tests/e2e/desktop-visual.spec.js:2480:3 › desktop visual regression › main shell and search panel keep their width before initial history data finishes loading @webkit 
+  18 passed (1.6m)
+- # Files pasted by the user:
+
+## "Run $installer = (Get-Item \"release-assets/browser-recall-$env:RELEASE_TAG-wind…": /Users/xyt/.codex/attachments/6ae32d39-e5d6-41b4-ba79-c13ac12d7af8/已粘贴的文本.txt
+
+## My request:
+Windows verification is failing in Release action, but not in regular CI. Maybe it's flaky or it's not covered in regular CI.
+- How to fix it thoroughly?
