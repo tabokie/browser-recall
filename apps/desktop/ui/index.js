@@ -2,6 +2,7 @@ import {
   resultRowHtml as renderResultRow,
   searchDraftControlHtml,
 } from './timeline-elements.js';
+import { sidebarListItemHtml } from './sidebar-elements.js';
 // Options page for Browser Recall
 // Bookmark-manager style UI with sidebar navigation, search, and settings modal
 import { parseSearchQueryWords, scoreSearchFields } from './search-runtime.js';
@@ -5626,16 +5627,11 @@ function createSidebarItemDOM(node, depth) {
 
   const collapseTitle = tr('desktopCollapse', 'Collapse');
   const expandTitle = tr('desktopExpand', 'Expand');
-  item.innerHTML = `
-    ${
-      hasChildren
-        ? `<button type="button" class="fold-toggle${expanded ? ' expanded' : ''}" title="${escapeHtml(expanded ? collapseTitle : expandTitle)}" aria-label="${escapeHtml(expanded ? collapseTitle : expandTitle)}" aria-expanded="${expanded}"></button>`
-        : '<span class="list-leaf-dot" aria-hidden="true"></span>'
-    }
-    <span class="label">${escapeHtml(listDisplayName(node))}</span>
-    <span class="pin-count"></span>
-    <button class="remove-list" title="${escapeHtml(tr('commonRemove', 'Remove'))}">&times;</button>
-  `;
+  item.innerHTML = sidebarListItemHtml(listDisplayName(node), {
+    hasChildren,
+    expanded,
+    tr,
+  });
 
   if (hasChildren) {
     item.querySelector('.fold-toggle').addEventListener('click', (e) => {

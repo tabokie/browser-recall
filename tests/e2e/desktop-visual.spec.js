@@ -365,6 +365,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       searchSnapshotsResultsByQuery,
       listHistoryFilesDelayMs,
       loadHistoryBatchDelayMs,
+      holdInitialHistoryBatch,
       highlightHistoryPageDelayMs,
       readDesktopValueDelayMs,
       getSettingsDelayMs,
@@ -400,6 +401,12 @@ async function installDesktopBridgeMock(page, options = {}) {
       const cancelledHistorySearchIds = [];
       const searchHistoryInvocations = [];
       const loadHistoryBatchInvocations = [];
+      let resolveInitialHistoryBatch;
+      const initialHistoryBatchResponse = holdInitialHistoryBatch
+        ? new Promise((resolve) => {
+            resolveInitialHistoryBatch = resolve;
+          })
+        : null;
       const previewRuleInvocations = [];
       const bridgeActionInvocations = [];
       let reviewGeneration = 0;
@@ -956,6 +963,12 @@ async function installDesktopBridgeMock(page, options = {}) {
         loadHistoryBatchInvocationCount() {
           return loadHistoryBatchInvocations.length;
         },
+        releaseInitialHistoryBatch() {
+          if (!resolveInitialHistoryBatch) {
+            throw new Error('Initial history batch is not held');
+          }
+          resolveInitialHistoryBatch();
+        },
         reviewPresentations() {
           return clone(reviewPresentations);
         },
@@ -1109,6 +1122,12 @@ async function installDesktopBridgeMock(page, options = {}) {
             };
           case 'loadHistoryBatch':
             loadHistoryBatchInvocations.push(clone(request.files || []));
+            if (
+              initialHistoryBatchResponse &&
+              loadHistoryBatchInvocations.length === 1
+            ) {
+              await initialHistoryBatchResponse;
+            }
             if (loadHistoryBatchDelayMs > 0) {
               await new Promise((resolve) =>
                 setTimeout(resolve, loadHistoryBatchDelayMs),
@@ -1524,6 +1543,7 @@ async function installDesktopBridgeMock(page, options = {}) {
         options.searchSnapshotsResultsByQuery || null,
       listHistoryFilesDelayMs: options.listHistoryFilesDelayMs || 0,
       loadHistoryBatchDelayMs: options.loadHistoryBatchDelayMs || 0,
+      holdInitialHistoryBatch: Boolean(options.holdInitialHistoryBatch),
       highlightHistoryPageDelayMs: options.highlightHistoryPageDelayMs || 0,
       readDesktopValueDelayMs: options.readDesktopValueDelayMs || 0,
       getSettingsDelayMs: options.getSettingsDelayMs || 0,
@@ -2493,28 +2513,27 @@ test.describe('desktop visual regression', () => {
       await installDesktopBridgeMock(page, {
         setupComplete: true,
         colorScheme: 'amber',
-        loadHistoryBatchDelayMs: 3000,
+        holdInitialHistoryBatch: true,
         historyEntries,
       });
       await page.goto(desktopUrl);
 
+      // Keep the loading state observable regardless of runner scheduling.
+      await expect(page.locator('#searchDraftInput')).toBeVisible();
       await expect
-        .poll(
-          () =>
-            page.evaluate(
-              () => getComputedStyle(document.documentElement).opacity,
-            ),
-          { timeout: 1000 },
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness.loadHistoryBatchInvocationCount(),
+          ),
         )
-        .toBe('1');
-      await expect(page.locator('#searchDraftInput')).toBeVisible({
-        timeout: 1000,
-      });
+        .toBe(1);
       expect(
-        await page.evaluate(() =>
-          window.__desktopVisualHarness.loadHistoryBatchInvocationCount(),
-        ),
-      ).toBeGreaterThan(0);
+        await page.evaluate(() => ({
+          opacity: getComputedStyle(document.documentElement).opacity,
+          ready: document.body.dataset.ready === 'true',
+        })),
+      ).toEqual({ opacity: '1', ready: false });
+      await expect(page.locator('#relatedResults .result-row')).toHaveCount(0);
       await expect(page.locator('.main')).toHaveCSS(
         'scrollbar-gutter',
         'stable',
@@ -2531,9 +2550,10 @@ test.describe('desktop visual regression', () => {
         });
       const loadingWidth = await measureMainWidth();
 
-      await page.waitForFunction(() => document.body.dataset.ready === 'true', {
-        timeout: 5000,
-      });
+      await page.evaluate(() =>
+        window.__desktopVisualHarness.releaseInitialHistoryBatch(),
+      );
+      await expect(page.locator('body')).toHaveAttribute('data-ready', 'true');
       await expect(page.locator('#relatedResults .result-row')).not.toHaveCount(
         0,
       );

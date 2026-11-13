@@ -27,7 +27,7 @@ shadow.innerHTML = `<style>
   ${surface.shadowCss}
   ${surface.highlightEntryCss}
   .overlay {
-    width: 300px; background: var(--br-bg-base); border: var(--br-floating-border);
+    width: min(300px, var(--article-width)); background: var(--br-bg-base); border: var(--br-floating-border);
     border-radius: 2px; color: var(--br-text-primary); font-family: var(--br-font-body);
     font-size: 12px; line-height: 1.45; padding: 0 8px;
   }
@@ -38,6 +38,10 @@ document.body.appendChild(host);
 
 function positionNote() {
   const mark = document.querySelector('.browser-recall-highlight');
+  host.style.setProperty(
+    '--article-width',
+    `${document.querySelector('.sample-article').clientWidth}px`,
+  );
   surface.positionNearRect(host, mark.getBoundingClientRect());
 }
 new ResizeObserver(positionNote).observe(document.body);

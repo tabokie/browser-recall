@@ -606,26 +606,19 @@ fn platform_machine_identifier() -> std::io::Result<String> {
 
 #[cfg(target_os = "windows")]
 fn platform_machine_identifier() -> std::io::Result<String> {
-    let output = std::process::Command::new("reg")
-        .args([
-            "query",
-            r"HKLM\SOFTWARE\Microsoft\Cryptography",
-            "/v",
-            "MachineGuid",
-        ])
-        .output()?;
-    if !output.status.success() {
-        return Err(invalid_data(format!(
-            "registry query for MachineGuid failed with status {}",
-            output.status
-        )));
-    }
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .find(|line| line.contains("MachineGuid"))
-        .and_then(|line| line.split_whitespace().last())
-        .map(str::to_string)
-        .ok_or_else(|| invalid_data("registry output is missing MachineGuid"))
+    use winreg::{
+        enums::{HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY},
+        RegKey,
+    };
+
+    // Keep the same MachineGuid and device-ID format as the Windows x64 reg.exe
+    // reader. Reading the registry must not start another process during setup.
+    RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey_with_flags(
+            r"SOFTWARE\Microsoft\Cryptography",
+            KEY_READ | KEY_WOW64_64KEY,
+        )?
+        .get_value("MachineGuid")
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]

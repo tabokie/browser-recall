@@ -5,21 +5,22 @@ for commands, and [Testing](TESTING.md) for coverage boundaries.
 
 ## Repository layout
 
-| Path                      | Responsibility                                            |
-| ------------------------- | --------------------------------------------------------- |
-| `apps/desktop/ui/`        | Desktop interface                                         |
-| `apps/desktop/src-tauri/` | Tauri shell and native integrations                       |
-| `apps/extension/`         | Chromium/Firefox connector                                |
-| `crates/daemon/`          | Commands, storage, pairing, rules, sync                   |
-| `crates/replay/`          | Schemas, replay, checkpoints, verification                |
-| `crates/search/`          | Native search                                             |
-| `crates/native-tests/`    | Minimal AppKit tests importing production code            |
-| `packages/core/`          | Shared JavaScript, CSS, localization, generated factories |
-| `scripts/`                | Builds, migrations, coverage, capture                     |
-| `tests/`                  | JavaScript, browser, and native scenarios                 |
-| `icons/`, `docs/images/`  | Icon sources, screenshots, capture manifests              |
-| `website/`                | Static product page and fictional demos                   |
-| `plans/`                  | Historical proposals and implementation records           |
+| Path                          | Responsibility                                                 |
+| ----------------------------- | -------------------------------------------------------------- |
+| `apps/desktop/ui/`            | Desktop interface                                              |
+| `apps/desktop/src-tauri/`     | Tauri shell and native integrations                            |
+| `apps/extension/`             | Chromium/Firefox connector                                     |
+| `crates/daemon/`              | Commands, storage, pairing, rules, sync                        |
+| `crates/replay/`              | Schemas, replay, checkpoints, verification                     |
+| `crates/search/`              | Native search                                                  |
+| `crates/native-tests/`        | Minimal AppKit tests importing production code                 |
+| `packages/core/`              | Shared JavaScript, CSS, localization, generated factories      |
+| `packages/demo/collection.js` | Fictional pages and lists shared by captures and website demos |
+| `scripts/`                    | Builds, migrations, coverage, capture                          |
+| `tests/`                      | JavaScript, browser, and native scenarios                      |
+| `icons/`, `docs/images/`      | Icon sources, screenshots, capture manifests                   |
+| `website/`                    | Static product page and fictional demos                        |
+| `plans/`                      | Historical proposals and implementation records                |
 
 ## Desktop
 
@@ -31,6 +32,7 @@ Paths below are relative to `apps/desktop/`.
 | `ui/desktop-bridge.js`, `ui/desktop-platform.js`                    | Validated Tauri commands and platform APIs                            |
 | `ui/book-elements.js`, `ui/book-typesetting.js`                     | Shared Book markup and Justif layout                                  |
 | `ui/timeline-elements.js`                                           | Timeline rows shared with website demos                               |
+| `ui/sidebar-elements.js`                                            | List controls shared with website demos                               |
 | `ui/bookmark-parser.js`                                             | Bookmark HTML parsing                                                 |
 | `ui/shared.css`, `ui/fonts/`                                        | Typography and bundled fonts                                          |
 | `ui/desktop-reviews.js`, `ui/desktop-updates.js`                    | Review opportunities/cancellation and update controls                 |
@@ -62,6 +64,7 @@ Paths below are relative to `apps/extension/`.
 | `browser-identity.js`, `browser-build-target.js`                          | Browser identity and generated build target                                                |
 | `popup.js`, `popup.html`, `popup-note-session.js`                         | Dashboard, sizing, list edits, note drafts                                                 |
 | `popup-list-elements.js`                                                  | List markup shared with website demos                                                      |
+| `popup-snapshot-elements.js`                                              | Snapshot-row markup shared with website demos                                              |
 | `extension-surface.js`, `extension-surface.css`, `extension-ui-tokens.js` | Isolated editors, highlights, overlays, shared persistent error renderer                   |
 | `connector/ws-client.js`                                                  | Sessions, validation, requests, queue draining                                             |
 | `connector/state.js`, `connector/pairing.js`                              | Connection diagnostics and authentication                                                  |
@@ -130,6 +133,13 @@ Paths below are relative to `scripts/` unless stated otherwise.
 | `rust-coverage.mjs`, `test-coverage-monitor.mjs`                                                  | Coverage and test-growth guard                            |
 | `generate-icons.mjs`                                                                              | Native icon slots, extension/tray assets                  |
 | `capture-documentation.mjs`, `capture-browser-documentation.mjs`                                  | Desktop/browser captures                                  |
+| `lib/documentation-details.mjs`                                                                   | Native bookmark import scenario                           |
+| `lib/documentation-detail-media.mjs`, `lib/documentation-detail-media.swift`                      | Cropped GIFs, still images, and capture provenance        |
+| `lib/documentation-detail-check.mjs`                                                              | GIF structure, looping, and provenance checks             |
+| `generate-documentation-gifs.mjs`, `documentation-gifs.json`                                      | Focused GIF generation from saved captures                |
+| `lib/documentation-gif.mjs`                                                                       | GIF frame selection and timing without recompression      |
+| `lib/documentation-gif-frame.swift`                                                               | Shared camera for cached native windows and wallpaper     |
+| `lib/documentation-gif-clicks.swift`                                                              | Cached zoom and contrasting click rings                   |
 | `documentation-tauri.conf.json`, `documentation-info.plist`, `verify-macos-documentation-app.mjs` | No-tray/no-URL-scheme capture bundles                     |
 | `lib/documentation-seed.mjs`, `lib/documentation-window.swift`                                    | Capture data and native window control                    |
 | `lib/documentation-native-capture.mjs`, `lib/documentation-image-spec.mjs`                        | Compilation, geometry, pixel stability                    |
@@ -138,9 +148,18 @@ Paths below are relative to `scripts/` unless stated otherwise.
 | `lib/store-screenshots.mjs`, `lib/store-screenshot.swift`                                         | Store provenance and RGB conversion                       |
 | `select-platform-checks.mjs`                                                                      | Relevant-change selection for expensive checks            |
 | `build-website.mjs`, `serve-website.mjs`                                                          | Static build and project-path preview                     |
+| `generate-website-finder.mjs`                                                                     | Finder sample files generated with production replay      |
 
-Website presentation lives in `website/demos/`; HTTPS page-view counting lives in
-`website/analytics.js`. `website/downloads.js` resolves the latest Windows installer.
+Website sections and demo sizing live in `website/index.html`, `website/styles.css`,
+and `website/main.js`. Embedded presentation lives in `website/demos/`.
+`website/locale.js` provides Chinese copy, language detection, the header switch,
+and translated Finder labels. English copy and translation keys stay in the HTML.
+`website/demos/browser.html`, `browser.css`, and `browser.js` supply the sample
+browser window; `highlight.js` and `popup.js` render the extension examples.
+HTTPS page-view counting lives in `website/analytics.js`.
+`website/downloads.js` resolves the latest Windows installer.
+`website/finder.js` and `website/finder.css` provide the Finder-style storage demo;
+`website/demos/finder-data.json` contains the generated sample library.
 `playwright.website.config.js` and `tests/website/` cover website behavior.
 
 | Workflow/configuration                                  | Responsibility                                               |
@@ -155,6 +174,10 @@ Website presentation lives in `website/demos/`; HTTPS page-view counting lives i
 
 Entry points in `apps/` and `crates/` are repository-relative; other paths are
 relative to `tests/`. Search neighboring scenarios before adding coverage.
+
+`crates/daemon/tests/windows_device_identity.rs` verifies that Windows device
+identity matches `MachineGuid` when registry subprocesses are unavailable. The
+Windows native job runs this check before packaging.
 
 | Behavior                                        | Entry point                                                                                                                                                                          |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

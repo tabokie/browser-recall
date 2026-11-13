@@ -1,0 +1,183 @@
+{
+  "bookmark-import": {
+    "kind": "desktop",
+    "endFrame": null,
+    "lastFrameSeconds": 2,
+    "clicks": 4,
+    "marginPixels": 24,
+    "windowRadiusPixels": 48,
+    "scene": {
+      "width": 1920,
+      "height": 1440,
+      "poses": [
+        {
+          "frame": 0,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 1440
+          }
+        },
+        {
+          "frame": 8,
+          "crop": {
+            "x": 460,
+            "y": 386,
+            "width": 1000,
+            "height": 464
+          }
+        },
+        {
+          "frame": 35,
+          "crop": {
+            "x": 460,
+            "y": 386,
+            "width": 1000,
+            "height": 464
+          }
+        },
+        {
+          "frame": 43,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 1440
+          }
+        },
+        {
+          "frame": 44,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 1440
+          }
+        },
+        {
+          "frame": 47,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 1440
+          }
+        },
+        {
+          "frame": 55,
+          "crop": {
+            "x": 20,
+            "y": 324,
+            "width": 1200,
+            "height": 734
+          }
+        },
+        {
+          "frame": 56,
+          "crop": {
+            "x": 20,
+            "y": 324,
+            "width": 1200,
+            "height": 734
+          }
+        }
+      ],
+      "states": [
+        {
+          "frame": 0,
+          "overview": 0,
+          "context": [5, 6, 7]
+        },
+        {
+          "frame": 32,
+          "overview": 43,
+          "context": [5, 6, 7]
+        },
+        {
+          "frame": 44,
+          "overview": 44
+        }
+      ]
+    }
+  },
+  "recording-pause": {
+    "kind": "browser",
+    "endFrame": 18,
+    "lastFrameSeconds": 2,
+    "clicks": 1,
+    "marginPixels": 24,
+    "windowRadiusPixels": 48,
+    "scene": {
+      "width": 1600,
+      "height": 868,
+      "poses": [
+        {
+          "frame": 0,
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 1600,
+            "height": 868
+          }
+        },
+        {
+          "frame": 8,
+          "crop": {
+            "x": 640,
+            "y": 64,
+            "width": 960,
+            "height": 586
+          }
+        },
+        {
+          "frame": 39,
+          "crop": {
+            "x": 640,
+            "y": 64,
+            "width": 960,
+            "height": 586
+          }
+        }
+      ],
+      "states": [
+        {
+          "frame": 0,
+          "overview": 0
+        }
+      ]
+    },
+    "clickRipples": [
+      {
+        "frame": 14,
+        "x": 480,
+        "y": 96,
+        "phase": 0
+      },
+      {
+        "frame": 15,
+        "x": 480,
+        "y": 96,
+        "phase": 0.45
+      },
+      {
+        "frame": 16,
+        "x": 480,
+        "y": 96,
+        "phase": 0.9
+      }
+    ],
+    "frameSeconds": {
+      "14": 0.16,
+      "15": 0.16,
+      "16": 0.16
+    },
+    "zoom": {
+      "scale": 1.206,
+      "x": 0,
+      "y": 96,
+      "startFrame": 0,
+      "endFrame": 8
+    }
+  }
+}

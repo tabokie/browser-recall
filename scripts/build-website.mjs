@@ -9,14 +9,16 @@ import {
   highlightHistoryEntryHtml,
   highlightHistoryPageGroupHtml,
 } from '../apps/desktop/ui/book-elements.js';
+import { sidebarListItemHtml } from '../apps/desktop/ui/sidebar-elements.js';
+import { demoLists, featuredPage } from '../packages/demo/collection.js';
 
 // Browser Recall website demos must reuse production renderers and typesetting.
-// Test every demo tab at phone widths and keep scrolling on the outer page.
+// Test every demo at phone widths and keep scrolling on the outer page.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = path.join(root, 'dist/website');
 await rm(output, { recursive: true, force: true });
 await cp(path.join(root, 'website'), output, { recursive: true });
-for (const name of ['timeline', 'organize', 'highlight']) {
+for (const name of ['timeline', 'popup', 'highlight']) {
   const file = path.join(output, `demos/${name}.js`);
   const source = await readFile(file, 'utf8');
   await writeFile(
@@ -30,12 +32,16 @@ await mkdir(path.join(output, 'assets'), { recursive: true });
 
 const assets = [
   ['icons/browser-recall-default.svg', 'icon.svg'],
+  ['icons/browser-recall-default-transparent.svg', 'extension-recording.svg'],
+  [
+    'icons/browser-recall-stop-recording-transparent.svg',
+    'extension-paused.svg',
+  ],
   ...['fraunces-regular.woff2', 'fraunces-italic.woff2', 'nunito.woff2'].map(
     (name) => [`apps/desktop/ui/fonts/${name}`, name],
   ),
   ...[
     'timeline-styles.png',
-    'book.png',
     'browser-note-window.png',
     'browser-popup-window.png',
   ].map((name) => [`docs/images/${name}`, name]),
@@ -51,10 +57,12 @@ await writeFile(path.join(output, '.nojekyll'), '');
 const productFiles = [
   'apps/desktop/ui/book-typesetting.js',
   'apps/desktop/ui/timeline-elements.js',
+  'apps/desktop/ui/sidebar-elements.js',
   'apps/desktop/ui/utils.js',
   'apps/desktop/ui/shared.css',
   'apps/desktop/ui/fonts',
   'apps/extension/popup-list-elements.js',
+  'apps/extension/popup-snapshot-elements.js',
   'apps/extension/utils.js',
   'apps/extension/extension-surface.js',
   'apps/extension/color-schemes.css',
@@ -63,6 +71,7 @@ const productFiles = [
   'packages/core/highlight-lifecycle.js',
   'packages/core/shared.css',
   'packages/core/color-schemes.css',
+  'packages/demo/collection.js',
 ];
 for (const file of productFiles) {
   const destination = path.join(output, 'demos/product', file);
@@ -105,9 +114,10 @@ async function demoDocument(name, head, body) {
   );
 }
 
+const seed = documentationSeed();
 const days = new Map();
-const highlights = documentationSeed()
-  .events.filter((event) => event.action === 'create_note')
+const highlights = seed.events
+  .filter((event) => event.action === 'create_note')
   .sort((a, b) => b.timestamp - a.timestamp);
 for (const highlight of highlights) {
   const date = formatHighlightHistoryDate(highlight.timestamp);
@@ -148,9 +158,36 @@ const desktop = await productDocument('apps/desktop/ui/index.html');
 const sidebar = fragment(desktop, '.sidebar');
 sidebar
   .querySelectorAll(
-    '#settingsBtn, #desktopUpdateNotice, #recycleBinBtn, .sidebar-content',
+    '#settingsBtn, #desktopUpdateNotice, #recycleBinBtn, #createListBtn, #listsEmpty',
   )
   .forEach((element) => element.remove());
+// Share the capture's list hierarchy and the desktop's list controls.
+// Creating a list prepends the list among its siblings in production replay.
+function appendLists(container, parentListId = null, depth = 0) {
+  for (const list of demoLists.filter(
+    (item) => item.parentSlug === parentListId,
+  )) {
+    const hasChildren = demoLists.some((item) => item.parentSlug === list.slug);
+    const item = desktop.createElement('div');
+    item.className = 'sidebar-item';
+    item.dataset.listId = list.slug;
+    item.style.paddingLeft = `calc(var(--sidebar-item-inset) + ${depth * 16}px)`;
+    item.innerHTML = sidebarListItemHtml(list.name, {
+      hasChildren,
+      readOnly: true,
+      tr: (_key, fallback) => fallback,
+    });
+    container.appendChild(item);
+    if (hasChildren) {
+      const children = desktop.createElement('div');
+      children.className = 'sidebar-children';
+      children.dataset.parentSlug = list.slug;
+      appendLists(children, list.slug, depth + 1);
+      container.appendChild(children);
+    }
+  }
+}
+appendLists(sidebar.querySelector('#listsList'));
 sidebar.querySelector('#exploreBtn').classList.add('active');
 const header = fragment(desktop, '.main-header');
 header
@@ -160,7 +197,8 @@ await demoDocument(
   'timeline',
   `
 <link rel="stylesheet" href="product/apps/desktop/ui/shared.css">
-${desktop.querySelector('style').outerHTML}`,
+${desktop.querySelector('style').outerHTML}
+<link rel="stylesheet" href="product/packages/core/color-schemes.css">`,
   `
 ${sidebar.outerHTML}${fragment(desktop, '#sidebarOverlay').outerHTML}
 <div class="main scroll-boundary-contained">${header.outerHTML}
@@ -171,18 +209,21 @@ ${fragment(desktop, '#resultsWrapper').outerHTML}<div id="demoBook" class="resul
 const popup = await productDocument('apps/extension/popup.html');
 const pageHeader = fragment(popup, '#pageHeader');
 pageHeader.style.display = '';
-pageHeader.querySelector('#pageTitle').textContent = 'A smaller, slower web';
-pageHeader.querySelector('#pageUrl').textContent =
-  'https://fieldnotes.example/a-smaller-web';
+pageHeader.querySelector('#pageTitle').textContent = featuredPage.title;
+pageHeader.querySelector('#pageUrl').textContent = featuredPage.url;
 const lists = fragment(popup, '#listSection');
 lists.style.display = '';
 // The demo focuses on toggling existing lists; creating/searching lists belongs
 // to the full popup, so omit the associated hint and add button here.
 lists.querySelector('.list-search-hint').remove();
+const snapshots = fragment(popup, '#snapshotSection');
+snapshots.style.display = '';
+snapshots.classList.add('is-empty');
 await demoDocument(
-  'organize',
+  'popup',
   `${popup.querySelector('style').outerHTML}<link rel="stylesheet" href="product/apps/extension/color-schemes.css">`,
   `
-${pageHeader.outerHTML}${lists.outerHTML}`,
+<div id="dashboard">${fragment(popup, '#recordingBar').outerHTML}
+<div id="dashboardContent">${pageHeader.outerHTML}${lists.outerHTML}${snapshots.outerHTML}</div></div>`,
 );
 console.log(`Browser Recall website built in ${output}`);

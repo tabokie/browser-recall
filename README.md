@@ -48,6 +48,22 @@ Browser Recall stores your data using readable formats such as JSON and Markdown
       </p>
     </td>
   </tr>
+	<tr>
+    <td>
+      <p align="center">
+        <img src="docs/images/details/bookmark-import.gif" alt="Choosing bookmark folders and importing the folders as nested lists">
+        <br>
+        Import bookmarks
+      </p>
+    </td>
+    <td>
+      <p align="center">
+        <img src="docs/images/details/recording-pause.gif" alt="Pausing recording in the browser extension makes the toolbar icon close its eyes">
+        <br>
+        Pause browser recording
+      </p>
+    </td>
+  </tr>
 </table>
 
 ## Install

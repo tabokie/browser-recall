@@ -1,103 +1,31 @@
+import {
+  captureLists,
+  capturePages,
+  demoLists,
+} from '../../packages/demo/collection.js';
+
 // Original, fictional reading material. No personal history or external pages.
 const documentationDevice = 'reading-desk';
 const day = 86400000;
 const base = Date.parse('2026-09-16T08:00:00Z');
-const pages = [
-  [
-    'A smaller, slower web',
-    'https://fieldnotes.example/a-smaller-web',
-    'Small web',
-  ],
-  [
-    'Making a home on the internet',
-    'https://garden.example/a-home-online',
-    'Small web',
-  ],
-  [
-    'Good tools leave room for you',
-    'https://workshop.example/good-tools',
-    'Small web',
-  ],
-  [
-    'A reading list for rainy afternoons',
-    'https://margin.example/reading-list',
-    'Weekend reading',
-  ],
-  [
-    'The quiet work of keeping a notebook',
-    'https://fieldnotes.example/notebooks',
-  ],
-  [
-    'Type that feels like a conversation',
-    'https://typefoundry.example/conversation',
-    'Design details',
-  ],
-  ['Designing for the second visit', 'https://workshop.example/second-visit'],
-  ['A garden is never quite finished', 'https://garden.example/never-finished'],
-  [
-    'Why I still keep a personal website',
-    'https://margin.example/personal-website',
-    'Small web',
-  ],
-  ['A little space between things', 'https://typefoundry.example/white-space'],
-  ['How to repot a rubber plant', 'https://leaf.example/guides/rubber-plant'],
-  ['Lemon and white bean soup', 'https://table.example/lemon-bean-soup'],
-  ['Saturday opening hours', 'https://library.example/visit'],
-  ['Train times: Central to the coast', 'https://rail.example/journey/coast'],
-  ['A walk along the old canal', 'https://footpath.example/canal-walk'],
-  ['Replacing a bicycle inner tube', 'https://cycle.example/repair/inner-tube'],
-  ['Weekend forecast', 'https://weather.example/weekend'],
-  ['Ceramics open studio — September', 'https://clay.example/open-studio'],
-  ['A guide to paper sizes', 'https://paper.example/sizes'],
-  ['CSS grid: a practical reference', 'https://webdocs.example/css/grid'],
-  ['The bookshop on the corner', 'https://bookshop.example/about'],
-  ['Miso mushrooms on toast', 'https://table.example/miso-mushrooms'],
-  ['A short history of the city tram', 'https://museum.example/journal/tram'],
-  ['Coffee filters, size 02', 'https://supply.example/coffee/filters'],
-  ['Repair café: what to bring', 'https://repair.example/visit'],
-  ['Native plants for a small balcony', 'https://leaf.example/balcony'],
-  ['Finding the right line height', 'https://typefoundry.example/line-height'],
-  ['An evening of piano music', 'https://venue.example/piano-evening'],
-  ['Map of the riverside path', 'https://footpath.example/riverside'],
-  ['How long does opened miso keep?', 'https://table.example/pantry/miso'],
-  [
-    'Library catalogue — The Creative Act',
-    'https://library.example/catalogue/creative-act',
-  ],
-  ['Local swimming pool timetable', 'https://pool.example/timetable'],
-  ['Simple shelves for a narrow room', 'https://workshop.example/shelves'],
-  ['Film notes: Perfect Days', 'https://screen.example/perfect-days'],
-  [
-    'A small desk lamp in warm white',
-    'https://supply.example/lighting/desk-lamp',
-  ],
-  [
-    'Exhibition: drawings from the everyday',
-    'https://museum.example/exhibitions/drawings',
-  ],
-  [
-    'An easy route home from the station',
-    'https://footpath.example/station-route',
-  ],
-  ['Roasted tomatoes with lentils', 'https://table.example/tomato-lentils'],
-  ['Community garden volunteer mornings', 'https://garden.example/volunteer'],
-  ['How to clean a fountain pen', 'https://paper.example/fountain-pen-care'],
-];
+const pages = capturePages.map(({ title, url, captureListSlug }) => [
+  title,
+  url,
+  demoLists.find((list) => list.slug === captureListSlug)?.name,
+]);
 
 export function documentationSeed() {
   const events = [];
-  for (const [index, name] of [
-    'Small web',
-    'Weekend reading',
-    'Design details',
-  ].entries()) {
+  // Replay prepends new siblings. Create roots in reverse display order,
+  // with each parent created before its child.
+  for (const [index, list] of captureLists.entries()) {
     events.push({
       action: 'create_list',
       timestamp: base - 36 * day + index,
-      name,
+      name: list.name,
       listOwner: documentationDevice,
-      listId: `reading-list-${index}`,
-      parentListId: null,
+      listId: list.slug,
+      parentListId: list.parentSlug,
     });
   }
   function visit(pageIndex, timestamp, duration) {

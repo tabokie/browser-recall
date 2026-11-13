@@ -47,13 +47,16 @@
     "packages/core/time-chart.js": "6f4405568ae9d417eb3dfdd91089455c7f244bd71bd6ed43ba318aa794fb1db0",
     "packages/core/utils.js": "0f8e3a330c92ff258cd1bc474eef9f4aa02252fdae8abc99a0bd51d13b18d9ac",
     "packages/core/virtual-scroller.js": "4498103f7f7b18fa6d5a4b246a701c026811fb65cea085e98cdd410a6efde216",
+    "packages/demo/collection.js": "4ac71448daff4e363f1eff9ae66a68e83f8cfd6ffea8919fb6a50e1a2de46744",
     "apps/extension/utils.js": "eea5cc2425981454fde629445ca28c0f4eb3aa42f9b39a4f9de9ce4ba17e4ad0",
     "scripts/stage-app-assets.mjs": "c56e699665110be082a74f48cec4970aca7844629382cf78317ded7b217b5c6d",
-    "scripts/lib/documentation-seed.mjs": "30ede382fce3d4551e36a0e50cb9933507ae4d2bcec67f63f9ba32dca8a1c064",
+    "scripts/lib/documentation-seed.mjs": "c61224094c86f4d59913a8466bdc7a9dbf4e4803b5cef670014c0c2548041a4b",
     "scripts/lib/documentation-image-spec.mjs": "7a1de6de100b7db96fc50434547b940db2fe4d2cf0421dc3f3b9e69d935735c4",
-    "scripts/lib/documentation-window.swift": "1428540506c826312d18cf0d5d0c05c82775cad6224578afc85c689115b560a4",
+    "scripts/lib/documentation-window.swift": "7e4743c88685bc961cfb438cfe611372cb52760381b004e0bfcdfce50f7640a0",
     "scripts/lib/documentation-native-capture.mjs": "13bf01e22d8affd2ba5aa7882cba0452a09d44f24f5742a308cc4ac705258049",
-    "scripts/lib/documentation-freshness.mjs": "139a4b24598ada8db0e79c8861eeb58437c23bd18b510c3f9068c917e5157324",
+    "scripts/lib/documentation-detail-media.mjs": "e3855a6e9661de0fe1a3f6313c74775dfaa62667f6c5ae10f2f17f8d14756294",
+    "scripts/lib/documentation-detail-media.swift": "3cf436abc6d578a6225715c899b0ef835b51e205b7d0ef125c2706d3912004c3",
+    "scripts/lib/documentation-freshness.mjs": "45f9dd6698ba16f6e9c913038a8c85e49a63ac60be45510e25ad0b7e7c8652e1",
     "scripts/lib/manual-seed.mjs": "2495a12d302cbacaf866d71ea89ae20afd1269d4ab767e1139226642604a9e97",
     "scripts/lib/seed-builder.mjs": "d7ab1c2e8b939ed65ee7f6fd1223ab8a12f20d384bb4ac013cdda75016655e64",
     "scripts/lib/replay-store.mjs": "4d6cb0c15dc4d9cb45b59de44a115acb222b5e09bfc2a4e04b7d91d05f96d82b",
@@ -78,23 +81,24 @@
     "apps/desktop/ui/fonts/nunito.woff2": "f85212b2392aff6c178df5c0c6176fe341785ba641e6ec4ab0c80fb10dc38e0c",
     "apps/desktop/ui/highlight-format.js": "9e5be7cc41e99dbfa9f5262aebacfe77da0cbca58416e6e53536cb01abd6f00d",
     "apps/desktop/ui/index.html": "d3be75c0ecfec2d1b4c799b0b969a49e471003ea0f397e992df2c6e4ca7673be",
-    "apps/desktop/ui/index.js": "dcc28d79b0ef0443d10848230ed2b71de8a0d20309e2775380d57d102be33695",
+    "apps/desktop/ui/index.js": "f41911d5ef1823c214f5f91771bc542b9ab0be223093525be1e12873aae17acd",
     "apps/desktop/ui/logger.js": "73939f96285999acfd96bf693d081955a6be4cb6929f17b2aeea59774b632f8c",
     "apps/desktop/ui/search-runtime.d.ts": "4c41e73480a780bc85d7e8f8279c87ba00e8b0753a52ca82375aca32baa1d797",
     "apps/desktop/ui/search-runtime.js": "68b8a6cd99b5b64628df2c8f86224a80a5eca025dd3c77cdab1e315f409dadf7",
     "apps/desktop/ui/shared.css": "7a1f0a695b89f29349af111d134a169bb309b15d8b904741fc88616a9d80eb38",
+    "apps/desktop/ui/sidebar-elements.js": "450cb1399f8976bfff4aa15bd49f280a1eb7dd092ea4df7a017689831b21b677",
     "apps/desktop/ui/theme.js": "1b00783e53576694e49414c5e7862db7cce928e59f39a72f918a5f27f4a0d488",
     "apps/desktop/ui/time-chart.js": "c3951dc6485faa02d9a43b19625eac0b86cc973709e3cddd0bfa0813467646bf",
     "apps/desktop/ui/timeline-elements.js": "5e3850f59810711c96acb2f5177d176e395bfed2106dd922827d89affbe22dd5",
     "apps/desktop/ui/utils.js": "849e90e145e6bfad9af7d3751b34b966b39603bea57863dfce4e055ccca47100",
     "apps/desktop/ui/virtual-scroller.js": "dd6dc0601e86bec3e503451dd0cf37330dafb73d6994aafcc76f9acd85292407",
     "apps/desktop/package.json": "dd0e6a800bf1eaa6f38a39599b1cc9833ba70726c757aa15f22b846513624078",
-    "apps/desktop/src-tauri/src/config.rs": "f32940fa4cd06ef7a21092af9949da2df1c7617aea114ebf1eb07a12e9bfa58f",
+    "apps/desktop/src-tauri/src/config.rs": "838ffbb88d2d37efee262dc000ae776cba592acde099e7d4b4d3c8a2840c199d",
     "apps/desktop/src-tauri/src/distribution.rs": "951576fc707fc6dca5fd7e0a625ce994f9498eecb40756d5fe76aa6294d98995",
     "apps/desktop/src-tauri/src/logging.rs": "4e96947264d95534a12f69c0c53d9e8bde262ff6694a6e0d28527a2327704572",
     "apps/desktop/src-tauri/src/login_item.rs": "aa9885e65b905fa3f0a6dfa57b1b84fb867ccb89f3d2429ee0fd34206808e7ca",
     "apps/desktop/src-tauri/src/macos_window_frame.rs": "8b3257ad179a000a8811843fbbabf903c980aba692e9fcc6f1306ec39548efb5",
-    "apps/desktop/src-tauri/src/main.rs": "3a1721e4e5b91488d99057da4232609267c7af70a24a04ae09fa1d552b51a7dd",
+    "apps/desktop/src-tauri/src/main.rs": "82a1f2bb80e85c99c0788431d6d38af8ce9f10c60b887a560d415cac68c39377",
     "apps/desktop/src-tauri/src/reviews.rs": "ddca8d72fdd8779c33bf7cbea118eee5da36f1941cf562b0543ec7b78464aa2e",
     "apps/desktop/src-tauri/src/reviews.swift": "433ae57ba922872f63e50252ef9ec4192f442f394a6aa3304261a58653b68fbb",
     "apps/desktop/src-tauri/src/reviews_native.rs": "2dcb11a5433b6f9c55c0271cf54497198ddfe3c7e10a802cdfb70dffda860f12",
@@ -108,7 +112,7 @@
     "apps/desktop/src-tauri/build_support.rs": "a3428b913d4e5557d61030c005533b75c78daef397e73cb7d0764d4321a47717",
     "apps/desktop/src-tauri/Cargo.toml": "96e0d4d667a26e96206531d11fd9fbf02ae9f7afd39c7c94f77bc0dfb986ba74",
     "apps/desktop/src-tauri/capabilities/main.json": "ad00db1db6a74b09e75e37fbeb63b4f2052b80b4f60fe8a0ec826a951c3338dc",
-    "Cargo.lock": "9d1f23add4c9c3ff897f760f8ece8fb453c430392b8dca1f994ed66972b6a55c",
+    "Cargo.lock": "8da7a4d1b844fdfe59d737164edb6a691ca4407658f42429e62b65c6f8dfc0e7",
     "Cargo.toml": "575afa94419349bbda4e73e4287f56fb55453c17fa7052fe8ec6b775a03cf48c",
     "rust-toolchain.toml": "f7cbfca0c3a394984b9eadf81df706d3a7c671ba479aecc12c154bf7c36d77db",
     "apps/desktop/src-tauri/icons/icon.icns": "27af23b25f93f42712fb5aaad2bd7edb437a0c5a056c4164b9d30ef524c493d6",
@@ -116,7 +120,10 @@
     "apps/desktop/src-tauri/icons/icon.png": "3a146dacc860f8de268cf6bb8615a0dca0232485a396d2c5ccba815522db10be",
     "apps/desktop/src-tauri/icons/tray-icon.png": "047da4fdb0b2cfdbf0511decfdea7cfe316f4ea2d2badc0149879ed0ba10c732",
     "apps/desktop/src-tauri/tauri.conf.json": "d1b5a9a6a96330e9e3af4ac4a50c3233ee8bdfd8a1baeefec4f621af0377fe2c",
-    "scripts/capture-documentation.mjs": "b42c8951a41801c6a39a9432c253e811e6bdf13bb15eef6a50b382712d689b9e",
+    "scripts/capture-documentation.mjs": "9a6d8bb516bac0febce291c7fa1e96ec5fa954eaf7855c3524deca86ab4f7ab7",
+    "scripts/lib/documentation-details.mjs": "d565f747443e1ecc94f783dbbd36a86aaa0b6d13080a80f5c6afd05d9f53f58b",
+    "tests/smoke/desktop-test-cleanup.mjs": "b88d400652bb1b483e319857a85350a65ada559b6e9d888d29df25c6b49839c1",
+    "tests/fixtures/documentation-bookmarks.html": "412219c7c237bafd74494de26ef768f2296924b9c90751c387ff55424d10c338",
     "scripts/lib/macos-native-session.mjs": "91e0705427e508601aad9e5dc011b5c1dd76b8dff14272465d8380e79597cc9b",
     "scripts/documentation-tauri.conf.json": "77b121460707553df53cbfa24c4e9717e6d5840f0c7dc32d5087247f6e94665d",
     "scripts/documentation-info.plist": "4aae6bb6408ed6927d9d9f7cce7590651f9b7e98a1b1ee0aee34d2478e047429",
@@ -124,7 +131,7 @@
     "scripts/compose-documentation-hero.mjs": "4e735e9f9e61d8c07f3b4c14df0df56dd9e75c8d167b16fe2ad3ffb72464b394"
   },
   "platform": "macOS / native Tauri WKWebView",
-  "seedSha256": "30ede382fce3d4551e36a0e50cb9933507ae4d2bcec67f63f9ba32dca8a1c064",
+  "seedSha256": "c61224094c86f4d59913a8466bdc7a9dbf4e4803b5cef670014c0c2548041a4b",
   "colorSchemes": ["amber", "mono"],
   "paddingPoints": 40,
   "wallpaper": {
@@ -143,29 +150,29 @@
   },
   "screenshots": {
     "timeline.png": {
-      "sha256": "f4f137baea6007b4033dbadece164fef7843b837ccc12a780d4d1e7a5961f653",
+      "sha256": "c69c70930014d12dec7d3883e93d133ac3a49b544656a3f8063f4a5bf3abd139",
       "width": 2080,
       "height": 1400
     },
     "book.png": {
-      "sha256": "7b6653c203d96c372528b9c613acd189b58b7a90f316c2498f9b549e3a246821",
+      "sha256": "4d1fcff90a70a45cd31c688a9f63d8a03415f7ea91992603000618170572e3cc",
       "width": 2080,
       "height": 1400
     },
     "timeline-mono.png": {
-      "sha256": "85c8c2b1ceb14730075ba990dac6e7f9c90696fd936dc6284f48d0efb28512c5",
+      "sha256": "2c4cbde7f9bceca14a1734e4d7cc4bad2b90ed138381470ec12e3219dbce3974",
       "width": 2080,
       "height": 1400
     },
     "timeline-styles.png": {
-      "sha256": "b5f952ef4f5d45ca6346b232d933197b99478dd38a40aaa8dae3d81c1db848d0",
+      "sha256": "5285271926abbae3cd05e5fa92e99c4f5ba7d6aa017016fdc469015d82cfc856",
       "width": 2080,
       "height": 1400,
       "composition": {
         "sources": ["timeline.png", "timeline-mono.png"],
         "sourceSha256": [
-          "f4f137baea6007b4033dbadece164fef7843b837ccc12a780d4d1e7a5961f653",
-          "85c8c2b1ceb14730075ba990dac6e7f9c90696fd936dc6284f48d0efb28512c5"
+          "c69c70930014d12dec7d3883e93d133ac3a49b544656a3f8063f4a5bf3abd139",
+          "2c4cbde7f9bceca14a1734e4d7cc4bad2b90ed138381470ec12e3219dbce3974"
         ],
         "split": { "top": 0.62, "bottom": 0.38 }
       }

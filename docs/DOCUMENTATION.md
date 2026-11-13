@@ -1,7 +1,73 @@
 # Documentation maintenance
 
 Follow the [documentation quality rules](../AGENTS.md#documentation-quality) before
-committing Markdown. The procedures below cover screenshot capture and verification.
+committing Markdown. The procedures below cover GIF editing, native capture, and verification.
+
+## Edit one GIF
+
+For framing, frame selection, or timing changes, regenerate only the named GIF:
+
+```bash
+npm run docs:gifs -- recording-pause
+npm run docs:gifs -- bookmark-import
+```
+
+Edit the matching entry in `scripts/documentation-gifs.json`. `endFrame` is the
+zero-based last frame to keep; `null` keeps every frame. `lastFrameSeconds` controls
+the final hold, and `clicks` records the visible actions. Recording pause keeps the
+first pause click and holds the closed-eye state before looping.
+
+`frameSeconds` overrides individual frame holds. `clickRipples` optionally adds
+white click rings with dark outlines over controls that hide the orange rings.
+Each ripple specifies a saved frame, its cursor position in output pixels, and
+its expansion phase from zero to one. Click overlays have a separate cache, so
+adjusting ripple contrast leaves the saved camera composition intact.
+
+`zoom` enlarges the composed scene around an output-pixel anchor (`x`, `y`).
+The magnification eases from one to `scale` between `startFrame` and `endFrame`,
+then holds. The window, wallpaper, pointer, and click rings scale together.
+
+`marginPixels` sets the wallpaper border in the window overview.
+`windowRadiusPixels` rounds the native window in scene coordinates. The window
+and wallpaper share one camera: zooming into the interface moves the window edges
+and wallpaper out of view. Close-ups fill the animation without an inset frame.
+
+`scene` records native window dimensions, camera poses, and overview frames for
+each application state. Camera poses use pixels relative to the window's top-left
+corner; intermediate poses use the capture timeline's easing. Saved overview and
+context frames fill surroundings omitted by a tight source crop. Update scene
+coordinates when native capture geometry or action sequences change.
+
+The generator reuses saved captures under `docs/images/details/sources/` and changes
+only the selected GIF, its saved derivatives, and its detail manifest. Framing uses
+macOS ImageIO and is cached separately. Frame selection and timing edits reuse the
+framed source without recompressing pixels and work on every platform. Other GIFs,
+still images, and screenshots remain unchanged. Each GIF records its own recipe
+and editing-tool fingerprints, so changing one recipe does not stale another GIF.
+The checker verifies source and framing hashes, then checks the output against
+the saved frames and timing recipe.
+
+Native capture commands below refresh the saved source and apply the recipe
+automatically. Use native capture when application visuals or capture actions
+change. Commit saved sources with the generated GIFs and manifests.
+
+## Refresh the Finder sample
+
+The website's Finder window explores fictional files under the production
+`logs/`, `objects/`, and `views/` paths, alongside `AGENTS.md`. Generate the sample
+with Rust installed:
+
+```bash
+npm run docs:finder
+npm run build:website
+```
+
+The generator applies sample events through production replay, derives real page
+slugs and shard directories, and includes HTML and Markdown snapshot payloads.
+Note filenames use the production `YYMMDD-<excerpt>-<hash>.json` format, and the
+sample device is `my-macbook`. Logs and the device folder start expanded.
+Commit `website/demos/finder-data.json` with changes to the generator or storage
+layout. Website builds only copy the generated data and need no Rust toolchain.
 
 ## Capture screenshots
 
@@ -41,6 +107,27 @@ dimensions do not guarantee 2× source detail on a 1× display. Before each Time
 capture, the script verifies the fixed fixture's month in the chart viewport.
 Failure evidence remains under `test-results/documentation/`.
 
+The same commands generate two looping GIFs and still images at 720 × 440
+pixels under `docs/images/details/`. Desktop capture demonstrates choosing
+bookmark folders and importing nested lists. Browser capture demonstrates pausing
+and resuming through real mouse clicks in the extension popup, including the native
+toolbar icon.
+
+Each animation starts with window context, holds the focused result, and loops
+directly to the first frame. Native window pixels supply every application state.
+The compositor draws an arrow cursor and click rings at the observed control
+positions and animates pointer movement. Only the camera and pointer are interpolated.
+
+The README uses the GIFs. Capture manifests in the detail directory record
+source fingerprints, dimensions, animation timing, and hashes. Commit the GIFs,
+still images, and manifests together.
+
+While iterating on desktop capture automation, use
+`node scripts/capture-documentation.mjs --reuse-build` after the first build.
+The command verifies the retained no-tray bundle, executable hash, and compiled
+source fingerprints before reusing the build. Application changes require a
+capture without `--reuse-build`.
+
 ## Verify and export
 
 Commit captured images with `docs/images/capture.json` and
@@ -60,9 +147,10 @@ and produce opaque 1280 × 800 RGB PNGs under `docs/images/chrome-web-store/`.
 Commit both exports and their `capture.json`. Staging uses the destination volume
 so a failed conversion preserves previous output.
 
-The checker validates image dimensions, hashes, capture inputs, README image links,
-and store-export freshness/format. `--images-only` skips source fingerprints but
-still checks export provenance. Linux CI checks image integrity; local CI also
+The checker validates image dimensions, hashes, capture inputs, GIF frames,
+infinite looping, cursor and click coverage, the focused ending, README image
+links, and store-export freshness/format. `--images-only` skips source fingerprints
+but still checks export provenance. Linux CI checks image integrity; local CI also
 checks capture-source freshness.
 
 Desktop fingerprints include native shell source, capabilities, build scripts,

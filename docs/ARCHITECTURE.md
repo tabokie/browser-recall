@@ -27,11 +27,42 @@ browser extension → authenticated local WebSocket → daemon
 
 The website shares presentation modules with the application but has no backend
 or access to user data. Isolated iframe demos use production styles, Book markup,
-Justif typesetting, and sample data. Demos keep a fixed 510 px height and leave
-scrolling to the outer page. GoatCounter page views run only on the hosted HTTPS
-page; see [Privacy](PRIVACY.md#website-connections). Installation links resolve the
-latest published Windows installer through GitHub's public API; unavailable
-metadata or disabled JavaScript leaves a link to the latest release page.
+Justif typesetting, and sample data. Each demo has its own feature section.
+Native captures and website views select their fictional pages and lists from
+the shared collection in `packages/demo/collection.js`.
+Timeline and Book share one 510 px desktop app viewport with sidebar navigation.
+Sidebar lists open matching sample pages without changing Timeline selection.
+A pill toggle below the desktop demo switches between the production Amber and
+Mono styles without resetting navigation or selection.
+The browser extension demo combines an article's saved highlight and note with a
+toolbar popup. List membership, sample snapshot capture, and recording pause are
+interactive; the popup and toolbar icon reflect recording state. Snapshot rows
+share the extension's renderer. The popup stays below the toolbar icon; on phones,
+the article leaves space for the popup and the browser window grows to show the
+saved note.
+Scrolling stays on the outer page.
+Static screenshots replace the interactive examples when JavaScript is unavailable.
+
+Website copy supports English and Simplified Chinese. The first supported browser
+language chooses the initial locale; an explicit `lang` query parameter or saved
+language choice takes precedence. Translation keys live beside the English copy
+in HTML. The header switch stores only the language preference in browser local
+storage. Static HTML supplies English without JavaScript;
+sample pages and library files retain their original content.
+
+The README uses looping GIFs captured from the native app and browser extension.
+Recipes control each GIF's framing, frame selection, and timing using saved captures.
+
+GoatCounter page views run only
+on the hosted HTTPS page; see [Privacy](PRIVACY.md#website-connections).
+Installation links resolve the latest published Windows installer through GitHub's
+public API; unavailable metadata or disabled JavaScript leaves a link to the
+latest release page.
+
+The Finder-style storage demo browses a checked-in fictional library generated
+with production replay and storage paths. Folder navigation and file previews run
+entirely in the browser. Refreshing the sample requires Rust; website builds use
+the generated JSON and remain Node-only.
 
 ## Storage
 
@@ -148,6 +179,9 @@ canonical defaults; malformed supplied values and unknown fields remain errors.
 Missing device identity is machine-derived; a missing data path returns to setup;
 `setup_complete` is inferred from an existing path.
 
+Windows derives missing device identity from `MachineGuid` through native registry
+access, preserving the device identifier format used by existing configurations.
+
 Nested metadata also has upgrade defaults, but connector identities and pairing
 tokens remain required. Missing review attempts become an empty array. A missing
 first-opening timestamp is recovered from the first request minus seven days, or
@@ -161,6 +195,10 @@ and deep-link actions reopen the same window. Single-instance handling registers
 before other plugins. Off-screen saved positions are centered on an available
 display. On macOS, preserve the complete `NSWindow` frame rather than deriving the
 frame from webview size.
+
+Windows native verification waits for a completion log after shell state, tray,
+deep links, and main window setup finish. Earlier application logging does not
+establish native readiness.
 
 A daemon startup failure leaves a visible error with Resume after storage repair.
 Concurrent starts share one attempt; reads never start another daemon. Errors

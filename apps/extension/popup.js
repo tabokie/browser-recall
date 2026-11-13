@@ -1,4 +1,5 @@
 import { listChipHtml } from './popup-list-elements.js';
+import { snapshotRowHtml } from './popup-snapshot-elements.js';
 // Popup — current-page dashboard
 import {
   generateSlugFromUrl,
@@ -676,17 +677,15 @@ function renderSnapshots(snapshots) {
   section?.classList.remove('is-empty');
 
   container.innerHTML = snapshots
-    .map(
-      (snap) => `
-    <div class="snapshot-row" role="button" tabindex="0" data-ts="${snap.timestamp}">
-      <span class="snapshot-time">${escapeHtml(formatTimestamp(snap.timestamp))}</span>
-      <span class="snapshot-badges">
-        ${snap.hasMd ? `<span class="badge md" data-ts="${snap.timestamp}">Markdown</span>` : ''}
-        ${snap.hasHtml ? `<span class="badge html" data-ts="${snap.timestamp}">HTML</span>` : ''}
-        <button class="delete-btn" data-ts="${snap.timestamp}" title="${escapeHtml(tr('extensionDeleteSnapshot', 'Delete snapshot', undefined))}">&times;</button>
-      </span>
-    </div>
-  `,
+    .map((snapshot) =>
+      snapshotRowHtml(snapshot, {
+        timeLabel: formatTimestamp(snapshot.timestamp),
+        deleteTitle: tr(
+          'extensionDeleteSnapshot',
+          'Delete snapshot',
+          undefined,
+        ),
+      }),
     )
     .join('');
 

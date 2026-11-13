@@ -66,8 +66,10 @@
     "lint:unused": "knip --include files,exports,duplicates",
     "lint:duplicates": "jscpd apps/extension/ --min-lines 5 --min-tokens 50",
     "build:test-daemon": "cargo build --locked -p browser-recall-daemon",
-    "docs:screenshots": "node scripts/capture-documentation.mjs",
-    "docs:screenshots:browser": "npm run build:test-daemon && node scripts/capture-browser-documentation.mjs",
+    "docs:screenshots": "node scripts/capture-documentation.mjs && node scripts/generate-documentation-gifs.mjs bookmark-import",
+    "docs:screenshots:browser": "npm run build:test-daemon && node scripts/capture-browser-documentation.mjs && node scripts/generate-documentation-gifs.mjs recording-pause",
+    "docs:gifs": "node scripts/generate-documentation-gifs.mjs",
+    "docs:finder": "node scripts/generate-website-finder.mjs",
     "ci:check-docs": "node scripts/check-documentation-screenshots.mjs"
   },
   "keywords": [

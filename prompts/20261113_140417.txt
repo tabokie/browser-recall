@@ -1,0 +1,113 @@
+- Let's improve the demos, including README screenshots and the product website. Firstly, I want the desktop app to have one nested list to showcase list can have hierarchy.
+- I don't like this arrangement. I propose removing "Design details", add more single-word lists, suggestions: "Design > Font", "Cinema", "Writing", "Music > Drumming", "Cooking"
+- "Small web" should be kept, and the original page that belongs to "Small web".
+- There are a few selling points that I think deserves to be mentioned in the product website and README, but they are small compared to the main features. I am not sure how to present them without drawing too much attention. (1) The "Import from bookmarks" UI, (2) paste and copy the selected pages is a formatted plaintext list, (3) User can pause recording in browser and the icon closes its eyes. You can propose more details like these if you want.
+- But I want to showcase the details using visuals or even animations (GIFs).
+- Looks good. We can use the same GIFs for both README and website. Is it tricky to build them programmatically?
+- No need for click-to-play, it can loop directly
+- No... I want you to build the actual things, the preview has made the point.
+- Continue
+- Not good enough. (1) The mouse cursor should be presented to illustrate user actions. For select, the mouse should click multiple times to mimic actual user operation. (2) There are too many close-ups without enough surrounding context, the camera should zoom out at the end of the recording. (3) The copy-and-paste demo looks rather thin. Do you think it's worth keeping? Or how can we improve it to enhance the product strength?
+- Desktop Visual Regression is failing:
+  1) [webkit] › tests/e2e/desktop-visual.spec.js:2480:3 › desktop visual regression › main shell and search panel keep their width before initial history data finishes loading @webkit
+
+    Error: Timeout 1000ms exceeded while waiting on the predicate
+
+      2507 |           { timeout: 1000 },
+      2508 |         )
+    > 2509 |         .toBe('1');
+           |          ^
+      2510 |       await expect(page.locator('#searchDraftInput')).toBeVisible({
+      2511 |         timeout: 1000,
+      2512 |       });
+        at /Users/runner/work/browser-recall/browser-recall/tests/e2e/desktop-visual.spec.js:2509:10
+        at serveDesktopUi (/Users/runner/work/browser-recall/browser-recall/tests/e2e/desktop-visual.spec.js:319:5)
+        at /Users/runner/work/browser-recall/browser-recall/tests/e2e/desktop-visual.spec.js:2491:5
+
+    Error Context: test-results/desktop-visual-desktop-vis-b637f-ata-finishes-loading-webkit-webkit/error-context.md
+
+  1 failed
+    [webkit] › tests/e2e/desktop-visual.spec.js:2480:3 › desktop visual regression › main shell and search panel keep their width before initial history data finishes loading @webkit
+  18 passed (1.6m)
+- # Files pasted by the user:
+
+## "Run $installer = (Get-Item \"release-assets/browser-recall-$env:RELEASE_TAG-wind…": /Users/xyt/.codex/attachments/6ae32d39-e5d6-41b4-ba79-c13ac12d7af8/已粘贴的文本.txt
+
+## My request:
+Windows verification is failing in Release action, but not in regular CI. Maybe it's flaky or it's not covered in regular CI.
+- How to fix it thoroughly?
+- Continue
+- This is taking too long, show me what you got now
+- It's pretty good. But: (1) remove the copy items demo, it is still not propelling enough. (2) Don't use zoom-out to end the GIFs, directly loop back to the first frame.
+- Clicking pause once is enough, no need to repeat the action
+- BTW, your should modify the script to control image generation more fine-grained, don't regenerate the whole suite for one focused change
+- The GIF should either have no background or scope the window with more visible background, right now it looks like four corners with weird color artifacts.
+- That's not right, when zoomed in the background should behave like a normal background to the window, rather than a fixed viewport
+- Why the first demo doesn't have rippling effect for clicks?
+- Zoom it in a little closer
+- keep the popup in the center horizontally
+- I want the demo for desktop app's file storage to be illustrated using actual macOS finder UI. Not bit exact but similar enough. Do you think it is easy enough to build it in browser? Or do we use a screenshot instead?
+- Build the finder window, fill it with the actual file layout we use in production.
+- Default open the logs folder as well. The note json file name format is wrong, should start with date. The "reading-desk" directory should be changed to a name indicative of a computer, like "my-macbook".
+- Good. Now take a look at [https://outcrop.rocks/](https://outcrop.rocks/) , I want to reorganize our product website to follow a similar style, which is to present demo each in their own section, remove the column style gallery.
+- Open locally
+- Merge the two demos of desktop app into one, the book can be clicked open.
+- Unlike what the caption says, the lists in the sidebar cannot be opened
+- Populate the list a little more, unevenly
+- Let's merge the two browser demos as well, I want a fake browser window that demonstrates the highlight and the popup window. User can pause the popup interactively.
+- Add the capture frame section to popup as well, and it can be clicked to add an entry in UI.
+- Remove the bookmark demo, as well as the redundant snapshot section and pause GIF demo.
+- Since the first section is not separated, let's remove its dedicated section description (Find your way back), the main product intro is enough. Remove the small caption in every section too.
+- Disallow the demo's extension popup to hide itself when I click on icon or empty space.
+- Add a pill styled toggle below the first demo to choose between mono style of the desktop UI.
+- Humanize the descriptive text in the product website.
+- Add an auto-detect Chinese locale to the website
+- The mono icon shows four stripes inside the circle boundary, is this intended?
+- Delegate this review to one subagent working in /Users/xyt/dev/browser-recall. Pass it the complete review instructions below and ask it to include staged, unstaged, and untracked files without modifying files. Reuse an active review of these changes.
+
+When starting a new review, call the collaboration spawn tool exactly once with fork_turns: none. Give this fresh child only the review context and execution instructions, not this conversation or its attachments. Tell it not to spawn agents, change code, or send or post anything to external services. Once the child starts, wait for that same child only; do not replace it, spawn in parallel, or review it yourself. If the child fails, report that failure instead of review findings.
+
+Keep this conversation available and return the reviewer's findings here with file locations. Do not fix issues unless the user asks. If subagent tools are unavailable, perform the same read-only review here.
+
+## Code review guidelines:
+# Review Guidelines
+
+You are acting as a reviewer for a proposed code change made by another engineer.
+
+Review the change and respond in normal Markdown. Do not return JSON, XML, a findings object, or any structured review schema.
+
+When feedback should be attached directly to a changed line, emit one `::code-comment{...}` directive for that issue. The directive creates an inline code comment in the review UI; keep the visible response as normal Markdown. Emit no directives when there are no actionable inline comments.
+
+Required `code-comment` attributes: `title`, `body`, and `file`. Optional attributes: `start`, `end`, and `priority`. Use the shortest useful line range. `file` should be an absolute path or include the workspace folder segment.
+
+Focus on discrete, actionable issues the original author would likely fix if they knew about them. Prefer no issues over speculative or low-signal feedback.
+
+General guidelines for whether to call out an issue:
+
+1. It meaningfully impacts correctness, performance, security, or maintainability.
+2. It is discrete and actionable.
+3. It was introduced by the change under review.
+4. The author would likely fix it once aware.
+5. It does not rely on unstated assumptions about intent.
+6. It identifies the affected behavior clearly rather than speculating broadly.
+
+## Repository Rule Attribution
+
+Use the root and scoped project instruction files applicable to changed files, respecting normal project-document precedence (`AGENTS.override.md`, `AGENTS.md`, then configured fallback filenames) and selecting at most one file per directory. Guidance may use headings, checklists, bullets, tables, or concise prose; do not require formal IDs or schemas. More-specific guidance wins on conflict, and user instructions about review scope or style take precedence.
+
+Review the diff independently and deduplicate findings by changed location and defect/remedy. A finding is rule-supported only when applicable guidance materially contributes repository-specific scope, an invariant, remedy, convention, or confirmation behavior beyond generic correctness advice. Preserve and union rule support when candidates merge, then check every final candidate against the applicable rules. Do not omit ordinary findings or invent findings solely because a rule file exists.
+
+When collaboration is available, use at most one focused investigator per applicable rule. For each rule-supported finding, verify the applicable project instruction file that supplies the rule and its smallest supporting line range, then include one compact Markdown or local-file reference in the visible comment body. Do not fabricate citations or add hidden metadata.
+
+When you call out an issue, include the relevant file and line or function in prose, explain the scenario where it matters, and keep the explanation concise. Use priority labels such as `[P1]` or `[P2]` only when helpful to communicate severity.
+
+If there are no actionable issues, say that directly and briefly.
+Review the code changes against the base branch 'origin/main'. The merge base commit for this comparison is da00f16934f4921c0f68c4d7567a3f6154c97b9d. Run `git diff da00f16934f4921c0f68c4d7567a3f6154c97b9d` to inspect the changes relative to origin/main. Provide concise, actionable feedback in a normal Markdown response.
+## My request:
+请审查 main 相较于 origin/main 的更改
+- [$flatten](/Users/xyt/dev/skills/flatten/SKILL.md) the product website
+- Why rhe LOC increased?
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix them all
+- In demo the popup position is wrong, it's at the bottom right of the browser
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) co-author=GPT-6.1 Sol

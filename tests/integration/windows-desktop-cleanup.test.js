@@ -52,22 +52,69 @@ test('teardown preserves the original failure and completes cleanup after an err
   const marker = path.join(workDir, 'later-cleanup');
   writeFileSync(marker, 'must be removed');
   const original = new Error('native assertion failed');
+  const diagnosticsError = new Error('could not retain diagnostics');
   try {
-    const error = await withCleanup(async () => {
-      throw original;
-    }, [
-      () => unlink(path.join(workDir, 'missing-file')),
-      () => unlink(marker),
-      () => removeTestProfile(workDir),
-    ]).catch((error) => error);
+    const error = await withCleanup(
+      async () => {
+        throw original;
+      },
+      [
+        () => unlink(path.join(workDir, 'missing-file')),
+        () => unlink(marker),
+        () => removeTestProfile(workDir),
+      ],
+      {
+        onFailure(error) {
+          expect(error).toBe(original);
+          throw diagnosticsError;
+        },
+      },
+    ).catch((error) => error);
     expect(error).toBeInstanceOf(AggregateError);
     expect(error.cause).toBe(original);
     expect(error.errors[0]).toBe(original);
-    expect(error.errors[1].code).toBe('ENOENT');
-    expect(error.errors).toHaveLength(2);
+    expect(error.errors[1]).toBe(diagnosticsError);
+    expect(error.errors[2].code).toBe('ENOENT');
+    expect(error.errors).toHaveLength(3);
     expect(existsSync(workDir)).toBe(false);
   } finally {
     await rm(workDir, { recursive: true, force: true });
+  }
+});
+
+test('startup failure evidence is retained before the temporary profile is removed', async () => {
+  const work = mkdtempSync(path.join(tmpdir(), 'browser-recall-evidence-'));
+  const profile = path.join(work, 'profile');
+  const evidence = path.join(work, 'startup-stages.log');
+  mkdirSync(profile);
+  writeFileSync(
+    path.join(profile, 'stages.log'),
+    'main entered\nwebview pending',
+  );
+  const original = new Error('native startup deadline missed');
+  try {
+    const result = await withCleanup(
+      async () => {
+        throw original;
+      },
+      [() => removeTestProfile(profile)],
+      {
+        async onFailure(error) {
+          expect(error).toBe(original);
+          writeFileSync(
+            evidence,
+            readFileSync(path.join(profile, 'stages.log')),
+          );
+        },
+      },
+    ).catch((error) => error);
+    expect(result).toBe(original);
+    expect(existsSync(profile)).toBe(false);
+    expect(readFileSync(evidence, 'utf8')).toBe(
+      'main entered\nwebview pending',
+    );
+  } finally {
+    await removeTestProfile(work);
   }
 });
 
@@ -375,6 +422,18 @@ Add-Type -TypeDefinition $source -CompilerParameters $parameters
       expect(failure.stderr).toContain(
         'The first desktop process exited during native startup',
       );
+      const diagnostics = failure.stdout.match(
+        /Windows startup diagnostics saved to ([^\r\n]+)/,
+      )?.[1];
+      expect(diagnostics).toBeTruthy();
+      expect(
+        JSON.parse(
+          readFileSync(path.join(diagnostics, 'startup.json'), 'utf8'),
+        ),
+      ).toMatchObject({ outcome: 'failed', executable });
+      expect(
+        readFileSync(path.join(diagnostics, 'failure.txt'), 'utf8'),
+      ).toContain('The first desktop process exited during native startup');
       expect(JSON.parse(readFileSync(report, 'utf8'))).toEqual({
         visible: true,
       });

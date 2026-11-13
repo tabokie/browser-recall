@@ -1,6 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -302,6 +303,11 @@ const profileDir = path.join(workDir, 'profile');
 const startupTraceFile = `${profileDir}.startup-stages.log`;
 const logDir = isolatedDesktopLogDir(profileDir);
 const desktopEnvironment = isolatedDesktopEnvironment(process.env, profileDir);
+const diagnosticsDir = path.join(
+  root,
+  'test-results/native-lifecycle',
+  path.basename(workDir),
+);
 
 const delay = (milliseconds) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -329,6 +335,9 @@ function readNewLogs() {
 let first;
 let second;
 let startupOutput = '';
+let startupReadyMs;
+let started;
+let capturedDiagnostics;
 function readStartupStages() {
   try {
     return readFileSync(startupTraceFile, 'utf8');
@@ -337,6 +346,7 @@ function readStartupStages() {
   }
 }
 function startupDiagnostics() {
+  if (capturedDiagnostics !== undefined) return capturedDiagnostics;
   const details = [
     `Startup stages (${startupTraceFile}):\n${readStartupStages()}`,
   ];
@@ -355,7 +365,12 @@ function startupDiagnostics() {
         String.raw`
 $ownerId = [int]$env:BROWSER_RECALL_STARTUP_PID
 Get-CimInstance Win32_Process -Filter "ProcessId = $ownerId OR ParentProcessId = $ownerId" |
-  Select-Object Name, ProcessId, ParentProcessId, KernelModeTime, UserModeTime |
+  Select-Object Name, ProcessId, ParentProcessId, KernelModeTime, UserModeTime, ExecutablePath,
+    @{Name='FileVersion'; Expression={
+      if (!$_.ExecutablePath) { return 'Unavailable: process path not reported' }
+      try { (Get-Item -LiteralPath $_.ExecutablePath -ErrorAction Stop).VersionInfo.FileVersion }
+      catch { "Unavailable: $($_.Exception.Message)" }
+    }} |
   ConvertTo-Json -Compress
 `,
       ],
@@ -374,7 +389,8 @@ Get-CimInstance Win32_Process -Filter "ProcessId = $ownerId OR ParentProcessId =
   } catch (error) {
     details.push(`Startup process inspection failed: ${error.message}`);
   }
-  return details.join('\n');
+  capturedDiagnostics = details.join('\n');
+  return capturedDiagnostics;
 }
 const startupFailure = (error) => {
   const message = `${error.message}; exitCode=${first.exitCode}, signal=${first.signalCode}\nOutput:\n${startupOutput}\nLogs:\n${error.startupLogs || ''}\n${startupDiagnostics()}${error.followUp ? `\n${error.followUp}` : ''}`;
@@ -387,65 +403,113 @@ const startupFailure = (error) => {
   }
   return new Error(message, { cause: error });
 };
-await withCleanup(async () => {
-  // windowsHide applies SW_HIDE to GUI apps too. Honor the application's first
-  // ShowWindow call, as the native update/relaunch scenario does.
-  first = spawn(executable, [], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: desktopEnvironment,
-  });
-  for (const stream of [first.stdout, first.stderr]) {
-    stream?.setEncoding('utf8');
-    stream?.on('data', (text) => (startupOutput += text));
-  }
-  await once(first, 'spawn');
-  try {
-    await waitForDesktopStartup(first, {
-      readLogs: readNewLogs,
-      readStages: readStartupStages,
-    });
-  } catch (error) {
-    throw startupFailure(error);
-  }
-  const iconSizes = await waitForProcessProbe(
-    first,
-    verifyRuntimeWindowsIcons,
-    {
-      timeoutMs: 15_000,
-      description: 'The desktop window icons',
-    },
-  );
 
-  second = spawn(executable, ['browser-recall://settings'], {
-    stdio: 'ignore',
-    env: desktopEnvironment,
-  });
-  const secondExit = await waitForExit(second, 15000);
-  if (secondExit.code !== 0 || secondExit.signal !== null) {
-    throw new Error(
-      `The forwarded second process exited unexpectedly: ${JSON.stringify(secondExit)}`,
+function preserveStartupDiagnostics(error = null) {
+  mkdirSync(diagnosticsDir, { recursive: true });
+  const stages = readStartupStages();
+  writeFileSync(path.join(diagnosticsDir, 'startup-stages.log'), stages);
+  writeFileSync(path.join(diagnosticsDir, 'process-output.log'), startupOutput);
+  writeFileSync(
+    path.join(diagnosticsDir, 'native-environment.txt'),
+    startupDiagnostics(),
+  );
+  if (existsSync(logDir)) {
+    cpSync(logDir, path.join(diagnosticsDir, 'logs'), { recursive: true });
+  }
+  writeFileSync(
+    path.join(diagnosticsDir, 'startup.json'),
+    `${JSON.stringify(
+      {
+        outcome: error ? 'failed' : 'passed',
+        executable,
+        revision: process.env.GITHUB_SHA || null,
+        runnerImage: process.env.ImageOS || null,
+        runnerImageVersion: process.env.ImageVersion || null,
+        processId: first?.pid || null,
+        startupReadyMs: startupReadyMs ?? null,
+        elapsedMs: started === undefined ? null : performance.now() - started,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  if (error) {
+    writeFileSync(
+      path.join(diagnosticsDir, 'failure.txt'),
+      error.stack || String(error),
     );
   }
-  if (first.exitCode !== null) {
-    throw new Error('The original desktop process exited during forwarding');
-  }
+  console.log(`Windows startup stages:\n${stages}`);
+  console.log(`Windows startup diagnostics saved to ${diagnosticsDir}`);
+}
 
-  await waitFor(
-    () => {
-      const logs = readNewLogs();
-      return (
-        logs.includes('received deep link') && logs.includes('route="settings"')
+await withCleanup(
+  async () => {
+    // windowsHide applies SW_HIDE to GUI apps too. Honor the application's first
+    // ShowWindow call, as the native update/relaunch scenario does.
+    started = performance.now();
+    first = spawn(executable, [], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: desktopEnvironment,
+    });
+    for (const stream of [first.stdout, first.stderr]) {
+      stream?.setEncoding('utf8');
+      stream?.on('data', (text) => (startupOutput += text));
+    }
+    await once(first, 'spawn');
+    try {
+      await waitForDesktopStartup(first, {
+        readLogs: readNewLogs,
+        readStages: readStartupStages,
+      });
+      startupReadyMs = performance.now() - started;
+    } catch (error) {
+      throw startupFailure(error);
+    }
+    const iconSizes = await waitForProcessProbe(
+      first,
+      verifyRuntimeWindowsIcons,
+      {
+        timeoutMs: 15_000,
+        description: 'The desktop window icons',
+      },
+    );
+
+    second = spawn(executable, ['browser-recall://settings'], {
+      stdio: 'ignore',
+      env: desktopEnvironment,
+    });
+    const secondExit = await waitForExit(second, 15000);
+    if (secondExit.code !== 0 || secondExit.signal !== null) {
+      throw new Error(
+        `The forwarded second process exited unexpectedly: ${JSON.stringify(secondExit)}`,
       );
-    },
-    10000,
-    'The original desktop process did not receive the forwarded settings route',
-  );
+    }
+    if (first.exitCode !== null) {
+      throw new Error('The original desktop process exited during forwarding');
+    }
 
-  console.log(
-    `Second launch exited cleanly; process ${first.pid} received browser-recall://settings; runtime icons are ${iconSizes.small}px and ${iconSizes.big}px at ${iconSizes.dpi} DPI`,
-  );
-}, [
-  () => stopTestProcess(second),
-  () => stopTestProcess(first),
-  () => removeTestProfile(workDir),
-]);
+    await waitFor(
+      () => {
+        const logs = readNewLogs();
+        return (
+          logs.includes('received deep link') &&
+          logs.includes('route="settings"')
+        );
+      },
+      10000,
+      'The original desktop process did not receive the forwarded settings route',
+    );
+
+    console.log(
+      `Second launch exited cleanly; process ${first.pid} received browser-recall://settings; runtime icons are ${iconSizes.small}px and ${iconSizes.big}px at ${iconSizes.dpi} DPI`,
+    );
+    preserveStartupDiagnostics();
+  },
+  [
+    () => stopTestProcess(second),
+    () => stopTestProcess(first),
+    () => removeTestProfile(workDir),
+  ],
+  { onFailure: preserveStartupDiagnostics },
+);

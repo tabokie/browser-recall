@@ -1,6 +1,8 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
 const exited = (child) => child.exitCode !== null || child.signalCode !== null;
+const nativeStartupComplete = (logs) =>
+  logs.includes('desktop native startup complete');
 
 export async function waitForDesktopStartup(
   child,
@@ -21,7 +23,7 @@ export async function waitForDesktopStartup(
         )
       )
         throw failure('The first desktop process exited during native startup');
-    } else if (logs.length > 0) {
+    } else if (nativeStartupComplete(logs)) {
       return logs;
     }
     await delay(Math.min(100, Math.max(0, deadline - performance.now())));
@@ -29,8 +31,8 @@ export async function waitForDesktopStartup(
 
   const stagesAtDeadline = readStages();
   const observationDeadline = performance.now() + observationMs;
-  let observation = 'Application logging remained unavailable';
-  // Observation explains a missed deadline; late logging must never pass startup.
+  let observation = 'Native startup remained incomplete';
+  // Observation explains a missed deadline; late completion must never pass startup.
   while (performance.now() < observationDeadline) {
     try {
       logs = readLogs();
@@ -38,8 +40,8 @@ export async function waitForDesktopStartup(
       observation = `Diagnostic log inspection failed: ${error.message}`;
       break;
     }
-    if (logs.length > 0) {
-      observation = `Application logging appeared after ${Math.round(performance.now() - started)}ms`;
+    if (nativeStartupComplete(logs)) {
+      observation = `Native startup completed after ${Math.round(performance.now() - started)}ms`;
       break;
     }
     if (exited(child)) {

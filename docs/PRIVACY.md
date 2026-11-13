@@ -1,6 +1,6 @@
 # Browser Recall — Privacy Policy
 
-**Last updated:** November 1, 2026
+**Last updated:** November 12, 2026
 
 Browser Recall's desktop app and browser extension store data locally and send no
 analytics or browsing data to a developer-operated service. Optional GitHub sync
@@ -85,6 +85,9 @@ not sell data or use data for advertising, creditworthiness, or lending. Optiona
 GitHub sync transfers data only to the user's configured repository for the library.
 
 ## Website connections
+
+The product website detects the browser's preferred language. Choosing a language
+with the header switch saves that preference in browser local storage.
 
 The product website requests public release metadata from GitHub to link to the
 latest Windows installer. The request sends no Browser Recall library data,

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Browser Recall browser extension demo</title>
+    <link rel="stylesheet" href="browser.css" />
+    <link rel="stylesheet" href="frame.css" />
+  </head>
+  <body>
+    <header class="browser-chrome">
+      <div class="browser-tabs" aria-hidden="true">
+        <span class="window-lights"><i></i><i></i><i></i></span>
+        <span class="browser-tab">Fieldnotes <span>×</span></span>
+        <span class="new-tab">+</span>
+      </div>
+      <div class="browser-toolbar">
+        <span class="browser-history" aria-hidden="true"
+          >← &nbsp; → &nbsp; ↻</span
+        >
+        <div class="browser-address">
+          <svg width="12" height="14" viewBox="0 0 16 18" aria-hidden="true">
+            <path
+              d="M4 8V5a4 4 0 0 1 8 0v3M3 8h10v8H3Z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.4"
+              stroke-linejoin="round"
+            ></path>
+          </svg>
+          fieldnotes.example/a-smaller-web
+        </div>
+        <button
+          id="extensionToggle"
+          type="button"
+          aria-label="Browser Recall popup"
+          aria-expanded="true"
+          aria-controls="extensionPopup"
+          title="Open Browser Recall"
+        >
+          <img
+            src="../assets/extension-recording.svg"
+            width="26"
+            height="26"
+            alt="Recording on"
+          />
+        </button>
+        <span class="browser-menu" aria-hidden="true">⋮</span>
+      </div>
+    </header>
+    <main class="sample-article">
+      <header>FIELDNOTES · ON MAKING THINGS</header>
+      <h1>A smaller, slower web</h1>
+      <p>A personal website can be a place to think out loud.</p>
+      <p>Leave room for the unfinished things.</p>
+      <p class="article-tail">
+        A photograph from a walk, a question you cannot answer, a list that only
+        makes sense to you.
+      </p>
+    </main>
+    <div
+      id="extensionPopup"
+      class="extension-popup"
+      role="region"
+      aria-label="Browser Recall extension popup"
+    >
+      <iframe
+        class="popup-frame"
+        src="popup.html"
+        title="Browser Recall recording and list controls"
+      ></iframe>
+    </div>
+    <div
+      id="browser-status"
+      class="sr-only"
+      role="status"
+      aria-live="polite"
+    ></div>
+    <script src="product/apps/extension/extension-surface.js"></script>
+    <script type="module" src="browser.js"></script>
+  </body>
+</html>

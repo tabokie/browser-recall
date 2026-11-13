@@ -49,6 +49,8 @@ Read [Architecture](docs/ARCHITECTURE.md) for system contracts,
   weaker assertions, or longer deadlines. Distinguish proven causes from hypotheses.
 - Preserve primary failures through diagnostics and teardown. Attempt every cleanup,
   bound subprocess operations, and retain evidence before removing test resources.
+  Give concurrent Playwright commands separate top-level output directories;
+  cleanup by one run can delete another run's artifacts.
 - Inspect focused screenshots before changing layout CSS. Preserve reading position
   during refreshes and use consistent coordinates for virtual scrolling.
 - Run relevant checks from [Development](DEVELOPMENT.md). Continuous integration

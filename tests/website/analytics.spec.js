@@ -10,10 +10,14 @@ test('local previews never load GoatCounter', async ({ page }) => {
     },
   );
   await page.goto('./');
-  await expect(page.getByRole('tab', { name: 'Find again' })).toBeVisible();
-  await page.getByRole('tab', { name: 'Highlight', exact: true }).click();
+  await expect(page.locator('#hero-title')).toBeVisible();
+  await page.locator('#highlight').scrollIntoViewIfNeeded();
+  await page
+    .frameLocator('.browser-frame')
+    .getByRole('button', { name: 'Browser Recall popup' })
+    .press('Escape');
   await expect(
-    page.frameLocator('.highlight-frame').locator('.highlight-note-text'),
+    page.frameLocator('.browser-frame').locator('.highlight-note-text'),
   ).toBeVisible();
   for (const frame of page.frames()) {
     await expect(frame.locator('script[data-goatcounter]')).toHaveCount(0);
@@ -44,7 +48,7 @@ test('the HTTPS page configures one tracker and works when the tracker is blocke
     },
   );
   await page.goto(
-    'https://browser-recall.test/browser-recall/?source=sample#explore',
+    'https://browser-recall.test/browser-recall/?source=sample#find',
   );
   const script = page.locator('script[data-goatcounter]');
   await expect(script).toHaveCount(1);
@@ -60,13 +64,19 @@ test('the HTTPS page configures one tracker and works when the tracker is blocke
   ).toEqual({ path: '/browser-recall/', no_events: true });
   await expect(script).toHaveJSProperty('async', true);
 
-  await page.getByRole('tab', { name: 'Organize', exact: true }).click();
-  const organize = page.frameLocator('.organize-frame');
-  await organize.getByRole('button', { name: 'Design details' }).click();
+  await page.locator('#highlight').scrollIntoViewIfNeeded();
+  const organize = page
+    .frameLocator('.browser-frame')
+    .frameLocator('.popup-frame');
+  await organize.getByRole('button', { name: 'Music', exact: true }).click();
   await expect(organize.locator('#listCount')).toHaveText('03');
-  await page.getByRole('tab', { name: 'Highlight', exact: true }).click();
+  await page.locator('#highlight').scrollIntoViewIfNeeded();
+  await page
+    .frameLocator('.browser-frame')
+    .getByRole('button', { name: 'Browser Recall popup' })
+    .press('Escape');
   await expect(
-    page.frameLocator('.highlight-frame').locator('.highlight-note-text'),
+    page.frameLocator('.browser-frame').locator('.highlight-note-text'),
   ).toBeVisible();
   for (const frame of page
     .frames()
