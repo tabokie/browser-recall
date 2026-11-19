@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures.js';
 import { withPopupLayout } from '../fixtures/popup-layout.mjs';
+import { withCleanup } from '../smoke/desktop-test-cleanup.mjs';
 import {
   POPUP_LONG_STARTUP_ERROR,
   POPUP_STARTUP_ERROR,
@@ -2166,11 +2167,13 @@ test.describe('Popup list chip behavior', () => {
       .toBe('true');
     await expect
       .poll(() =>
-        popup.evaluate(
-          () => getComputedStyle(document.documentElement).opacity,
-        ),
+        popup.evaluate(() => ({
+          document: getComputedStyle(document.documentElement).opacity,
+          dashboard: getComputedStyle(document.getElementById('dashboard'))
+            .opacity,
+        })),
       )
-      .toBe('0');
+      .toEqual({ document: '1', dashboard: '0' });
     await expect
       .poll(() =>
         popup.evaluate(
@@ -2366,6 +2369,195 @@ test.describe('Popup list chip behavior', () => {
 
     await popup.close();
     await page.close();
+  });
+
+  test('a list change during startup waits for the first dashboard', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    const title = 'Popup Startup List Change';
+    localServer.addPage('/popup-startup-list-change', {
+      title,
+      body: '<main>Selected text</main>',
+    });
+    const url = localServer.url('/popup-startup-list-change');
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+
+    const page = await extContext.newPage();
+    let helper;
+    let popup;
+    await withCleanup(async () => {
+      await page.goto(url);
+      helper = await openHelperPage(extContext, extensionId);
+      await waitForContentScript(helper, page, url);
+      const prepared = await helper.evaluate(
+        async ({ url, title }) => {
+          const created = await chrome.runtime.sendMessage({
+            action: 'createNote',
+            url,
+            title,
+            excerpt: ['Selected text'],
+            note: 'Saved note',
+            cssPath: ['main'],
+          });
+          if (!created?.success) throw new Error(JSON.stringify(created));
+          const [tab] = await chrome.tabs.query({ url });
+          return chrome.runtime.sendMessage({
+            action: 'preparePopupBootstrapForTest',
+            tabId: tab.id,
+          });
+        },
+        { url, title },
+      );
+      expect(prepared).toMatchObject({ success: true, mode: 'dashboard' });
+
+      popup = await extContext.newPage();
+      await popup.addInitScript(() => {
+        const send = chrome.tabs.sendMessage.bind(chrome.tabs);
+        chrome.tabs.sendMessage = async (tabId, request, ...args) => {
+          if (request.action === 'getHighlightMarkupState') {
+            await new Promise((resolve) => {
+              globalThis.releaseHighlightLookup = resolve;
+            });
+          }
+          return send(tabId, request, ...args);
+        };
+        chrome.runtime.onMessage.addListener((request) => {
+          if (request.action === 'mutation' && request.type === 'lists') {
+            globalThis.receivedListChange = true;
+          }
+        });
+      });
+      await popup.goto(
+        `chrome-extension://${extensionId}/${prepared.popupPath}`,
+      );
+      await popup.waitForFunction(
+        () => typeof globalThis.releaseHighlightLookup === 'function',
+      );
+      const saved = await helper.evaluate(() =>
+        chrome.runtime.sendMessage({
+          action: 'saveListMeta',
+          name: 'New list during open',
+        }),
+      );
+      expect(saved?.success).toBe(true);
+      await popup.waitForFunction(() => globalThis.receivedListChange === true);
+      expect(
+        await popup.evaluate(
+          () => document.documentElement.dataset.popupHidden,
+        ),
+      ).toBe('true');
+      await popup.evaluate(() => globalThis.releaseHighlightLookup());
+      await expectPopupRevealed(popup);
+      await expect(popup.locator('#pageTitle')).toHaveText(title);
+      await expect(popup.locator('#notesSection')).toContainText('Saved note');
+      await expect(popup.locator('#listChips')).toContainText(
+        'New list during open',
+      );
+    }, [() => popup?.close(), () => helper?.close(), () => page.close()]);
+  });
+
+  test('connector recovery during sizing keeps the first surface complete', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    const title = 'Popup Reconnection';
+    localServer.addPage('/popup-reconnection', {
+      title,
+      body: '<main>Page</main>',
+    });
+    const url = localServer.url('/popup-reconnection');
+    const target = await extContext.newPage();
+    let helper;
+    let popup;
+    await withCleanup(async () => {
+      await target.goto(url);
+      helper = await openHelperPage(extContext, extensionId);
+      await waitForContentScript(helper, target, url);
+      const [tab] = await helper.evaluate(
+        (url) => chrome.tabs.query({ url }),
+        url,
+      );
+      popup = await extContext.newPage();
+      await popup.addInitScript(
+        (tab) => {
+          chrome.extension.getViews = () => [window];
+          const nativeQuery = chrome.tabs.query.bind(chrome.tabs);
+          chrome.tabs.query = (query) =>
+            query.active && query.currentWindow
+              ? Promise.resolve([tab])
+              : nativeQuery(query);
+          const onChanged = chrome.storage.onChanged.addListener.bind(
+            chrome.storage.onChanged,
+          );
+          chrome.storage.onChanged.addListener = (listener) => {
+            globalThis.reportConnectorRecovery = () =>
+              listener({ connectorState: { newValue: 'connected' } }, 'local');
+            onChanged(listener);
+          };
+          const frameCallbacks = [];
+          window.requestAnimationFrame = (callback) =>
+            frameCallbacks.push(callback);
+          const nativeTimeout = window.setTimeout.bind(window);
+          window.setTimeout = (callback, delay, ...args) => {
+            if (
+              delay === 100 &&
+              document.documentElement.dataset.popupHidden === 'sizing'
+            ) {
+              globalThis.finishInitialSizing = callback;
+              return 0;
+            }
+            return nativeTimeout(callback, delay, ...args);
+          };
+          const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+          chrome.runtime.sendMessage = async (request, ...args) => {
+            if (request.action === 'consumePopupBootstrap') {
+              return {
+                success: true,
+                bootstrap: {
+                  mode: 'connector-diagnostic',
+                  connector: { state: 'offline', hasToken: true },
+                },
+              };
+            }
+            if (request.action === 'getPageSummary') {
+              await new Promise((resolve) => {
+                globalThis.releaseRecoveredSummary = resolve;
+              });
+            }
+            return send(request, ...args);
+          };
+        },
+        { id: tab.id, url, title },
+      );
+      await popup.goto(
+        `chrome-extension://${extensionId}/popup.html?bootstrap=reconnection-test`,
+      );
+      await popup.waitForFunction(
+        () => typeof globalThis.finishInitialSizing === 'function',
+        null,
+        { polling: 20 },
+      );
+      await popup.evaluate(() => globalThis.reportConnectorRecovery());
+      await popup.waitForFunction(
+        () => typeof globalThis.releaseRecoveredSummary === 'function',
+        null,
+        { polling: 20 },
+      );
+      await popup.evaluate(() => globalThis.finishInitialSizing());
+      await expectPopupRevealed(popup);
+      await expect(popup.locator('#pageDiagnosticSection')).toBeVisible();
+      await expect(popup.locator('#pageHeader')).toBeHidden();
+      await popup.evaluate(() => globalThis.releaseRecoveredSummary());
+      await expect(popup.locator('#pageTitle')).toHaveText(title);
+      await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
+    }, [() => popup?.close(), () => helper?.close(), () => target.close()]);
   });
 
   test('disconnected toolbar popup opens only after its terminal diagnostic is prepared', async ({

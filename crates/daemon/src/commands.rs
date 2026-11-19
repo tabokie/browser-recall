@@ -1,4 +1,5 @@
 use crate::connectors::{current_local_day_start_unix, prune_inactive_connectors};
+use crate::read_projections::ListMembershipProjection;
 use crate::search::{search_notes_in_storage, search_snapshots_in_data_dir};
 use crate::storage::{HistoryFileListing, Storage};
 use crate::{
@@ -315,16 +316,20 @@ fn list_event_fields_from_list(list: &ListEntity) -> Result<(String, String), St
     Ok((list.name.clone(), list.owner.clone()))
 }
 
-fn validate_list_pin_urls(urls: Vec<String>) -> Result<Vec<String>, String> {
-    urls.into_iter()
-        .map(|url| {
-            if url.is_empty() {
-                Err("addListPins urls must not contain empty strings".to_string())
-            } else {
-                Ok(url)
-            }
-        })
-        .collect()
+fn list_pin_page_slug(action: &str, url: &str) -> Result<String, String> {
+    if url.is_empty() {
+        return Err(format!("{action} urls must not contain empty strings"));
+    }
+    generate_slug_from_url(url).map_err(|error| error.to_string())
+}
+
+async fn load_active_pin_list(storage: &Storage, list_id: &str) -> Result<ListEntity, String> {
+    storage
+        .load_list(list_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .filter(|list| !list.deleted)
+        .ok_or_else(|| "List not found".to_string())
 }
 
 fn add_list_pin_titles(
@@ -654,12 +659,12 @@ fn validate_list_manifests(
             Some(mapped_id) => {
                 return Err(format!(
                     "list path {path} maps to {mapped_id}, expected {list_id}"
-                ))
+                ));
             }
             None => {
                 return Err(format!(
                     "active list {list_id} is missing from name-to-id manifest"
-                ))
+                ));
             }
         }
         active_ids.insert(list_id.clone());
@@ -952,47 +957,107 @@ pub async fn toggle_list_pin(
     }))
 }
 
+pub struct ListPinAddition {
+    pub list: ListMembershipProjection,
+    pub confirmed_urls: Vec<String>,
+    pub added_urls: Vec<String>,
+}
+
 pub async fn add_list_pins(
     storage: &Storage,
     device_id: &str,
     input: AddListPinsInput,
-) -> Result<(), String> {
+) -> Result<ListPinAddition, String> {
     let transaction = ReplayTransaction::begin(storage, device_id).await?;
-    let urls = validate_list_pin_urls(input.urls)?;
-    let (list_name, list_owner) = list_event_fields(storage, device_id, &input.list_id)
-        .await?
-        .ok_or_else(|| "List not found".to_string())?;
-    let mut titles = add_list_pin_titles(input.titles, urls.len())?;
-    for (index, url) in urls.iter().enumerate() {
-        if titles[index].is_some() {
+    let list = load_active_pin_list(storage, &input.list_id).await?;
+    let (list_name, list_owner) = list_event_fields_from_list(&list)?;
+    let titles = add_list_pin_titles(input.titles, input.urls.len())?;
+    let pinned: HashSet<_> = list.pins.iter().map(|pin| pin.id.as_str()).collect();
+    let mut seen = HashSet::new();
+    let mut confirmed_urls = Vec::new();
+    let mut added_urls = Vec::new();
+    let mut added_titles = Vec::new();
+    for (url, title) in input.urls.into_iter().zip(titles) {
+        let slug = list_pin_page_slug("addListPins", &url)?;
+        if !seen.insert(slug.clone()) {
             continue;
         }
-        let page_key = format!(
-            "page:{}",
-            generate_slug_from_url(url).map_err(|error| error.to_string())?
-        );
-        if let Some(Entity::Page(page)) = storage
-            .load_entity(&page_key)
-            .await
-            .map_err(|error| error.to_string())?
-        {
-            if let Some(title) = page.title {
-                titles[index] = Some(title);
-            }
+        let page_key = format!("page:{slug}");
+        confirmed_urls.push(url.clone());
+        if pinned.contains(page_key.as_str()) {
+            continue;
+        }
+        let title = match title {
+            Some(title) => Some(title),
+            None => storage
+                .load_entity(&page_key)
+                .await
+                .map_err(|error| error.to_string())?
+                .and_then(|entity| match entity {
+                    Entity::Page(page) => page.title,
+                    _ => None,
+                }),
+        };
+        added_urls.push(url);
+        added_titles.push(title);
+    }
+    if !added_urls.is_empty() {
+        replay_entries_in_transaction(
+            transaction,
+            vec![LogEntry::PinToList {
+                timestamp: storage.next_command_timestamp_millis(),
+                name: list_name,
+                list_owner,
+                urls: added_urls.clone(),
+                titles: added_titles
+                    .iter()
+                    .any(Option::is_some)
+                    .then_some(added_titles),
+                source: None,
+            }],
+        )
+        .await?;
+    }
+    Ok(ListPinAddition {
+        list: ListMembershipProjection {
+            slug: list.slug,
+            name: list.name,
+        },
+        confirmed_urls,
+        added_urls,
+    })
+}
+
+pub async fn remove_list_pins(
+    storage: &Storage,
+    device_id: &str,
+    list_id: &str,
+    urls: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let transaction = ReplayTransaction::begin(storage, device_id).await?;
+    let list = load_active_pin_list(storage, list_id).await?;
+    let (name, list_owner) = list_event_fields_from_list(&list)?;
+    let mut pinned: HashSet<_> = list.pins.iter().map(|pin| pin.id.as_str()).collect();
+    let mut removed_urls = Vec::new();
+    for url in urls {
+        let slug = list_pin_page_slug("removeListPins", &url)?;
+        if pinned.remove(format!("page:{slug}").as_str()) {
+            removed_urls.push(url);
         }
     }
-    replay_entries_in_transaction(
-        transaction,
-        vec![LogEntry::PinToList {
-            timestamp: storage.next_command_timestamp_millis(),
-            name: list_name,
-            list_owner,
-            urls,
-            titles: titles.iter().any(Option::is_some).then_some(titles),
-            source: None,
-        }],
-    )
-    .await
+    if !removed_urls.is_empty() {
+        replay_entries_in_transaction(
+            transaction,
+            vec![LogEntry::UnpinFromList {
+                timestamp: storage.next_command_timestamp_millis(),
+                name,
+                list_owner,
+                urls: removed_urls.clone(),
+            }],
+        )
+        .await?;
+    }
+    Ok(removed_urls)
 }
 
 pub async fn save_list_meta(

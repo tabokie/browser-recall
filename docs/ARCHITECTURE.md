@@ -300,10 +300,11 @@ a protocol version change.
 
 ### Popup and editors
 
-Toolbar opens resolve the original page and fetch a complete daemon summary before
-opening. A single-use token transfers the result; preparation exceeding 1.5 seconds
-shows an error. Direct opens use the same renderer. Page changes and daemon updates
-invalidate prepared summaries; failed opens never fall back to an extension tab.
+Toolbar opens resolve the original page and fetch a complete daemon summary.
+A single-use token transfers the summary to the popup renderer. Preparation
+exceeding 1.5 seconds shows an error. Direct opens use the same renderer. Page
+changes and daemon updates invalidate prepared summaries. Failed opens never
+fall back to an extension tab.
 
 Popup identity reads prefer the page's content script, then inspect the live
 document if the receiver is missing. Known scripting denials on HTTP(S) pages
@@ -327,10 +328,20 @@ The next normal popup opening has no pending error. Success notifications remain
 brief. Reading saved data does not reinstall capture or change recording
 eligibility.
 
-The hidden document reserves startup size. Visible dashboard/error content sizes
-the popup through normal layout flow. Fatal errors use a bounded scrollable message
-and visible Reload button. Popup edits and list refreshes serialize; `createListAndPin`
-creates and pins together. Keep the list input stable during typing/composition.
+Completed dashboard or error content sets the popup size through normal layout
+flow. Chrome toolbar opens defer the document load event with a bounded local
+image request. The popup cancels the request after the initial surface is laid
+out. Firefox and Chrome opens without the request keep the background painted
+while the viewport settles. A connector diagnostic stays in place while
+recovery loads the dashboard. Fatal errors use a bounded scrollable message
+and visible Reload button. Popup edits and list refreshes serialize. Keep the
+list input stable during typing and composition.
+
+The desktop sends one `removeListPins` command for the selected pages.
+`addListPins` returns the target list and `confirmedUrls`, including URLs already
+in the list. The desktop matches those exact URLs to update list tags in place.
+Both commands only write changed memberships.
+`createListAndPin` creates and pins together.
 
 Save, delete, and editor closing share one queue. Failed edits can retry; unchanged
 text creates no replacement. Before closing a popup, finish pending work and
@@ -380,9 +391,14 @@ Note search includes accepted edits awaiting checkpoints. Only desktop can reque
 full history; popup reads stay page-scoped.
 
 Filters use device directories and page properties. Multi-day membership comes
-from `visitDates`. Keyword rules match titles case-insensitively with exactly
-`{ pattern }`. Function-rule previews may inspect supplied page data, but previews
-are never stored in logs.
+from `visitDates`. Tagged matches a like, a saved snapshot, or membership in a
+visible list. In list view, membership in the open list is excluded from Tagged.
+Pin notifications reapply Tagged to the current results and preserve the reading
+position. Page reads in flight retry if a pin change makes their memberships stale.
+
+Keyword rules match titles case-insensitively with exactly `{ pattern }`.
+Function-rule previews may inspect supplied page data, but previews are never
+stored in logs.
 
 Product settings live in `views/manifest/settings.json`; Rust replay defines names,
 types, allowed values, and defaults. Startup/reset create complete settings and

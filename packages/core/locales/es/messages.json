@@ -1481,6 +1481,10 @@
     "message": "Error al alternar: $1",
     "description": "Sync device toggle failure."
   },
+  "desktopTagged": {
+    "message": "Con etiqueta",
+    "description": "Localized UI text."
+  },
   "desktopVisitedMultipleTimes": {
     "message": "Visitado en varios días",
     "description": "Localized UI text."

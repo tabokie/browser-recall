@@ -1509,6 +1509,10 @@
     "message": "Toggle failed: $1",
     "description": "Sync device toggle failure."
   },
+  "desktopTagged": {
+    "message": "Tagged",
+    "description": "Filter for pages with a like, snapshot, or list tag."
+  },
   "desktopVisitedMultipleTimes": {
     "message": "Visited on multiple days",
     "description": "Localized UI text."

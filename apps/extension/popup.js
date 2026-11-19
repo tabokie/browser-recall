@@ -1,4 +1,4 @@
-import { listChipHtml } from './popup-list-elements.js';
+import { layoutListChips, listChipHtml } from './popup-list-elements.js';
 import { snapshotRowHtml } from './popup-snapshot-elements.js';
 // Popup — current-page dashboard
 import {
@@ -71,7 +71,7 @@ let popupUiMutationQueue = Promise.resolve();
 let popupUiMutationActiveIdleResolvers = [];
 let listChipsClickBound = false;
 let liveListRefreshQueued = false;
-let pendingLiveListMutation = null;
+let pendingLiveListRefresh = false;
 
 function resetCurrentPageIdentity({ slug, url, title, tab }) {
   Object.assign(
@@ -108,8 +108,52 @@ function showFatalError(message) {
 }
 
 function revealPopup() {
-  document.documentElement.removeAttribute('data-popup-hidden');
-  document.documentElement.style.opacity = '';
+  const root = document.documentElement;
+  if (root.dataset.popupHidden !== 'true') return;
+  root.dataset.popupHidden = 'sizing';
+  const reveal = () => {
+    root.removeAttribute('data-popup-hidden');
+    schedulePendingLiveListRefresh();
+  };
+  const startupImage = document.getElementById('popupStartupImage');
+  if (startupImage && !startupImage.complete) {
+    reveal();
+    // Flush the final layout before allowing Chrome's popup to appear.
+    document.body.getBoundingClientRect();
+    startupImage.removeAttribute('src');
+    return;
+  }
+  const nativePopup = chrome.extension
+    ?.getViews?.({ type: 'popup' })
+    ?.includes(window);
+  if (!nativePopup) {
+    reveal();
+    return;
+  }
+
+  // Browser action popups size to their document, up to 600 px. Screen space
+  // can impose a smaller limit, so also reveal if the browser caps the viewport.
+  const deadline = setTimeout(reveal, 100);
+  let fittedSize = null;
+  const waitForViewport = () => {
+    if (!root.hasAttribute('data-popup-hidden')) return;
+    const { width, height } = document.body.getBoundingClientRect();
+    const fitted =
+      Math.abs(window.innerWidth - width) < 1 &&
+      Math.abs(window.innerHeight - Math.min(height, 600)) < 1 &&
+      window.outerHeight >= window.innerHeight;
+    // Matching measurements can arrive before Chrome presents the resized
+    // window. Give the compositor a frame to catch up before showing content.
+    const size = fitted ? `${width}x${height}` : null;
+    if (size && size === fittedSize) {
+      clearTimeout(deadline);
+      reveal();
+    } else {
+      fittedSize = size;
+      window.requestAnimationFrame(waitForViewport);
+    }
+  };
+  window.requestAnimationFrame(waitForViewport);
 }
 
 function renderPopupShell(options = {}) {
@@ -340,7 +384,6 @@ function renderPageDiagnostic({
 }) {
   hideElement('blacklisted');
   replaceConnectorDiagnosticOwner(kind === 'connector');
-  setPopupSurface('diagnostic', { reveal });
   resetDashboardSections();
   const section = document.getElementById('pageDiagnosticSection');
   const titleEl = document.getElementById('pageDiagnosticTitle');
@@ -371,6 +414,7 @@ function renderPageDiagnostic({
     }
   }
   if (pageHeader) pageHeader.style.display = 'none';
+  setPopupSurface('diagnostic', { reveal });
 }
 
 function showUnavailablePage(
@@ -452,6 +496,8 @@ function formatDuration(ms) {
 
 function applyDesktopConnectorUi(connector, owner) {
   if (!connectorDiagnosticOwnedBy(owner)) return;
+  // Keep the diagnostic in place until the replacement dashboard is ready.
+  if (connector.state === 'connected' && connector.deviceId) return;
   renderConnectorDiagnostic(connector);
 }
 
@@ -640,7 +686,7 @@ async function refreshDesktopConnectorState() {
 
 function connectorDiagnosticVisible() {
   return (
-    !document.documentElement.hasAttribute('data-popup-hidden') &&
+    document.documentElement.dataset.popupHidden !== 'true' &&
     connectorDiagnosticActive &&
     popupShellState.surface === 'diagnostic'
   );
@@ -786,7 +832,7 @@ function sendHighlightMarkupAction(tabId, action) {
   return chrome.tabs.sendMessage(tabId, { action });
 }
 
-async function refreshHighlightMarkupState() {
+async function readHighlightMarkupState() {
   const tabId = currentPage.tab?.id;
   if (!Number.isInteger(tabId)) {
     throw new Error(tr('extensionNoTargetTab', 'No target tab', undefined));
@@ -802,8 +848,7 @@ async function refreshHighlightMarkupState() {
     // the desktop and must still render when a loading/restricted tab has no
     // content-script receiver.
     if (globalThis.browserRecallWebExtension?.isRuntimeFailure?.(error)) {
-      currentPage.markupStateAvailable = false;
-      return false;
+      return { markupStateAvailable: false, markupHidden: false };
     }
     throw error;
   }
@@ -811,9 +856,7 @@ async function refreshHighlightMarkupState() {
   if (typeof response.hidden !== 'boolean') {
     throw new Error('getHighlightMarkupState response missing hidden');
   }
-  currentPage.markupHidden = response.hidden;
-  currentPage.markupStateAvailable = true;
-  return true;
+  return { markupStateAvailable: true, markupHidden: response.hidden };
 }
 
 function renderMarkupControls() {
@@ -1066,67 +1109,21 @@ function handleListChipsClick(event) {
   }
 }
 
-async function renderListChips(listOverride = null) {
+function renderListChips(listOverride = null) {
   const container = document.getElementById('listChips');
   const lists = listOverride ?? currentPage.summary?.lists;
   if (!Array.isArray(lists)) {
     throw new Error('Popup list projection must be an array');
   }
 
-  // Partition into lists containing this page vs. others
-  const containsPage = [];
-  const others = [];
-  for (const list of lists) {
-    if (list.containsPage) {
-      containsPage.push(list);
-    } else {
-      others.push(list);
-    }
-  }
+  const layout = layoutListChips(lists, frozenChipOrder);
+  frozenChipOrder = layout.order;
   const listCount = document.getElementById('listCount');
   if (listCount) {
-    listCount.textContent = String(containsPage.length).padStart(2, '0');
+    listCount.textContent = String(layout.pinnedCount).padStart(2, '0');
   }
 
-  // Sort others by most recent activity
-  const othersRanked = others.map((list) => {
-    return { list, lastActivity: list.lastActivity || 0 };
-  });
-  othersRanked.sort((a, b) => b.lastActivity - a.lastActivity);
-
-  let displayLists;
-  if (!frozenChipOrder) {
-    // First render: pinned lists first, then fill remaining slots with active lists
-    const remaining = Math.max(0, 10 - containsPage.length);
-    displayLists = [
-      ...containsPage,
-      ...othersRanked.slice(0, remaining).map((r) => r.list),
-    ];
-    frozenChipOrder = displayLists.map((l) => l.slug);
-  } else {
-    // Subsequent renders: use frozen order, but ensure newly-pinned lists are visible
-    const bySlug = new Map(lists.map((l) => [l.slug, l]));
-    displayLists = frozenChipOrder
-      .filter((slug) => bySlug.has(slug))
-      .map((slug) => bySlug.get(slug));
-    for (const list of containsPage) {
-      if (!frozenChipOrder.includes(list.slug)) {
-        displayLists.push(list);
-        frozenChipOrder.push(list.slug);
-      }
-    }
-    const displayed = new Set(displayLists.map((list) => list.slug));
-    let remainingSlots = Math.max(0, 10 - displayLists.length);
-    for (const { list } of othersRanked) {
-      if (remainingSlots <= 0) break;
-      if (displayed.has(list.slug)) continue;
-      displayLists.push(list);
-      frozenChipOrder.push(list.slug);
-      displayed.add(list.slug);
-      remainingSlots--;
-    }
-  }
-
+  const displayLists = layout.lists;
   const existingChips = [...container.querySelectorAll('.list-chip')];
   const canPatchInPlace =
     existingChips.length === displayLists.length &&
@@ -2129,6 +2126,11 @@ async function renderDashboardSummary(tab, identity, summary, options = {}) {
     renderBlacklistDiagnostic(tab, summary.url || identity.url || tab.url);
     return false;
   }
+  if (renderSections && summary.notes.length > 0) {
+    const markupState = await readHighlightMarkupState();
+    if (generation !== currentPage.generation) return false;
+    Object.assign(currentPage, markupState);
+  }
   if (resetSections) resetDashboardSections();
   else clearPageDiagnosticSection();
   const page = summary.page || transientPageView(identity.slug, summary);
@@ -2144,16 +2146,9 @@ async function renderDashboardSummary(tab, identity, summary, options = {}) {
   if (renderSections) {
     renderVisitsAndLikes(page);
     renderSnapshots(summary.snapshots);
-    if (summary.notes.length > 0) {
-      await refreshHighlightMarkupState();
-      if (generation !== currentPage.generation) return false;
-    }
     renderNotes(summary.notes);
   }
-  if (renderLists) {
-    await renderListChips(summary.lists);
-    if (generation !== currentPage.generation) return false;
-  }
+  if (renderLists) renderListChips(summary.lists);
   if (finish) {
     await finishDashboardRender(tab, generation);
     if (generation !== currentPage.generation) return false;
@@ -2276,13 +2271,30 @@ function listMutationTargetsCurrentPage(request) {
 }
 
 function scheduleLiveListRefresh(request) {
-  if (!currentPage.slug) {
-    pendingLiveListMutation = request;
+  if (
+    !['lists', 'pins'].includes(request?.type) ||
+    (currentPage.slug && !listMutationTargetsCurrentPage(request))
+  ) {
     return;
   }
-  if (!listMutationTargetsCurrentPage(request) || liveListRefreshQueued) return;
+  pendingLiveListRefresh = true;
+  schedulePendingLiveListRefresh();
+}
+
+function schedulePendingLiveListRefresh() {
+  if (
+    !pendingLiveListRefresh ||
+    !currentPage.slug ||
+    liveListRefreshQueued ||
+    (popupShellState.surface === 'diagnostic' &&
+      currentPage.pageSummaryState === 'loading') ||
+    document.documentElement.hasAttribute('data-popup-hidden')
+  ) {
+    return;
+  }
   liveListRefreshQueued = true;
   void enqueuePopupUiMutation('refresh-live-list-mutation', async () => {
+    pendingLiveListRefresh = false;
     liveListRefreshQueued = false;
     await refreshCurrentPageSummary({
       renderSections: false,
@@ -2292,12 +2304,6 @@ function scheduleLiveListRefresh(request) {
     liveListRefreshQueued = false;
     logDebug('[popup] live list refresh failed:', error.message);
   });
-}
-
-function schedulePendingLiveListRefresh() {
-  const request = pendingLiveListMutation;
-  pendingLiveListMutation = null;
-  if (request) scheduleLiveListRefresh(request);
 }
 
 chrome.runtime.onMessage.addListener((request) => {
@@ -2385,11 +2391,7 @@ async function showDashboard(tab) {
   if (generation !== currentPage.generation) return;
   if (identity.slug !== previousSlug) frozenChipOrder = null;
   resetCurrentPageIdentity({ ...identity, tab });
-  document.getElementById('pageTitle').textContent = identity.title;
-  document.getElementById('pageUrl').textContent = identity.url;
-  resetDashboardSections();
   await fetchAndRenderPageData(tab, identity, {
-    resetSections: false,
     renderLists: true,
     finish: true,
   });
@@ -2698,11 +2700,13 @@ async function loadConnectedDashboard(connector) {
 async function initPopup() {
   await initializeExtensionI18n();
   localizeDocument();
-  await applyTheme();
   // Hydrate the session-authoritative pause state while the static shell is
   // still hidden, before any prepared diagnostic or controls are revealed.
-  await loadRecordingState();
-  const handoff = await consumePopupBootstrap();
+  const [, , handoff] = await Promise.all([
+    applyTheme(),
+    loadRecordingState(),
+    consumePopupBootstrap(),
+  ]);
   if (handoff) {
     try {
       await renderPreparedPopup(handoff.bootstrap);

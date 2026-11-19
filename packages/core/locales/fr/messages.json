@@ -1481,6 +1481,10 @@
     "message": "Échec de la bascule : $1",
     "description": "Sync device toggle failure."
   },
+  "desktopTagged": {
+    "message": "Avec une étiquette",
+    "description": "Localized UI text."
+  },
   "desktopVisitedMultipleTimes": {
     "message": "Visité plusieurs jours",
     "description": "Localized UI text."

@@ -1481,6 +1481,10 @@
     "message": "Pengalihan gagal: $1",
     "description": "Sync device toggle failure."
   },
+  "desktopTagged": {
+    "message": "Bertag",
+    "description": "Localized UI text."
+  },
   "desktopVisitedMultipleTimes": {
     "message": "Dikunjungi pada beberapa hari",
     "description": "Localized UI text."

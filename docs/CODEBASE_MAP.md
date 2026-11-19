@@ -63,7 +63,8 @@ Paths below are relative to `apps/extension/`.
 | `browser-capabilities.js`                                                 | Browser response capabilities and scripting error classification                           |
 | `browser-identity.js`, `browser-build-target.js`                          | Browser identity and generated build target                                                |
 | `popup.js`, `popup.html`, `popup-note-session.js`                         | Dashboard, sizing, list edits, note drafts                                                 |
-| `popup-list-elements.js`                                                  | List markup shared with website demos                                                      |
+| `popup-startup.js`                                                        | Chrome document load timing for the first popup layout                                     |
+| `popup-list-elements.js`                                                  | List chip ordering and markup for the popup and website demo                               |
 | `popup-snapshot-elements.js`                                              | Snapshot-row markup shared with website demos                                              |
 | `extension-surface.js`, `extension-surface.css`, `extension-ui-tokens.js` | Isolated editors, highlights, overlays, shared persistent error renderer                   |
 | `connector/ws-client.js`                                                  | Sessions, validation, requests, queue draining                                             |
@@ -97,6 +98,10 @@ Paths below are relative to `crates/`.
 | `replay/src/entities.rs`, `replay/src/settings.rs`                     | Checkpoint/settings schemas                                   |
 | `replay/src/bin/replay-tool.rs`, `replay/src/bin/replay-verify.rs`     | Replay and production verification CLIs                       |
 | `search/src/lib.rs`                                                    | Search ranking and file discovery                             |
+
+For list pins, `daemon/src/commands.rs` confirms membership and
+`daemon/src/command_authority.rs` builds the `addListPins` response and pin
+notifications. `apps/desktop/ui/index.js` updates visible tags and Tagged results.
 
 ## Shared modules
 

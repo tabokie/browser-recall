@@ -78,6 +78,10 @@ messages, native popup resizing, and short/long startup errors. The shared failu
 fixture forces `getRecordingState` errors and is omitted from production bundles.
 `npm run test:firefox:smoke` simulates browser APIs; the command does not launch
 Firefox. `npm run test:shortcut:native` checks Option+R in Chromium on macOS.
+`npm run test:popup:native` also presses Chrome's toolbar control through
+macOS Accessibility and records the first frames of a tall dashboard. The check
+requires Accessibility and Screen Recording permissions. A failed opening
+retains the captured frames at the path printed by the test.
 
 ## Native checks
 

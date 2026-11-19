@@ -8,6 +8,22 @@ function attentionLevel(normalized) {
   return 'low';
 }
 
+export function isPageListTag(slug, excludeListId) {
+  return !slug.startsWith('system/') && slug !== excludeListId;
+}
+
+export function pageListTagsHtml(listSlugs, listNameById, excludeListId) {
+  return listSlugs
+    .filter((slug) => isPageListTag(slug, excludeListId))
+    .map((slug) => {
+      const name = listNameById.get(slug);
+      return name
+        ? `<span class="card-tag card-tag-list" data-list-slug="${escapeHtml(slug)}">${escapeHtml(name)}</span>`
+        : '';
+    })
+    .join('');
+}
+
 export function resultRowHtml(
   title,
   url,
@@ -55,13 +71,6 @@ export function resultRowHtml(
 
   const hasNotes = hasHighlightNotes === true;
   const hasSnaps = hasSnapshots;
-  const belongedListNames = [];
-  for (const listSlug of listSlugs) {
-    if (listSlug.startsWith('system/')) continue;
-    if (excludeListId && listSlug === excludeListId) continue;
-    const name = listNameById.get(listSlug);
-    if (name) belongedListNames.push(name);
-  }
   const attLvl = attentionLevel(normalized);
   if (url)
     cardDataByUrl.set(url, {
@@ -75,9 +84,7 @@ export function resultRowHtml(
       timestamps,
     });
   const attCtrlHtml = `<div class="att-ctrl${attLvl ? ' ' + attLvl : ''}" data-url="${safeUrl}" data-title="${safeTitle}"><span class="att-ctrl-dot"></span><button class="att-ctrl-btn" title="${escapeHtml(tr('desktopViewDetails', 'View details'))}"><span class="att-ctrl-icon" aria-hidden="true">⋯</span></button></div>`;
-  const listTagsHtml = belongedListNames
-    .map((n) => `<span class="card-tag card-tag-list">${escapeHtml(n)}</span>`)
-    .join('');
+  const listTagsHtml = pageListTagsHtml(listSlugs, listNameById, excludeListId);
   const isLiked = likes > 0;
   const isAuto = pinSource === 'auto';
   const matchNoteHit = matchSources && matchSources.has('note');

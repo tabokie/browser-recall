@@ -1481,6 +1481,10 @@
     "message": "Не удалось переключить: $1",
     "description": "Sync device toggle failure."
   },
+  "desktopTagged": {
+    "message": "С метками",
+    "description": "Localized UI text."
+  },
   "desktopVisitedMultipleTimes": {
     "message": "Посещено в разные дни",
     "description": "Localized UI text."

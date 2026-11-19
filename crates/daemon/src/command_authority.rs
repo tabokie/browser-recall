@@ -87,6 +87,10 @@ enum CommandRequest {
         urls: Vec<String>,
         titles: Option<Vec<Option<String>>>,
     },
+    RemoveListPins {
+        list_id: String,
+        urls: Vec<String>,
+    },
     SaveListMeta {
         list_id: Option<String>,
         name: Option<String>,
@@ -148,6 +152,7 @@ const SUPPORTED_ACTIONS: &[&str] = &[
     "updateNote",
     "toggleListPin",
     "addListPins",
+    "removeListPins",
     "saveListMeta",
     "createListAndPin",
     "importBookmarks",
@@ -355,8 +360,7 @@ impl CommandAuthority {
                 urls,
                 titles,
             } => {
-                let mutation_urls = urls.clone();
-                commands::add_list_pins(
+                let added = commands::add_list_pins(
                     &self.storage,
                     &self.device_id,
                     commands::AddListPinsInput {
@@ -367,12 +371,17 @@ impl CommandAuthority {
                 )
                 .await?;
                 CommandOutcome::new(
+                    json!({ "success": true, "list": added.list, "confirmedUrls": added.confirmed_urls }),
+                    list_pin_mutations(list_id, added.added_urls),
+                )
+            }
+            CommandRequest::RemoveListPins { list_id, urls } => {
+                let removed =
+                    commands::remove_list_pins(&self.storage, &self.device_id, &list_id, urls)
+                        .await?;
+                CommandOutcome::new(
                     json!({ "success": true }),
-                    mutation_with("pins", |fields| {
-                        fields.list_id = Some(list_id);
-                        fields.url = mutation_urls.first().cloned();
-                        fields.urls = Some(mutation_urls);
-                    }),
+                    list_pin_mutations(list_id, removed),
                 )
             }
             CommandRequest::SaveListMeta {
@@ -587,12 +596,12 @@ impl CommandOutcome {
                 return Err(
                     "command implementation returned a non-success response on the success path"
                         .to_string(),
-                )
+                );
             }
             None => {
                 return Err(
                     "command implementation response is missing explicit success".to_string(),
-                )
+                );
             }
         }
         if payload.contains_key("error") {
@@ -624,6 +633,17 @@ fn optional_response_string(
         Some(Value::String(value)) => Ok(Some(value.clone())),
         Some(_) => Err(format!("{action} response {key} must be a string or null")),
     }
+}
+
+fn list_pin_mutations(list_id: String, urls: Vec<String>) -> Vec<MutationPayload> {
+    if urls.is_empty() {
+        return Vec::new();
+    }
+    mutation_with("pins", |fields| {
+        fields.list_id = Some(list_id);
+        fields.url = urls.first().cloned();
+        fields.urls = Some(urls);
+    })
 }
 
 fn required_response_string_array(

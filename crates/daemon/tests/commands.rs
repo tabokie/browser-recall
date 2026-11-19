@@ -1,3 +1,4 @@
+use browser_recall_daemon::command_authority::CommandAuthority;
 use browser_recall_daemon::commands::{
     self, add_rule, delete_list, delete_note, delete_snapshot, ensure_default_lists,
     get_snapshot_html, import_bookmarks, import_history, list_event_fields, list_history_files,
@@ -59,7 +60,9 @@ async fn add_list_pins(
     device_id: &str,
     request: &serde_json::Value,
 ) -> Result<(), String> {
-    commands::add_list_pins(storage, device_id, command_input("addListPins", request)?).await
+    commands::add_list_pins(storage, device_id, command_input("addListPins", request)?)
+        .await
+        .map(|_| ())
 }
 
 async fn save_list_meta(
@@ -120,6 +123,113 @@ async fn read_log_files(log_dir: &Path) -> Vec<String> {
         );
     }
     logs
+}
+
+#[tokio::test]
+async fn bulk_pin_changes_are_idempotent() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage.ensure_layout("device-a").await.expect("layout");
+    let authority = CommandAuthority::new(storage.clone(), "device-a".to_string());
+    let created = authority
+        .execute("saveListMeta", serde_json::json!({ "name": "Later" }))
+        .await
+        .expect("create list")
+        .response();
+    let list_id = created["listId"].as_str().expect("list ID");
+    let first = "https://example.com/first?_tracking=1";
+    let second = "https://example.com/second";
+    import_bookmarks(
+        &storage,
+        "device-a",
+        vec![BookmarkImportNode {
+            title: "Imported".to_string(),
+            bookmarks: vec![BookmarkImportEntry {
+                url: first.to_string(),
+                title: "First bookmark".to_string(),
+            }],
+            skipped: Vec::new(),
+            children: Vec::new(),
+        }],
+    )
+    .await
+    .expect("import raw bookmark URL");
+    let imported_slug = generate_slug_from_url(first).expect("bookmark slug");
+    let imported = storage
+        .load_page(&imported_slug)
+        .await
+        .expect("read imported page")
+        .expect("imported page exists");
+    assert_eq!(imported.url.as_deref(), Some(first));
+    let request = serde_json::json!({ "listId": list_id, "urls": [first, second, first] });
+    let added = authority
+        .execute("addListPins", request.clone())
+        .await
+        .expect("add both pages");
+    assert_eq!(
+        added.response()["confirmedUrls"],
+        serde_json::json!([first, second])
+    );
+    let log_before = read_log_files(&dir.path().join("logs/device-a")).await;
+    let duplicate = authority
+        .execute("addListPins", request.clone())
+        .await
+        .expect("repeat add");
+    assert!(
+        duplicate.mutations.is_empty(),
+        "repeat add emits no mutation"
+    );
+    assert_eq!(
+        read_log_files(&dir.path().join("logs/device-a")).await,
+        log_before
+    );
+    assert_eq!(
+        duplicate.response()["list"],
+        serde_json::json!({ "slug": list_id, "name": "Later" })
+    );
+    assert_eq!(
+        duplicate.response()["confirmedUrls"],
+        serde_json::json!([first, second])
+    );
+    authority
+        .execute(
+            "removeListPins",
+            serde_json::json!({ "listId": list_id, "urls": [first, ""] }),
+        )
+        .await
+        .expect_err("reject the entire batch before writing");
+    assert_eq!(
+        read_log_files(&dir.path().join("logs/device-a")).await,
+        log_before
+    );
+    let removed = authority
+        .execute("removeListPins", request.clone())
+        .await
+        .expect("remove both pages");
+    assert_eq!(removed.mutations.len(), 1);
+    assert_eq!(
+        removed.mutations[0].urls.as_ref().expect("removed URLs"),
+        &[first, second]
+    );
+    let remaining = storage
+        .load_list(list_id)
+        .await
+        .expect("read list")
+        .expect("list");
+    assert!(remaining.pins.is_empty());
+    let log_after = read_log_files(&dir.path().join("logs/device-a")).await;
+    let entry_count =
+        |files: &[String]| files.iter().map(|file| file.lines().count()).sum::<usize>();
+    assert_eq!(entry_count(&log_after), entry_count(&log_before) + 1);
+    let retry = authority
+        .execute("removeListPins", request)
+        .await
+        .expect("repeat removal");
+    assert!(retry.mutations.is_empty());
+    assert_eq!(
+        read_log_files(&dir.path().join("logs/device-a")).await,
+        log_after
+    );
 }
 
 #[tokio::test]

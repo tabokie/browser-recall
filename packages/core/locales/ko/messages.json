@@ -1481,6 +1481,10 @@
     "message": "토글 실패: $1",
     "description": "Sync device toggle failure."
   },
+  "desktopTagged": {
+    "message": "태그 있음",
+    "description": "Localized UI text."
+  },
   "desktopVisitedMultipleTimes": {
     "message": "여러 날 방문함",
     "description": "Localized UI text."

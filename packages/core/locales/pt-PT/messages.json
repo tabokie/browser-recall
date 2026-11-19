@@ -1481,6 +1481,10 @@
     "message": "Falha na comutação: $1",
     "description": "Sync device toggle failure."
   },
+  "desktopTagged": {
+    "message": "Com etiqueta",
+    "description": "Localized UI text."
+  },
   "desktopVisitedMultipleTimes": {
     "message": "Visitado em vários dias",
     "description": "Localized UI text."

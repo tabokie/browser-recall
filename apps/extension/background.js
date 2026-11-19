@@ -101,6 +101,41 @@ let preparedActionPopupGlobalOwner = null;
 const preparedActionPopupTabOwners = new Map();
 let popupPreparationGateForTest = null;
 
+if (
+  typeof ServiceWorkerGlobalScope !== 'undefined' &&
+  globalThis instanceof ServiceWorkerGlobalScope
+) {
+  globalThis.addEventListener('fetch', (event) => {
+    if (event.request.destination !== 'image') return;
+    const url = new URL(event.request.url);
+    if (
+      url.origin !== globalThis.location.origin ||
+      url.pathname !== '/icons/icon16.png' ||
+      !pendingPopupBootstraps.has(url.searchParams.get('popupStartup'))
+    ) {
+      return;
+    }
+    event.respondWith(holdPopupDocumentLoad(event.request.signal));
+  });
+}
+
+async function holdPopupDocumentLoad(signal) {
+  // Chrome shows the native popup after the document load event. The popup
+  // cancels this invisible image request as soon as its first layout is ready.
+  if (!signal.aborted) {
+    await new Promise((resolve) => {
+      const finish = () => {
+        clearTimeout(deadline);
+        signal.removeEventListener('abort', finish);
+        resolve();
+      };
+      const deadline = setTimeout(finish, POPUP_PREPARE_TIMEOUT_MS);
+      signal.addEventListener('abort', finish, { once: true });
+    });
+  }
+  return new Response(null, { status: 204 });
+}
+
 function createPopupPreparationGateForTest(holdPreparation) {
   if (holdPreparation !== true) return null;
   if (popupPreparationGateForTest) {
@@ -1308,7 +1343,8 @@ async function handleGetPageSummary(request) {
     if (
       typeof desktopResp.displayTitle !== 'string' ||
       typeof desktopResp.access?.blacklisted !== 'boolean' ||
-      typeof desktopResp.access?.hasVisitHistory !== 'boolean'
+      typeof desktopResp.access?.hasVisitHistory !== 'boolean' ||
+      !Array.isArray(desktopResp.lists)
     ) {
       return {
         success: false,

@@ -1,0 +1,62 @@
+- Deleting selected items from a list sometimes misses a few items. The issue happens when I select items in a search query, not sure if it can happen in normal view as well.
+- I don't think this is the cause. The selected items didn't change before I pressed delete. Unless you mean the "clearing" doesn't affect UI states?
+- Couldn't you try to reproduce this? I think the condition is pretty simple, open a list, run a search, select and delete some of the items
+- Don't only select consecutive items.
+- How did you check? I see there were errors like "Could not refresh current view". Didn't you see that?
+- The smaller run already showed errors.
+- In my initial case, there were no errors. How confident are you that you have fixed the issue that I encountered?
+- Ok. Let's work on other improvements. When dragging a page to a list, the current view should immediately show the new list's tag.
+- Continue
+- Sometimes the browser popup still flickers when being opened. Let's investigate and list the possible causes before performing any fixes.
+- Are the confirmed causes easy to fix?
+- Help me understand the second point. I thought the code flow after popup is clicked is, to prepare UI content and then invoke Chrome window paint? Do you mean currently we invoke Chrome paint (transparent) and then prepare the UI?
+- Why couldn't we prepare the dashboard before opening?
+- Okay, proceed with your proposed improvements
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) 
+- Fix them
+- Let's fix another issue. In the sidebar of the desktop app, on selected list item, the '+' and '-' sign has muted color compared to the rounded bullet.
+- Add a filter in the search filter panel: "Tagged". In timeline view, it filters page with any tag (liked, snapshot, a list); in list view it filters the same way except "exist in current list" is not considered a tag.
+- Delegate this review to one subagent working in /Users/xyt/dev/browser-recall. Pass it the complete review instructions below and ask it to include staged, unstaged, and untracked files without modifying files. Reuse an active review of these changes.
+
+When starting a new review, call the collaboration spawn tool exactly once with fork_turns: none. Give this fresh child only the review context and execution instructions, not this conversation or its attachments. Tell it not to spawn agents, change code, or send or post anything to external services. Once the child starts, wait for that same child only; do not replace it, spawn in parallel, or review it yourself. If the child fails, report that failure instead of review findings.
+
+Keep this conversation available and return the reviewer's findings here with file locations. Do not fix issues unless the user asks. If subagent tools are unavailable, perform the same read-only review here.
+
+## Code review guidelines:
+# Review Guidelines
+
+You are acting as a reviewer for a proposed code change made by another engineer.
+
+Review the change and respond in normal Markdown. Do not return JSON, XML, a findings object, or any structured review schema.
+
+When feedback should be attached directly to a changed line, emit one `::code-comment{...}` directive for that issue. The directive creates an inline code comment in the review UI; keep the visible response as normal Markdown. Emit no directives when there are no actionable inline comments.
+
+Required `code-comment` attributes: `title`, `body`, and `file`. Optional attributes: `start`, `end`, and `priority`. Use the shortest useful line range. `file` should be an absolute path or include the workspace folder segment.
+
+Focus on discrete, actionable issues the original author would likely fix if they knew about them. Prefer no issues over speculative or low-signal feedback.
+
+General guidelines for whether to call out an issue:
+
+1. It meaningfully impacts correctness, performance, security, or maintainability.
+2. It is discrete and actionable.
+3. It was introduced by the change under review.
+4. The author would likely fix it once aware.
+5. It does not rely on unstated assumptions about intent.
+6. It identifies the affected behavior clearly rather than speculating broadly.
+
+## Repository Rule Attribution
+
+Use the root and scoped project instruction files applicable to changed files, respecting normal project-document precedence (`AGENTS.override.md`, `AGENTS.md`, then configured fallback filenames) and selecting at most one file per directory. Guidance may use headings, checklists, bullets, tables, or concise prose; do not require formal IDs or schemas. More-specific guidance wins on conflict, and user instructions about review scope or style take precedence.
+
+Review the diff independently and deduplicate findings by changed location and defect/remedy. A finding is rule-supported only when applicable guidance materially contributes repository-specific scope, an invariant, remedy, convention, or confirmation behavior beyond generic correctness advice. Preserve and union rule support when candidates merge, then check every final candidate against the applicable rules. Do not omit ordinary findings or invent findings solely because a rule file exists.
+
+When collaboration is available, use at most one focused investigator per applicable rule. For each rule-supported finding, verify the applicable project instruction file that supplies the rule and its smallest supporting line range, then include one compact Markdown or local-file reference in the visible comment body. Do not fabricate citations or add hidden metadata.
+
+When you call out an issue, include the relevant file and line or function in prose, explain the scenario where it matters, and keep the explanation concise. Use priority labels such as `[P1]` or `[P2]` only when helpful to communicate severity.
+
+If there are no actionable issues, say that directly and briefly.
+Review the code changes against the base branch 'origin/main'. The merge base commit for this comparison is 00853b0de927095bfa88450405eb800752697842. Run `git diff 00853b0de927095bfa88450405eb800752697842` to inspect the changes relative to origin/main. Provide concise, actionable feedback in a normal Markdown response.
+## My request:
+Please review changes on main against origin/main
+- Fix them all
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) co-author=GPT-6.1 Sol, GPT-6.2 Sol

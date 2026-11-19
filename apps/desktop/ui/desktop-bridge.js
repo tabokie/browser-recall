@@ -1,6 +1,7 @@
 const reviewOpportunities = new Set([
   'saveListMeta',
   'toggleListPin',
+  'removeListPins',
   'updateNote',
   'replaceNote',
   'renamePage',

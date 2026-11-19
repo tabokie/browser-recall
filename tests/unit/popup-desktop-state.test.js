@@ -1377,7 +1377,9 @@ describe('popup desktop state rendering', () => {
     await import('../../apps/extension/popup.js');
 
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(document.documentElement.style.opacity).toBe('0');
+    expect(getComputedStyle(document.getElementById('dashboard')).opacity).toBe(
+      '0',
+    );
     expect(document.documentElement.dataset.popupHidden).toBe('true');
     expect(getComputedStyle(document.documentElement).backgroundColor).toBe(
       'rgb(247, 244, 234)',
@@ -1454,7 +1456,9 @@ describe('popup desktop state rendering', () => {
       ),
     );
 
-    expect(document.documentElement.style.opacity).toBe('0');
+    expect(getComputedStyle(document.getElementById('dashboard')).opacity).toBe(
+      '0',
+    );
     expect(document.documentElement.dataset.popupHidden).toBe('true');
     expect(getComputedStyle(document.documentElement).backgroundColor).toBe(
       'rgb(247, 244, 234)',
@@ -1465,8 +1469,7 @@ describe('popup desktop state rendering', () => {
     expect(getComputedStyle(document.getElementById('dashboard')).display).toBe(
       'flex',
     );
-    expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
-    expect(document.getElementById('pageUrl').textContent).toBe(tab.url);
+    expect(document.getElementById('pageHeader').style.display).toBe('none');
     expect(document.getElementById('listSection').style.display).toBe('none');
     expect(document.getElementById('notesSection').style.display).toBe('none');
     expect(document.getElementById('snapshotSection').style.display).toBe(
@@ -1495,7 +1498,7 @@ describe('popup desktop state rendering', () => {
       () =>
         document.getElementById('pageTitle').textContent === 'Desktop Title',
     );
-    expect(document.documentElement.style.opacity).toBe('');
+    expect(document.documentElement.dataset.popupHidden).toBeUndefined();
     expect(document.getElementById('pageTitle').textContent).toBe(
       'Desktop Title',
     );

@@ -1481,6 +1481,10 @@
     "message": "टॉगल विफल: $1",
     "description": "Sync device toggle failure."
   },
+  "desktopTagged": {
+    "message": "टैग किए गए",
+    "description": "Localized UI text."
+  },
   "desktopVisitedMultipleTimes": {
     "message": "कई दिनों में देखा गया",
     "description": "Localized UI text."

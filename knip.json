@@ -21,6 +21,7 @@
         "background-test-control.js",
         "content.js",
         "popup.js",
+        "popup-startup.js",
         "snapshot-viewer.js",
         "options-stub.js",
         "spa-navigation-bridge.js",

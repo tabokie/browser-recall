@@ -1481,6 +1481,10 @@
     "message": "فشل التبديل: $1",
     "description": "Sync device toggle failure."
   },
+  "desktopTagged": {
+    "message": "مع علامة",
+    "description": "Localized UI text."
+  },
   "desktopVisitedMultipleTimes": {
     "message": "تمت زيارته في أيام متعددة",
     "description": "Localized UI text."

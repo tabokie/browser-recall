@@ -1,5 +1,7 @@
 import {
+  isPageListTag,
   resultRowHtml as renderResultRow,
+  pageListTagsHtml,
   searchDraftControlHtml,
 } from './timeline-elements.js';
 import { sidebarListItemHtml } from './sidebar-elements.js';
@@ -961,6 +963,7 @@ let pendingShellRoute = window.__BR_STATE__?.route || null;
 let applyingShellRoute = false;
 let shellReady = false;
 let allListPins = {}; // listId -> [{ url, title, pinnedAt }]
+let listMembershipRevision = 0;
 let lastClickedRow = null; // for shift-click range select
 const cardDataByUrl = new Map(); // url → { attDetail, timestamps } for detail overlay
 const listNameById = new Map(); // listId → display name, populated by renderLists()
@@ -1302,12 +1305,13 @@ function mergeSearchResults(newResults, source, gen) {
 
 // Enrich new entries and render the current searchState.results to the virtual scroller.
 async function renderProgressiveResults(gen) {
-  if (gen !== searchState.generation) return;
+  const view = activeView;
+  if (view.type !== 'explore' || gen !== searchState.generation) return;
   // Enrich all entries that haven't been enriched yet
   const unenriched = searchState.results.filter((r) => !r._enriched);
   if (unenriched.length > 0) {
     await enrichFromEntityStorage(unenriched);
-    if (gen !== searchState.generation) return;
+    if (view !== activeView || gen !== searchState.generation) return;
     for (const r of unenriched) r._enriched = true;
   }
   // Apply filters
@@ -2271,30 +2275,27 @@ function createDefaultFilterState() {
     hasHighlights: null, // null=any, true=require
     hasSnapshots: null,
     liked: null,
+    tagged: null,
     visitedMultipleTimes: null,
   };
 }
 
 function validateFilterState(state, key) {
-  const expectedKeys = [
-    'devices',
-    'hasHighlights',
-    'hasSnapshots',
-    'liked',
-    'visitedMultipleTimes',
-  ];
+  const defaults = createDefaultFilterState();
   if (
     !state ||
     typeof state !== 'object' ||
     Array.isArray(state) ||
-    Object.keys(state).length !== expectedKeys.length ||
-    expectedKeys.some(
-      (field) => !Object.prototype.hasOwnProperty.call(state, field),
+    Object.keys(state).some((field) => !Object.hasOwn(defaults, field)) ||
+    Object.keys(defaults).some(
+      (field) => field !== 'tagged' && !Object.hasOwn(state, field),
     )
   ) {
     throw new Error(`Stored filter state ${key} has an invalid shape`);
   }
-  const devices = state.devices;
+  // Filter settings saved before Tagged omit the field.
+  const filter = { tagged: defaults.tagged, ...state };
+  const { devices, ...pageFilters } = filter;
   if (
     !devices ||
     typeof devices !== 'object' ||
@@ -2303,17 +2304,12 @@ function validateFilterState(state, key) {
   ) {
     throw new Error(`Stored filter state ${key}.devices is invalid`);
   }
-  for (const booleanKey of [
-    'hasHighlights',
-    'hasSnapshots',
-    'liked',
-    'visitedMultipleTimes',
-  ]) {
-    if (state[booleanKey] !== null && state[booleanKey] !== true) {
-      throw new Error(`Stored filter state ${key}.${booleanKey} is invalid`);
+  for (const [field, value] of Object.entries(pageFilters)) {
+    if (value !== null && value !== true) {
+      throw new Error(`Stored filter state ${key}.${field} is invalid`);
     }
   }
-  return state;
+  return filter;
 }
 
 function isDefaultFilterState(state) {
@@ -2322,11 +2318,12 @@ function isDefaultFilterState(state) {
     state.hasHighlights === null &&
     state.hasSnapshots === null &&
     state.liked === null &&
+    state.tagged === null &&
     state.visitedMultipleTimes === null
   );
 }
 
-function applyFilters(results) {
+function applyFilters(results, excludeListId = null) {
   if (isDefaultFilterState(filterState)) return results;
   const enabledDevices = Object.keys(filterState.devices);
   return results.filter((item) => {
@@ -2344,6 +2341,16 @@ function applyFilters(results) {
     }
     if (filterState.liked === true) {
       if (!item.likes || item.likes <= 0) return false;
+    }
+    if (
+      filterState.tagged === true &&
+      !(
+        item.likes > 0 ||
+        item.hasSnapshots === true ||
+        item.listSlugs?.some((slug) => isPageListTag(slug, excludeListId))
+      )
+    ) {
+      return false;
     }
     if (filterState.visitedMultipleTimes === true) {
       if (!item.visitCount || item.visitCount <= 1) return false;
@@ -2363,11 +2370,13 @@ function saveFilterState() {
 }
 
 async function loadFilterState() {
+  const view = activeView;
   const key =
-    activeView.type === 'explore'
+    view.type === 'explore'
       ? 'exploreFilterState'
-      : 'listFilterState:' + activeView.id;
+      : 'listFilterState:' + view.id;
   const data = await chrome.storage.session.get(key);
+  if (activeView !== view) return;
   if (Object.prototype.hasOwnProperty.call(data, key)) {
     filterState = validateFilterState(data[key], key);
     return;
@@ -3227,27 +3236,54 @@ async function showExplore({
   }
 }
 
+let listPinsRefreshSequence = 0;
+let listPinFilterSequence = 0;
+let deletingListPinsId = null;
+let readyListView = null;
+let renderedListRulesView = null;
+
+function isCurrentListPinsRefresh(view, sequence) {
+  return activeView === view && sequence === listPinsRefreshSequence;
+}
+
 // Reload list data without replacing the search controls or resetting scroll.
-async function refreshListPins() {
-  const listId = activeView.id;
-  const projection = await loadListDisplay(listId);
-  if (!projection) throw new Error(`List not found: ${listId}`);
-  if (activeView.type !== 'list' || activeView.id !== listId) return;
-  const pins = projection.pins;
-  allListPins[listId] = pins;
-  updatePinCount(listId, pins.length);
-  const { pinsResolved, pageSnap } = await resolvePinsForDisplay(pins);
-  const enriched = pinsResolved.map((r) => enrichPinResult(r, pins, pageSnap));
-  await renderListPinView(enriched, listId, {
-    preserveScroll: true,
-    renderPanel: false,
-  });
+async function refreshListPins({ preserveScroll = true } = {}) {
+  const view = activeView;
+  if (view !== readyListView) return;
+  const refreshSequence = ++listPinsRefreshSequence;
+  const listId = view.id;
+  try {
+    const projection = await readWithCurrentListMemberships(
+      () => loadListDisplay(listId),
+      () => isCurrentListPinsRefresh(view, refreshSequence),
+    );
+    if (!isCurrentListPinsRefresh(view, refreshSequence)) return;
+    if (!projection) throw new Error(`List not found: ${listId}`);
+    const pins = projection.pins;
+    const { pinsResolved, pageSnap } = await resolvePinsForDisplay(pins);
+    if (!isCurrentListPinsRefresh(view, refreshSequence)) return;
+    allListPins[listId] = pins;
+    updatePinCount(listId, pins.length);
+    if (renderedListRulesView !== view) {
+      renderRulesSection(listId, projection.rules);
+      renderedListRulesView = view;
+    }
+    listPinsData = pinsResolved.map((pin) =>
+      enrichPinResult(pin, pins, pageSnap),
+    );
+    await runListPinFilter({ preserveScroll });
+  } catch (error) {
+    if (isCurrentListPinsRefresh(view, refreshSequence)) throw error;
+  }
 }
 
 async function showList(list) {
   const displayName = listDisplayName(list);
-  activeView = { type: 'list', id: list.slug, name: list.name || null };
-  committedSearchQuery = committedQueryFromSession(await loadSearchQuery());
+  const view = { type: 'list', id: list.slug, name: list.name || null };
+  activeView = view;
+  const query = await loadSearchQuery();
+  if (activeView !== view) return;
+  committedSearchQuery = committedQueryFromSession(query);
   draftSearchInput = committedSearchQuery;
   updateSidebarActive();
   updateMainTitle(displayName);
@@ -3285,34 +3321,14 @@ async function showList(list) {
   renderListSkeleton();
 
   try {
-    const listId = list.slug;
-
     await loadFilterState();
-
-    const listProjection = await loadListDisplay(listId);
-    if (!listProjection) throw new Error(`List not found: ${listId}`);
-    allListPins[listId] = listProjection.pins;
-    const pins = allListPins[listId];
-    updatePinCount(listId, pins.length);
-
-    // Render rules section
-    renderRulesSection(listId, listProjection.rules);
-
-    if (pins.length === 0) {
-      listPinsData = [];
-      listPinsListId = listId;
-      renderSearchPanel();
-      document.getElementById('relatedResults').innerHTML =
-        `<div class="no-results">${escapeHtml(tr('desktopNoPinnedPages', 'No pinned pages'))}</div>`;
-      document.getElementById('relatedChart').classList.remove('visible');
-    } else {
-      const { pinsResolved, pageSnap } = await resolvePinsForDisplay(pins);
-      const enriched = pinsResolved.map((r) =>
-        enrichPinResult(r, pins, pageSnap),
-      );
-      await renderListPinView(enriched, listId);
-    }
+    if (activeView !== view) return;
+    listPinsData = [];
+    readyListView = view;
+    renderSearchPanel();
+    await refreshListPins({ preserveScroll: false });
   } catch (error) {
+    if (activeView !== view) return;
     logError('List load error:', error);
     document.getElementById('relatedResults').innerHTML =
       `<div class="no-results">${escapeHtml(tr('desktopErrorPrefix', `Error: ${error.message}`, [error.message]))}</div>`;
@@ -3992,19 +4008,6 @@ function initRulesPanel() {
 }
 
 let listPinsData = [];
-let listPinsListId = null;
-
-// Render all pins into #relatedResults with search filtering support
-async function renderListPinView(
-  allPins,
-  listId,
-  { preserveScroll = false, renderPanel = true } = {},
-) {
-  listPinsData = allPins;
-  listPinsListId = listId;
-  if (renderPanel) renderSearchPanel();
-  await runListPinFilter({ preserveScroll });
-}
 
 // Run the active view's search pipeline after an explicit commit/filter change.
 function runActiveSearchPipeline() {
@@ -4018,13 +4021,22 @@ function runActiveSearchPipeline() {
     if (runActiveSearchPipeline._preserveScroll) {
       preserveRelatedScrollOnNextRender = true;
     }
-    runListPinFilter();
+    void runListPinFilter().catch((error) =>
+      surfaceBackgroundError('Could not filter the current list', error),
+    );
   }
   runActiveSearchPipeline._preserveScroll = false;
 }
 
 // Filter list pins by the committed query, then apply filters
 async function runListPinFilter({ preserveScroll = false } = {}) {
+  const view = activeView;
+  if (view !== readyListView) return;
+  const refreshSequence = listPinsRefreshSequence;
+  const filterSequence = ++listPinFilterSequence;
+  const isCurrent = () =>
+    filterSequence === listPinFilterSequence &&
+    isCurrentListPinsRefresh(view, refreshSequence);
   const allQueries = committedSearchQuery.trim()
     ? [committedSearchQuery.trim()]
     : [];
@@ -4043,11 +4055,17 @@ async function runListPinFilter({ preserveScroll = false } = {}) {
 
   // Apply structured filters (same as explore)
   if (!isDefaultFilterState(filterState)) {
-    await enrichFromEntityStorage(filtered);
+    try {
+      await enrichFromEntityStorage(filtered);
+    } catch (error) {
+      if (isCurrent()) throw error;
+      return;
+    }
+    if (!isCurrent()) return;
   }
-  filtered = applyFilters(filtered);
+  filtered = applyFilters(filtered, view.id);
 
-  renderFilteredPins(filtered, listPinsListId, allQueries.join(' '), {
+  renderFilteredPins(filtered, view.id, allQueries.join(' '), {
     preserveScroll,
   });
   if (searchState.reviewOnCompletion) {
@@ -4322,15 +4340,15 @@ function processHistoryForDisplay(entries, { globalDedup = false } = {}) {
   return results;
 }
 
-async function loadProjectedPages(slugs) {
-  const contexts = await loadPageContext(slugs);
-  const pages = {};
-  for (const slug of slugs) {
-    const context = contexts[slug];
-    if (!context) continue;
-    pages[slug] = context.page;
-  }
-  return { contexts, pages };
+async function readWithCurrentListMemberships(read, isCurrent = () => true) {
+  // A read started before a confirmed pin change can contain older memberships.
+  let revision;
+  let projection;
+  do {
+    revision = listMembershipRevision;
+    projection = await read();
+  } while (revision !== listMembershipRevision && isCurrent());
+  return projection;
 }
 
 // Batch-fetch page entities for all unique slugs in entries, enrich with entity titles.
@@ -4338,12 +4356,14 @@ async function enrichFromEntityStorage(entries, opts = {}) {
   const { includeVisitDates = true } = opts;
   const allSlugs = [...new Set(entries.map((r) => r.slug).filter(Boolean))];
   if (allSlugs.length === 0) return;
-  const { contexts, pages } = await loadProjectedPages(allSlugs);
+  const contexts = await readWithCurrentListMemberships(() =>
+    loadPageContext(allSlugs),
+  );
 
   for (const entry of entries) {
-    const page = pages[entry.slug];
-    if (!page) continue;
     const context = contexts[entry.slug];
+    if (!context) continue;
+    const { page } = context;
     if (!entry.title && page.title) entry.title = page.title;
     entry.user_title = page.user_title ?? null;
     entry.hasSnapshots = page.hasSnapshots === true;
@@ -4361,6 +4381,53 @@ async function enrichFromEntityStorage(entries, opts = {}) {
     entry.visitCount = page.visitDates.length;
     entry.hasHighlightNotes = context.notes.length > 0;
   }
+}
+
+function applyAddedPageListTags(list, urls) {
+  listMembershipRevision++;
+  const { slug, name } = list;
+  listNameById.set(slug, name);
+  const entries = new Set([
+    ...searchState.results,
+    ...listPinsData,
+    ...(globalVirtualScroller?._fullData || []),
+    ...(relatedVirtualScroller?._fullData || []),
+  ]);
+  for (const entry of entries) {
+    if (urls.has(entry.url) && !entry.listSlugs?.includes(slug)) {
+      entry.listSlugs = [...(entry.listSlugs ?? []), slug].sort();
+    }
+  }
+
+  const tag = pageListTagsHtml([slug], listNameById, getActivePinListId());
+  if (!tag) return;
+  const container = getActiveContainer();
+  const anchor = captureRelatedDomScrollAnchor(container);
+  const scroller = container?._virtualScroller;
+  const cards = new Set([
+    ...(container?.querySelectorAll('.result-item') || []),
+    ...(scroller?._savedNodes.values() || []),
+  ]);
+  let added = false;
+  for (const card of cards) {
+    const url = card.querySelector('.result-row')?.dataset.url;
+    if (!urls.has(url)) continue;
+    const existing = [...card.querySelectorAll('.card-tag-list')];
+    if (existing.some((element) => element.dataset.listSlug === slug)) continue;
+    const next = existing.find((element) => element.dataset.listSlug > slug);
+    let extras = card.querySelector('.card-extras');
+    if (!extras) {
+      extras = document.createElement('div');
+      extras.className = 'card-extras';
+      card.appendChild(extras);
+    }
+    if (next) next.insertAdjacentHTML('beforebegin', tag);
+    else extras.insertAdjacentHTML('beforeend', tag);
+    added = true;
+  }
+  if (!added) return;
+  scroller?.onExpandToggle();
+  restoreRelatedDomScrollAnchor(container, anchor);
 }
 
 async function displayHistoryRows(entries, { preserveScroll = false } = {}) {
@@ -5876,35 +5943,43 @@ function bindSidebarItemDragDrop(item, node) {
       try {
         const data = JSON.parse(e.dataTransfer.getData('text/plain'));
         const items = data.items || [{ url: data.url, title: data.title }];
-        if (!allListPins[node.slug]) allListPins[node.slug] = [];
-        const pins = allListPins[node.slug];
-        const newUrls = [];
-        const titles = [];
-        for (const { url, title } of items) {
-          const pinSlug = generateSlugFromUrl(url);
-          if (
-            url &&
-            !pins.some((pin) => pin.kind === 'page' && pin.slug === pinSlug)
-          ) {
-            pins.push({ kind: 'page', slug: pinSlug, pinnedAt: Date.now() });
-            newUrls.push(url);
-            titles.push(title || null);
-          }
-        }
-        if (newUrls.length > 0) {
+        const pages = [
+          ...new Map(items.map((page) => [page.url, page])).values(),
+        ];
+        const urls = pages.map((page) => page.url);
+        const titles = pages.map((page) => page.title || null);
+        if (urls.length > 0) {
           const msg = {
             action: 'addListPins',
             listId: node.slug,
-            urls: newUrls,
+            urls,
           };
           if (titles.some(Boolean)) msg.titles = titles;
-          await sendAction(msg);
+          const { list, confirmedUrls } = await sendAction(msg);
+          // Bookmark imports can retain query parameters that browser capture
+          // removes. Match the exact URLs confirmed by the daemon.
+          const confirmed = Array.isArray(confirmedUrls)
+            ? new Set(confirmedUrls)
+            : null;
+          if (
+            list?.slug !== node.slug ||
+            typeof list.name !== 'string' ||
+            !list.name.trim() ||
+            !confirmed ||
+            confirmedUrls.length !== urls.length ||
+            urls.some((url) => !confirmed.has(url))
+          ) {
+            throw new Error('addListPins returned incomplete list memberships');
+          }
+          delete allListPins[node.slug];
+          applyAddedPageListTags(list, confirmed);
           if (activeView.type === 'list' && activeView.id === node.slug) {
-            void showList(node).then(() => desktopReviewRequests.completed());
+            await refreshCurrentView();
+            desktopReviewRequests.completed();
           }
         }
       } catch (err) {
-        logError('Drop error:', err);
+        surfaceBackgroundError('Could not finish adding pages to list', err);
       }
     }
   });
@@ -7826,6 +7901,34 @@ function parsePreciseHistoryMutation(request) {
 let mutationRefreshTimer = null;
 const pendingHistoryMutationRequests = [];
 
+async function refreshTaggedResults(urls) {
+  if (filterState.tagged !== true || searchDraftPreviewActive) return;
+  const affected = urls?.length ? new Set(urls) : null;
+  if (activeView.type === 'list') {
+    if (affected && !listPinsData.some((pin) => affected.has(pin.url))) return;
+    await runListPinFilter({ preserveScroll: true });
+    return;
+  }
+  if (activeView.type !== 'explore') return;
+  if (!committedSearchQuery.trim()) {
+    await refreshCurrentView();
+    return;
+  }
+
+  // Keep the existing search and update the affected candidates, including
+  // pages currently hidden by Tagged.
+  let changed = false;
+  for (const result of searchState.results) {
+    if (affected && !affected.has(result.url)) continue;
+    delete result._enriched;
+    changed = true;
+  }
+  if (changed) {
+    preserveRelatedScrollOnNextRender = true;
+    await renderProgressiveResults(searchState.generation);
+  }
+}
+
 chrome.runtime.onMessage.addListener((request) => {
   if (request.action !== 'mutation') return;
 
@@ -7929,14 +8032,18 @@ chrome.runtime.onMessage.addListener((request) => {
       }
     }, 500);
   } else if (type === 'pins') {
-    // List pins changed — invalidate caches and re-render active list.
+    listMembershipRevision++;
+    if (request.listId) delete allListPins[request.listId];
+    else allListPins = {};
     const activeListId = activeView.type === 'list' ? activeView.id : null;
-    if (request.listId) {
-      delete allListPins[request.listId];
-      if (request.listId === activeListId) void refreshCurrentView();
+    if (activeListId && activeListId === deletingListPinsId) return;
+    if (activeListId && (!request.listId || request.listId === activeListId)) {
+      void refreshCurrentView();
     } else {
-      allListPins = {};
-      if (activeListId) void refreshCurrentView();
+      const urls = request.urls ?? (request.url ? [request.url] : undefined);
+      void refreshTaggedResults(urls).catch((error) =>
+        surfaceBackgroundError('Could not refresh Tagged results', error),
+      );
     }
   } else if (type === 'lists') {
     renderLists();
@@ -8151,6 +8258,11 @@ function renderFilterPanelHtml() {
     'liked',
     tr('extensionLiked', 'Liked'),
     filterState.liked,
+  );
+  html += renderCheckboxFilter(
+    'tagged',
+    tr('desktopTagged', 'Tagged'),
+    filterState.tagged,
   );
   html += renderCheckboxFilter(
     'visitedMultipleTimes',
@@ -8430,20 +8542,12 @@ function bindFilterEvents(container) {
 // Entity-scan filter: scan page checkpoints instead of all history JSONL files.
 // Page projections contain the materialized visit state and page properties
 // needed by filters without loading raw event logs.
-async function runEntityScanFilter() {
-  showSearchSpinner();
-  const contexts = await loadAllPageContext();
-  const pages = Object.fromEntries(
-    Object.entries(contexts).map(([slug, context]) => [slug, context.page]),
-  );
-  const slugs = Object.keys(contexts);
-
+function entityScanResults(contexts) {
   // Build display rows from page entities
   const seenUrls = new Set();
   const results = [];
 
-  for (const slug of slugs) {
-    const page = pages[slug];
+  for (const [slug, { page, notes, lists }] of Object.entries(contexts)) {
     if (seenUrls.has(page.url)) continue;
     seenUrls.add(page.url);
 
@@ -8460,8 +8564,6 @@ async function runEntityScanFilter() {
     const d = new Date(latestTs);
     const day =
       d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
-
-    const notes = contexts[slug].notes;
 
     results.push({
       url: page.url,
@@ -8481,7 +8583,7 @@ async function runEntityScanFilter() {
       latestTs,
       deviceIds: new Set(Object.keys(timestamps)),
       hasSnapshots: page.hasSnapshots === true,
-      listSlugs: contexts[slug].lists.map((list) => list.slug),
+      listSlugs: lists.map((list) => list.slug),
       likes: page.likes,
       createdAt: page.createdAt,
       hasHighlightNotes: notes.length > 0,
@@ -8519,7 +8621,6 @@ async function runEntityScanFilter() {
     });
   }
 
-  hideSearchSpinner();
   return results;
 }
 
@@ -8582,16 +8683,32 @@ async function runSearchFilterPipeline() {
   }
 
   cancelActiveHistorySearch();
+  const view = activeView;
+  const generation = ++searchState.generation;
+  const isCurrent = () =>
+    view === activeView && generation === searchState.generation;
   // No search queries → show all history (demand-loaded)
   const hasActiveFilters = !isDefaultFilterState(filterState);
 
   let results;
   if (hasActiveFilters) {
     // Page projections are the authoritative filter input.
-    results = await runEntityScanFilter();
-    results = applyFilters(results);
-    hideSearchSpinner();
+    showSearchSpinner();
+    try {
+      const contexts = await readWithCurrentListMemberships(
+        loadAllPageContext,
+        isCurrent,
+      );
+      if (!isCurrent()) return;
+      results = applyFilters(entityScanResults(contexts));
+    } catch (error) {
+      if (isCurrent()) throw error;
+      return;
+    } finally {
+      if (generation === searchState.generation) hideSearchSpinner();
+    }
   } else {
+    hideSearchSpinner();
     results = processHistoryForDisplay(
       historyEntriesWithUrls(historyState.allEntries),
     ).map((item) => ({ ...item, relevance: 0 }));
@@ -8599,6 +8716,8 @@ async function runSearchFilterPipeline() {
 
   const relatedContainer = document.getElementById('relatedResults');
   if (results.length === 0) {
+    disableRelatedVirtualScrollerForDirectRender(relatedContainer);
+    preserveRelatedScrollOnNextRender = false;
     consumeRelatedTopReset();
     relatedContainer.innerHTML = `<div class="no-results">${escapeHtml(tr('desktopNoResults', 'No results'))}</div>`;
     document.getElementById('relatedChart').classList.remove('visible');
@@ -9318,15 +9437,26 @@ document.addEventListener('keydown', async (e) => {
     return;
   }
 
-  // Unpin each selected row from the active list
+  if (deletingListPinsId !== null) return;
+
+  // Keep one stable selection and refresh once after the daemon commits it.
   const listId = activeView.id;
-  for (const row of selected) {
-    const url = row.dataset.url;
-    const title = row.dataset.title;
-    if (url) await toggleResultPin(listId, url, title);
+  const urls = [...new Set(selected.map((row) => row.dataset.url))].filter(
+    Boolean,
+  );
+  deletingListPinsId = listId;
+  ++listPinsRefreshSequence;
+  try {
+    await sendAction({ action: 'removeListPins', listId, urls });
+  } catch (error) {
+    surfaceBackgroundError('Could not remove selected pages from list', error);
+  } finally {
+    deletingListPinsId = null;
+    if (activeView.type === 'list' && activeView.id === listId) {
+      preserveRelatedScrollOnNextRender = true;
+      void refreshCurrentView();
+    }
   }
-  preserveRelatedScrollOnNextRender = true;
-  void refreshCurrentView();
 });
 
 // --- Ctrl+C / Ctrl+V for page copy-paste ---

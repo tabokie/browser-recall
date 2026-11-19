@@ -1,5 +1,5 @@
 <!doctype html>
-<html data-popup-hidden="true" style="background-color: #f7f4ea; opacity: 0">
+<html data-popup-hidden="true">
   <head>
     <meta charset="UTF-8" />
     <title data-i18n="extensionShortName">browser-recall</title>
@@ -89,9 +89,13 @@
         padding: 0;
       }
 
-      /* Reserve the startup size until the complete popup is revealed, then
-         let the browser fit the popup window to its visible content. */
-      html[data-popup-hidden] body {
+      /* Keep the canvas painted while startup content is hidden. Once the
+         dashboard is laid out, let the browser size the window before reveal. */
+      html[data-popup-hidden] body > :not(script) {
+        opacity: 0;
+      }
+
+      html[data-popup-hidden='true'] body {
         min-height: 320px;
       }
 
@@ -1157,6 +1161,7 @@
     <script src="browser-build-target.js"></script>
     <script src="browser-api.js"></script>
     <script src="extension-surface.js"></script>
+    <script src="popup-startup.js"></script>
     <script type="module" src="popup.js"></script>
   </body>
 </html>

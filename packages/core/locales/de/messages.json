@@ -1481,6 +1481,10 @@
     "message": "Umschalten fehlgeschlagen: $1",
     "description": "Sync device toggle failure."
   },
+  "desktopTagged": {
+    "message": "Mit Tags",
+    "description": "Localized UI text."
+  },
   "desktopVisitedMultipleTimes": {
     "message": "An mehreren Tagen besucht",
     "description": "Localized UI text."

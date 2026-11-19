@@ -8,6 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { stageDesktopUiAssets } from '../../scripts/stage-app-assets.mjs';
 import { listKey, pageKey } from '../../packages/core/entity-types.js';
+import { generateSlug } from '../../packages/core/page-identity.js';
 import { generateSlugFromUrl } from '../../packages/core/utils.js';
 import { VIRTUAL_SCROLLER_BUFFER } from '../../packages/core/virtual-scroller.js';
 import { pickSeeded, seededRandom } from './helpers.js';
@@ -1397,14 +1398,47 @@ async function installDesktopBridgeMock(page, options = {}) {
               pins: [],
             };
             const pins = [...(entity.pins || [])];
+            const confirmedUrls = new Set();
             for (const url of request.urls || []) {
               const pinId = pageKeyForUrl(url);
               if (!pinId) continue;
+              confirmedUrls.add(url);
               if (!pins.some((pin) => pin.id === pinId)) {
                 pins.push({ id: pinId, pinnedAt: Date.now() });
               }
+              const page = stores.session.get(pinId);
+              if (page) {
+                stores.session.set(pinId, {
+                  ...page,
+                  parentIds: [...new Set([...(page.parentIds || []), key])],
+                });
+              }
             }
             stores.session.set(key, { ...entity, pins });
+            return {
+              success: true,
+              list: { slug: entity.slug, name: entity.name },
+              confirmedUrls: [...confirmedUrls],
+            };
+          }
+          case 'removeListPins': {
+            const key = `list:${request.listId}`;
+            const list = stores.session.get(key);
+            if (!list) return { success: false, error: 'List not found' };
+            const ids = new Set(request.urls.map(pageKeyForUrl));
+            stores.session.set(key, {
+              ...list,
+              pins: list.pins.filter((pin) => !ids.has(pin.id)),
+            });
+            for (const id of ids) {
+              const page = stores.session.get(id);
+              if (page) {
+                stores.session.set(id, {
+                  ...page,
+                  parentIds: (page.parentIds || []).filter((id) => id !== key),
+                });
+              }
+            }
             return { success: true };
           }
           case 'updateListTree':
@@ -2084,77 +2118,91 @@ test.describe('desktop visual regression', () => {
     });
   });
 
-  test('mono selected leaf lists keep the marker and pin count visible', async ({
-    page,
-  }) => {
-    const pinnedUrl = 'https://example.com/mono-selected-list';
-    const pinnedSlug = generateSlugFromUrl(pinnedUrl);
+  for (const colorScheme of ['amber', 'mono']) {
+    test(`selected sidebar list markers share a foreground in ${colorScheme} @webkit`, async ({
+      page,
+    }, testInfo) => {
+      const pinnedUrl = 'https://example.com/mono-selected-list';
+      const pinnedSlug = generateSlugFromUrl(pinnedUrl);
 
-    await serveDesktopUi(async (desktopUrl) => {
-      await openDesktopUi(page, desktopUrl, {
-        setupComplete: true,
-        colorScheme: 'mono',
-        extraSession: {
-          'list:design': {
-            slug: 'design',
-            name: 'Design references',
-            pins: [
-              {
-                id: pageKey(pinnedSlug),
-                pinnedAt: Date.now(),
-                source: null,
-              },
-            ],
+      await serveDesktopUi(async (desktopUrl) => {
+        await openDesktopUi(page, desktopUrl, {
+          setupComplete: true,
+          colorScheme,
+          extraSession: {
+            'list:design': {
+              slug: 'design',
+              name: 'Design references',
+              pins: [
+                {
+                  id: pageKey(pinnedSlug),
+                  pinnedAt: Date.now(),
+                  source: null,
+                },
+              ],
+            },
+            [pageKey(pinnedSlug)]: {
+              slug: pinnedSlug,
+              url: pinnedUrl,
+              title: 'Mono selected list',
+            },
           },
-          [pageKey(pinnedSlug)]: {
-            slug: pinnedSlug,
-            url: pinnedUrl,
-            title: 'Mono selected list',
-          },
-        },
-      });
+        });
 
-      const design = page.locator('.sidebar-item[data-list-id="design"]');
-      await design.evaluate((item) => item.click());
-      await expect(design).toHaveClass(/active/);
-      await expect(design.locator('.pin-count')).toHaveText('1');
+        const design = page.locator('.sidebar-item[data-list-id="design"]');
+        const research = page.locator('.sidebar-item[data-list-id="research"]');
+        const toggle = research.locator('.fold-toggle');
 
-      expect(
-        await design.evaluate((item) => {
-          const marker = item.querySelector('.list-leaf-dot');
-          const count = item.querySelector('.pin-count');
-          return {
-            foreground: getComputedStyle(item).color,
-            marker: getComputedStyle(marker, '::before').borderTopColor,
-            count: getComputedStyle(count).color,
-          };
-        }),
-      ).toEqual({
-        foreground: 'rgb(255, 255, 255)',
-        marker: 'rgb(255, 255, 255)',
-        count: 'rgb(255, 255, 255)',
-      });
+        for (const theme of ['light', 'dark']) {
+          await page.evaluate(
+            (theme) =>
+              document.documentElement.setAttribute('data-theme', theme),
+            theme,
+          );
+          await design.evaluate((item) => item.click());
+          await expect(design).toHaveClass(/active/);
+          await expect(design.locator('.pin-count')).toHaveText('1');
+          const { foreground, marker, count } = await design.evaluate(
+            (item) => ({
+              foreground: getComputedStyle(item).color,
+              marker: getComputedStyle(
+                item.querySelector('.list-leaf-dot'),
+                '::before',
+              ).borderTopColor,
+              count: getComputedStyle(item.querySelector('.pin-count')).color,
+            }),
+          );
+          expect(marker).toBe(foreground);
+          expect(count).toBe(foreground);
+          if (colorScheme === 'mono') {
+            expect(foreground).toBe(
+              theme === 'light' ? 'rgb(255, 255, 255)' : 'rgb(26, 26, 26)',
+            );
+          }
 
-      await page.evaluate(() =>
-        document.documentElement.setAttribute('data-theme', 'dark'),
-      );
-      expect(
-        await design.evaluate((item) => {
-          const marker = item.querySelector('.list-leaf-dot');
-          const count = item.querySelector('.pin-count');
-          return {
-            foreground: getComputedStyle(item).color,
-            marker: getComputedStyle(marker, '::before').borderTopColor,
-            count: getComputedStyle(count).color,
-          };
-        }),
-      ).toEqual({
-        foreground: 'rgb(26, 26, 26)',
-        marker: 'rgb(26, 26, 26)',
-        count: 'rgb(26, 26, 26)',
+          await research.locator('.label').click();
+          await expect(research).toHaveClass(/active/);
+          for (const expanded of [true, false]) {
+            await expect(toggle).toHaveAttribute(
+              'aria-expanded',
+              String(expanded),
+            );
+            const strokes = await toggle.evaluate((button) => [
+              getComputedStyle(button, '::before').backgroundColor,
+              getComputedStyle(button, '::after').backgroundColor,
+            ]);
+            if (strokes.some((color) => color !== marker)) {
+              await research.screenshot({
+                path: testInfo.outputPath(`selected-list-marker-${theme}.png`),
+              });
+            }
+            expect(strokes).toEqual([marker, marker]);
+            await toggle.click();
+          }
+        }
       });
     });
-  });
+  }
 
   test('timeline selection paints before timeline content rendering starts @webkit', async ({
     page,
@@ -6670,6 +6718,156 @@ test.describe('desktop visual regression', () => {
     });
   });
 
+  test('Tagged filters Timeline and ignores the current list membership in list view @webkit', async ({
+    page,
+  }) => {
+    const visitedAt = Date.now() - 1000;
+    const research = listKey('research');
+    const reading = listKey('reading');
+    const fixtures = [
+      { name: 'liked', parentIds: [research], likes: 1 },
+      {
+        name: 'snapshot',
+        parentIds: [research],
+        childIds: ['snapshot:tagged-filter-snapshot'],
+      },
+      { name: 'other-list', parentIds: [research, reading] },
+      { name: 'current-list-only', parentIds: [research] },
+      { name: 'untagged', parentIds: [] },
+    ].map(({ name, ...properties }) => {
+      const url = `https://tagged-filter.example/${name}`;
+      return {
+        slug: generateSlugFromUrl(url),
+        url,
+        title: `Tagged filter ${name}`,
+        name,
+        ...properties,
+      };
+    });
+    const previousFilterState = {
+      devices: {},
+      hasHighlights: null,
+      hasSnapshots: null,
+      liked: null,
+      visitedMultipleTimes: null,
+    };
+    const extraSession = {
+      exploreFilterState: previousFilterState,
+      'listFilterState:research': previousFilterState,
+      ...Object.fromEntries(
+        fixtures.map(({ name, ...record }) => [
+          pageKey(record.slug),
+          {
+            childIds: [],
+            timestamps: { 'device-a': visitedAt },
+            createdAt: visitedAt,
+            visitDates: [visitDateInt(todayKey())],
+            ...record,
+          },
+        ]),
+      ),
+      [research]: {
+        slug: 'research',
+        name: 'Research',
+        pins: fixtures
+          .filter(({ parentIds }) => parentIds.includes(research))
+          .map(({ slug }) => ({ id: pageKey(slug), pinnedAt: visitedAt })),
+      },
+    };
+    const historyEntries = fixtures.map(({ url, title }) => ({
+      action: 'visit_page',
+      url,
+      title,
+      timestamp: visitedAt,
+      deviceId: 'device-a',
+    }));
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, { extraSession, historyEntries });
+      const rows = page.locator(
+        '#relatedResults .result-row[data-url^="https://tagged-filter.example/"]',
+      );
+      const expectMatchingPages = async (names) => {
+        await expect(rows).toHaveCount(names.length);
+        for (const name of names) {
+          await expect(
+            page.locator(
+              `#relatedResults .result-row[data-url="https://tagged-filter.example/${name}"]`,
+            ),
+          ).toBeVisible();
+        }
+      };
+      const listMatches = ['liked', 'snapshot', 'other-list'];
+      const timelineMatches = [...listMatches, 'current-list-only'];
+      const tagged = page.getByRole('checkbox', {
+        name: 'Tagged',
+        exact: true,
+      });
+      const changeReadingMembership = async (name, add) => {
+        await page.evaluate(
+          async ({ url, add }) => {
+            const result = await window.__TAURI__.core.invoke('bridge_action', {
+              request: {
+                action: add ? 'addListPins' : 'removeListPins',
+                listId: 'reading',
+                urls: [url],
+              },
+            });
+            if (!result.success) throw new Error(result.error);
+            window.__desktopVisualHarness.emitRuntimeMessage({
+              action: 'mutation',
+              type: 'pins',
+              listId: 'reading',
+              urls: [url],
+            });
+          },
+          { url: fixtures.find((fixture) => fixture.name === name).url, add },
+        );
+      };
+      await expectMatchingPages([...timelineMatches, 'untagged']);
+      await page.locator('#filterToggleBtn').click();
+      await expect(tagged).not.toBeChecked();
+      await tagged.check();
+      await expectMatchingPages(timelineMatches);
+      await changeReadingMembership('untagged', true);
+      await expectMatchingPages([...timelineMatches, 'untagged']);
+      await changeReadingMembership('untagged', false);
+      await expectMatchingPages(timelineMatches);
+
+      await commitDesktopSearch(page, 'Tagged filter');
+      await expect(page.locator('#relatedResults')).toHaveAttribute(
+        'data-search-count',
+        String(timelineMatches.length),
+      );
+      await expect(page.locator('#contentSearchSpinner')).toBeHidden();
+      await expectMatchingPages(timelineMatches);
+      await changeReadingMembership('untagged', true);
+      await expectMatchingPages([...timelineMatches, 'untagged']);
+      await changeReadingMembership('untagged', false);
+      await expectMatchingPages(timelineMatches);
+      expect(
+        await page.evaluate(() =>
+          window.__desktopVisualHarness.searchHistoryInvocationCount(),
+        ),
+      ).toBe(1);
+
+      await page.locator('.sidebar-item[data-list-id="research"]').click();
+      await expectMatchingPages(timelineMatches);
+      await expect(tagged).not.toBeChecked();
+      await tagged.check();
+      await expectMatchingPages(listMatches);
+      await changeReadingMembership('current-list-only', true);
+      await expectMatchingPages(timelineMatches);
+      await changeReadingMembership('current-list-only', false);
+      await expectMatchingPages(listMatches);
+      await commitDesktopSearch(page, 'Tagged filter current-list-only');
+      await expectMatchingPages([]);
+      await page.locator('#filterClearBtn').click();
+      await expect(tagged).not.toBeChecked();
+      await expectMatchingPages(['current-list-only']);
+    });
+  });
+
   test('desktop search starts only when Enter commits the draft query', async ({
     page,
   }) => {
@@ -8033,6 +8231,231 @@ test.describe('desktop visual regression', () => {
     });
   });
 
+  for (const view of ['timeline', 'search', 'list']) {
+    test(`dropping selected pages updates list tags in place (${view}) @webkit`, async ({
+      page,
+    }) => {
+      const errors = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      page.on('console', (message) => {
+        if (message.type() === 'error') errors.push(message.text());
+      });
+      const now = Date.UTC(2026, 10, 1, 12);
+      const historyEntries = Array.from({ length: 3 }, (_, index) => {
+        const url = `https://example.com/drag-membership-${index}`;
+        return {
+          url: view === 'list' && index === 0 ? `${url}?_tracking=1` : url,
+          title: `Drag membership ${index}`,
+          timestamp: now - index * 1000,
+          deviceId: 'test-device',
+        };
+      });
+      // Bookmark import uses the stored URL, including underscore parameters.
+      const slugs = historyEntries.map(({ url }, index) =>
+        view === 'list' && index === 0
+          ? generateSlug('example/drag-membership-0', url)
+          : generateSlugFromUrl(url),
+      );
+      const extraSession = Object.fromEntries(
+        historyEntries.map((entry, index) => {
+          const slug = slugs[index];
+          return [
+            pageKey(slug),
+            {
+              slug,
+              url: entry.url,
+              title: entry.title,
+              parentIds: [listKey('research')],
+            },
+          ];
+        }),
+      );
+      extraSession[listKey('research')] = {
+        slug: 'research',
+        name: 'Research',
+        pins: historyEntries.map((entry, index) => ({
+          id: pageKey(slugs[index]),
+          pinnedAt: entry.timestamp,
+        })),
+      };
+      await serveDesktopUi(async (desktopUrl) => {
+        await page.route('**/favicon.ico', (route) =>
+          route.fulfill({ status: 204 }),
+        );
+        await openDesktopUi(page, desktopUrl, { historyEntries, extraSession });
+        if (view === 'list') {
+          await page.locator('.sidebar-item[data-list-id="research"]').click();
+        } else if (view === 'search') {
+          await commitDesktopSearch(page, 'Drag membership');
+          await expect(page.locator('#relatedResults')).toHaveAttribute(
+            'data-search-count',
+            '3',
+          );
+        }
+        const rows = page.locator('#relatedResults .result-row');
+        await expect(rows).toHaveCount(3);
+        if (view !== 'list') {
+          await expect(
+            rows.first().locator('..').locator('.card-tag-list'),
+          ).toHaveText('Research');
+        }
+        await rows.nth(0).locator('.result-title').click();
+        await rows
+          .nth(2)
+          .locator('.result-title')
+          .click({ modifiers: ['ControlOrMeta'] });
+        await expect(
+          page.locator('#relatedResults .result-row.selected'),
+        ).toHaveCount(2);
+        await rows.evaluateAll((elements) =>
+          elements.forEach((row) => (row.dataset.dropProbe = 'preserved')),
+        );
+        const searchCount = await page.evaluate(() =>
+          window.__desktopVisualHarness.searchHistoryInvocationCount(),
+        );
+        await rows
+          .nth(0)
+          .locator('..')
+          .dragTo(page.locator('.sidebar-item[data-list-id="reading"]'));
+        for (const index of [0, 2]) {
+          await expect(
+            rows
+              .nth(index)
+              .locator('..')
+              .locator('.card-tag-list', { hasText: 'Reading queue' }),
+          ).toHaveCount(1);
+          await expect(rows.nth(index)).toHaveAttribute(
+            'data-drop-probe',
+            'preserved',
+          );
+        }
+        await expect(
+          rows
+            .nth(1)
+            .locator('..')
+            .locator('.card-tag-list', { hasText: 'Reading queue' }),
+        ).toHaveCount(0);
+        await expect(
+          page.locator('#relatedResults .result-row.selected'),
+        ).toHaveCount(2);
+        expect(
+          await page.evaluate(() =>
+            window.__desktopVisualHarness.searchHistoryInvocationCount(),
+          ),
+        ).toBe(searchCount);
+        await expect(page.locator('#errorBubble')).toHaveCount(0);
+        expect(errors).toEqual([]);
+
+        await rows
+          .nth(0)
+          .locator('..')
+          .dragTo(page.locator('.sidebar-item[data-list-id="reading"]'));
+        for (const index of [0, 2]) {
+          await expect(
+            rows
+              .nth(index)
+              .locator('..')
+              .locator('.card-tag-list', { hasText: 'Reading queue' }),
+          ).toHaveCount(1);
+        }
+        expect(
+          await page.evaluate(
+            () =>
+              window.__desktopVisualHarness.sessionValue('list:reading').pins
+                .length,
+          ),
+        ).toBe(2);
+
+        if (view === 'timeline') {
+          await page.evaluate(() => {
+            const invoke = window.__TAURI__.core.invoke;
+            window.__TAURI__.core.invoke = (command, payload) => {
+              if (
+                command === 'bridge_action' &&
+                payload?.request?.action === 'addListPins'
+              ) {
+                return { success: false, error: 'List write rejected' };
+              }
+              return invoke(command, payload);
+            };
+          });
+          await rows
+            .nth(0)
+            .locator('..')
+            .dragTo(page.locator('.sidebar-item[data-list-id="design"]'));
+          await expect(page.locator('#errorBubble')).toContainText(
+            'List write rejected',
+          );
+          await expect(
+            page.locator('#relatedResults .card-tag-list', {
+              hasText: 'Design references',
+            }),
+          ).toHaveCount(0);
+          expect(errors).toHaveLength(1);
+          expect(errors[0]).toContain('List write rejected');
+        } else {
+          await expect(page.locator('#errorBubble')).toHaveCount(0);
+          expect(errors).toEqual([]);
+        }
+      });
+    });
+  }
+
+  test('a delayed Timeline page read preserves a list tag confirmed by a drop @webkit', async ({
+    page,
+  }) => {
+    const url = 'https://example.com/delayed-page-membership';
+    const slug = generateSlugFromUrl(url);
+    const title = 'Delayed page membership';
+    const timestamp = Date.UTC(2026, 10, 1, 12);
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        historyEntries: [{ url, title, timestamp, deviceId: 'test-device' }],
+        extraSession: {
+          [pageKey(slug)]: {
+            slug,
+            url,
+            title,
+            parentIds: [listKey('research')],
+          },
+        },
+      });
+      await page.locator('.sidebar-item[data-list-id="design"]').click();
+      await expect(page.locator('#mainTitle')).toHaveText('Design references');
+      await page.evaluate((slug) => {
+        const invoke = window.__TAURI__.core.invoke;
+        let held = false;
+        window.__TAURI__.core.invoke = async (command, payload) => {
+          if (
+            !held &&
+            command === 'bridge_action' &&
+            payload.request.action === 'getPageContext' &&
+            payload.request.slugs.includes(slug)
+          ) {
+            held = true;
+            const response = await invoke(command, payload);
+            await new Promise((resolve) => {
+              window.__releaseOlderPageContext = resolve;
+            });
+            return response;
+          }
+          return invoke(command, payload);
+        };
+      }, slug);
+      await page.locator('#exploreBtn').click();
+      await page.waitForFunction(() => window.__releaseOlderPageContext);
+      const item = page.locator(`.result-row[data-url="${url}"]`).locator('..');
+      const tags = item.locator('.card-tag-list');
+      await expect(tags).toHaveCount(0);
+      await item.dragTo(page.locator('.sidebar-item[data-list-id="reading"]'));
+      await expect(tags).toHaveText(['Reading queue']);
+      await page.evaluate(() => window.__releaseOlderPageContext());
+      await expect(tags.filter({ hasText: 'Research' })).toHaveCount(1);
+      await expect(tags.filter({ hasText: 'Reading queue' })).toHaveCount(1);
+      await expect(page.locator('#errorBubble')).toHaveCount(0);
+    });
+  });
+
   test('marquee selection intersects the full page card bounds', async ({
     page,
   }) => {
@@ -9264,6 +9687,218 @@ test.describe('desktop visual regression', () => {
       );
     });
   });
+
+  for (const { query, structured } of [
+    { query: '', structured: false },
+    { query: 'needle', structured: false },
+    { query: 'needle', structured: true },
+  ]) {
+    test(`deleting nonadjacent list pages refreshes after all unpins (${structured ? 'structured filter' : query || 'unfiltered'}) @webkit`, async ({
+      page,
+    }) => {
+      const errors = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      page.on('console', (message) => {
+        if (message.type() === 'error') errors.push(message.text());
+      });
+      const now = Date.UTC(2026, 10, 1, 12);
+      const urls = Array.from(
+        { length: 6 },
+        (_, index) => `https://example.com/bulk-delete-${index}`,
+      );
+      const extraSession = Object.fromEntries(
+        urls.map((url, index) => {
+          const slug = generateSlugFromUrl(url);
+          return [
+            pageKey(slug),
+            {
+              slug,
+              url,
+              title: `${index < 5 ? 'needle' : 'keep'} ${index}`,
+              likes: 1,
+            },
+          ];
+        }),
+      );
+      extraSession[listKey('research')] = {
+        slug: 'research',
+        name: 'Research',
+        pins: urls.map((url, index) => ({
+          id: pageKey(generateSlugFromUrl(url)),
+          pinnedAt: now - index,
+        })),
+      };
+
+      await serveDesktopUi(async (desktopUrl) => {
+        await page.route('**/favicon.ico', (route) =>
+          route.fulfill({ status: 204 }),
+        );
+        await openDesktopUi(page, desktopUrl, { extraSession });
+        await page.locator('.sidebar-item[data-list-id="research"]').click();
+        await expect(page.locator('#relatedResults .result-row')).toHaveCount(
+          6,
+        );
+        if (query) {
+          await commitDesktopSearch(page, query);
+          await expect(page.locator('#relatedResults .result-row')).toHaveCount(
+            5,
+          );
+        }
+        if (structured) {
+          await page.locator('#filterToggleBtn').click();
+          await page
+            .locator('.filter-checkbox input[data-key="liked"]')
+            .click();
+          await expect(page.locator('#relatedResults .result-row')).toHaveCount(
+            5,
+          );
+        }
+        await page.locator('#relatedResults .result-title').first().click();
+        await page
+          .locator('#relatedResults .result-title')
+          .nth(2)
+          .click({ modifiers: ['ControlOrMeta'] });
+        await expect(
+          page.locator('#relatedResults .result-row.selected'),
+        ).toHaveCount(2);
+        await page
+          .locator('#relatedResults .result-title')
+          .nth(4)
+          .click({ modifiers: ['ControlOrMeta'] });
+        await expect(
+          page.locator('#relatedResults .result-row.selected'),
+        ).toHaveCount(3);
+
+        await page.evaluate(
+          ({ olderRefreshFails, structured }) => {
+            const invoke = window.__TAURI__.core.invoke;
+            const olderRefresh = new Promise((resolve) => {
+              window.__releaseOlderPinRefresh = resolve;
+            });
+            let heldRead = false;
+            let heldEnrichment = false;
+            let completedUnpins = 0;
+            window.__deletionRefreshReads = [];
+            window.__olderPinRefreshDelivered = false;
+            window.__TAURI__.core.invoke = async (command, payload) => {
+              const action = payload?.request?.action;
+              if (command === 'bridge_action' && action === 'getListDisplay') {
+                if (!heldRead) {
+                  heldRead = true;
+                  const response = await invoke(command, payload);
+                  if (structured) return response;
+                  window.__olderPinReadWaiting = true;
+                  await olderRefresh;
+                  window.__olderPinRefreshDelivered = true;
+                  if (olderRefreshFails) {
+                    throw new Error(
+                      'list pin references missing page deleted-during-refresh',
+                    );
+                  }
+                  return response;
+                }
+                window.__deletionRefreshReads.push(completedUnpins);
+                if (completedUnpins < 3) {
+                  // A real native run hit this error when an earlier projection
+                  // was resolving a page removed by a later unpin command.
+                  throw new Error(
+                    'list pin references missing page deleted-during-refresh',
+                  );
+                }
+              }
+              if (
+                command === 'bridge_action' &&
+                action === 'getPageContext' &&
+                structured &&
+                !heldEnrichment
+              ) {
+                heldEnrichment = true;
+                const response = await invoke(command, payload);
+                window.__olderPinReadWaiting = true;
+                await olderRefresh;
+                window.__olderPinRefreshDelivered = true;
+                return response;
+              }
+              const response = await invoke(command, payload);
+              if (command === 'bridge_action' && action === 'removeListPins') {
+                completedUnpins += payload.request.urls.length;
+                window.__desktopVisualHarness.emitRuntimeMessage({
+                  action: 'mutation',
+                  type: 'pins',
+                  listId: 'research',
+                });
+              }
+              return response;
+            };
+            window.__desktopVisualHarness.emitRuntimeMessage({
+              action: 'mutation',
+              type: 'pins',
+              listId: 'research',
+            });
+          },
+          { olderRefreshFails: Boolean(query) && !structured, structured },
+        );
+
+        await page.waitForFunction(() => window.__olderPinReadWaiting);
+        await page.keyboard.press('Delete');
+
+        await expect
+          .poll(() =>
+            page.evaluate(
+              () =>
+                window.__desktopVisualHarness.sessionValue('list:research')
+                  .pins,
+            ),
+          )
+          .toEqual(
+            [1, 3, 5].map(
+              (index) => extraSession[listKey('research')].pins[index],
+            ),
+          );
+        await expect(page.locator('#relatedResults .result-row')).toHaveCount(
+          query ? 2 : 3,
+        );
+        await page.evaluate(async () => {
+          window.__releaseOlderPinRefresh();
+          // Let the delivered response finish the normal asynchronous render.
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+        });
+        expect(
+          await page.evaluate(() => window.__olderPinRefreshDelivered),
+        ).toBe(true);
+        await expect(page.locator('#relatedResults .result-row')).toHaveCount(
+          query ? 2 : 3,
+        );
+        await expect(
+          page.locator('.sidebar-item[data-list-id="research"] .pin-count'),
+        ).toHaveText('3');
+        await expect(page.locator('#errorBubble')).toHaveCount(0);
+        expect(errors).toEqual([]);
+        expect(
+          await page.evaluate(() => window.__deletionRefreshReads),
+        ).toEqual([3]);
+        if (query) {
+          await page.locator('#searchDraftClearBtn').click();
+          await expect(page.locator('#relatedResults .result-row')).toHaveCount(
+            3,
+          );
+          expect(
+            await page
+              .locator('#relatedResults .result-row')
+              .evaluateAll((rows) => rows.map((row) => row.dataset.url)),
+          ).toEqual([1, 3, 5].map((index) => urls[index]));
+        }
+        expect(
+          await page.evaluate(() =>
+            window.__desktopVisualHarness
+              .bridgeActionInvocations()
+              .filter((request) => request.action === 'removeListPins')
+              .map((request) => request.urls),
+          ),
+        ).toEqual([[0, 2, 4].map((index) => urls[index])]);
+      });
+    });
+  }
 
   test('deleting a pinned page preserves the list scroll position', async ({
     page,

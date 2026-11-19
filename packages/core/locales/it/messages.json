@@ -1481,6 +1481,10 @@
     "message": "Attivazione/disattivazione non riuscita: $1",
     "description": "Sync device toggle failure."
   },
+  "desktopTagged": {
+    "message": "Con tag",
+    "description": "Localized UI text."
+  },
   "desktopVisitedMultipleTimes": {
     "message": "Visitato in più giorni",
     "description": "Localized UI text."

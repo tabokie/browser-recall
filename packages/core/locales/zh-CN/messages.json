@@ -1481,6 +1481,10 @@
     "message": "切换失败：$1",
     "description": "Sync device toggle failure."
   },
+  "desktopTagged": {
+    "message": "有标签",
+    "description": "Localized UI text."
+  },
   "desktopVisitedMultipleTimes": {
     "message": "多日访问",
     "description": "Localized UI text."
