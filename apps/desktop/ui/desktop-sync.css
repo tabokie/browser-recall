@@ -1,0 +1,37 @@
+.sync-setup-guide {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 8px;
+}
+
+.sync-setup-guide summary {
+  cursor: pointer;
+  color: var(--accent-blue, var(--accent-primary));
+  font-weight: 500;
+}
+
+.sync-setup-guide ol {
+  margin: 8px 0 4px;
+  padding-left: 20px;
+  line-height: 1.6;
+}
+
+.sync-setup-guide ul {
+  margin: 4px 0;
+  padding-left: 16px;
+}
+
+.sync-setup-guide li {
+  margin-bottom: 4px;
+}
+
+.sync-setup-guide code {
+  font-size: 11px;
+  background: var(--bg-surface-hover);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.sync-setup-guide a {
+  color: var(--accent-blue, var(--accent-primary));
+}

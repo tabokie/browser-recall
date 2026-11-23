@@ -159,6 +159,14 @@
     "message": "Überprüfen...",
     "description": "Button label while checking."
   },
+  "desktopDataFolderNeedsAccess": {
+    "message": "Wähle deinen Datenordner erneut aus, um den Zugriff wiederherzustellen.",
+    "description": "Onboarding instruction when the saved data folder needs access again."
+  },
+  "desktopPrivacyPolicy": {
+    "message": "Datenschutzerklärung",
+    "description": "Link to the Browser Recall privacy policy."
+  },
   "desktopChooseDataFolder": {
     "message": "Wählen Sie Datenordner",
     "description": "Desktop onboarding data-folder button."
@@ -406,10 +414,6 @@
   "commonProductIntro": {
     "message": "Die Desktop-App organisiert und durchsucht deine Sammlung. Die Browser-Erweiterung erfasst Besuche und speichert Seitenkopien, Markierungen und Notizen.",
     "description": "Onboarding product description."
-  },
-  "desktopOnboardingLiveCapture": {
-    "message": "Erweiterungen jetzt oder später installieren",
-    "description": "Onboarding live capture heading."
   },
   "desktopOnboardingPickColor": {
     "message": "Wählen Sie eine Farbe",
@@ -1269,10 +1273,6 @@
     "message": "$1 Elemente wurden beim Parsen oder Importieren übersprungen.",
     "description": "History import skipped item summary."
   },
-  "desktopInboxRulesHint": {
-    "message": "Regeln sortieren neue Seiten automatisch in diese Liste. Keyword-Regeln stimmen mit Seitentitel, Webadresse und Textkörper überein. Funktionsregeln verwenden ein benutzerdefiniertes JS-Prädikat, das wahr/falsch zurückgibt.",
-    "description": "Localized UI text."
-  },
   "desktopIntervalMinutes": {
     "message": "Intervall (min)",
     "description": "Localized UI text."
@@ -1639,5 +1639,26 @@
   },
   "desktopUpdateInstall": {
     "message": "Aktualisieren und neu starten"
+  },
+  "desktopStartLibrary": {
+    "message": "Deine Bibliothek einrichten"
+  },
+  "desktopStartLibraryDescription": {
+    "message": "Importiere Lesezeichen oder erkunde eine Beispielbibliothek."
+  },
+  "desktopTrySampleLibrary": {
+    "message": "Beispielbibliothek ausprobieren"
+  },
+  "desktopRemoveSampleLibrary": {
+    "message": "Beispielbibliothek entfernen"
+  },
+  "desktopConnectBrowser": {
+    "message": "Browser verbinden"
+  },
+  "desktopKeywordRulesHint": {
+    "message": "Regeln sortieren neue Seiten automatisch in diese Liste ein. Stichwörter und reguläre Ausdrücke werden mit Seitentiteln abgeglichen."
+  },
+  "desktopJavaScriptRuleUnavailable": {
+    "message": "In dieser Version nicht verfügbar"
   }
 }

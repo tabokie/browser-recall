@@ -11,6 +11,7 @@ pub struct DesktopShellStateResponse<'a> {
     pub debug_logging: bool,
     pub setup_complete: bool,
     pub data_dir: Option<&'a str>,
+    pub data_folder_needs_access: bool,
     pub system_locale: Option<String>,
     pub paired_browsers: Vec<Value>,
 }

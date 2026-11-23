@@ -1942,6 +1942,49 @@
         border-bottom: 1px solid var(--border-subtle);
       }
 
+      .empty-timeline {
+        margin: 42px 8px;
+        text-align: center;
+        color: var(--text-secondary);
+      }
+
+      .empty-timeline h2 {
+        margin: 0 0 6px;
+        color: var(--text-primary);
+        font-family: var(--font-display);
+        font-weight: 600;
+        font-size: 24px;
+      }
+
+      .empty-timeline p {
+        margin: 0 0 16px;
+      }
+
+      .empty-timeline-actions {
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .empty-timeline-connect {
+        margin-top: 12px;
+        padding: 4px 8px;
+        border: 0;
+        background: transparent;
+        color: var(--text-secondary);
+        font: inherit;
+        font-size: 12px;
+        cursor: pointer;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+
+      .empty-timeline .empty-timeline-error {
+        color: var(--accent-red);
+        margin-top: 12px;
+      }
+
       .no-results {
         text-align: center;
         color: var(--text-muted);
@@ -2104,6 +2147,26 @@
         font-weight: 700;
         color: var(--text-primary);
         margin-bottom: 14px;
+      }
+
+      .data-heading {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .data-heading > :is(.hint-icon, .data-privacy-link) {
+        box-sizing: border-box;
+        height: 14px;
+        background: transparent;
+        border: 1px solid var(--border-subtle);
+        color: var(--text-secondary);
+      }
+
+      .data-heading > :is(.hint-icon, .data-privacy-link):hover {
+        border-color: var(--border-hover);
+        color: var(--text-primary);
       }
 
       .modal-section {
@@ -2463,6 +2526,35 @@
         background: var(--bg-surface-active);
       }
 
+      .external-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        text-decoration: none;
+      }
+
+      .external-link:focus-visible {
+        outline: 2px solid var(--accent-primary);
+        outline-offset: 2px;
+      }
+
+      .external-link .link-arrow {
+        color: var(--text-secondary);
+        font-size: 12px;
+      }
+
+      .data-privacy-link {
+        gap: 3px;
+        padding: 0 5px;
+        border-radius: var(--radius-pill);
+        font: 600 10px/1 var(--font-body);
+      }
+
+      .data-privacy-link .link-arrow {
+        color: inherit;
+        font-size: inherit;
+      }
+
       .btn-danger {
         background: var(--accent-red);
         color: #fff;
@@ -2664,44 +2756,6 @@
         font-family: var(--font-body);
         background: var(--bg-surface);
         flex-shrink: 0;
-      }
-
-      .sync-setup-guide {
-        font-size: 12px;
-        color: var(--text-secondary);
-        margin-top: 8px;
-      }
-
-      .sync-setup-guide summary {
-        cursor: pointer;
-        color: var(--accent-blue, var(--accent-primary));
-        font-weight: 500;
-      }
-
-      .sync-setup-guide ol {
-        margin: 8px 0 4px;
-        padding-left: 20px;
-        line-height: 1.6;
-      }
-
-      .sync-setup-guide ul {
-        margin: 4px 0;
-        padding-left: 16px;
-      }
-
-      .sync-setup-guide li {
-        margin-bottom: 4px;
-      }
-
-      .sync-setup-guide code {
-        font-size: 11px;
-        background: var(--bg-surface-hover);
-        padding: 1px 4px;
-        border-radius: 3px;
-      }
-
-      .sync-setup-guide a {
-        color: var(--accent-blue, var(--accent-primary));
       }
 
       .trim-action-label {
@@ -3862,6 +3916,11 @@
         gap: 8px;
         width: 100%;
       }
+      .rule-unavailable {
+        color: var(--text-muted);
+        font-size: 11px;
+      }
+
       .rule-desc {
         flex: 1;
         overflow: hidden;
@@ -4247,17 +4306,23 @@
         font-size: 14px;
         color: var(--text-secondary);
         line-height: 1.6;
-        margin: 0 0 20px;
+        margin: 0 0 4px;
       }
       .onboarding-section {
-        margin-bottom: 16px;
+        padding-block: 16px;
+      }
+      .onboarding-section + .onboarding-section {
+        border-top: 1px solid var(--border-subtle);
+      }
+      .onboarding-section:last-child {
+        padding-bottom: 0;
       }
       .onboarding-section h3 {
         font-family: var(--font-body);
         font-size: 14px;
         font-weight: 600;
         color: var(--text-primary);
-        margin: 0 0 6px;
+        margin: 0 0 8px;
       }
       .onboarding-section p {
         font-family: var(--font-body);
@@ -4265,16 +4330,17 @@
         color: var(--text-secondary);
         margin: 0 0 10px;
       }
-      .onboarding-store-links {
+      .browser-store-links {
         display: flex;
         flex-wrap: wrap;
-        gap: 6px 16px;
-        margin: 0 0 10px;
-        font-size: 13px;
+        gap: 8px 12px;
       }
-      .onboarding-store-links a {
-        color: var(--accent-primary);
-        text-underline-offset: 3px;
+      .browser-store-links .btn-secondary {
+        border-color: var(--border-subtle);
+        box-shadow: none;
+      }
+      .browser-store-links .btn-secondary:hover {
+        border-color: var(--border-hover);
       }
       .onboarding-section label:not(.toggle-switch) {
         display: block;
@@ -4298,10 +4364,12 @@
         border-color: var(--accent-primary);
         box-shadow: 0 0 0 2px var(--accent-primary-glow);
       }
-      .onboarding-live-capture .option-row {
+      .onboarding-login .option-row {
         color: var(--text-primary);
+        font-size: 14px;
+        font-weight: 600;
       }
-      .onboarding-live-capture .option.disabled .option-row {
+      .onboarding-login .option-row.disabled {
         color: var(--text-muted);
       }
       #onboardingLaunchAtLoginUnsupported {
@@ -4339,8 +4407,18 @@
       #onboardingDirStatus:empty {
         display: none;
       }
-      .onboarding-required {
-        margin-bottom: 20px;
+      .onboarding-privacy-link {
+        padding: 3px 6px;
+        border-radius: 4px;
+        color: var(--text-secondary);
+        font: 600 12px/1.4 var(--font-body);
+      }
+      .onboarding-privacy-link:hover {
+        color: var(--text-primary);
+      }
+      .onboarding-privacy-link span:first-child {
+        text-decoration: underline;
+        text-underline-offset: 2px;
       }
       #onboardingStartBtn {
         width: 100%;
@@ -4584,36 +4662,21 @@
           </div>
         </div>
 
-        <div class="onboarding-section onboarding-live-capture">
-          <h3 data-i18n="desktopOnboardingLiveCapture">
-            Install extensions now or later
-          </h3>
-          <div class="onboarding-store-links">
-            <a
-              href="https://chromewebstore.google.com/detail/bgghgkobpfgcinpjjeeconciefclpdgp"
-              target="_blank"
-              rel="noopener noreferrer"
-              data-i18n="extensionStoreChrome"
-              >Chrome Web Store</a
+        <div class="onboarding-section onboarding-login">
+          <div class="option-row" id="onboardingLaunchAtLoginRow">
+            <span
+              id="onboardingLaunchAtLoginLabel"
+              data-i18n="desktopLaunchAtLoginLong"
+              >Launch Browser Recall when you log in</span
             >
-            <a
-              href="https://addons.mozilla.org/firefox/addon/browser-recall-connector/"
-              target="_blank"
-              rel="noopener noreferrer"
-              data-i18n="extensionStoreFirefox"
-              >Firefox Add-ons</a
-            >
-          </div>
-          <div class="option" id="onboardingLaunchAtLoginRow">
-            <div class="option-row">
-              <span data-i18n="desktopLaunchAtLoginLong"
-                >Launch Browser Recall when you log in</span
-              >
-              <label class="toggle-switch sm">
-                <input type="checkbox" id="onboardingLaunchAtLogin" checked />
-                <span class="toggle-track"></span>
-              </label>
-            </div>
+            <label class="toggle-switch sm">
+              <input
+                type="checkbox"
+                id="onboardingLaunchAtLogin"
+                aria-labelledby="onboardingLaunchAtLoginLabel"
+              />
+              <span class="toggle-track"></span>
+            </label>
           </div>
           <p
             id="onboardingLaunchAtLoginUnsupported"
@@ -4624,7 +4687,7 @@
           <p id="onboardingLaunchAtLoginError" class="selectable-text"></p>
         </div>
 
-        <div class="onboarding-section onboarding-required">
+        <div class="onboarding-section">
           <h3 data-i18n="desktopOnboardingDataHeading">
             Choose your data folder
           </h3>
@@ -4759,6 +4822,15 @@
           Get Started
         </button>
       </div>
+      <a
+        class="external-link onboarding-privacy-link"
+        href="https://github.com/tabokie/browser-recall/blob/main/docs/PRIVACY.md"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <span data-i18n="desktopPrivacyPolicy">Privacy Policy</span>
+        <span class="link-arrow" aria-hidden="true">↗</span>
+      </a>
     </div>
 
     <!-- Left sidebar -->
@@ -4868,6 +4940,47 @@
     <div class="sidebar-resize-handle" id="sidebarResizeHandle"></div>
     <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
+    <template id="emptyTimelineTemplate">
+      <section class="empty-timeline">
+        <h2 data-i18n="desktopStartLibrary">Start your library</h2>
+        <p data-i18n="desktopStartLibraryDescription">
+          Import bookmarks or explore a sample library.
+        </p>
+        <div class="empty-timeline-actions">
+          <button
+            type="button"
+            class="btn btn-primary"
+            id="emptyTimelineImport"
+            data-i18n="desktopImportBookmarks"
+          >
+            Import Bookmarks
+          </button>
+          <button
+            type="button"
+            class="btn btn-secondary"
+            id="emptyTimelineSample"
+            data-i18n="desktopTrySampleLibrary"
+          >
+            Try Sample Library
+          </button>
+        </div>
+        <button
+          type="button"
+          class="empty-timeline-connect"
+          id="emptyTimelineConnect"
+          data-i18n="desktopConnectBrowser"
+        >
+          Connect a Browser
+        </button>
+        <p
+          class="empty-timeline-error"
+          id="emptyTimelineError"
+          role="status"
+          hidden
+        ></p>
+      </section>
+    </template>
+
     <!-- Main panel -->
     <div class="main scroll-boundary-contained">
       <div class="main-header">
@@ -4883,6 +4996,15 @@
         <span class="main-title" id="mainTitle" data-i18n="desktopTimeline"
           >Timeline</span
         >
+        <button
+          type="button"
+          class="btn btn-secondary btn-sm"
+          id="removeSampleLibraryBtn"
+          data-i18n="desktopRemoveSampleLibrary"
+          hidden
+        >
+          Remove Sample Library
+        </button>
         <input
           class="main-title-input"
           id="mainTitleInput"
@@ -4954,11 +5076,9 @@
                 >Inbox rules</span
               >
               <span class="hint-icon"
-                >?<span class="hint-tip" data-i18n="desktopInboxRulesHint"
+                >?<span class="hint-tip" data-i18n="desktopKeywordRulesHint"
                   >Rules automatically sort new pages into this list. Keyword
-                  rules match against page title, web address, and body text.
-                  Function rules use a custom JS predicate that returns
-                  true/false.</span
+                  and regular expression rules match page titles.</span
                 ></span
               >
               <button
@@ -5133,10 +5253,42 @@
 
           <!-- ── Connection ── -->
           <div class="modal-group">
-            <div class="modal-group-label" data-i18n="desktopConnection">
+            <div
+              class="modal-group-label"
+              id="desktopConnectionHeading"
+              tabindex="-1"
+              data-i18n="desktopConnection"
+            >
               Connection
             </div>
             <div class="modal-section">
+              <div class="option">
+                <p data-i18n="desktopConnectBrowser">Connect a Browser</p>
+                <div class="browser-store-links">
+                  <a
+                    class="btn btn-secondary btn-sm external-link"
+                    href="https://chromewebstore.google.com/detail/bgghgkobpfgcinpjjeeconciefclpdgp"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <span data-i18n="extensionStoreChrome"
+                      >Chrome Web Store</span
+                    >
+                    <span class="link-arrow" aria-hidden="true">↗</span>
+                  </a>
+                  <a
+                    class="btn btn-secondary btn-sm external-link"
+                    href="https://addons.mozilla.org/firefox/addon/browser-recall-connector/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <span data-i18n="extensionStoreFirefox"
+                      >Firefox Add-ons</span
+                    >
+                    <span class="link-arrow" aria-hidden="true">↗</span>
+                  </a>
+                </div>
+              </div>
               <div class="option" id="launchAtLoginOption">
                 <div class="option-row">
                   <span data-i18n="desktopLaunchAtLogin">Launch at login</span>
@@ -5189,7 +5341,7 @@
 
           <!-- ── Data ── -->
           <div class="modal-group">
-            <div class="modal-group-label">
+            <div class="modal-group-label data-heading">
               <span data-i18n="desktopData">Data</span>
               <span class="hint-icon"
                 >?<span class="hint-tip" data-i18n="desktopDataStorageHint"
@@ -5197,6 +5349,15 @@
                   date. Open with any text editor or process with jq.</span
                 ></span
               >
+              <a
+                class="external-link data-privacy-link"
+                href="https://github.com/tabokie/browser-recall/blob/main/docs/PRIVACY.md"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <span data-i18n="desktopPrivacyPolicy">Privacy Policy</span>
+                <span class="link-arrow" aria-hidden="true">↗</span>
+              </a>
             </div>
 
             <div class="data-compact">
@@ -5260,10 +5421,7 @@
                     accept=".html,.htm"
                   />
                 </div>
-                <div
-                  id="bookmarkTreeContainer"
-                  class="bookmark-tree-container scroll-boundary-contained"
-                >
+                <div id="bookmarkTreeContainer" class="bookmark-tree-container">
                   <span
                     class="bookmark-tree-placeholder"
                     data-i18n="desktopBookmarkPreviewPlaceholder"
@@ -5288,10 +5446,7 @@
                   </button>
                 </div>
                 <div id="importProgress" class="import-progress"></div>
-                <div
-                  id="importFailures"
-                  class="import-failures scroll-boundary-contained"
-                ></div>
+                <div id="importFailures" class="import-failures"></div>
               </div>
               <!-- Import history expandable (hidden until Import History clicked) -->
               <div id="historyImportPanel" style="display: none">
@@ -5323,10 +5478,7 @@
                   </button>
                 </div>
                 <div id="historyImportProgress" class="import-progress"></div>
-                <div
-                  id="historyImportFailures"
-                  class="import-failures scroll-boundary-contained"
-                ></div>
+                <div id="historyImportFailures" class="import-failures"></div>
               </div>
               <div class="data-row">
                 <span
@@ -5396,10 +5548,7 @@
                     Add
                   </button>
                 </div>
-                <div
-                  id="blacklistEntries"
-                  class="blacklist-entries scroll-boundary-contained"
-                ></div>
+                <div id="blacklistEntries" class="blacklist-entries"></div>
               </div>
             </div>
 
@@ -5456,313 +5605,11 @@
                     Add
                   </button>
                 </div>
-                <div
-                  id="trimEntries"
-                  class="blacklist-entries scroll-boundary-contained"
-                ></div>
+                <div id="trimEntries" class="blacklist-entries"></div>
               </div>
             </div>
 
-            <!-- Sync (default OFF) -->
-            <div class="addon-section">
-              <label class="addon-header" for="syncEnabled">
-                <span class="toggle-switch">
-                  <input type="checkbox" id="syncEnabled" />
-                  <span class="toggle-track"></span>
-                </span>
-                <span class="addon-header-title" data-i18n="desktopSync"
-                  >Sync</span
-                >
-                <span
-                  class="addon-experimental-badge"
-                  data-i18n="desktopExperimental"
-                  >Experimental</span
-                >
-                <span class="addon-header-desc wrap" data-i18n="desktopSyncDesc"
-                  >Sync history and notes across devices, not including
-                  snapshots</span
-                >
-              </label>
-              <div class="addon-body" id="syncConfigFields">
-                <div class="option" style="margin-top: 8px; display: none">
-                  <div class="option-row">
-                    <span data-i18n="desktopIntervalMinutes"
-                      >Interval (min)</span
-                    >
-                    <input
-                      type="number"
-                      id="syncIntervalMinutes"
-                      min="1"
-                      max="60"
-                      value="5"
-                      style="width: 60px"
-                    />
-                  </div>
-                </div>
-                <div class="option" style="margin-top: 8px">
-                  <div class="option-row">
-                    <span data-i18n="desktopRetentionDays"
-                      >Retention (days)</span
-                    >
-                    <input
-                      type="number"
-                      id="syncRetentionDays"
-                      min="1"
-                      max="30"
-                      value="7"
-                      style="width: 60px"
-                    />
-                  </div>
-                </div>
-                <div class="option" style="margin-top: 8px">
-                  <div class="option-row">
-                    <span data-i18n="desktopProvider">Provider</span>
-                    <select id="syncMethod" disabled>
-                      <option value="github" translate="no">GitHub</option>
-                    </select>
-                  </div>
-                </div>
-                <!-- GitHub -->
-                <div id="syncGithubFields">
-                  <div class="option" style="margin-top: 8px">
-                    <div style="font-size: 13px; margin-bottom: 4px">
-                      <span data-i18n="desktopRepositoryAddress"
-                        >Repository address</span
-                      >
-                    </div>
-                    <input
-                      type="text"
-                      id="syncRepoUrl"
-                      placeholder="https://github.com/user/browser-recall-sync"
-                      style="
-                        width: 100%;
-                        padding: 4px 6px;
-                        border: 1px solid var(--border-subtle);
-                        border-radius: 4px;
-                        font-size: 12px;
-                      "
-                    />
-                    <div
-                      style="
-                        margin-top: 6px;
-                        font-size: 12px;
-                        color: var(--text-secondary);
-                      "
-                    >
-                      <span data-i18n="desktopNoSyncRepo"
-                        >Don't have a sync repo?</span
-                      >
-                      <a
-                        href="https://github.com/new"
-                        target="_blank"
-                        style="color: var(--accent-primary)"
-                        data-i18n="desktopCreateGithubRepo"
-                        >Create one on GitHub</a
-                      >
-                      <span data-i18n="desktopMakePrivate"
-                        >(make it private)</span
-                      >
-                    </div>
-                  </div>
-                  <div class="option" style="margin-top: 8px">
-                    <div style="font-size: 13px; margin-bottom: 4px">
-                      <span data-i18n="desktopAuthentication"
-                        >Authentication</span
-                      >
-                    </div>
-                    <!-- Disconnected state -->
-                    <div id="syncAuthDisconnected" style="margin-top: 6px">
-                      <div style="margin-bottom: 8px">
-                        <button
-                          id="syncCreateTokenBtn"
-                          class="btn btn-primary btn-sm"
-                          style="width: 100%"
-                        >
-                          <span data-i18n="desktopCreateTokenGithub"
-                            >Create Token on GitHub</span
-                          >
-                        </button>
-                        <div
-                          style="
-                            margin-top: 6px;
-                            font-size: 12px;
-                            color: var(--text-secondary);
-                            text-align: center;
-                          "
-                        >
-                          <span data-i18n="desktopGithubPrefilled"
-                            >Opens GitHub with pre-filled settings</span
-                          >
-                        </div>
-                      </div>
-                      <div
-                        style="
-                          margin: 12px 0;
-                          text-align: center;
-                          font-size: 12px;
-                          color: var(--text-secondary);
-                        "
-                      >
-                        <span data-i18n="desktopPasteExistingToken"
-                          >or paste an existing token:</span
-                        >
-                      </div>
-                      <input
-                        type="password"
-                        id="syncPatInput"
-                        placeholder="github_pat_..."
-                        style="
-                          width: 100%;
-                          padding: 4px 6px;
-                          border: 1px solid var(--border-subtle);
-                          border-radius: 4px;
-                          font-size: 12px;
-                        "
-                      />
-                      <div class="option-row" style="margin-top: 10px">
-                        <span
-                          ><span data-i18n="desktopRememberToken"
-                            >Remember token</span
-                          >
-                          <span class="hint-icon"
-                            >?<span
-                              class="hint-tip"
-                              data-i18n="desktopRememberTokenHint"
-                              >When off, the token is kept in memory only and
-                              cleared on browser restart.</span
-                            ></span
-                          ></span
-                        >
-                        <label class="toggle-switch sm">
-                          <input
-                            type="checkbox"
-                            id="syncRememberToken"
-                            checked
-                          />
-                          <span class="toggle-track"></span>
-                        </label>
-                      </div>
-                      <details
-                        class="sync-setup-guide"
-                        style="margin-top: 12px"
-                      >
-                        <summary data-i18n="desktopManualSetupInstructions">
-                          Manual setup instructions
-                        </summary>
-                        <ol data-i18n-html="desktopManualSetupHtml">
-                          <li>
-                            Create a <strong>private</strong> repository on
-                            <a href="https://github.com/new" target="_blank"
-                              >GitHub</a
-                            >
-                            (e.g. <code>browser-recall-sync</code>). Leave it
-                            empty.
-                          </li>
-                          <li>
-                            Go to
-                            <a
-                              href="https://github.com/settings/personal-access-tokens/new"
-                              target="_blank"
-                              >Fine-grained tokens</a
-                            >
-                            and create a token:
-                            <ul>
-                              <li>
-                                Set expiration to <strong>No expiration</strong>
-                              </li>
-                              <li>
-                                Under "Repository access", choose
-                                <strong>Only select repositories</strong> and
-                                pick your sync repo
-                              </li>
-                              <li>
-                                Under "Permissions", add
-                                <strong>Contents</strong> and set to
-                                <strong>Read and write</strong>
-                              </li>
-                            </ul>
-                          </li>
-                          <li>Paste the repository address and token above.</li>
-                        </ol>
-                      </details>
-                    </div>
-                    <!-- Connected state -->
-                    <div
-                      id="syncAuthConnected"
-                      style="display: none; margin-top: 6px"
-                    >
-                      <div style="font-size: 13px; color: var(--text-primary)">
-                        <span style="color: var(--accent-green)">&#10003;</span>
-                        <span data-i18n="desktopConnected">Connected</span>
-                        <span id="syncAuthDetail"></span>
-                      </div>
-                      <div
-                        style="
-                          display: flex;
-                          justify-content: flex-end;
-                          margin-top: 6px;
-                        "
-                      >
-                        <button
-                          id="syncDisconnectBtn"
-                          class="btn btn-secondary btn-sm"
-                          data-i18n="commonClear"
-                        >
-                          Clear
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div class="data-row data-btn-row" style="margin-top: 10px">
-                  <button
-                    id="syncPatSaveBtn"
-                    class="btn btn-secondary btn-sm"
-                    data-i18n="desktopConnect"
-                  >
-                    Connect
-                  </button>
-                  <button
-                    id="syncCheckDevicesBtn"
-                    class="btn btn-secondary btn-sm"
-                    data-i18n="desktopCheckDevices"
-                  >
-                    Check Devices
-                  </button>
-                  <button
-                    id="syncNowBtn"
-                    class="btn btn-primary btn-sm"
-                    data-i18n="desktopSyncNow"
-                  >
-                    Sync Now
-                  </button>
-                  <button
-                    id="syncCancelBtn"
-                    class="btn btn-secondary btn-sm"
-                    data-i18n="commonCancel"
-                    style="display: none"
-                  >
-                    Cancel
-                  </button>
-                </div>
-                <div
-                  id="syncStatus"
-                  style="
-                    margin-top: 8px;
-                    font-size: 12px;
-                    color: var(--text-muted);
-                  "
-                ></div>
-
-                <!-- Remote Devices -->
-                <div
-                  id="syncDevicesSection"
-                  style="margin-top: 12px; display: none"
-                >
-                  <div id="syncDevicesList" style="font-size: 12px"></div>
-                </div>
-              </div>
-            </div>
+            <template id="desktopSyncSettings"></template>
           </div>
 
           <div class="modal-group">

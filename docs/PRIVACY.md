@@ -1,6 +1,6 @@
 # Browser Recall — Privacy Policy
 
-**Last updated:** November 12, 2026
+**Last updated:** November 23, 2026
 
 Browser Recall's desktop app and browser extension store data locally and send no
 analytics or browsing data to a developer-operated service. Optional GitHub sync
@@ -14,10 +14,16 @@ lists, rules, edited titles, and imported bookmarks or history. Stop recording
 pauses extension capture; the daemon, the desktop app's local data service, applies
 URL exclusions.
 
-User-requested snapshots save page HTML, resources, extracted text, and non-password
-form values. Captured pages may contain personal, health, financial, communication,
-or location information. Password/file input values are cleared; other sensitive
-content is not automatically redacted.
+Browser Recall asks for approval before connecting a browser to the library.
+Pause automatic recording from the browser toolbar popup. To disconnect a
+browser, remove the browser under **Settings → Connection** in the desktop app.
+
+User-requested snapshots save page HTML, resources, and extracted text. Browser
+Recall Connector 1.0.2 and later omit form values, selections, and editable text
+when saving new snapshots. Older connector versions can save non-password form
+values. Displayed page content can include personal, health, financial,
+communication, or location information. Previously saved snapshots retain their
+original contents.
 
 Local configuration stores device identity, approved browsers, connection tokens,
 and recent connection activity. Settings control recording, exclusions, display,
@@ -37,8 +43,9 @@ original hosting servers.
 
 ## Optional GitHub sync
 
-GitHub sync is disabled by default. When enabled, the supplied personal access
-token uploads recent current-device logs and note JSON to the configured repository.
+GitHub sync is available in direct-download desktop builds and is disabled by
+default. When enabled, the supplied personal access token uploads recent logs
+from the current device and note JSON to the configured repository.
 Snapshot HTML and Markdown are not uploaded.
 
 Repository permissions control access to synced data. Tokens may be saved in local
@@ -107,4 +114,5 @@ highlights, notes, lists, or snapshots from Browser Recall collections.
 
 ## Contact
 
-For privacy questions, open an issue in the project's GitHub repository.
+Email [Browser Recall support](mailto:xy.tao@outlook.com) for privacy questions or
+help deleting your data.

@@ -44,6 +44,35 @@ fn configured_fixture(data: &Path) -> DaemonConfig {
     config
 }
 
+#[test]
+fn installation_profile_keeps_its_identity_and_library_bookmark() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = ConfigStore::new(directory.path()).with_installation_device_id();
+    let initial = store.load_or_create().unwrap();
+    assert!(initial.device_id.starts_with("mac-"));
+    assert!(!initial.launch_at_login);
+    assert!(initial.data_dir_bookmark.is_none());
+
+    let folder = directory.path().join("library");
+    store
+        .update(|config| {
+            config.select_data_directory(folder.clone()).unwrap();
+            config.data_dir_bookmark = Some(vec![1, 2, 3]);
+            config.complete_setup().unwrap();
+            Ok(())
+        })
+        .unwrap();
+
+    let reopened = ConfigStore::new(directory.path())
+        .with_installation_device_id()
+        .load_or_create()
+        .unwrap();
+    assert_eq!(reopened.device_id, initial.device_id);
+    assert_eq!(reopened.data_dir, folder);
+    assert_eq!(reopened.data_dir_bookmark, Some(vec![1, 2, 3]));
+    assert!(reopened.is_configured());
+}
+
 #[tokio::test]
 async fn every_missing_configuration_field_gets_a_persisted_default_and_keeps_other_settings() {
     let directory = tempfile::tempdir().unwrap();

@@ -159,6 +159,14 @@
     "message": "正在检查...",
     "description": "Button label while checking."
   },
+  "desktopDataFolderNeedsAccess": {
+    "message": "请重新选择数据文件夹以恢复访问权限。",
+    "description": "Onboarding instruction when the saved data folder needs access again."
+  },
+  "desktopPrivacyPolicy": {
+    "message": "隐私政策",
+    "description": "Link to the Browser Recall privacy policy."
+  },
   "desktopChooseDataFolder": {
     "message": "选择数据文件夹",
     "description": "Desktop onboarding data-folder button."
@@ -406,10 +414,6 @@
   "commonProductIntro": {
     "message": "桌面应用用于整理和搜索收藏。浏览器扩展记录网页访问，并保存快照、高亮和笔记。",
     "description": "Onboarding product description."
-  },
-  "desktopOnboardingLiveCapture": {
-    "message": "现在或以后安装扩展",
-    "description": "Onboarding live capture heading."
   },
   "desktopOnboardingPickColor": {
     "message": "选择颜色",
@@ -1269,10 +1273,6 @@
     "message": "解析或导入期间跳过了 $1 项。",
     "description": "History import skipped item summary."
   },
-  "desktopInboxRulesHint": {
-    "message": "规则会自动把新页面归入此列表。关键字规则匹配页面标题、网址和正文文本。函数规则使用返回 true/false 的自定义 JS 谓词。",
-    "description": "Localized UI text."
-  },
   "desktopIntervalMinutes": {
     "message": "间隔（分钟）",
     "description": "Localized UI text."
@@ -1639,5 +1639,26 @@
   },
   "desktopUpdateInstall": {
     "message": "更新并重启"
+  },
+  "desktopStartLibrary": {
+    "message": "开始使用你的资料库"
+  },
+  "desktopStartLibraryDescription": {
+    "message": "导入书签，或探索示例资料库。"
+  },
+  "desktopTrySampleLibrary": {
+    "message": "试用示例资料库"
+  },
+  "desktopRemoveSampleLibrary": {
+    "message": "移除示例资料库"
+  },
+  "desktopConnectBrowser": {
+    "message": "连接浏览器"
+  },
+  "desktopKeywordRulesHint": {
+    "message": "规则会自动将新页面归入此列表。关键词和正则表达式会匹配网页标题。"
+  },
+  "desktopJavaScriptRuleUnavailable": {
+    "message": "此版本不支持"
   }
 }

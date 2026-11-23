@@ -800,6 +800,12 @@ export function stageDesktopUiAssets(
   outDir = targets['desktop-ui'].defaultOutDir,
 ) {
   const staged = stageTarget('desktop-ui', outDir);
+  const syncMarkup = path.join(staged, 'desktop-sync.html');
+  fs.writeFileSync(
+    path.join(staged, 'desktop-sync-markup.js'),
+    `export default ${JSON.stringify(fs.readFileSync(syncMarkup, 'utf8'))};\n`,
+  );
+  fs.unlinkSync(syncMarkup);
   writeDesktopVendorAssets(staged);
   return staged;
 }

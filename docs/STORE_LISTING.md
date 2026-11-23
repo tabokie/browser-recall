@@ -21,8 +21,9 @@ The desktop app must run while browsing. Open the extension popup and approve th
 connection in Browser Recall after installation.
 
 Data stays in the folder chosen during desktop setup. No Browser Recall account
-is required, and the application sends no analytics. Experimental GitHub sync
-shares recent logs and notes through your repository; snapshots stay local.
+is required, and the application sends no analytics. Direct-download desktop
+builds offer experimental GitHub sync for recent logs and notes through your
+repository. Snapshots stay local.
 
 | Shortcut | Action              |
 | -------- | ------------------- |
@@ -92,11 +93,12 @@ Disclose directly handled categories:
 - **Website content:** selections, annotations, HTML, resources.
 - **Authentication information:** desktop pairing token.
 
-Snapshot capture also preserves arbitrary content and non-password form values.
+Browser Recall Connector 1.0.2 and later preserve the content displayed on the
+page and omit live form state. Older releases can preserve non-password values.
 Disclose **Personally identifiable information**, **Health information**,
 **Financial and payment information**, **Personal communications**, and **Location**
-for unrestricted user-saved content. Password/file input values are cleared;
-capture does not redact all sensitive information.
+for unrestricted user-saved content. Sensitive information displayed on the page
+can still be present in the snapshot.
 
 Local processing still requires disclosure; see the [User Data FAQ](https://developer.chrome.com/docs/webstore/program-policies/user-data-faq).
 The implementation supports the three limited-use certifications: no sale/transfer

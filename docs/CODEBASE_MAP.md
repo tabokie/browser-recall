@@ -38,10 +38,12 @@ Paths below are relative to `apps/desktop/`.
 | `ui/desktop-reviews.js`, `ui/desktop-updates.js`                    | Review opportunities/cancellation and update controls                 |
 | `src-tauri/src/main.rs`                                             | Daemon lifecycle, commands, events, tray, deep links, single instance |
 | `src-tauri/src/config.rs`, `src-tauri/src/shell_contract.rs`        | Local setup and shell response types                                  |
+| `src-tauri/src/library_access.rs`                                   | Mac App Store library picker and persistent sandbox access            |
 | `src-tauri/src/snapshot_open.rs`                                    | Open snapshots or select files in the file manager                    |
 | `src-tauri/src/distribution.rs`                                     | Distribution channel and test-profile restrictions                    |
 | `src-tauri/src/reviews.rs`, `src-tauri/src/reviews_native.rs`       | Review scheduling, persistence, AppKit dispatch                       |
 | `src-tauri/src/reviews.swift`, `src-tauri/storekit_build.rs`        | StoreKit bridge and build integration                                 |
+| `ui/desktop-features.js`, `src-tauri/store_frontend.rs`             | Channel-specific desktop feature exports and asset selection          |
 | `src-tauri/src/updates.rs`                                          | Authenticated update lifecycle                                        |
 | `src-tauri/src/login_item.rs`                                       | Launch-at-login registration and rollback                             |
 | `src-tauri/src/windows_icon.rs`, `src-tauri/src/windows_startup.rs` | Windows icons and early test-profile diagnostics                      |
@@ -84,6 +86,7 @@ Paths below are relative to `crates/`.
 | ---------------------------------------------------------------------- | ------------------------------------------------------------- |
 | `daemon/src/lib.rs`, `daemon/src/main.rs`                              | Startup API and standalone CLI                                |
 | `daemon/src/command_authority.rs`, `daemon/src/commands.rs`            | Shared command validation and execution                       |
+| `daemon/src/sample_library.rs`                                         | Desktop sample list, highlight, snapshot, and cleanup         |
 | `daemon/src/runtime.rs`                                                | Transactions, write order, recovery, sync installation, reset |
 | `daemon/src/storage.rs`                                                | Cache, disk reads, log index, checkpoint writer               |
 | `daemon/src/read_projections.rs`, `daemon/src/mutations.rs`            | View responses and change notifications                       |

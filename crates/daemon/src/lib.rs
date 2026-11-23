@@ -20,9 +20,11 @@ pub mod protocol;
 pub mod read_projections;
 pub mod rules;
 pub mod runtime;
+mod sample_library;
 pub mod search;
 pub mod settings;
 pub mod storage;
+#[cfg(not(feature = "mac-app-store"))]
 pub mod sync;
 pub mod ws_server;
 

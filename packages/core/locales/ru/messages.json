@@ -159,6 +159,14 @@
     "message": "Проверка...",
     "description": "Button label while checking."
   },
+  "desktopDataFolderNeedsAccess": {
+    "message": "Выберите папку данных ещё раз, чтобы восстановить доступ.",
+    "description": "Onboarding instruction when the saved data folder needs access again."
+  },
+  "desktopPrivacyPolicy": {
+    "message": "Политика конфиденциальности",
+    "description": "Link to the Browser Recall privacy policy."
+  },
   "desktopChooseDataFolder": {
     "message": "Выберите папку данных",
     "description": "Desktop onboarding data-folder button."
@@ -406,10 +414,6 @@
   "commonProductIntro": {
     "message": "Настольное приложение упорядочивает вашу коллекцию и выполняет поиск. Расширение браузера записывает посещения и сохраняет снимки, выделения и заметки.",
     "description": "Onboarding product description."
-  },
-  "desktopOnboardingLiveCapture": {
-    "message": "Установите расширения сейчас или позже",
-    "description": "Onboarding live capture heading."
   },
   "desktopOnboardingPickColor": {
     "message": "Выберите цвет",
@@ -1269,10 +1273,6 @@
     "message": "$1 элементов пропущены во время анализа или импорта.",
     "description": "History import skipped item summary."
   },
-  "desktopInboxRulesHint": {
-    "message": "Правила автоматически сортируют новые страницы в этот список. Правила ключевых слов соответствуют заголовку страницы, веб-адресу и основному тексту. В правилах функций используется пользовательский предикат JS, который возвращает true/false.",
-    "description": "Localized UI text."
-  },
   "desktopIntervalMinutes": {
     "message": "Интервал (мин)",
     "description": "Localized UI text."
@@ -1639,5 +1639,26 @@
   },
   "desktopUpdateInstall": {
     "message": "Обновить и перезапустить"
+  },
+  "desktopStartLibrary": {
+    "message": "Начните свою библиотеку"
+  },
+  "desktopStartLibraryDescription": {
+    "message": "Импортируйте закладки или откройте пример библиотеки."
+  },
+  "desktopTrySampleLibrary": {
+    "message": "Попробовать библиотеку-пример"
+  },
+  "desktopRemoveSampleLibrary": {
+    "message": "Удалить библиотеку-пример"
+  },
+  "desktopConnectBrowser": {
+    "message": "Подключить браузер"
+  },
+  "desktopKeywordRulesHint": {
+    "message": "Правила автоматически добавляют новые страницы в этот список. Ключевые слова и регулярные выражения проверяются по заголовкам страниц."
+  },
+  "desktopJavaScriptRuleUnavailable": {
+    "message": "Недоступно в этой сборке"
   }
 }

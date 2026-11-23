@@ -11,6 +11,8 @@
 
 mod config;
 mod distribution;
+#[cfg(feature = "mac-app-store")]
+mod library_access;
 mod logging;
 mod login_item;
 #[cfg(target_os = "macos")]
@@ -20,6 +22,7 @@ mod reviews_native;
 mod search;
 mod shell_contract;
 mod snapshot_open;
+#[cfg(not(feature = "mac-app-store"))]
 mod updates;
 #[cfg(target_os = "windows")]
 mod windows_icon;
@@ -42,6 +45,7 @@ use browser_recall_daemon::search::{
     NoteSearchHit, SnapshotSearchHit,
 };
 use browser_recall_daemon::storage::Storage;
+#[cfg(not(feature = "mac-app-store"))]
 use browser_recall_daemon::sync::{
     background_worker_loop, sync_device_entries_json, SyncBackgroundOutcome, SyncController,
     SyncError,
@@ -72,6 +76,7 @@ use tauri::{
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use tauri_plugin_opener::OpenerExt;
+#[cfg(not(feature = "mac-app-store"))]
 use tokio::sync::Notify;
 use tracing::{info, warn};
 
@@ -86,6 +91,7 @@ const NORMAL_WINDOW_HEIGHT: f64 = 760.0;
 struct ShellState {
     snapshot: ServerSnapshot,
     data_dir: String,
+    data_folder_needs_access: bool,
     log_dir: String,
     login_item_supported: bool,
     login_item_error: Option<String>,
@@ -99,16 +105,28 @@ struct ShellState {
 struct DesktopState {
     server: Mutex<Option<ServerHandle>>,
     server_start: StartGate,
+    setup: tokio::sync::Mutex<()>,
+    #[cfg(feature = "mac-app-store")]
+    library_access: Mutex<Option<library_access::LibraryAccess>>,
     operations: Arc<tokio::sync::RwLock<()>>,
     config_store: ConfigStore,
     shell: Mutex<ShellState>,
+    #[cfg(not(feature = "mac-app-store"))]
     sync: SyncController,
     storage_bridge: Mutex<StorageBridgeState>,
     active_history_search: Mutex<Option<ActiveHistorySearch>>,
     logging: logging::LoggingHandle,
-    quit_requested: Mutex<bool>,
+    quit_state: Mutex<QuitState>,
     main_window_focus_pending: AtomicBool,
     main_window_frame: Mutex<Option<RetainedWindowFrame>>,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum QuitState {
+    #[default]
+    Running,
+    Draining,
+    Ready,
 }
 
 #[derive(Clone, Copy)]
@@ -213,15 +231,15 @@ fn pairing_approver(app: AppHandle) -> PairingApprover {
         let app = app.clone();
         Box::pin(async move {
             let message = format!(
-                "Browser: {} (extension ID: {})",
+                "Allow {} (extension ID: {}) to record browsing visits in your local Browser Recall library. You can pause recording from the Browser Recall toolbar popup.",
                 request.browser_name, request.extension_id
             );
             let approved = app
                 .dialog()
                 .message(message)
-                .title("Allow connection?")
+                .title("Allow browsing activity recording?")
                 .buttons(MessageDialogButtons::OkCancelCustom(
-                    "Allow".to_string(),
+                    "Allow recording".to_string(),
                     "Deny".to_string(),
                 ))
                 .blocking_show();
@@ -282,12 +300,7 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
                     }
                 }
             }
-            "quit" => {
-                if let Some(state) = app.try_state::<DesktopState>() {
-                    *state.quit_requested.lock() = true;
-                }
-                app.exit(0);
-            }
+            "quit" => request_desktop_quit(app, 0),
             _ => {}
         })
         .build(app)?;
@@ -581,6 +594,7 @@ mod tests {
                 connected_connectors: Vec::new(),
             },
             data_dir: String::new(),
+            data_folder_needs_access: false,
             log_dir: String::new(),
             login_item_supported: true,
             login_item_error: None,
@@ -1011,10 +1025,6 @@ fn server_control_for_app(app: &AppHandle) -> Option<ServerControlHandle> {
     server.as_ref().map(ServerHandle::control_handle)
 }
 
-fn shell_device_id(app: &AppHandle) -> String {
-    shell_snapshot(app).device_id
-}
-
 fn inactive_server_snapshot(config: &DaemonConfig) -> ServerSnapshot {
     ServerSnapshot {
         port: 0,
@@ -1070,6 +1080,10 @@ async fn start_configured_shell_server(
 
 async fn start_shell_server(app: &AppHandle) -> Result<ServerSnapshot, String> {
     let state = app.state::<DesktopState>();
+    #[cfg(feature = "mac-app-store")]
+    if state.library_access.lock().is_none() {
+        return Err("Choose the data folder to grant Browser Recall access".into());
+    }
     state
         .server_start
         .run(
@@ -1096,6 +1110,7 @@ async fn start_shell_server(app: &AppHandle) -> Result<ServerSnapshot, String> {
                     shell.setup_complete = true;
                 });
                 spawn_server_watchers(app.clone(), snapshot_rx, change_rx);
+                #[cfg(not(feature = "mac-app-store"))]
                 state.sync.request_worker();
                 Ok(snapshot)
             },
@@ -1225,27 +1240,22 @@ fn session_bridge_clear(state: &mut StorageBridgeState) -> Map<String, Value> {
     session_bridge_remove(state, &keys)
 }
 
-fn emit_passive_mutation(app: &AppHandle, mutation_type: &str) {
-    emit_runtime_message(
-        app,
-        json!({
-            "action": "mutation",
-            "type": mutation_type,
-        }),
-    );
-}
-
+#[cfg(not(feature = "mac-app-store"))]
 fn emit_sync_refresh_mutations(app: &AppHandle) {
     for mutation_type in [
         "history", "note", "snapshot", "lists", "orphaned", "settings",
     ] {
-        emit_passive_mutation(app, mutation_type);
+        emit_runtime_message(app, json!({ "action": "mutation", "type": mutation_type }));
     }
 }
 
+#[cfg(not(feature = "mac-app-store"))]
 async fn run_background_sync_once(app: AppHandle) {
     let state = app.state::<DesktopState>();
     let _operation = state.operations.read().await;
+    if *state.quit_state.lock() != QuitState::Running {
+        return;
+    }
     let storage = match storage_for_app(&app) {
         Ok(storage) => storage,
         Err(error) => {
@@ -1352,23 +1362,42 @@ fn paired_browser_payloads(
         .collect())
 }
 
-fn choose_desktop_data_folder(app: &AppHandle) -> Result<Value, String> {
-    if app.state::<DesktopState>().server.lock().is_some() {
+async fn choose_desktop_data_folder(app: &AppHandle) -> Result<Value, String> {
+    let state = app.state::<DesktopState>();
+    let _setup = state.setup.lock().await;
+    if state.server.lock().is_some() {
         return Err("The data folder can only be changed before setup starts.".to_string());
     }
 
+    #[cfg(not(feature = "mac-app-store"))]
     let folder = app
         .dialog()
         .file()
         .set_title("Choose Browser Recall Data Folder")
         .blocking_pick_folder();
+    #[cfg(not(feature = "mac-app-store"))]
+    let folder = folder
+        .map(|path| path.into_path())
+        .transpose()
+        .map_err(|error| error.to_string())?;
+    #[cfg(feature = "mac-app-store")]
+    let folder = {
+        let config = state
+            .config_store
+            .load_or_create()
+            .map_err(|error| error.to_string())?;
+        library_access::LibraryAccess::choose(app, config.data_dir).await?
+    };
     let Some(folder) = folder else {
         return Ok(json!({
             "success": true,
             "cancelled": true,
         }));
     };
-    let data_dir = folder.into_path().map_err(|error| error.to_string())?;
+    #[cfg(not(feature = "mac-app-store"))]
+    let data_dir = folder;
+    #[cfg(feature = "mac-app-store")]
+    let (access, data_dir, bookmark) = folder;
     std::fs::create_dir_all(&data_dir).map_err(|error| error.to_string())?;
 
     let config_store = app.state::<DesktopState>().config_store.clone();
@@ -1376,12 +1405,20 @@ fn choose_desktop_data_folder(app: &AppHandle) -> Result<Value, String> {
         .update(|config| {
             config
                 .select_data_directory(data_dir.clone())
-                .map_err(std::io::Error::other)
+                .map_err(std::io::Error::other)?;
+            #[cfg(feature = "mac-app-store")]
+            {
+                config.data_dir_bookmark = Some(bookmark);
+            }
+            Ok(())
         })
         .map_err(|error| error.to_string())?;
+    #[cfg(feature = "mac-app-store")]
+    state.library_access.lock().replace(access);
 
     update_shell_state(app, |state| {
         state.data_dir = data_dir.display().to_string();
+        state.data_folder_needs_access = false;
         state.setup_complete = false;
     });
     Ok(json!({
@@ -1392,7 +1429,13 @@ fn choose_desktop_data_folder(app: &AppHandle) -> Result<Value, String> {
 }
 
 async fn complete_desktop_setup(app: &AppHandle, request: &Value) -> Result<Value, String> {
-    let config_store = app.state::<DesktopState>().config_store.clone();
+    let state = app.state::<DesktopState>();
+    let _setup = state.setup.lock().await;
+    #[cfg(feature = "mac-app-store")]
+    if state.library_access.lock().is_none() {
+        return Err("Choose the data folder to grant Browser Recall access".into());
+    }
+    let config_store = &state.config_store;
     let login_item = login_item::SystemLoginItem::new(app);
     let launch_at_login = request
         .get("launchAtLogin")
@@ -1432,14 +1475,13 @@ async fn complete_desktop_setup(app: &AppHandle, request: &Value) -> Result<Valu
     }))
 }
 
-async fn prepare_desktop_update(
-    app: &AppHandle,
+async fn drain_desktop(
+    state: &DesktopState,
 ) -> Result<tokio::sync::OwnedRwLockWriteGuard<()>, String> {
-    let state = app.state::<DesktopState>();
-    // Wait for native commands and background sync, then close connector sessions
-    // and wait for all accepted checkpoint writes before replacing the application.
-    let guard = state.operations.clone().write_owned().await;
+    // Wait for desktop commands and background sync before draining the daemon.
+    #[cfg(not(feature = "mac-app-store"))]
     state.sync.cancel();
+    let guard = state.operations.clone().write_owned().await;
     let server = state.server.lock().take();
     if let Some(server) = server {
         let storage = server.storage();
@@ -1452,13 +1494,36 @@ async fn prepare_desktop_update(
     Ok(guard)
 }
 
+fn request_desktop_quit(app: &AppHandle, code: i32) {
+    let state = app.state::<DesktopState>();
+    {
+        let mut quit = state.quit_state.lock();
+        if *quit != QuitState::Running {
+            return;
+        }
+        *quit = QuitState::Draining;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<DesktopState>();
+        let drained = drain_desktop(&state).await;
+        if let Err(error) = &drained {
+            warn!(%error, "could not flush checkpoints before quitting Browser Recall");
+        }
+        *state.quit_state.lock() = QuitState::Ready;
+        app.exit(code);
+    });
+}
+
+#[cfg(not(feature = "mac-app-store"))]
 struct DesktopUpdateLifecycle<'a>(&'a AppHandle);
 
+#[cfg(not(feature = "mac-app-store"))]
 impl updates::UpdateLifecycle for DesktopUpdateLifecycle<'_> {
     type Guard = tokio::sync::OwnedRwLockWriteGuard<()>;
 
     async fn prepare(&self) -> Result<Self::Guard, String> {
-        prepare_desktop_update(self.0).await
+        drain_desktop(&self.0.state::<DesktopState>()).await
     }
 
     async fn recover(&self) -> Result<(), String> {
@@ -1469,7 +1534,7 @@ impl updates::UpdateLifecycle for DesktopUpdateLifecycle<'_> {
     }
 
     fn restart(&self) {
-        *self.0.state::<DesktopState>().quit_requested.lock() = true;
+        *self.0.state::<DesktopState>().quit_state.lock() = QuitState::Ready;
         self.0.restart();
     }
 }
@@ -1521,26 +1586,35 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
         "getDesktopUpdateState" | "checkDesktopUpdate" | "installDesktopUpdate"
     ) {
         validate_desktop_bridge_fields(action, request_object)?;
-        let updates = app.state::<updates::DesktopUpdates>();
+        #[cfg(feature = "mac-app-store")]
         return match action {
-            "getDesktopUpdateState" => Ok(json!({
-                "success": true, "enabled": !distribution::MAC_APP_STORE_BUILD,
-                "update": updates.snapshot()
-            })),
-            _ if distribution::MAC_APP_STORE_BUILD => {
-                Err("Application updates are managed by the Mac App Store".into())
-            }
-            "checkDesktopUpdate" => {
-                Ok(json!({ "success": true, "update": updates.check(&app).await? }))
-            }
-            _ => {
-                updates.install(&app, &DesktopUpdateLifecycle(&app)).await?;
-                Ok(json!({ "success": true }))
-            }
+            "getDesktopUpdateState" => Ok(json!({ "success": true, "enabled": false })),
+            _ => Err("Application updates are managed by the Mac App Store".into()),
         };
+        #[cfg(not(feature = "mac-app-store"))]
+        {
+            let updates = app.state::<updates::DesktopUpdates>();
+            return match action {
+                "getDesktopUpdateState" => Ok(json!({
+                    "success": true, "enabled": true,
+                    "update": updates.snapshot()
+                })),
+                "checkDesktopUpdate" => {
+                    Ok(json!({ "success": true, "update": updates.check(&app).await? }))
+                }
+                _ => {
+                    updates.install(&app, &DesktopUpdateLifecycle(&app)).await?;
+                    Ok(json!({ "success": true }))
+                }
+            };
+        }
     }
     let state = app.state::<DesktopState>();
     let _operation = state.operations.read().await;
+    if *state.quit_state.lock() != QuitState::Running {
+        return Err("Browser Recall is quitting".into());
+    }
+    #[cfg(not(feature = "mac-app-store"))]
     if app.state::<updates::DesktopUpdates>().snapshot().phase == "installing" {
         return Err("Browser Recall is installing an update".to_string());
     }
@@ -1567,7 +1641,6 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
     let server_read_projections = server_read_projections_for_app(&app);
     let read_projections = || require_running_storage(server_read_projections.as_ref());
     let snapshot = shell_snapshot(&app);
-    let device_id = shell_device_id(&app);
     let setup_complete = shell_setup_complete(&app);
 
     let response = match action {
@@ -1596,6 +1669,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 debug_logging: shell.debug_logging,
                 setup_complete: shell.setup_complete,
                 data_dir: shell_contract::data_dir_payload(&shell.data_dir),
+                data_folder_needs_access: shell.data_folder_needs_access,
                 system_locale: sys_locale::get_locale(),
                 paired_browsers,
             })
@@ -1628,7 +1702,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .map_err(|error| error.to_string())?;
             json!({ "success": true })
         }
-        "chooseDesktopDataFolder" => choose_desktop_data_folder(&app)?,
+        "chooseDesktopDataFolder" => choose_desktop_data_folder(&app).await?,
         "completeDesktopSetup" => complete_desktop_setup(&app, &request).await?,
         "updateDesktopShellSettings" => {
             let launch_at_login = request
@@ -1924,30 +1998,41 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             resume_daemon(&app).await?;
             json!({ "success": true })
         }
+        #[cfg(feature = "mac-app-store")]
+        "flushDesktopQueue" => {
+            storage()?
+                .flush_checkpoints()
+                .await
+                .map_err(|error| error.to_string())?;
+            json!({ "success": true })
+        }
+        #[cfg(not(feature = "mac-app-store"))]
         "getSyncDevices" => {
             let state = app.state::<DesktopState>();
             json!({
                 "success": true,
                 "devices": state.sync.device_entries_json(),
-                "localDeviceId": device_id,
+                "localDeviceId": snapshot.device_id,
             })
         }
+        #[cfg(not(feature = "mac-app-store"))]
         "syncListDevices" => {
             let state = app.state::<DesktopState>();
             match state.sync.refresh_devices(storage()?).await {
                 Ok(devices) => json!({
                     "success": true,
                     "devices": sync_device_entries_json(&devices),
-                    "localDeviceId": device_id,
+                    "localDeviceId": snapshot.device_id,
                 }),
                 Err(error) => json!({
                     "success": false,
                     "devices": [],
-                    "localDeviceId": device_id,
+                    "localDeviceId": snapshot.device_id,
                     "error": error,
                 }),
             }
         }
+        #[cfg(not(feature = "mac-app-store"))]
         "toggleSyncDevicePaused" => {
             let target = request
                 .get("deviceId")
@@ -1960,21 +2045,25 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 "paused": paused,
             })
         }
+        #[cfg(not(feature = "mac-app-store"))]
         "updateSyncSettings" | "clearSyncFolder" | "flushDesktopQueue" | "initializeFilesystem" => {
             let state = app.state::<DesktopState>();
             state.sync.settings_changed(storage()?).await?;
             json!({ "success": true })
         }
+        #[cfg(not(feature = "mac-app-store"))]
         "cancelSync" => {
             let state = app.state::<DesktopState>();
             state.sync.cancel();
             json!({ "success": true })
         }
+        #[cfg(not(feature = "mac-app-store"))]
         "clearSyncToken" => {
             let state = app.state::<DesktopState>();
             state.sync.clear_token()?;
             json!({ "success": true })
         }
+        #[cfg(not(feature = "mac-app-store"))]
         "toggleSyncRemember" => {
             let remember = request
                 .get("remember")
@@ -1984,6 +2073,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             state.sync.toggle_remember(remember)?;
             json!({ "success": true })
         }
+        #[cfg(not(feature = "mac-app-store"))]
         "syncNow" => {
             let state = app.state::<DesktopState>();
             let response = state.sync.sync_now_response(storage()?).await;
@@ -1996,6 +2086,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             }
             response
         }
+        #[cfg(not(feature = "mac-app-store"))]
         "setSyncToken" => {
             let token = request
                 .get("token")
@@ -2012,10 +2103,12 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 "githubUser": github_user,
             })
         }
+        #[cfg(not(feature = "mac-app-store"))]
         "getSyncAuthState" => {
             let state = app.state::<DesktopState>();
             state.sync.auth_state_json()
         }
+        #[cfg(not(feature = "mac-app-store"))]
         "deleteSyncDevice" => {
             let target = request
                 .get("deviceId")
@@ -2053,8 +2146,11 @@ fn validate_desktop_bridge_fields(
         "loadPageNotes" | "listSnapshots" => &["slug"],
         "getSnapshotHtml" | "openSnapshot" | "openSnapshotDirectory" => &["slug", "timestamp"],
         "previewRule" => &["rule", "entries"],
+        #[cfg(not(feature = "mac-app-store"))]
         "toggleSyncDevicePaused" | "deleteSyncDevice" => &["deviceId"],
+        #[cfg(not(feature = "mac-app-store"))]
         "toggleSyncRemember" => &["remember"],
+        #[cfg(not(feature = "mac-app-store"))]
         "setSyncToken" => &["token", "remember"],
         "getDesktopSystemLocale"
         | "getAppReviewState"
@@ -2075,11 +2171,12 @@ fn validate_desktop_bridge_fields(
         | "getRecycleBin"
         | "getSettings"
         | "resumeService"
-        | "getSyncDevices"
+        | "flushDesktopQueue" => &[],
+        #[cfg(not(feature = "mac-app-store"))]
+        "getSyncDevices"
         | "syncListDevices"
         | "updateSyncSettings"
         | "clearSyncFolder"
-        | "flushDesktopQueue"
         | "initializeFilesystem"
         | "cancelSync"
         | "clearSyncToken"
@@ -2265,7 +2362,10 @@ fn main() -> tauri::Result<()> {
         std::process::exit(1);
     }
     let builder = tauri::Builder::default();
-    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    #[cfg(all(
+        not(feature = "mac-app-store"),
+        any(target_os = "macos", target_os = "windows", target_os = "linux")
+    ))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
         show_main_window(app);
     }));
@@ -2308,6 +2408,7 @@ fn main() -> tauri::Result<()> {
         .setup(|app| {
             #[cfg(target_os = "windows")]
             windows_startup::record("Tauri setup entered");
+            #[cfg(not(feature = "mac-app-store"))]
             app.manage(updates::DesktopUpdates::new(
                 app.package_info().version.to_string(),
             ));
@@ -2342,6 +2443,10 @@ fn main() -> tauri::Result<()> {
             );
             if let Some(error) = &bootstrap.login_item_error {
                 warn!(%error, "could not reconcile launch-at-login registration");
+            }
+            #[cfg(feature = "mac-app-store")]
+            if let Some(error) = &bootstrap.library_access_error {
+                warn!(%error, "Browser Recall needs access to the data folder again");
             }
             if let Err(error) = reviews_native::start(app.handle()) {
                 warn!(%error, "could not monitor App Store review interaction");
@@ -2381,19 +2486,32 @@ fn main() -> tauri::Result<()> {
                 } else {
                     (None, inactive_server_snapshot(&bootstrap.config), None)
                 };
+            #[cfg(not(feature = "mac-app-store"))]
             let daemon_started = server_handle.is_some();
             if !cfg!(feature = "no-tray") {
                 create_tray(app.handle())?;
             }
-            let sync_notify = Arc::new(Notify::new());
             app.manage(DesktopState {
                 server: Mutex::new(server_handle),
                 server_start: StartGate::default(),
+                setup: tokio::sync::Mutex::default(),
+                #[cfg(feature = "mac-app-store")]
+                library_access: Mutex::new(bootstrap.library_access),
                 operations: Arc::new(tokio::sync::RwLock::new(())),
                 config_store: bootstrap.config_store.clone(),
                 shell: Mutex::new(ShellState {
                     snapshot: initial_snapshot,
                     data_dir: bootstrap.config.data_dir.display().to_string(),
+                    data_folder_needs_access: {
+                        #[cfg(feature = "mac-app-store")]
+                        {
+                            bootstrap.library_access_error.is_some()
+                        }
+                        #[cfg(not(feature = "mac-app-store"))]
+                        {
+                            false
+                        }
+                    },
                     log_dir: bootstrap.log_dir.display().to_string(),
                     login_item_supported: login_item::SystemLoginItem::new(app.handle())
                         .supported(),
@@ -2404,16 +2522,17 @@ fn main() -> tauri::Result<()> {
                     route: None,
                     error: None,
                 }),
+                #[cfg(not(feature = "mac-app-store"))]
                 sync: SyncController::new(
                     bootstrap.config_store.clone(),
                     &bootstrap.config,
                     bootstrap.config.device_id.clone(),
-                    sync_notify.clone(),
+                    Arc::new(Notify::new()),
                 ),
                 storage_bridge: Mutex::new(StorageBridgeState::default()),
                 active_history_search: Mutex::new(None),
                 logging,
-                quit_requested: Mutex::new(false),
+                quit_state: Mutex::default(),
                 main_window_focus_pending: AtomicBool::new(false),
                 main_window_frame: Mutex::new(None),
             });
@@ -2421,24 +2540,22 @@ fn main() -> tauri::Result<()> {
             if let Some((snapshot_rx, change_rx)) = watcher_bundle {
                 spawn_server_watchers(app.handle().clone(), snapshot_rx, change_rx);
             }
-            let sync_notify = app.state::<DesktopState>().sync.worker_notify();
-            tauri::async_runtime::spawn(background_worker_loop(sync_notify, {
-                let app = app.handle().clone();
-                move || {
-                    let app = app.clone();
-                    async move {
-                        run_background_sync_once(app).await;
-                    }
-                }
-            }));
             configure_deep_links(app.handle());
-            if daemon_started {
-                app.state::<DesktopState>().sync.request_worker();
+            #[cfg(not(feature = "mac-app-store"))]
+            {
+                let state = app.state::<DesktopState>();
+                tauri::async_runtime::spawn(background_worker_loop(state.sync.worker_notify(), {
+                    let app = app.handle().clone();
+                    move || run_background_sync_once(app.clone())
+                }));
+                if daemon_started {
+                    state.sync.request_worker();
+                }
             }
             show_main_window(app.handle());
             // Documentation and native test profiles must never contact releases.
+            #[cfg(not(feature = "mac-app-store"))]
             if !cfg!(debug_assertions)
-                && !distribution::MAC_APP_STORE_BUILD
                 && std::env::var_os("BROWSER_RECALL_DESKTOP_TEST_PROFILE_DIR").is_none()
                 && cfg!(any(target_os = "macos", target_os = "windows"))
             {
@@ -2484,13 +2601,13 @@ fn main() -> tauri::Result<()> {
     #[cfg(target_os = "windows")]
     windows_startup::record("Tauri build finished");
     app.run(|app, event| match event {
-        tauri::RunEvent::ExitRequested { api, .. } => {
-            let quit_requested = app
+        tauri::RunEvent::ExitRequested { code, api, .. } => {
+            if app
                 .try_state::<DesktopState>()
-                .map(|state| *state.quit_requested.lock())
-                .unwrap_or(false);
-            if !quit_requested {
+                .is_some_and(|state| *state.quit_state.lock() != QuitState::Ready)
+            {
                 api.prevent_exit();
+                request_desktop_quit(app, code.unwrap_or(0));
             }
         }
         #[cfg(target_os = "macos")]

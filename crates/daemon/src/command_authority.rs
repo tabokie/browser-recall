@@ -2,6 +2,7 @@ use crate::commands;
 use crate::mutations::{mutation_batch as mutation, mutation_batch_with as mutation_with};
 use crate::protocol::{HistoryMutationEntry, MutationPayload, RulePayload};
 use crate::runtime;
+use crate::sample_library;
 use crate::storage::Storage;
 use browser_recall_replay::{entities::TreeNode, LogEntry};
 use serde::Deserialize;
@@ -104,6 +105,8 @@ enum CommandRequest {
     ImportBookmarks {
         tree: Vec<commands::BookmarkImportNode>,
     },
+    LoadSampleLibrary,
+    RemoveSampleLibrary,
     ImportHistory {
         entries: Vec<commands::HistoryImportEntry>,
     },
@@ -156,6 +159,8 @@ const SUPPORTED_ACTIONS: &[&str] = &[
     "saveListMeta",
     "createListAndPin",
     "importBookmarks",
+    "loadSampleLibrary",
+    "removeSampleLibrary",
     "importHistory",
     "deleteList",
     "updateListTree",
@@ -436,6 +441,25 @@ impl CommandAuthority {
                     }),
                     mutation("lists"),
                 )
+            }
+            CommandRequest::LoadSampleLibrary => {
+                let name = sample_library::load(&self.storage, &self.device_id).await?;
+                let mut mutations = mutation("lists");
+                mutations.extend(mutation("note"));
+                mutations.extend(mutation("snapshot"));
+                mutations.extend(mutation("orphaned"));
+                CommandOutcome::new(
+                    json!({ "success": true, "listId": sample_library::LIST_ID, "name": name }),
+                    mutations,
+                )
+            }
+            CommandRequest::RemoveSampleLibrary => {
+                sample_library::remove(&self.storage, &self.device_id).await?;
+                let mut mutations = mutation("note");
+                mutations.extend(mutation("snapshot"));
+                mutations.extend(mutation("lists"));
+                mutations.extend(mutation("orphaned"));
+                CommandOutcome::new(json!({ "success": true }), mutations)
             }
             CommandRequest::ImportHistory { entries } => {
                 let (page_count, visit_count, skipped_count) =

@@ -20,6 +20,7 @@ fn desktop_shell_state_keeps_nullable_native_diagnostics_typed() {
         debug_logging: false,
         setup_complete: false,
         data_dir: None,
+        data_folder_needs_access: true,
         system_locale: None,
         paired_browsers: Vec::new(),
     };
@@ -27,6 +28,7 @@ fn desktop_shell_state_keeps_nullable_native_diagnostics_typed() {
     let value = serde_json::to_value(response).expect("serialize desktop shell state");
     assert!(value["loginItemError"].is_null());
     assert!(value["dataDir"].is_null());
+    assert_eq!(value["dataFolderNeedsAccess"], true);
 }
 
 #[test]

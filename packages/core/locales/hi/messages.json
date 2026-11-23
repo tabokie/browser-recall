@@ -159,6 +159,14 @@
     "message": "जाँच हो रही है...",
     "description": "Button label while checking."
   },
+  "desktopDataFolderNeedsAccess": {
+    "message": "पहुँच बहाल करने के लिए अपना डेटा फ़ोल्डर फिर से चुनें।",
+    "description": "Onboarding instruction when the saved data folder needs access again."
+  },
+  "desktopPrivacyPolicy": {
+    "message": "गोपनीयता नीति",
+    "description": "Link to the Browser Recall privacy policy."
+  },
   "desktopChooseDataFolder": {
     "message": "डेटा फ़ोल्डर चुनें",
     "description": "Desktop onboarding data-folder button."
@@ -406,10 +414,6 @@
   "commonProductIntro": {
     "message": "डेस्कटॉप ऐप आपके संग्रह को व्यवस्थित करता है और उसमें खोजता है। ब्राउज़र एक्सटेंशन विज़िट रिकॉर्ड करता है और स्नैपशॉट, हाइलाइट और नोट सहेजता है।",
     "description": "Onboarding product description."
-  },
-  "desktopOnboardingLiveCapture": {
-    "message": "एक्सटेंशन अभी या बाद में इंस्टॉल करें",
-    "description": "Onboarding live capture heading."
   },
   "desktopOnboardingPickColor": {
     "message": "एक रंग चुनें",
@@ -1269,10 +1273,6 @@
     "message": "$1 आइटम पार्सिंग या आयात के दौरान छूट गए।",
     "description": "History import skipped item summary."
   },
-  "desktopInboxRulesHint": {
-    "message": "नियम स्वचालित रूप से नए पृष्ठों को इस सूची में क्रमबद्ध करते हैं। कीवर्ड नियम पृष्ठ शीर्षक, वेब पते और मुख्य पाठ से मेल खाते हैं। फ़ंक्शन नियम एक कस्टम JS विधेय का उपयोग करते हैं जो सही/गलत रिटर्न देता है।",
-    "description": "Localized UI text."
-  },
   "desktopIntervalMinutes": {
     "message": "अंतराल (मिनट)",
     "description": "Localized UI text."
@@ -1639,5 +1639,26 @@
   },
   "desktopUpdateInstall": {
     "message": "अपडेट करें और पुनः शुरू करें"
+  },
+  "desktopStartLibrary": {
+    "message": "अपनी लाइब्रेरी शुरू करें"
+  },
+  "desktopStartLibraryDescription": {
+    "message": "बुकमार्क आयात करें या नमूना लाइब्रेरी देखें।"
+  },
+  "desktopTrySampleLibrary": {
+    "message": "नमूना लाइब्रेरी आज़माएँ"
+  },
+  "desktopRemoveSampleLibrary": {
+    "message": "नमूना लाइब्रेरी हटाएँ"
+  },
+  "desktopConnectBrowser": {
+    "message": "ब्राउज़र कनेक्ट करें"
+  },
+  "desktopKeywordRulesHint": {
+    "message": "नियम नए पेजों को अपने आप इस सूची में रखते हैं। कीवर्ड और रेगुलर एक्सप्रेशन पेज के शीर्षकों से मिलाए जाते हैं।"
+  },
+  "desktopJavaScriptRuleUnavailable": {
+    "message": "इस बिल्ड में उपलब्ध नहीं"
   }
 }

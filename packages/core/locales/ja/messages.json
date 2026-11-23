@@ -159,6 +159,14 @@
     "message": "確認中...",
     "description": "Button label while checking."
   },
+  "desktopDataFolderNeedsAccess": {
+    "message": "アクセスを復元するには、データフォルダをもう一度選択してください。",
+    "description": "Onboarding instruction when the saved data folder needs access again."
+  },
+  "desktopPrivacyPolicy": {
+    "message": "プライバシーポリシー",
+    "description": "Link to the Browser Recall privacy policy."
+  },
   "desktopChooseDataFolder": {
     "message": "データフォルダーの選択",
     "description": "Desktop onboarding data-folder button."
@@ -406,10 +414,6 @@
   "commonProductIntro": {
     "message": "デスクトップアプリでコレクションを整理・検索できます。ブラウザー拡張機能で閲覧履歴、スナップショット、ハイライト、ノートを保存できます。",
     "description": "Onboarding product description."
-  },
-  "desktopOnboardingLiveCapture": {
-    "message": "拡張機能は今すぐ、または後でインストール",
-    "description": "Onboarding live capture heading."
   },
   "desktopOnboardingPickColor": {
     "message": "色を選択してください",
@@ -1269,10 +1273,6 @@
     "message": "$1 個のアイテムが解析またはインポート中にスキップされました。",
     "description": "History import skipped item summary."
   },
-  "desktopInboxRulesHint": {
-    "message": "ルールにより、新しいページがこのリストに自動的に分類されます。キーワード ルールは、ページ タイトル、Web アドレス、本文テキストと照合します。関数ルールは、true/false を返すカスタム JS 述語を使用します。",
-    "description": "Localized UI text."
-  },
   "desktopIntervalMinutes": {
     "message": "間隔 (分)",
     "description": "Localized UI text."
@@ -1639,5 +1639,26 @@
   },
   "desktopUpdateInstall": {
     "message": "更新して再起動"
+  },
+  "desktopStartLibrary": {
+    "message": "ライブラリを始める"
+  },
+  "desktopStartLibraryDescription": {
+    "message": "ブックマークをインポートするか、サンプルライブラリを試せます。"
+  },
+  "desktopTrySampleLibrary": {
+    "message": "サンプルライブラリを試す"
+  },
+  "desktopRemoveSampleLibrary": {
+    "message": "サンプルライブラリを削除"
+  },
+  "desktopConnectBrowser": {
+    "message": "ブラウザを接続"
+  },
+  "desktopKeywordRulesHint": {
+    "message": "ルールは新しいページをこのリストに自動で振り分けます。キーワードと正規表現はページのタイトルに照合します。"
+  },
+  "desktopJavaScriptRuleUnavailable": {
+    "message": "このビルドでは利用できません"
   }
 }

@@ -1753,7 +1753,9 @@ async fn run_connector_command(
     action: &str,
     request: Value,
 ) -> Result<Value, WsServerError> {
-    if CommandAuthority::supports(action) {
+    if CommandAuthority::supports(action)
+        && !matches!(action, "loadSampleLibrary" | "removeSampleLibrary")
+    {
         return run_shared_command(shared, action, request).await;
     }
 
@@ -2149,7 +2151,6 @@ async fn handle_test_reset_data(shared: &SharedState) -> DaemonMessage {
             .await
             .map_err(WsServerError::Ingest)?;
         set_device_id_internal(shared, device_id.clone()).await?;
-        shared.storage.reset_cache();
         resume_service(shared).await;
         Ok::<(), WsServerError>(())
     }

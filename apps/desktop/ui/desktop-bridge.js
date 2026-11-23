@@ -87,6 +87,7 @@ export async function loadDesktopShellState() {
     'launchAtLogin',
     'debugLogging',
     'setupComplete',
+    'dataFolderNeedsAccess',
   ]) {
     requireBooleanField(response, field, action);
   }

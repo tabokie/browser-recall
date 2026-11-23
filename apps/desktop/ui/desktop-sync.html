@@ -1,0 +1,248 @@
+<div class="addon-section">
+  <label class="addon-header" for="syncEnabled">
+    <span class="toggle-switch">
+      <input type="checkbox" id="syncEnabled" />
+      <span class="toggle-track"></span>
+    </span>
+    <span class="addon-header-title" data-i18n="desktopSync">Sync</span>
+    <span class="addon-experimental-badge" data-i18n="desktopExperimental"
+      >Experimental</span
+    >
+    <span class="addon-header-desc wrap" data-i18n="desktopSyncDesc"
+      >Sync history and notes across devices, not including snapshots</span
+    >
+  </label>
+  <div class="addon-body" id="syncConfigFields">
+    <div class="option" style="margin-top: 8px; display: none">
+      <div class="option-row">
+        <span data-i18n="desktopIntervalMinutes">Interval (min)</span>
+        <input
+          type="number"
+          id="syncIntervalMinutes"
+          min="1"
+          max="60"
+          value="5"
+          style="width: 60px"
+        />
+      </div>
+    </div>
+    <div class="option" style="margin-top: 8px">
+      <div class="option-row">
+        <span data-i18n="desktopRetentionDays">Retention (days)</span>
+        <input
+          type="number"
+          id="syncRetentionDays"
+          min="1"
+          max="30"
+          value="7"
+          style="width: 60px"
+        />
+      </div>
+    </div>
+    <div class="option" style="margin-top: 8px">
+      <div class="option-row">
+        <span data-i18n="desktopProvider">Provider</span>
+        <select id="syncMethod" disabled>
+          <option value="github" translate="no">GitHub</option>
+        </select>
+      </div>
+    </div>
+    <!-- GitHub -->
+    <div id="syncGithubFields">
+      <div class="option" style="margin-top: 8px">
+        <div style="font-size: 13px; margin-bottom: 4px">
+          <span data-i18n="desktopRepositoryAddress">Repository address</span>
+        </div>
+        <input
+          type="text"
+          id="syncRepoUrl"
+          placeholder="https://github.com/user/browser-recall-sync"
+          style="
+            width: 100%;
+            padding: 4px 6px;
+            border: 1px solid var(--border-subtle);
+            border-radius: 4px;
+            font-size: 12px;
+          "
+        />
+        <div
+          style="margin-top: 6px; font-size: 12px; color: var(--text-secondary)"
+        >
+          <span data-i18n="desktopNoSyncRepo">Don't have a sync repo?</span>
+          <a
+            href="https://github.com/new"
+            target="_blank"
+            style="color: var(--accent-primary)"
+            data-i18n="desktopCreateGithubRepo"
+            >Create one on GitHub</a
+          >
+          <span data-i18n="desktopMakePrivate">(make it private)</span>
+        </div>
+      </div>
+      <div class="option" style="margin-top: 8px">
+        <div style="font-size: 13px; margin-bottom: 4px">
+          <span data-i18n="desktopAuthentication">Authentication</span>
+        </div>
+        <!-- Disconnected state -->
+        <div id="syncAuthDisconnected" style="margin-top: 6px">
+          <div style="margin-bottom: 8px">
+            <button
+              id="syncCreateTokenBtn"
+              class="btn btn-primary btn-sm"
+              style="width: 100%"
+            >
+              <span data-i18n="desktopCreateTokenGithub"
+                >Create Token on GitHub</span
+              >
+            </button>
+            <div
+              style="
+                margin-top: 6px;
+                font-size: 12px;
+                color: var(--text-secondary);
+                text-align: center;
+              "
+            >
+              <span data-i18n="desktopGithubPrefilled"
+                >Opens GitHub with pre-filled settings</span
+              >
+            </div>
+          </div>
+          <div
+            style="
+              margin: 12px 0;
+              text-align: center;
+              font-size: 12px;
+              color: var(--text-secondary);
+            "
+          >
+            <span data-i18n="desktopPasteExistingToken"
+              >or paste an existing token:</span
+            >
+          </div>
+          <input
+            type="password"
+            id="syncPatInput"
+            placeholder="github_pat_..."
+            style="
+              width: 100%;
+              padding: 4px 6px;
+              border: 1px solid var(--border-subtle);
+              border-radius: 4px;
+              font-size: 12px;
+            "
+          />
+          <div class="option-row" style="margin-top: 10px">
+            <span
+              ><span data-i18n="desktopRememberToken">Remember token</span>
+              <span class="hint-icon"
+                >?<span class="hint-tip" data-i18n="desktopRememberTokenHint"
+                  >When off, the token is kept in memory only and cleared on
+                  browser restart.</span
+                ></span
+              ></span
+            >
+            <label class="toggle-switch sm">
+              <input type="checkbox" id="syncRememberToken" checked />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <details class="sync-setup-guide" style="margin-top: 12px">
+            <summary data-i18n="desktopManualSetupInstructions">
+              Manual setup instructions
+            </summary>
+            <ol data-i18n-html="desktopManualSetupHtml">
+              <li>
+                Create a <strong>private</strong> repository on
+                <a href="https://github.com/new" target="_blank">GitHub</a>
+                (e.g. <code>browser-recall-sync</code>). Leave it empty.
+              </li>
+              <li>
+                Go to
+                <a
+                  href="https://github.com/settings/personal-access-tokens/new"
+                  target="_blank"
+                  >Fine-grained tokens</a
+                >
+                and create a token:
+                <ul>
+                  <li>Set expiration to <strong>No expiration</strong></li>
+                  <li>
+                    Under "Repository access", choose
+                    <strong>Only select repositories</strong> and pick your sync
+                    repo
+                  </li>
+                  <li>
+                    Under "Permissions", add
+                    <strong>Contents</strong> and set to
+                    <strong>Read and write</strong>
+                  </li>
+                </ul>
+              </li>
+              <li>Paste the repository address and token above.</li>
+            </ol>
+          </details>
+        </div>
+        <!-- Connected state -->
+        <div id="syncAuthConnected" style="display: none; margin-top: 6px">
+          <div style="font-size: 13px; color: var(--text-primary)">
+            <span style="color: var(--accent-green)">&#10003;</span>
+            <span data-i18n="desktopConnected">Connected</span>
+            <span id="syncAuthDetail"></span>
+          </div>
+          <div
+            style="display: flex; justify-content: flex-end; margin-top: 6px"
+          >
+            <button
+              id="syncDisconnectBtn"
+              class="btn btn-secondary btn-sm"
+              data-i18n="commonClear"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="data-row data-btn-row" style="margin-top: 10px">
+      <button
+        id="syncPatSaveBtn"
+        class="btn btn-secondary btn-sm"
+        data-i18n="desktopConnect"
+      >
+        Connect
+      </button>
+      <button
+        id="syncCheckDevicesBtn"
+        class="btn btn-secondary btn-sm"
+        data-i18n="desktopCheckDevices"
+      >
+        Check Devices
+      </button>
+      <button
+        id="syncNowBtn"
+        class="btn btn-primary btn-sm"
+        data-i18n="desktopSyncNow"
+      >
+        Sync Now
+      </button>
+      <button
+        id="syncCancelBtn"
+        class="btn btn-secondary btn-sm"
+        data-i18n="commonCancel"
+        style="display: none"
+      >
+        Cancel
+      </button>
+    </div>
+    <div
+      id="syncStatus"
+      style="margin-top: 8px; font-size: 12px; color: var(--text-muted)"
+    ></div>
+
+    <!-- Remote Devices -->
+    <div id="syncDevicesSection" style="margin-top: 12px; display: none">
+      <div id="syncDevicesList" style="font-size: 12px"></div>
+    </div>
+  </div>
+</div>

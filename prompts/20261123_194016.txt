@@ -1,0 +1,29 @@
+- I'm about to submit the macOS package for app store review. Are there any gaps left? You can also reference information from [https://github.com/mjmirza/app-store-compliance](https://github.com/mjmirza/app-store-compliance).
+- Is it better off removing the GitHub sync feature, at least for now? I think it is not mature enough in the first place. Does app store review the source code or only the binary? We could gate the feature as optional.
+- Good. Add the compile flag and turn it off for app store build. I remember we have an existing compile flag maybe reuse it.
+- But I saw earlier that you opened the app with an error, "could not read theme". Is that anticipated?
+- Good. Let's proceed to close the other gaps you mentioned earlier.
+- Continue
+- The links are styled poorly (blue hypertext), not consistent with overall design. Show me the onboard screenshot after you improve the styling.
+- You introduced the links to other UIs as well, e.g. the settings UI.
+- I don't see privacy link in onboard page now. The current style of onboarding is not ideal either. The spacing between different actions is too tight, and "Launch when log in" appear as a sub-entry to the extension heading, and the "launch when log in" should be default on if allowed by app store. The style of setting is slightly off. "Privacy Policy" is too large and aligned to the left contrary to other buttons. I would like it to be a similar small button next to the help '?' button next to section heading.
+- It is really messy, not consistent or thought-out or polished. The aesthetics is not coherent. For onboarding, there's no section line between the first two items, and the spacing after the section line is inconsistent (data directory section is larger), and the privacy button is outright copied from settings page without adapting to the UI. For settings, the privacy button is still too large, it should be exactly the same height as the question button.
+- The background color of the settings's privacy button should align with the question button as well. Then inspect one more time what could be improved about the modified UI components w\.r.t. style and aesthetics.
+- Back to store launch. Explain why "this Mac has no valid distribution signing identities". I'm in the developer program already. Do I need to sign in somewhere? Explain "complete the App Store Connect declarations" as well.
+- What do you mean by "Keychain usually shows the resulting identity as `3rd Party Mac Developer Installer`". The apple developer portal creates a \`.cer\` file, should I import it to keychain somehow? Also, I can see a Apple Distribution key that I created in the first step in the keychain, but it says the certificate is not trusted.
+- I imported the .cer. AppleWWDRCAG3.cer link says 403 error
+- Good. Proceed with the gaps earlier.
+- Downloaded
+- Apart from manual steps, what else could be improved with respect to getting it easier to be approved?
+- I agree with all four. But the first point is a bit complicated to implement, and I wonder does the apple guideline really extends to browser extension? Because only the extension does recording, not the desktop app.
+- Is it enough to add a status page next to the settings button in desktop app, the status page's button shows active browser count, and we move the connection section from old settings page to this status page. I don't like the idea of changing desktop tray icon, because pausing desktop is not the idiomatic way to control the recording. I also don't want to modify extension popup to have more recording label, the current visual design is more than enough to convey the idea.
+- I don't care if the count is faithful and accurate enough, because to show accurately the count of non-pausing browsers, you have to force browser to communicate with desktop during pause and unpause, that is pure waste of energy. I think a count of active connections today is accurate enough if it's okay with app store review.
+- But that's impossible technically, for a browser that is inactive but not paused, would you call it "recording" or idle?
+- So what's your opinion? You insist we must modify the data transmit in order to display a non-pausing browser count?
+- So how to settle the review question exactly? That's all I care about.
+- Why is it that we need to "keeping publication under your control"? If the current version pass then it's okay to publish no?
+- Work on the other three changes you proposed.
+- Fix a minor issue: in the settings UI, some area has scroll disabled, e.g. the site exclusion rule.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) 
+- Fix them all. For sample library question, use normal recoverable deletion flow. And I wonder why there is a distinction of handling between normal lists and sample library, is there some architectural decisions that I'm not made aware of?
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) co-author=GPT-6.2 Sol

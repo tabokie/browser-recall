@@ -581,6 +581,31 @@ pub async fn ensure_default_lists(storage: &Storage, device_id: &str) -> Result<
 
     let list_timestamp = storage.next_command_timestamp_millis();
     let rule_timestamp = storage.next_command_timestamp_millis();
+    replay_entries_in_transaction(
+        transaction,
+        vec![
+            LogEntry::CreateList {
+                timestamp: list_timestamp,
+                list_owner: "system".to_string(),
+                list_id: Some("hubs".to_string()),
+                name: "Hubs".to_string(),
+                parent_list_id: None,
+            },
+            LogEntry::AddRule {
+                timestamp: rule_timestamp,
+                list_owner: "system".to_string(),
+                name: "Hubs".to_string(),
+                rule: default_hubs_rule(),
+            },
+        ],
+    )
+    .await?;
+
+    Ok(true)
+}
+
+#[cfg(all(feature = "javascript-list-rules", not(feature = "mac-app-store")))]
+fn default_hubs_rule() -> RuleInput {
     let mut config = BTreeMap::new();
     config.insert(
         "description".to_string(),
@@ -605,31 +630,23 @@ pub async fn ensure_default_lists(storage: &Storage, device_id: &str) -> Result<
             .join("\n"),
         ),
     );
-    replay_entries_in_transaction(
-        transaction,
-        vec![
-            LogEntry::CreateList {
-                timestamp: list_timestamp,
-                list_owner: "system".to_string(),
-                list_id: Some("hubs".to_string()),
-                name: "Hubs".to_string(),
-                parent_list_id: None,
-            },
-            LogEntry::AddRule {
-                timestamp: rule_timestamp,
-                list_owner: "system".to_string(),
-                name: "Hubs".to_string(),
-                rule: RuleInput {
-                    id: None,
-                    rule_type: "function".to_string(),
-                    config,
-                },
-            },
-        ],
-    )
-    .await?;
+    RuleInput {
+        id: None,
+        rule_type: "function".to_string(),
+        config,
+    }
+}
 
-    Ok(true)
+#[cfg(not(all(feature = "javascript-list-rules", not(feature = "mac-app-store"))))]
+fn default_hubs_rule() -> RuleInput {
+    RuleInput {
+        id: None,
+        rule_type: "keyword".to_string(),
+        config: BTreeMap::from([(
+            "pattern".to_string(),
+            Value::String(r"/\b(blog|wiki|home|landing|explore|discover|index)\b/".to_string()),
+        )]),
+    }
 }
 
 fn validate_list_manifests(
@@ -1549,6 +1566,20 @@ pub async fn update_rule(
     config: BTreeMap<String, Value>,
 ) -> Result<(), String> {
     let transaction = ReplayTransaction::begin(storage, device_id).await?;
+    if !crate::rules::JAVASCRIPT_LIST_RULES_ENABLED {
+        let list = storage
+            .load_list(list_id)
+            .await
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "List not found".to_string())?;
+        if list
+            .rules
+            .iter()
+            .any(|rule| rule.id == rule_id && rule.rule_type == "function")
+        {
+            return Err(crate::rules::JAVASCRIPT_RULE_UNAVAILABLE.to_string());
+        }
+    }
     let (list_name, list_owner) = list_event_fields(storage, device_id, list_id)
         .await?
         .ok_or_else(|| "List not found".to_string())?;

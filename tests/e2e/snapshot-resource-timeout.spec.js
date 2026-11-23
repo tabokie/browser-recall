@@ -1,4 +1,7 @@
 import http from 'node:http';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { test, expect } from './fixtures.js';
 import { getSlugForUrl, openHelperPage } from './helpers.js';
 
@@ -38,12 +41,11 @@ test('capture reconstructs serialized shadow DOM in the trusted snapshot viewer'
   localServer,
   setupDir,
 }) => {
-  void setupDir;
-
   const crossOrigin = await startServer((_request, response) => {
     response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     response.end(`<!doctype html><html><body>
       <cross-snapshot-card id="cross-snapshot-card"></cross-snapshot-card>
+      <textarea>private-preset-cross-frame</textarea>
       <script>
         customElements.define('cross-snapshot-card', class extends HTMLElement {
           constructor() {
@@ -61,6 +63,17 @@ test('capture reconstructs serialized shadow DOM in the trusted snapshot viewer'
       <link rel="icon" href="data:image/png;base64,iVBORw0KGgo=">
       <snapshot-card id="snapshot-card"></snapshot-card>
       <closed-snapshot-card id="closed-snapshot-card"></closed-snapshot-card>
+      <form>
+        <label for="sample-form-email">Contact email</label>
+        <input id="sample-form-email" value="private-preset@example.test">
+        <input type="hidden" value="private-hidden-token">
+        <input type="checkbox" id="sample-form-check">
+        <textarea id="sample-form-draft">private-preset-draft</textarea>
+        <select id="sample-form-select"><option>First</option><option value="other">Other</option></select>
+      </form>
+      <div id="sample-form-editable" contenteditable="plaintext-only"></div>
+      <p>A public line survives.</p>
+      <pre><code>Code before <textarea>private-preset-code-draft</textarea> and after.</code></pre>
       <iframe id="nested-shadow-frame" srcdoc="<!doctype html><html><body>
         <nested-snapshot-card id='nested-snapshot-card'></nested-snapshot-card>
         <script>
@@ -103,6 +116,11 @@ test('capture reconstructs serialized shadow DOM in the trusted snapshot viewer'
   try {
     page = await extContext.newPage();
     await page.goto(pageUrl);
+    await page.locator('#sample-form-email').fill('private-live@example.test');
+    await page.locator('#sample-form-draft').fill('private-live-draft');
+    await page.locator('#sample-form-editable').fill('private-editable-draft');
+    await page.locator('#sample-form-check').check();
+    await page.locator('#sample-form-select').selectOption('other');
     await expect
       .poll(() =>
         page
@@ -164,12 +182,27 @@ test('capture reconstructs serialized shadow DOM in the trusted snapshot viewer'
     expect(snapshotResponse.html).toContain('Captured shadow content');
     expect(snapshotResponse.html).toContain('Captured closed shadow content');
     expect(snapshotResponse.html).not.toContain('id="savepage-shadowloader"');
+    expect(snapshotResponse.html).toContain('Contact email');
+    expect(snapshotResponse.html).not.toMatch(
+      /private-(preset|live|hidden|editable)/,
+    );
+    const stem = `${getSlugForUrl(pageUrl)}-${capture.timestamp}`;
+    const shard = createHash('sha256').update(stem).digest('hex').slice(0, 2);
+    const markdown = await readFile(
+      path.join(setupDir, 'objects', 'snapshots', shard, `${stem}.md`),
+      'utf8',
+    );
+    expect(markdown).toContain('A public line survives.');
+    expect(markdown).toContain('Code before  and after.');
+    expect(markdown).not.toMatch(/private-(preset|live|hidden|editable)/);
 
     viewer = await extContext.newPage();
     await viewer.goto(
       `chrome-extension://${extensionId}/snapshot-viewer.html?slug=${encodeURIComponent(getSlugForUrl(pageUrl))}&ts=${capture.timestamp}`,
     );
     const frame = viewer.frameLocator('iframe');
+    await expect(frame.locator('#sample-form-check')).not.toBeChecked();
+    await expect(frame.locator('#sample-form-select')).toHaveValue('First');
     const card = frame.locator('#snapshot-card');
     await expect
       .poll(() =>

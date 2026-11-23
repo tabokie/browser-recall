@@ -2447,13 +2447,11 @@ function extractHTML(depth,frame,element,crossframe,nosrcframe,framekey,parentpr
     startTag = "<" + tagName;
     for (i = 0; i < element.attributes.length; i++)
     {
-        if (element.attributes[i].name != "zoompage-fontsize")
-        {
-            startTag += " " + element.attributes[i].name;
-            startTag += "=\"";
-            startTag += element.attributes[i].value.replace(/"/g,"&quot;");
-            startTag += "\"";
-        }
+        var attribute = element.attributes[i];
+        if (attribute.name == "zoompage-fontsize" ||
+            (tagName == "input" && (attribute.name == "value" || attribute.name == "checked")) ||
+            (tagName == "option" && (attribute.name == "value" || attribute.name == "selected"))) continue;
+        startTag += " " + attribute.name + "=\"" + attribute.value.replace(/"/g,"&quot;") + "\"";
     }
     if (element.parentElement != null && element.parentElement.localName == "head" && metadataElements.indexOf(tagName) < 0)
     {
@@ -3016,7 +3014,6 @@ function extractHTML(depth,frame,element,crossframe,nosrcframe,framekey,parentpr
     }
     
     /* External image referenced in <input> element */
-    /* Reinstate checked state or text value of <input> element */
     
     else if (element.localName == "input")
     {
@@ -3037,39 +3034,6 @@ function extractHTML(depth,frame,element,crossframe,nosrcframe,framekey,parentpr
                 startTag = startTag.replace(/ src="[^"]*"/,origstr + " src=\"" + datauri + "\"");
             }
         }
-        
-        if (element.type.toLowerCase() == "file" || element.type.toLowerCase() == "password")
-        {
-            /* maintain security */
-            
-            if (element.hasAttribute("value")) startTag = startTag.replace(/ value="[^"]*"/," value=\"\"");
-            else startTag = startTag.replace(/>$/," value=\"\">");
-        }
-        else if (element.type.toLowerCase() == "checkbox" || element.type.toLowerCase() == "radio")
-        {
-            if (!element.checked) startTag = startTag.replace(/ checked="[^"]*"/,"");
-            else if (!element.hasAttribute("checked")) startTag = startTag.replace(/>$/," checked=\"\">");
-        }
-        else
-        {
-            if (element.hasAttribute("value")) startTag = startTag.replace(/ value="[^"]*"/," value=\"" + element.value + "\"");
-            else startTag = startTag.replace(/>$/," value=\"" + element.value + "\">");
-        }
-    }
-    
-    /* Reinstate text value of <textarea> element */
-    
-    else if (element.localName == "textarea")
-    {
-        textContent = element.value;
-    }
-    
-    /* Reinstate selected state of <option> element */
-    
-    else if (element.localName == "option")
-    {
-        if (element.selected) startTag = startTag.replace(/ selected="[^"]*"/," selected=\"\"");
-        else startTag = startTag.replace(/ selected="[^"]*"/,"");
     }
     
     /* Graphics drawn within <canvas> element */
@@ -3785,15 +3749,10 @@ function extractHTML(depth,frame,element,crossframe,nosrcframe,framekey,parentpr
             
             htmlStrings[htmlStrings.length] = textContent;
         }
-        else if (element.localName == "textarea")  /* <textarea> element */
-        {
-            textContent = textContent.replace(/&/g,"&amp;");
-            textContent = textContent.replace(/</g,"&lt;");
-            textContent = textContent.replace(/>/g,"&gt;");
-            
-            htmlStrings[htmlStrings.length] = textContent;
-        }
-        else if (voidElements.indexOf(element.localName) >= 0) ;  /* void element */
+        // Keep the control in the layout but omit its editable contents.
+        else if (voidElements.indexOf(element.localName) >= 0 ||
+                 element.localName == "textarea" || element.isContentEditable ||
+                 ["", "true", "plaintext-only"].includes(element.getAttribute("contenteditable")?.toLowerCase())) ;
         else
         {
             /* Handle shadow child nodes */

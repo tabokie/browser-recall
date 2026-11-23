@@ -78,6 +78,14 @@ export function extractMarkdown(root, { baseUrl } = {}) {
     );
   }
 
+  function isExcluded(element) {
+    return (
+      element.isContentEditable ||
+      skippedTags.has(element.tagName) ||
+      isHidden(element)
+    );
+  }
+
   function escapeText(value) {
     return String(value).replace(/([\\`*_[\]<>])/g, '\\$1');
   }
@@ -118,15 +126,17 @@ export function extractMarkdown(root, { baseUrl } = {}) {
     return `${fence}${padding}${content}${padding}${fence}`;
   }
 
+  function readCodeText(node) {
+    if (node.nodeType === 3) return node.nodeValue ?? '';
+    if (node.nodeType !== 1 || isExcluded(node)) return '';
+    return Array.from(node.childNodes, readCodeText).join('');
+  }
+
   function renderInlineNode(node) {
     if (node.nodeType === 3) {
       return escapeText(node.nodeValue ?? '');
     }
-    if (
-      node.nodeType !== 1 ||
-      isHidden(node) ||
-      skippedTags.has(node.tagName)
-    ) {
+    if (node.nodeType !== 1 || isExcluded(node)) {
       return '';
     }
 
@@ -168,7 +178,7 @@ export function extractMarkdown(root, { baseUrl } = {}) {
       case 'STRIKE':
         return `~~${normalizeInline(children())}~~`;
       case 'CODE':
-        return inlineCode(node.textContent ?? '');
+        return inlineCode(readCodeText(node));
       default:
         return children();
     }
@@ -235,8 +245,7 @@ export function extractMarkdown(root, { baseUrl } = {}) {
     for (const node of nodes) {
       if (
         node.nodeType === 1 &&
-        !isHidden(node) &&
-        !skippedTags.has(node.tagName) &&
+        !isExcluded(node) &&
         blockTags.has(node.tagName)
       ) {
         flushInline();
@@ -266,7 +275,7 @@ export function extractMarkdown(root, { baseUrl } = {}) {
     let ordinal = Number.isFinite(parsedStart) ? parsedStart : 1;
     const lines = [];
     const items = Array.from(list.children).filter(
-      (child) => child.tagName === 'LI' && !isHidden(child),
+      (child) => child.tagName === 'LI' && !isExcluded(child),
     );
 
     for (const item of items) {
@@ -285,7 +294,9 @@ export function extractMarkdown(root, { baseUrl } = {}) {
         lines.push(line ? `${continuation}${line}` : '');
       }
       for (const nested of Array.from(item.children).filter(
-        (child) => child.tagName === 'UL' || child.tagName === 'OL',
+        (child) =>
+          (child.tagName === 'UL' || child.tagName === 'OL') &&
+          !isExcluded(child),
       )) {
         const nestedMarkdown = renderList(nested, baseIndent + marker.length);
         if (nestedMarkdown) lines.push(nestedMarkdown);
@@ -299,7 +310,7 @@ export function extractMarkdown(root, { baseUrl } = {}) {
     const code =
       Array.from(node.children).find((child) => child.tagName === 'CODE') ??
       node;
-    const content = String(code.textContent ?? '')
+    const content = readCodeText(code)
       .replace(/\r\n?/g, '\n')
       .replace(/^\n|\n$/g, '');
     const language =
@@ -316,14 +327,14 @@ export function extractMarkdown(root, { baseUrl } = {}) {
 
   function renderTable(table) {
     const rows = Array.from(table.querySelectorAll('tr')).filter(
-      (row) => row.closest('table') === table && !isHidden(row),
+      (row) => row.closest('table') === table && !isExcluded(row),
     );
     if (rows.length === 0) return '';
     const parsedRows = rows.map((row) =>
       Array.from(row.children)
         .filter((cell) => cell.tagName === 'TH' || cell.tagName === 'TD')
         .flatMap((cell) => {
-          const content = renderInlineChildren(cell)
+          const content = (isExcluded(cell) ? '' : renderInlineChildren(cell))
             .replace(/\n/g, '<br>')
             .replace(/\|/g, '\\|');
           const span = Math.max(
@@ -344,7 +355,7 @@ export function extractMarkdown(root, { baseUrl } = {}) {
   }
 
   function renderBlock(node) {
-    if (isHidden(node) || skippedTags.has(node.tagName)) return '';
+    if (isExcluded(node)) return '';
     if (/^H[1-6]$/.test(node.tagName)) {
       return `${'#'.repeat(Number(node.tagName[1]))} ${renderInlineChildren(node)}`;
     }
@@ -370,6 +381,7 @@ export function extractMarkdown(root, { baseUrl } = {}) {
       case 'DL': {
         const parts = [];
         for (const child of node.children) {
+          if (isExcluded(child)) continue;
           if (child.tagName === 'DT') {
             parts.push(`**${renderInlineChildren(child)}**`);
           } else if (child.tagName === 'DD') {
@@ -383,7 +395,7 @@ export function extractMarkdown(root, { baseUrl } = {}) {
     }
   }
 
-  return renderNodes(root.childNodes);
+  return root.isContentEditable ? '' : renderNodes(root.childNodes);
 }
 
 export function createMarkdownExtractorGlobalScript() {

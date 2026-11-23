@@ -159,6 +159,14 @@
     "message": "Memeriksa...",
     "description": "Button label while checking."
   },
+  "desktopDataFolderNeedsAccess": {
+    "message": "Pilih kembali folder data Anda untuk memulihkan akses.",
+    "description": "Onboarding instruction when the saved data folder needs access again."
+  },
+  "desktopPrivacyPolicy": {
+    "message": "Kebijakan Privasi",
+    "description": "Link to the Browser Recall privacy policy."
+  },
   "desktopChooseDataFolder": {
     "message": "Pilih Folder Data",
     "description": "Desktop onboarding data-folder button."
@@ -406,10 +414,6 @@
   "commonProductIntro": {
     "message": "Aplikasi desktop mengatur dan mencari koleksi Anda. Ekstensi browser mencatat kunjungan dan menyimpan snapshot, sorotan, dan catatan.",
     "description": "Onboarding product description."
-  },
-  "desktopOnboardingLiveCapture": {
-    "message": "Pasang ekstensi sekarang atau nanti",
-    "description": "Onboarding live capture heading."
   },
   "desktopOnboardingPickColor": {
     "message": "Pilih warna",
@@ -1269,10 +1273,6 @@
     "message": "$1 item dilewati selama penguraian atau impor.",
     "description": "History import skipped item summary."
   },
-  "desktopInboxRulesHint": {
-    "message": "Aturan secara otomatis mengurutkan halaman baru ke dalam daftar ini. Aturan kata kunci cocok dengan judul halaman, alamat web, dan teks isi. Aturan fungsi menggunakan predikat JS khusus yang mengembalikan nilai benar/salah.",
-    "description": "Localized UI text."
-  },
   "desktopIntervalMinutes": {
     "message": "Interval (menit)",
     "description": "Localized UI text."
@@ -1639,5 +1639,26 @@
   },
   "desktopUpdateInstall": {
     "message": "Perbarui dan mulai ulang"
+  },
+  "desktopStartLibrary": {
+    "message": "Mulai pustaka Anda"
+  },
+  "desktopStartLibraryDescription": {
+    "message": "Impor markah atau jelajahi pustaka contoh."
+  },
+  "desktopTrySampleLibrary": {
+    "message": "Coba Pustaka Contoh"
+  },
+  "desktopRemoveSampleLibrary": {
+    "message": "Hapus Pustaka Contoh"
+  },
+  "desktopConnectBrowser": {
+    "message": "Hubungkan Peramban"
+  },
+  "desktopKeywordRulesHint": {
+    "message": "Aturan otomatis menyortir halaman baru ke daftar ini. Kata kunci dan ekspresi reguler dicocokkan dengan judul halaman."
+  },
+  "desktopJavaScriptRuleUnavailable": {
+    "message": "Tidak tersedia dalam versi ini"
   }
 }

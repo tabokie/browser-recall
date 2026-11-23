@@ -1,10 +1,18 @@
 mod build_support;
 #[cfg(feature = "mac-app-store")]
+mod store_frontend;
+#[cfg(feature = "mac-app-store")]
 mod storekit_build;
 
 use std::{env, path::PathBuf, process};
 
 fn try_build() -> Result<(), String> {
+    if cfg!(all(
+        feature = "mac-app-store",
+        feature = "javascript-list-rules"
+    )) {
+        return Err("Mac App Store builds require --no-default-features and cannot enable javascript-list-rules".into());
+    }
     let manifest_dir = env::var_os("CARGO_MANIFEST_DIR")
         .map(PathBuf::from)
         .ok_or_else(|| "Cargo did not provide CARGO_MANIFEST_DIR".to_string())?;
@@ -26,9 +34,12 @@ fn try_build() -> Result<(), String> {
             test_manifest.display()
         );
     }
-    build_support::require_frontend_dist(&config_path)?;
+    let _frontend_dist = build_support::require_frontend_dist(&config_path)?;
     #[cfg(feature = "mac-app-store")]
-    storekit_build::build(&manifest_dir)?;
+    {
+        store_frontend::prepare(&manifest_dir, &_frontend_dist)?;
+        storekit_build::build(&manifest_dir)?;
+    }
     tauri_build::try_build(tauri_build::Attributes::default())
         .map_err(|error| format!("failed to generate the Tauri build context: {error:#}"))
 }

@@ -159,6 +159,14 @@
     "message": "Checking...",
     "description": "Button label while checking."
   },
+  "desktopDataFolderNeedsAccess": {
+    "message": "Choose your data folder again to restore access.",
+    "description": "Onboarding instruction when the saved data folder needs access again."
+  },
+  "desktopPrivacyPolicy": {
+    "message": "Privacy Policy",
+    "description": "Link to the Browser Recall privacy policy."
+  },
   "desktopChooseDataFolder": {
     "message": "Choose Data Folder",
     "description": "Desktop onboarding data-folder button."
@@ -406,10 +414,6 @@
   "commonProductIntro": {
     "message": "The desktop app organizes and searches your collection. The browser extension records visits and saves snapshots, highlights, and notes.",
     "description": "Onboarding product description."
-  },
-  "desktopOnboardingLiveCapture": {
-    "message": "Install extensions now or later",
-    "description": "Onboarding live capture heading."
   },
   "desktopOnboardingPickColor": {
     "message": "Pick a color",
@@ -1297,10 +1301,6 @@
     "message": "$1 items skipped during parsing or import.",
     "description": "History import skipped item summary."
   },
-  "desktopInboxRulesHint": {
-    "message": "Rules automatically sort new pages into this list. Keyword rules match against page title, web address, and body text. Function rules use a custom JS predicate that returns true/false.",
-    "description": "Localized UI text."
-  },
   "desktopIntervalMinutes": {
     "message": "Interval (min)",
     "description": "Localized UI text."
@@ -1639,5 +1639,26 @@
   },
   "desktopUpdateInstall": {
     "message": "Update and restart"
+  },
+  "desktopStartLibrary": {
+    "message": "Start your library"
+  },
+  "desktopStartLibraryDescription": {
+    "message": "Import bookmarks or explore a sample library."
+  },
+  "desktopTrySampleLibrary": {
+    "message": "Try Sample Library"
+  },
+  "desktopRemoveSampleLibrary": {
+    "message": "Remove Sample Library"
+  },
+  "desktopConnectBrowser": {
+    "message": "Connect a Browser"
+  },
+  "desktopKeywordRulesHint": {
+    "message": "Rules automatically sort new pages into this list. Keyword and regular expression rules match page titles."
+  },
+  "desktopJavaScriptRuleUnavailable": {
+    "message": "Unavailable in this build"
   }
 }

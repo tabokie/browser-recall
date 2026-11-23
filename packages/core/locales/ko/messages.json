@@ -159,6 +159,14 @@
     "message": "확인 중...",
     "description": "Button label while checking."
   },
+  "desktopDataFolderNeedsAccess": {
+    "message": "접근 권한을 복원하려면 데이터 폴더를 다시 선택하세요.",
+    "description": "Onboarding instruction when the saved data folder needs access again."
+  },
+  "desktopPrivacyPolicy": {
+    "message": "개인정보 처리방침",
+    "description": "Link to the Browser Recall privacy policy."
+  },
   "desktopChooseDataFolder": {
     "message": "데이터 폴더 선택",
     "description": "Desktop onboarding data-folder button."
@@ -406,10 +414,6 @@
   "commonProductIntro": {
     "message": "데스크톱 앱에서 컬렉션을 정리하고 검색하세요. 브라우저 확장 프로그램은 방문 기록, 스냅샷, 하이라이트와 메모를 저장합니다.",
     "description": "Onboarding product description."
-  },
-  "desktopOnboardingLiveCapture": {
-    "message": "확장 프로그램을 지금 또는 나중에 설치하세요",
-    "description": "Onboarding live capture heading."
   },
   "desktopOnboardingPickColor": {
     "message": "색상을 선택하세요",
@@ -1269,10 +1273,6 @@
     "message": "$1 항목을 구문 분석하거나 가져오는 동안 건너뛰었습니다.",
     "description": "History import skipped item summary."
   },
-  "desktopInboxRulesHint": {
-    "message": "규칙은 새 페이지를 이 목록에 자동으로 정렬합니다. 키워드 규칙은 페이지 제목, 웹 주소 및 본문 텍스트와 일치합니다. 함수 규칙은 true/false를 반환하는 사용자 정의 JS 조건자를 사용합니다.",
-    "description": "Localized UI text."
-  },
   "desktopIntervalMinutes": {
     "message": "간격(분)",
     "description": "Localized UI text."
@@ -1639,5 +1639,26 @@
   },
   "desktopUpdateInstall": {
     "message": "업데이트 및 재시작"
+  },
+  "desktopStartLibrary": {
+    "message": "라이브러리 시작하기"
+  },
+  "desktopStartLibraryDescription": {
+    "message": "북마크를 가져오거나 샘플 라이브러리를 둘러보세요."
+  },
+  "desktopTrySampleLibrary": {
+    "message": "샘플 라이브러리 체험"
+  },
+  "desktopRemoveSampleLibrary": {
+    "message": "샘플 라이브러리 제거"
+  },
+  "desktopConnectBrowser": {
+    "message": "브라우저 연결"
+  },
+  "desktopKeywordRulesHint": {
+    "message": "규칙은 새 페이지를 이 목록에 자동으로 분류합니다. 키워드와 정규 표현식은 페이지 제목과 비교됩니다."
+  },
+  "desktopJavaScriptRuleUnavailable": {
+    "message": "이 빌드에서 사용할 수 없음"
   }
 }

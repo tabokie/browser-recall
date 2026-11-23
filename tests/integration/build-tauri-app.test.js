@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 import process from 'node:process';
 import { describe, expect, it } from 'vitest';
 
-import { tauriBuildInvocation } from '../../scripts/build-tauri-app.mjs';
+import {
+  macAppStoreBundle,
+  tauriBuildInvocation,
+} from '../../scripts/build-tauri-app.mjs';
 import { canonicalDesktopBundles } from '../../scripts/collect-desktop-artifacts.mjs';
 import { desktopBuildPlan } from '../../scripts/desktop-build-plan.mjs';
 import { finalizeDesktopBuild } from '../../scripts/finalize-desktop-build.mjs';
@@ -83,6 +86,31 @@ describe('Tauri build launcher', () => {
     expect(canonicalDesktopBundles('macos')).toEqual(['app']);
     expect(canonicalDesktopBundles('windows')).toEqual([]);
     expect(canonicalDesktopBundles('linux')).toEqual([]);
+  });
+
+  it('uses the Store profile with default Cargo features off and a dedicated bundle path', () => {
+    const overlay = '/tmp/store-signing.json';
+    const invocation = tauriBuildInvocation({
+      platform: 'darwin',
+      macAppStore: true,
+      buildArgs: ['--config', overlay],
+    });
+    expect(invocation.args.slice(1)).toEqual([
+      'build',
+      '--bundles',
+      'app',
+      '--features',
+      'mac-app-store',
+      '--config',
+      '../../scripts/app-store-tauri.conf.json',
+      '--config',
+      overlay,
+      '--',
+      '--no-default-features',
+    ]);
+    expect(macAppStoreBundle.replaceAll('\\', '/')).toMatch(
+      /\/target\/mac-app-store\/release\/bundle\/macos\/Browser Recall\.app$/,
+    );
   });
 
   it('does not run macOS finalization or verification on Windows', () => {

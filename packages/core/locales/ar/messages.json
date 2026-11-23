@@ -159,6 +159,14 @@
     "message": "جارٍ التحقق...",
     "description": "Button label while checking."
   },
+  "desktopDataFolderNeedsAccess": {
+    "message": "اختر مجلد البيانات مرة أخرى لاستعادة الوصول إليه.",
+    "description": "Onboarding instruction when the saved data folder needs access again."
+  },
+  "desktopPrivacyPolicy": {
+    "message": "سياسة الخصوصية",
+    "description": "Link to the Browser Recall privacy policy."
+  },
   "desktopChooseDataFolder": {
     "message": "اختر مجلد البيانات",
     "description": "Desktop onboarding data-folder button."
@@ -406,10 +414,6 @@
   "commonProductIntro": {
     "message": "ينظم تطبيق سطح المكتب مجموعتك ويبحث فيها. تسجل إضافة المتصفح الزيارات وتحفظ اللقطات والتظليلات والملاحظات.",
     "description": "Onboarding product description."
-  },
-  "desktopOnboardingLiveCapture": {
-    "message": "ثبّت الإضافات الآن أو لاحقًا",
-    "description": "Onboarding live capture heading."
   },
   "desktopOnboardingPickColor": {
     "message": "اختر لونًا",
@@ -1269,10 +1273,6 @@
     "message": "$1 العناصر التي تم تخطيها أثناء التحليل أو الاستيراد.",
     "description": "History import skipped item summary."
   },
-  "desktopInboxRulesHint": {
-    "message": "تقوم القواعد تلقائيًا بفرز الصفحات الجديدة في هذه القائمة. تتطابق قواعد الكلمات الرئيسية مع عنوان الصفحة وعنوان الويب والنص الأساسي. تستخدم قواعد الدالة مسند JS مخصصًا يُرجع صواب/خطأ.",
-    "description": "Localized UI text."
-  },
   "desktopIntervalMinutes": {
     "message": "الفاصل الزمني (دقيقة)",
     "description": "Localized UI text."
@@ -1639,5 +1639,26 @@
   },
   "desktopUpdateInstall": {
     "message": "التحديث وإعادة التشغيل"
+  },
+  "desktopStartLibrary": {
+    "message": "ابدأ مكتبتك"
+  },
+  "desktopStartLibraryDescription": {
+    "message": "استورد الإشارات المرجعية أو استكشف مكتبة نموذجية."
+  },
+  "desktopTrySampleLibrary": {
+    "message": "جرّب المكتبة النموذجية"
+  },
+  "desktopRemoveSampleLibrary": {
+    "message": "إزالة المكتبة النموذجية"
+  },
+  "desktopConnectBrowser": {
+    "message": "ربط متصفح"
+  },
+  "desktopKeywordRulesHint": {
+    "message": "تفرز القواعد الصفحات الجديدة تلقائيًا في هذه القائمة. تطابق قواعد الكلمات الرئيسية والتعبيرات النمطية عناوين الصفحات."
+  },
+  "desktopJavaScriptRuleUnavailable": {
+    "message": "غير متاح في هذا الإصدار"
   }
 }

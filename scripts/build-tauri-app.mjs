@@ -11,6 +11,11 @@ import { desktopBuildPlan } from './desktop-build-plan.mjs';
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '..');
 const require = createRequire(import.meta.url);
+export const macAppStoreTargetDir = path.join(repoRoot, 'target/mac-app-store');
+export const macAppStoreBundle = path.join(
+  macAppStoreTargetDir,
+  'release/bundle/macos/Browser Recall.app',
+);
 const localAdHocSigning =
   !process.env.APPLE_SIGNING_IDENTITY ||
   process.env.APPLE_SIGNING_IDENTITY === '-';
@@ -47,19 +52,39 @@ function forwardLine(line, target) {
 
 export function tauriBuildInvocation({
   platform = process.platform,
-  buildArgs = desktopBuildPlan(platform).tauriArgs,
+  buildArgs,
+  macAppStore = false,
 } = {}) {
+  if (macAppStore && platform !== 'darwin') {
+    throw new Error('Mac App Store bundles must be built on macOS');
+  }
+  const args = macAppStore
+    ? [
+        'build',
+        '--bundles',
+        'app',
+        '--features',
+        'mac-app-store',
+        '--config',
+        '../../scripts/app-store-tauri.conf.json',
+        ...(buildArgs ?? []),
+        '--',
+        '--no-default-features',
+      ]
+    : (buildArgs ?? desktopBuildPlan(platform).tauriArgs);
   return {
     command: process.execPath,
-    args: [require.resolve('@tauri-apps/cli/tauri.js'), ...buildArgs],
+    args: [require.resolve('@tauri-apps/cli/tauri.js'), ...args],
   };
 }
 
-export function runTauriBuild(buildArgs) {
-  const { command, args } = tauriBuildInvocation({ buildArgs });
+export function runTauriBuild(buildArgs, macAppStore = false) {
+  const { command, args } = tauriBuildInvocation({ buildArgs, macAppStore });
   const child = spawn(command, args, {
     cwd: path.join(repoRoot, 'apps', 'desktop'),
-    env: process.env,
+    env: macAppStore
+      ? { ...process.env, CARGO_TARGET_DIR: macAppStoreTargetDir }
+      : process.env,
     stdio: ['inherit', 'pipe', 'pipe'],
   });
 
@@ -81,5 +106,7 @@ export function runTauriBuild(buildArgs) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  runTauriBuild(process.argv.length > 2 ? process.argv.slice(2) : undefined);
+  const [mode, ...args] = process.argv.slice(2);
+  if (mode === '--mac-app-store') runTauriBuild(args, true);
+  else runTauriBuild(mode ? [mode, ...args] : undefined);
 }

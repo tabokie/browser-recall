@@ -1,0 +1,15 @@
+{
+  "plugins": {
+    "updater": null
+  },
+  "bundle": {
+    "category": "Productivity",
+    "macOS": {
+      "entitlements": "../../../scripts/app-store.entitlements",
+      "files": {
+        "Resources/PrivacyInfo.xcprivacy": "../../../scripts/app-store.PrivacyInfo.xcprivacy"
+      },
+      "minimumSystemVersion": "13.0"
+    }
+  }
+}

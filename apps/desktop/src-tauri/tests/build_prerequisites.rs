@@ -3,6 +3,52 @@ mod build_support;
 
 use std::fs;
 
+#[cfg(feature = "mac-app-store")]
+#[test]
+fn mac_app_store_context_excludes_github_sync_and_javascript_rule_editor() {
+    let context: tauri::Context<tauri::Wry> = tauri::generate_context!(test = true);
+    let assets = context.assets();
+    for module in [
+        "desktop-sync.js",
+        "desktop-sync.css",
+        "desktop-sync-markup.js",
+        "desktop-javascript-rules.js",
+    ] {
+        assert!(
+            assets.get(&module.into()).is_none(),
+            "embedded optional asset {module}"
+        );
+    }
+    let features = assets
+        .get(&"desktop-features.js".into())
+        .expect("feature exports");
+    let features = std::str::from_utf8(&features).expect("UTF-8 feature exports");
+    assert!(features.contains("export const createDesktopSync = null;"));
+    assert!(features.contains("export const javascriptRuleEditor = null;"));
+    for (file, sync_control, local_control) in [
+        ("index.html", "syncConfigFields", "settingsModal"),
+        ("index.js", "getSyncAuthState", "flushDesktopQueue"),
+    ] {
+        let content = assets.get(&file.into()).expect("embedded desktop asset");
+        let source = std::str::from_utf8(&content).expect("UTF-8 desktop asset");
+        assert!(
+            source.contains(local_control),
+            "missing {local_control} in {file}"
+        );
+        assert!(
+            !source.contains(sync_control),
+            "GitHub sync bundled in {file}"
+        );
+    }
+    let content = assets
+        .get(&"index.js".into())
+        .expect("embedded desktop script");
+    let script = std::str::from_utf8(&content).expect("UTF-8 desktop script");
+    assert!(!script.contains("fnSource"));
+    assert!(!script.contains("function highlightJS("));
+    assert!(script.contains("desktopJavaScriptRuleUnavailable"));
+}
+
 #[test]
 fn release_build_uses_the_windows_gui_subsystem() {
     let main_source = include_str!("../src/main.rs");

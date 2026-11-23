@@ -7,6 +7,236 @@ use browser_recall_replay::{generate_slug_from_url, LogEntry};
 use serde_json::json;
 use tempfile::tempdir;
 
+#[cfg(feature = "mac-app-store")]
+#[tokio::test]
+async fn app_store_keeps_legacy_javascript_rules_without_running_them() {
+    use browser_recall_daemon::rules::{match_list_rules_strict, PageData};
+    use browser_recall_replay::RuleInput;
+
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    let device = "device-a";
+    storage.ensure_layout(device).await.unwrap();
+    commands::ensure_default_settings(&storage, device)
+        .await
+        .unwrap();
+    commands::ensure_default_lists(&storage, device)
+        .await
+        .unwrap();
+
+    let legacy = json!({ "description": "Always matches", "fnSource": "return true;" });
+    let timestamp = storage.next_command_timestamp_millis();
+    browser_recall_daemon::runtime::commit_local_entries(
+        &storage,
+        device,
+        [LogEntry::AddRule {
+            timestamp,
+            list_owner: "system".into(),
+            name: "Hubs".into(),
+            rule: RuleInput {
+                id: Some("legacy-function".into()),
+                rule_type: "function".into(),
+                config: serde_json::from_value(legacy.clone()).unwrap(),
+            },
+        }],
+    )
+    .await
+    .expect("replay stored JavaScript rule");
+
+    let list = storage
+        .load_list("hubs")
+        .await
+        .unwrap()
+        .expect("system Hubs list");
+    assert!(list.rules.iter().any(|rule| rule.id == "legacy-function"));
+    let matches = match_list_rules_strict(
+        &list,
+        &PageData {
+            title: Some("Home".into()),
+            url: "https://example.org/".into(),
+            body: None,
+        },
+    )
+    .expect("keyword rule still runs");
+    assert_eq!(matches.len(), 1);
+    assert_ne!(matches[0].rule_id, "legacy-function");
+
+    let authority = CommandAuthority::new(storage.clone(), device.into());
+    let error = authority
+        .execute(
+            "addRule",
+            json!({
+                "listId": "hubs", "rule": { "type": "function", "config": legacy },
+            }),
+        )
+        .await
+        .expect_err("cannot add JavaScript rules");
+    assert!(error.contains("JavaScript list rules are unavailable"));
+    let error = authority.execute("updateRule", json!({
+        "listId": "hubs", "ruleId": "legacy-function", "config": { "fnSource": "return false;" },
+    })).await.expect_err("cannot edit a legacy JavaScript rule");
+    assert!(error.contains("JavaScript list rules are unavailable"));
+    assert_eq!(
+        storage.load_list("hubs").await.unwrap().unwrap().rules,
+        list.rules
+    );
+}
+
+#[tokio::test]
+async fn sample_library_moves_its_records_to_the_recycle_bin_and_reuses_them() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    let device = "device-a";
+    storage.ensure_layout(device).await.expect("storage layout");
+    commands::ensure_default_settings(&storage, device)
+        .await
+        .expect("settings");
+    commands::ensure_default_lists(&storage, device)
+        .await
+        .expect("lists");
+    let authority = CommandAuthority::new(storage.clone(), device.to_string());
+    let sample = authority
+        .execute("loadSampleLibrary", json!({}))
+        .await
+        .expect("sample")
+        .response();
+    let list_id = sample["listId"].as_str().expect("sample list id");
+    let page_slug = generate_slug_from_url("https://example.org/?browser-recall-sample=reading")
+        .expect("sample slug");
+    let read = ReadProjections::new(storage.clone());
+    let before = read.page_info(&page_slug).await.expect("sample page");
+    assert_eq!(before.notes.len(), 1);
+    assert_eq!(before.snapshots.len(), 1);
+    let sample_note = &before.notes[0].slug;
+    let timestamp = before.snapshots[0].timestamp;
+    let html = storage
+        .load_snapshot_html(&page_slug, timestamp)
+        .await
+        .expect("snapshot read")
+        .expect("offline HTML");
+    assert!(html.contains("A quieter way to read"));
+    assert!(!html.contains("<script"));
+
+    let again = authority
+        .execute("loadSampleLibrary", json!({}))
+        .await
+        .expect("reopen sample");
+    assert_eq!(again.response(), sample);
+    let unchanged = read.page_info(&page_slug).await.expect("same sample page");
+    assert_eq!(unchanged.notes.len(), 1);
+    assert_eq!(unchanged.snapshots.len(), 1);
+    assert_eq!(unchanged.snapshots[0].timestamp, timestamp);
+
+    let personal_url = "https://example.org/personal-bookmark";
+    let personal_pin = format!("page:{}", generate_slug_from_url(personal_url).unwrap());
+    authority
+        .execute(
+            "addListPins",
+            json!({ "listId": list_id, "urls": [personal_url] }),
+        )
+        .await
+        .expect("pin a personal page to the sample list");
+
+    let personal = authority
+        .execute(
+            "createNote",
+            json!({
+                "url": "https://example.org/?browser-recall-sample=reading",
+                "pageSlug": page_slug,
+                "excerpt": ["Personal excerpt"],
+                "cssPath": ["main > p:last-child"],
+                "note": "Keep this user-authored note"
+            }),
+        )
+        .await
+        .expect("user note")
+        .response();
+    authority
+        .execute("removeSampleLibrary", json!({}))
+        .await
+        .expect("remove sample");
+    authority
+        .execute("removeSampleLibrary", json!({}))
+        .await
+        .expect("remove again");
+    storage.flush_checkpoints().await.expect("flush cleanup");
+    assert!(
+        storage
+            .load_list(list_id)
+            .await
+            .expect("list lookup")
+            .expect("recoverable sample list")
+            .deleted
+    );
+    assert_eq!(
+        storage
+            .load_snapshot_html(&page_slug, timestamp)
+            .await
+            .expect("snapshot lookup")
+            .as_deref(),
+        Some(html.as_str())
+    );
+    let recycle_bin = storage.load_orphaned().await.unwrap().unwrap();
+    for key in [
+        format!("list:{list_id}"),
+        format!("note:{sample_note}"),
+        format!("snapshot:{page_slug}-{timestamp}"),
+    ] {
+        assert_eq!(
+            recycle_bin
+                .entries
+                .iter()
+                .filter(|entry| entry.key == key)
+                .count(),
+            1
+        );
+    }
+    let remaining = read.page_info(&page_slug).await.expect("personal page");
+    assert!(remaining.snapshots.is_empty());
+    assert_eq!(remaining.notes.len(), 1);
+    assert_eq!(
+        remaining.notes[0].slug,
+        personal["noteSlug"].as_str().unwrap()
+    );
+
+    let restored = authority
+        .execute("loadSampleLibrary", json!({}))
+        .await
+        .expect("reload sample from the Recycle Bin");
+    assert_eq!(restored.response(), sample);
+    let restored_page = read
+        .page_info(&page_slug)
+        .await
+        .expect("restored sample page");
+    assert_eq!(restored_page.snapshots.len(), 1);
+    assert_eq!(restored_page.snapshots[0].timestamp, timestamp);
+    assert_eq!(restored_page.notes.len(), 2);
+    assert!(restored_page
+        .notes
+        .iter()
+        .any(|note| note.slug == *sample_note));
+    let restored_list = storage.load_list(list_id).await.unwrap().unwrap();
+    assert!(restored_list.pins.iter().any(|pin| pin.id == personal_pin));
+
+    let edited = authority
+        .execute(
+            "updateNote",
+            json!({ "noteSlug": sample_note, "note": "My own annotation" }),
+        )
+        .await
+        .expect("edit the restored sample highlight")
+        .response();
+    authority
+        .execute("removeSampleLibrary", json!({}))
+        .await
+        .expect("remove sample after editing its highlight");
+    let remaining = read.page_info(&page_slug).await.expect("personal page");
+    assert!(remaining.notes.iter().any(|note| {
+        note.slug == edited["noteSlug"].as_str().unwrap()
+            && note.note.as_deref() == Some("My own annotation")
+    }));
+}
+
 #[tokio::test]
 async fn note_command_returns_committed_response_and_mutation_together() {
     let dir = tempdir().expect("tempdir");

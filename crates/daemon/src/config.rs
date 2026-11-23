@@ -103,6 +103,8 @@ impl ReviewRequestHistory {
 pub struct DaemonConfig {
     pub device_id: String,
     pub data_dir: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_dir_bookmark: Option<Vec<u8>>,
     pub last_port: Option<u16>,
     pub launch_at_login: bool,
     pub log_level: String,
@@ -125,8 +127,9 @@ impl DaemonConfig {
         Self {
             device_id,
             data_dir: PathBuf::new(),
+            data_dir_bookmark: None,
             last_port: None,
-            launch_at_login: true,
+            launch_at_login: false,
             log_level: default_log_level(),
             setup_complete: false,
             connectors: Vec::new(),
@@ -153,6 +156,7 @@ impl DaemonConfig {
             return Err("data directory is not configured");
         }
         self.data_dir = data_dir;
+        self.data_dir_bookmark = None;
         self.setup_complete = false;
         Ok(())
     }
@@ -185,6 +189,9 @@ impl DaemonConfig {
         if self.setup_complete && self.data_dir.as_os_str().is_empty() {
             return Err("configured daemon is missing data_dir".to_string());
         }
+        if self.data_dir_bookmark.as_ref().is_some_and(Vec::is_empty) {
+            return Err("data_dir_bookmark must not be empty".to_string());
+        }
         if !matches!(self.log_level.as_str(), "info" | "debug") {
             return Err("log_level must be info or debug".to_string());
         }
@@ -211,6 +218,7 @@ impl DaemonConfig {
 #[derive(Debug, Clone)]
 pub struct ConfigStore {
     root_dir: PathBuf,
+    generate_device_id: fn() -> std::io::Result<String>,
 }
 
 struct LoadedConfig {
@@ -222,7 +230,13 @@ impl ConfigStore {
     pub fn new(root_dir: impl Into<PathBuf>) -> Self {
         Self {
             root_dir: root_dir.into(),
+            generate_device_id: default_device_id,
         }
+    }
+
+    pub fn with_installation_device_id(mut self) -> Self {
+        self.generate_device_id = || Ok(format!("mac-{}", random_string(24).to_ascii_lowercase()));
+        self
     }
 
     pub fn root_dir(&self) -> &Path {
@@ -272,7 +286,7 @@ impl ConfigStore {
         let missing_data_dir = !fields.contains_key("data_dir");
         let device_id = match fields.get("device_id") {
             Some(value) => serde_json::from_value(value.clone()).map_err(invalid_data)?,
-            None => default_device_id()?,
+            None => (self.generate_device_id)()?,
         };
         let mut defaults = DaemonConfig::with_device_id(device_id);
         defaults.setup_complete = fields
@@ -333,7 +347,7 @@ impl ConfigStore {
             .is_some_and(|loaded| loaded.needs_defaults);
         let mut config = match &existing {
             Some(loaded) => loaded.config.clone(),
-            None => DaemonConfig::new_unconfigured()?,
+            None => DaemonConfig::with_device_id((self.generate_device_id)()?),
         };
         let result = edit(&mut config)?;
         if needs_defaults || existing.as_ref().map(|loaded| &loaded.config) != Some(&config) {

@@ -37,13 +37,7 @@ async fn on_main(
                 return Ok(0);
             };
             let shell = state.shell.lock();
-            if handle
-                .state::<crate::updates::DesktopUpdates>()
-                .snapshot()
-                .phase
-                == "installing"
-                || state.sync.is_in_progress()
-                || !shell.setup_complete
+            if !shell.setup_complete
                 || shell.error.is_some()
                 || !matches!(
                     shell.snapshot.service_state,

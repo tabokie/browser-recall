@@ -377,6 +377,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       initialRoute,
       systemLocale,
       loginItemError,
+      dataFolderNeedsAccess,
       previewRuleMatchesByPattern,
       desktopUpdateFailure,
       appStoreBuild,
@@ -1102,10 +1103,11 @@ async function installDesktopBridgeMock(page, options = {}) {
               success: true,
               loginItemSupported: true,
               loginItemError,
-              launchAtLogin: true,
+              launchAtLogin: setupComplete,
               debugLogging: false,
               setupComplete,
               dataDir: setupComplete ? '/tmp/browser-recall-visual' : null,
+              dataFolderNeedsAccess,
               systemLocale,
               pairedBrowsers,
             };
@@ -1226,6 +1228,27 @@ async function installDesktopBridgeMock(page, options = {}) {
             });
             return { success: true };
           case 'openSnapshotDirectory':
+            return { success: true };
+          case 'chooseDesktopDataFolder':
+            return {
+              success: true,
+              cancelled: false,
+              dataFolder: '/tmp/browser-recall-visual',
+            };
+          case 'completeDesktopSetup':
+            setupComplete = true;
+            return {
+              success: true,
+              deviceId: 'visual-device',
+              dataFolder: '/tmp/browser-recall-visual',
+            };
+          case 'loadSampleLibrary':
+            return {
+              success: true,
+              listId: 'browser-recall-sample-library',
+              name: 'Sample Library',
+            };
+          case 'removeSampleLibrary':
             return { success: true };
           case 'permanentDeleteAll': {
             const orphaned = stores.session.get('manifest:orphaned') || {
@@ -1589,6 +1612,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       initialRoute: options.initialRoute || '',
       systemLocale: options.systemLocale || 'en',
       loginItemError: options.loginItemError || null,
+      dataFolderNeedsAccess: Boolean(options.dataFolderNeedsAccess),
       desktopUpdateFailure: options.desktopUpdateFailure || null,
       appStoreBuild: options.appStoreBuild || false,
       requestAppReviewDelayMs: options.requestAppReviewDelayMs || 0,
@@ -1793,6 +1817,48 @@ test.describe('desktop visual regression', () => {
         animations: 'disabled',
         maxDiffPixelRatio: 0.01,
       });
+      await expect(
+        page.getByRole('checkbox', {
+          name: 'Launch Browser Recall when you log in',
+        }),
+      ).not.toBeChecked();
+      await expect(
+        page
+          .locator('#onboarding')
+          .getByRole('link', { name: 'Chrome Web Store' }),
+      ).toHaveCount(0);
+      await page.getByRole('link', { name: 'Privacy Policy' }).click();
+    });
+  });
+
+  test('an empty library offers bookmarks, sample content and optional browser setup', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      const sampleListId = 'browser-recall-sample-library';
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: false,
+        historyEntries: [],
+        extraSession: {
+          [`list:${sampleListId}`]: {
+            slug: sampleListId,
+            name: 'Sample Library',
+            pins: [],
+            rules: [],
+            deleted: false,
+          },
+        },
+      });
+      await page.getByRole('button', { name: 'Choose Data Folder' }).click();
+      await page.getByRole('button', { name: 'Get Started' }).click();
+      const starter = page.locator('.empty-timeline');
+      await expect(
+        starter.getByRole('heading', { name: 'Start your library' }),
+      ).toBeVisible();
+      await starter.getByRole('button', { name: 'Import Bookmarks' }).click();
+      await expect(page.locator('#bookmarkFileInput')).toBeFocused();
+      await page.locator('#settingsClose').click();
+      await starter.getByRole('button', { name: 'Connect a Browser' }).click();
       const chromeStore = page.getByRole('link', { name: 'Chrome Web Store' });
       const firefoxStore = page.getByRole('link', { name: 'Firefox Add-ons' });
       await expect(chromeStore).toHaveAttribute(
@@ -1812,6 +1878,67 @@ test.describe('desktop visual regression', () => {
         )
         .toEqual([
           'https://addons.mozilla.org/firefox/addon/browser-recall-connector/',
+        ]);
+      await page.locator('#settingsClose').click();
+      await starter.getByRole('button', { name: 'Try Sample Library' }).click();
+      await expect(page.locator('#mainTitle')).toHaveText('Sample Library');
+      await page.getByRole('button', { name: 'Remove Sample Library' }).click();
+      await expect(starter).toBeVisible();
+      expect(
+        await page.evaluate(() =>
+          window.__desktopVisualHarness.bridgeActionInvocations(),
+        ),
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ action: 'loadSampleLibrary' }),
+          expect.objectContaining({ action: 'removeSampleLibrary' }),
+        ]),
+      );
+    });
+  });
+
+  test('setup asks for a folder again when the saved permission is unavailable', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: false,
+        dataFolderNeedsAccess: true,
+      });
+      await expect(page.locator('#onboardingDirStatus')).toHaveText(
+        'Choose your data folder again to restore access.',
+      );
+      await expect(page.getByRole('button', { name: 'Continue' })).toBeHidden();
+    });
+  });
+
+  test('Settings opens the privacy policy in the browser', async ({ page }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, { setupComplete: true });
+      await page.locator('#settingsBtn').click();
+      const privacyLink = page.getByRole('link', { name: 'Privacy Policy' });
+      await expect(
+        page.locator('.modal-group-label .hint-icon + a'),
+      ).toHaveAccessibleName('Privacy Policy');
+      const [helpStyle, privacyStyle] = await page
+        .locator('.data-heading')
+        .locator('.hint-icon, a')
+        .evaluateAll((controls) =>
+          controls.map((control) => ({
+            height: control.getBoundingClientRect().height,
+            backgroundColor: getComputedStyle(control).backgroundColor,
+          })),
+        );
+      expect(privacyStyle).toEqual(helpStyle);
+      await privacyLink.click();
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness.openedExternalUrls(),
+          ),
+        )
+        .toEqual([
+          'https://github.com/tabokie/browser-recall/blob/main/docs/PRIVACY.md',
         ]);
     });
   });
@@ -5561,11 +5688,6 @@ test.describe('desktop visual regression', () => {
         '.main.scroll-boundary-contained',
         '.sidebar-content.scroll-boundary-contained',
         '#settingsModal .modal-body.scroll-boundary-contained',
-        '#blacklistEntries.scroll-boundary-contained',
-        '#trimEntries.scroll-boundary-contained',
-        '#bookmarkTreeContainer.scroll-boundary-contained',
-        '#importFailures.scroll-boundary-contained',
-        '#historyImportFailures.scroll-boundary-contained',
         '#rulesPreviewList.scroll-boundary-contained',
         '#rulesPinsPreviewList.scroll-boundary-contained',
       ];
@@ -5608,7 +5730,7 @@ test.describe('desktop visual regression', () => {
     });
   });
 
-  test('mouse wheel over an excluded site continues scrolling settings at the list boundary', async ({
+  test('mouse wheel over an excluded site continues scrolling Settings at the list boundary @webkit', async ({
     page,
   }) => {
     const urlBlacklist = Array.from(
@@ -5625,7 +5747,21 @@ test.describe('desktop visual regression', () => {
       await page.locator('#settingsBtn').click();
       const modalBody = page.locator('#settingsModal .modal-body');
       const entries = page.locator('#blacklistEntries');
-      const lastEntry = entries.locator('.blacklist-entry').last();
+      const excludedSites = entries.locator('.blacklist-entry');
+      await expect(excludedSites).toHaveCount(urlBlacklist.length);
+      await excludedSites.first().hover();
+      const bodyBeforeListScroll = await modalBody.evaluate(
+        (element) => element.scrollTop,
+      );
+      await page.mouse.wheel(0, 80);
+      await expect
+        .poll(() => entries.evaluate((element) => element.scrollTop))
+        .toBeGreaterThan(0);
+      expect(await modalBody.evaluate((element) => element.scrollTop)).toBe(
+        bodyBeforeListScroll,
+      );
+
+      const lastEntry = excludedSites.last();
       await expect(lastEntry).toContainText('excluded-23.example');
       await lastEntry.evaluate((element) =>
         element.scrollIntoView({ block: 'center' }),
@@ -5642,6 +5778,33 @@ test.describe('desktop visual regression', () => {
         entryBox.y + entryBox.height / 2,
       );
       await page.mouse.wheel(0, 360);
+
+      await expect
+        .poll(() => modalBody.evaluate((element) => element.scrollTop))
+        .toBeGreaterThan(before);
+    });
+  });
+
+  test('mouse wheel over a short Excluded Sites list scrolls Settings @webkit', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        urlBlacklist: ['https://excluded.example/'],
+      });
+
+      await page.locator('#settingsBtn').click();
+      const modalBody = page.locator('#settingsModal .modal-body');
+      const entry = page.locator('#blacklistEntries .blacklist-entry');
+      await expect(entry).toContainText('excluded.example');
+      await entry.evaluate((element) =>
+        element.scrollIntoView({ block: 'center' }),
+      );
+
+      await entry.hover();
+      const before = await modalBody.evaluate((element) => element.scrollTop);
+      await page.mouse.wheel(0, 80);
 
       await expect
         .poll(() => modalBody.evaluate((element) => element.scrollTop))

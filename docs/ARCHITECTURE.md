@@ -181,6 +181,8 @@ Missing device identity is machine-derived; a missing data path returns to setup
 
 Windows derives missing device identity from `MachineGuid` through native registry
 access, preserving the device identifier format used by existing configurations.
+The Mac App Store build generates and saves an installation-specific device ID
+without querying the Mac's hardware identifier.
 
 Nested metadata also has upgrade defaults, but connector identities and pairing
 tokens remain required. Missing review attempts become an empty array. A missing
@@ -203,10 +205,19 @@ establish native readiness.
 A daemon startup failure leaves a visible error with Resume after storage repair.
 Concurrent starts share one attempt; reads never start another daemon. Errors
 reach callers, and locks remain usable after a thread panic.
+Desktop quit waits for accepted connector commands and pending checkpoints
+before exiting. The same drain also prepares the daemon for a desktop update.
+
+The empty Timeline links to bookmark import, Sample Library, and browser setup.
+The Sample Library command groups a list, a highlight, and an offline page in
+one replay transaction. Removal applies the same recoverable deletion events as
+regular lists, highlights, and snapshots. The Recycle Bin can restore each item,
+and Try Sample Library reuses the recoverable sample records on reload.
 
 Launch at login uses macOS `SMAppService`, Linux autostart, or a quoted Windows Run
 registration. Failed persistence rolls back the operating-system change. Startup
 reconciles the registration and reports failures beside the setting.
+Launch at login defaults to off for new configurations.
 
 Tauri plugins generating permission schemas remain unconditional Cargo dependencies,
 even when runtime use is platform-specific. Generated schemas must match across hosts.
@@ -214,6 +225,16 @@ even when runtime use is platform-specific. Generated schemas must match across 
 ### Reviews and updates
 
 The `mac-app-store` Cargo feature enables StoreKit and disables GitHub updating.
+The Mac App Store build omits the GitHub sync interface, commands, and worker,
+and the JavaScript list rule editor and interpreter. Existing sync settings and
+JavaScript list rules remain readable in stored libraries. Keyword rules operate
+normally when a list also contains unavailable JavaScript rules.
+The desktop frontend imports channel-specific feature exports. The Mac App Store
+build supplies disabled exports and omits the corresponding modules and assets.
+App Sandbox limits the daemon to the app container and user-approved folders. The
+desktop app stores the selected library's security-scoped bookmark in `config.json`
+and restores the permission before starting the daemon. If permission cannot be
+restored, setup asks the user to select the library again without replacing it.
 Only this channel initializes `review_requests` in `config.json`. The first attempt
 requires seven days after first opening; the second requires thirty days after
 the first attempt. At most two attempts are allowed, with no expiry windows.
@@ -221,7 +242,7 @@ Collection changes and app updates preserve history.
 
 Successful edits, searches, navigation, and closing details create review
 opportunities. Presentation requires three seconds without interaction, a focused
-visible window, and no busy editor, dialog, error, import, search, or sync. Activity,
+visible window, and no busy editor, dialog, error, import, or search. Activity,
 focus loss, new work, and webview reload cancel stale requests.
 
 The Rust coordinator owns eligibility, reservation, cancellation, and rollback.
@@ -398,7 +419,8 @@ position. Page reads in flight retry if a pin change makes their memberships sta
 
 Keyword rules match titles case-insensitively with exactly `{ pattern }`.
 Function-rule previews may inspect supplied page data, but previews are never
-stored in logs.
+stored in logs. The Mac App Store build skips existing JavaScript list rules
+during matching and rejects new JavaScript rules and previews.
 
 Product settings live in `views/manifest/settings.json`; Rust replay defines names,
 types, allowed values, and defaults. Startup/reset create complete settings and

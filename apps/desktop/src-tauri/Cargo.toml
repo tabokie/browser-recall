@@ -8,11 +8,13 @@ serde_json = "1.0"
 tauri-build = { version = "2", features = [] }
 
 [features]
+default = ["javascript-list-rules"]
+javascript-list-rules = ["browser-recall-daemon/javascript-list-rules"]
 no-tray = []
-mac-app-store = []
+mac-app-store = ["browser-recall-daemon/mac-app-store"]
 
 [dependencies]
-browser-recall-daemon = { path = "../../../crates/daemon" }
+browser-recall-daemon = { path = "../../../crates/daemon", default-features = false }
 browser-recall-replay = { path = "../../../crates/replay" }
 chrono = "0.4"
 parking_lot = "0.12"
@@ -44,8 +46,8 @@ windows = { version = "0.61", features = [
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSView", "NSWindow", "NSResponder"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["NSGeometry"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSOpenPanel", "NSResponder", "NSSavePanel", "NSView", "NSWindow"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSArray", "NSData", "NSError", "NSGeometry", "NSPathUtilities", "NSString", "NSURL"] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }

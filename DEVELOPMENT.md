@@ -138,13 +138,18 @@ installer packaging is not provided by Release.
 
 ```bash
 npm run build:app-store --workspace @browser-recall/desktop
-cargo test --locked -p browser-recall-desktop --features mac-app-store --test reviews
+node scripts/package-mac-app-store.mjs --verify-local
+cargo test --locked -p browser-recall-desktop --no-default-features --features mac-app-store --test reviews --test build_prerequisites
+cargo test --locked -p browser-recall-daemon --no-default-features --features mac-app-store --test command_authority
 ```
 
-The `mac-app-store` feature enables StoreKit review requests and disables GitHub
-updates. The build requires macOS and Xcode's Swift compiler. App Store signing,
-provisioning, entitlements, and submission remain distribution setup. Regular
-builds omit the feature. Native CI tests the channel before GitHub packaging.
+The Mac App Store build uses App Sandbox and persists access to the user-selected
+library with a security-scoped bookmark. Cargo builds the bundle in
+`target/mac-app-store/`. The `mac-app-store` feature enables
+StoreKit review requests and excludes GitHub updating, sync, and JavaScript list
+rules. See the
+[Mac App Store guide](docs/MAC_APP_STORE.md) for distribution signing, installer
+validation, listing assets, and App Review steps.
 See [Desktop app](docs/ARCHITECTURE.md#desktop-app) for review timing and persistence.
 
 ## GitHub releases and updates

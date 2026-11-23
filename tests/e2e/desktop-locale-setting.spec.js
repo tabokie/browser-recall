@@ -120,6 +120,7 @@ async function installDesktopShellBridge(page, helper, setupDir) {
             success: true,
             setupComplete: true,
             dataDir: setupDir,
+            dataFolderNeedsAccess: false,
             systemLocale: 'zh-CN',
             pairedBrowsers: [],
             debugLogging: false,

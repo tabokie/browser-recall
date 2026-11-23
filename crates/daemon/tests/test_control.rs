@@ -80,6 +80,17 @@ async fn test_control_can_reset_and_seed_daemon_data() {
         other => panic!("expected test reset result, got {other:?}"),
     }
 
+    let defaults = handle
+        .storage()
+        .load_settings()
+        .await
+        .expect("read settings immediately after reset")
+        .expect("default settings must be available when reset succeeds");
+    assert_eq!(
+        defaults.values,
+        browser_recall_daemon::settings::default_values()
+    );
+
     socket
         .send(Message::Text(
             serde_json::to_string(&ConnectorMessage::TestControl {

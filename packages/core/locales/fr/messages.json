@@ -159,6 +159,14 @@
     "message": "Vérification...",
     "description": "Button label while checking."
   },
+  "desktopDataFolderNeedsAccess": {
+    "message": "Choisissez à nouveau votre dossier de données pour rétablir l’accès.",
+    "description": "Onboarding instruction when the saved data folder needs access again."
+  },
+  "desktopPrivacyPolicy": {
+    "message": "Politique de confidentialité",
+    "description": "Link to the Browser Recall privacy policy."
+  },
   "desktopChooseDataFolder": {
     "message": "Choisissez le dossier de données",
     "description": "Desktop onboarding data-folder button."
@@ -406,10 +414,6 @@
   "commonProductIntro": {
     "message": "L’application de bureau organise votre collection et permet d’y effectuer des recherches. L’extension de navigateur enregistre les visites, les instantanés, les passages surlignés et les notes.",
     "description": "Onboarding product description."
-  },
-  "desktopOnboardingLiveCapture": {
-    "message": "Installez les extensions maintenant ou plus tard",
-    "description": "Onboarding live capture heading."
   },
   "desktopOnboardingPickColor": {
     "message": "Choisissez une couleur",
@@ -1269,10 +1273,6 @@
     "message": "$1 éléments ignorés lors de l'analyse ou de l'importation.",
     "description": "History import skipped item summary."
   },
-  "desktopInboxRulesHint": {
-    "message": "Les règles trient automatiquement les nouvelles pages dans cette liste. Les règles de mots clés correspondent au titre de la page, à l'adresse Web et au corps du texte. Les règles de fonction utilisent un prédicat JS personnalisé qui renvoie vrai/faux.",
-    "description": "Localized UI text."
-  },
   "desktopIntervalMinutes": {
     "message": "Intervalle (min)",
     "description": "Localized UI text."
@@ -1639,5 +1639,26 @@
   },
   "desktopUpdateInstall": {
     "message": "Mettre à jour et redémarrer"
+  },
+  "desktopStartLibrary": {
+    "message": "Créez votre bibliothèque"
+  },
+  "desktopStartLibraryDescription": {
+    "message": "Importez des favoris ou explorez un exemple de bibliothèque."
+  },
+  "desktopTrySampleLibrary": {
+    "message": "Essayer la bibliothèque d’exemple"
+  },
+  "desktopRemoveSampleLibrary": {
+    "message": "Supprimer la bibliothèque d’exemple"
+  },
+  "desktopConnectBrowser": {
+    "message": "Connecter un navigateur"
+  },
+  "desktopKeywordRulesHint": {
+    "message": "Les règles trient automatiquement les nouvelles pages dans cette liste. Les mots-clés et les expressions régulières sont comparés aux titres des pages."
+  },
+  "desktopJavaScriptRuleUnavailable": {
+    "message": "Indisponible dans cette version"
   }
 }
