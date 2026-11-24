@@ -44,6 +44,10 @@ function verifyStoreBundle(buildNumber) {
   );
   if (info.CFBundleIdentifier !== identifier)
     throw new Error('Unexpected Mac App Store bundle identifier');
+  if (info.ITSAppUsesNonExemptEncryption !== false)
+    throw new Error(
+      'The Mac App Store Info.plist must declare ITSAppUsesNonExemptEncryption as Boolean false',
+    );
   if (buildNumber && info.CFBundleVersion !== buildNumber) {
     throw new Error(
       `Expected build ${buildNumber}, found ${info.CFBundleVersion}`,

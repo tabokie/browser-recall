@@ -6,6 +6,7 @@
     "category": "Productivity",
     "macOS": {
       "entitlements": "../../../scripts/app-store.entitlements",
+      "infoPlist": "../../../scripts/app-store-info.plist",
       "files": {
         "Resources/PrivacyInfo.xcprivacy": "../../../scripts/app-store.PrivacyInfo.xcprivacy"
       },

@@ -423,10 +423,13 @@ stored in logs. The Mac App Store build skips existing JavaScript list rules
 during matching and rejects new JavaScript rules and previews.
 
 Product settings live in `views/manifest/settings.json`; Rust replay defines names,
-types, allowed values, and defaults. Startup/reset create complete settings and
-lists. Partial/invalid existing settings require migration. Failed UI writes reload
+types, allowed values, and defaults. Startup and reset initialize complete settings.
+Partial or invalid existing settings require migration. Failed UI writes reload
 authoritative settings. Shared locale catalogs generate desktop choices and
 extension translations; builds validate keys, placeholders, HTML, and fixed names.
+
+The Mac App Store build starts with an empty list tree. Creating the first list
+initializes its manifests.
 
 Experimental GitHub sync runs in the daemon. Sync uploads current-device recent
 logs and note JSON; snapshot HTML/Markdown stay local. Downloaded events rebuild

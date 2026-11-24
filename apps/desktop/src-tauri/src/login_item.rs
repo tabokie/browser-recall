@@ -1,6 +1,10 @@
+#[cfg(target_os = "macos")]
+use objc2_core_foundation::{CFArray, CFBundle, CFRetained, CFString, CFType, CFURL};
 use std::io;
 #[cfg(any(target_os = "windows", test))]
 use std::path::Path;
+#[cfg(target_os = "macos")]
+use std::ptr::NonNull;
 use tauri::{AppHandle, Runtime};
 
 const SKIP_LOGIN_ITEM_REGISTRATION_ENV: &str = "BROWSER_RECALL_SKIP_LOGIN_ITEM_REGISTRATION";
@@ -124,7 +128,7 @@ pub enum SystemLoginItemSnapshot {
     Suppressed,
     Unsupported,
     #[cfg(target_os = "macos")]
-    Macos(isize),
+    Macos(MacosLoginItemStatus),
     #[cfg(target_os = "windows")]
     Windows(WindowsLoginItemSnapshot),
     #[cfg(target_os = "linux")]
@@ -149,7 +153,7 @@ impl<R: Runtime> LoginItemBackend for SystemLoginItem<'_, R> {
         }
 
         #[cfg(target_os = "macos")]
-        return Ok(macos_login_item_status()? == MACOS_LOGIN_ITEM_ENABLED);
+        return macos_login_item_status()?.is_enabled(macos_login_item_is_listed);
 
         #[cfg(target_os = "windows")]
         return windows_login_item_enabled(self.app);
@@ -170,7 +174,7 @@ impl<R: Runtime> LoginItemBackend for SystemLoginItem<'_, R> {
         }
 
         #[cfg(target_os = "macos")]
-        return Ok(macos_login_item_status()? != MACOS_LOGIN_ITEM_NOT_REGISTERED);
+        return macos_login_item_status()?.needs_unregister(macos_login_item_is_listed);
 
         #[cfg(target_os = "windows")]
         return Ok(windows_registry_value_snapshot(
@@ -211,11 +215,14 @@ impl<R: Runtime> LoginItemBackend for SystemLoginItem<'_, R> {
 
         #[cfg(target_os = "macos")]
         {
-            let registered = macos_login_item_status()? != MACOS_LOGIN_ITEM_NOT_REGISTERED;
-            if enabled && !registered {
-                sync_macos_login_item(true)?;
-            } else if !enabled && registered {
-                sync_macos_login_item(false)?;
+            let status = macos_login_item_status()?;
+            let needs_change = if enabled {
+                !status.is_enabled(macos_login_item_is_listed)?
+            } else {
+                status.needs_unregister(macos_login_item_is_listed)?
+            };
+            if needs_change {
+                sync_macos_login_item(enabled)?;
             }
             return Ok(());
         }
@@ -522,11 +529,67 @@ fn set_windows_login_item<R: Runtime>(app: &AppHandle<R>, enabled: bool) -> io::
 }
 
 #[cfg(target_os = "macos")]
-const MACOS_LOGIN_ITEM_NOT_REGISTERED: isize = 0;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MacosLoginItemStatus {
+    Unregistered,
+    Enabled,
+    RequiresApproval,
+}
+
 #[cfg(target_os = "macos")]
-const MACOS_LOGIN_ITEM_ENABLED: isize = 1;
+impl TryFrom<isize> for MacosLoginItemStatus {
+    type Error = io::Error;
+
+    fn try_from(status: isize) -> io::Result<Self> {
+        match status {
+            // SMAppService can report NotFound before this app first registers
+            // and NotRegistered after it unregisters the same login item.
+            0 | 3 => Ok(Self::Unregistered),
+            1 => Ok(Self::Enabled),
+            2 => Ok(Self::RequiresApproval),
+            _ => Err(io::Error::other(format!(
+                "macOS returned an unknown SMAppService login item status ({status})"
+            ))),
+        }
+    }
+}
+
 #[cfg(target_os = "macos")]
-const MACOS_LOGIN_ITEM_REQUIRES_APPROVAL: isize = 2;
+impl MacosLoginItemStatus {
+    pub(crate) fn is_enabled(
+        self,
+        is_listed: impl FnOnce() -> io::Result<bool>,
+    ) -> io::Result<bool> {
+        match self {
+            Self::Unregistered => is_listed(),
+            Self::Enabled => Ok(true),
+            Self::RequiresApproval => Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "macOS requires approval for Browser Recall to launch at login. Check Open at Login in System Settings → General → Login Items & Extensions.",
+            )),
+        }
+    }
+
+    pub(crate) fn is_registered(self) -> bool {
+        self != Self::Unregistered
+    }
+
+    pub(crate) fn needs_unregister(
+        self,
+        is_listed: impl FnOnce() -> io::Result<bool>,
+    ) -> io::Result<bool> {
+        if self.is_registered() {
+            return Ok(true);
+        }
+        if is_listed()? {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "Browser Recall is still listed under Open at Login. Remove it in System Settings → General → Login Items & Extensions, then try again.",
+            ));
+        }
+        Ok(false)
+    }
+}
 
 #[cfg(target_os = "macos")]
 fn macos_version_at_least(required_major: u32) -> bool {
@@ -550,7 +613,7 @@ fn macos_version_at_least(required_major: u32) -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn macos_login_item_status() -> io::Result<isize> {
+fn macos_login_item_status() -> io::Result<MacosLoginItemStatus> {
     unsafe {
         let pool = objc_autoreleasePoolPush();
         let result = (|| {
@@ -559,32 +622,87 @@ fn macos_login_item_status() -> io::Result<isize> {
             send_integer_message(service, "status")
         })();
         objc_autoreleasePoolPop(pool);
-        result
+        result?.try_into()
     }
 }
 
 #[cfg(target_os = "macos")]
-fn restore_macos_login_item_status(status: isize) -> io::Result<()> {
+fn macos_login_item_is_listed() -> io::Result<bool> {
+    // Open at Login can retain this bundle path after its signing identifier
+    // changes. SMAppService only checks the current registration identity.
+    let app_path = CFBundle::main_bundle()
+        .and_then(|bundle| bundle.bundle_url())
+        .and_then(|url| url.to_file_path())
+        .ok_or_else(|| io::Error::other("macOS could not locate the Browser Recall app bundle"))?
+        .canonicalize()?;
+
+    let items = unsafe {
+        let list = LSSharedFileListCreate(None, kLSSharedFileListSessionLoginItems, None)
+            .map(|list| CFRetained::from_raw(list))
+            .ok_or_else(|| io::Error::other("macOS could not open the Open at Login list"))?;
+        LSSharedFileListCopySnapshot(&list, std::ptr::null_mut())
+            .map(|snapshot| CFRetained::from_raw(snapshot))
+            .ok_or_else(|| io::Error::other("macOS could not read the Open at Login list"))?
+    };
+
+    const NO_USER_INTERACTION: u32 = 1 << 0;
+    const DO_NOT_MOUNT_VOLUMES: u32 = 1 << 1;
+    for item in items.iter() {
+        let Some(url) = (unsafe {
+            LSSharedFileListItemCopyResolvedURL(
+                &item,
+                NO_USER_INTERACTION | DO_NOT_MOUNT_VOLUMES,
+                std::ptr::null_mut(),
+            )
+            .map(|url| CFRetained::from_raw(url))
+        }) else {
+            continue;
+        };
+        let matches = url.to_file_path().is_some_and(|path| {
+            path == app_path || path.canonicalize().is_ok_and(|path| path == app_path)
+        });
+        // Resolving a login item can grant sandbox access before returning the URL.
+        unsafe { url.stop_accessing_security_scoped_resource() };
+        if matches {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "CoreServices", kind = "framework")]
+unsafe extern "C" {
+    static kLSSharedFileListSessionLoginItems: &'static CFString;
+
+    fn LSSharedFileListCreate(
+        allocator: Option<&CFType>,
+        list_type: &CFString,
+        options: Option<&CFType>,
+    ) -> Option<NonNull<CFType>>;
+    fn LSSharedFileListCopySnapshot(
+        list: &CFType,
+        seed: *mut u32,
+    ) -> Option<NonNull<CFArray<CFType>>>;
+    fn LSSharedFileListItemCopyResolvedURL(
+        item: &CFType,
+        flags: u32,
+        error: *mut *mut CFType,
+    ) -> Option<NonNull<CFURL>>;
+}
+
+#[cfg(target_os = "macos")]
+fn restore_macos_login_item_status(status: MacosLoginItemStatus) -> io::Result<()> {
     if macos_login_item_status()? == status {
         return Ok(());
     }
-    match status {
-        MACOS_LOGIN_ITEM_NOT_REGISTERED => sync_macos_login_item(false)?,
-        MACOS_LOGIN_ITEM_ENABLED | MACOS_LOGIN_ITEM_REQUIRES_APPROVAL => {
-            sync_macos_login_item(true)?
-        }
-        _ => {
-            return Err(io::Error::other(format!(
-                "cannot restore unknown SMAppService status {status}"
-            )))
-        }
-    }
+    sync_macos_login_item(status.is_registered())?;
     let restored = macos_login_item_status()?;
     if restored == status {
         Ok(())
     } else {
         Err(io::Error::other(format!(
-            "restored SMAppService status {restored}, expected {status}"
+            "restored SMAppService status {restored:?}, expected {status:?}"
         )))
     }
 }

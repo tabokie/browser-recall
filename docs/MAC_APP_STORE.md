@@ -36,13 +36,13 @@ node scripts/package-mac-app-store.mjs --package "$BUILD_NUMBER"
 ```
 
 Set `BUILD_NUMBER` to the same build number as the signing overlay. The packaging
-command checks the application signature, sandbox entitlements, embedded profile,
-and build number before writing the installer to `dist/mac-app-store/`. Validate
-that installer in Transporter. Install the processed build through TestFlight in
-a disposable macOS account and exercise the review steps below. Also test
-selecting an existing library, a full quit and relaunch, revoking a browser, and
-a fresh launch with the browser extension absent. If the build includes Intel
-support, verify both executable architectures.
+command checks the export declaration, application signature, sandbox entitlements,
+embedded profile, and build number before writing the installer to
+`dist/mac-app-store/`. Validate that installer in Transporter. Install the
+processed build through TestFlight in a disposable macOS account and exercise
+the review steps below. Also test selecting an existing library, a full quit
+and relaunch, revoking a browser, and a fresh launch with the browser extension
+absent. If the build includes Intel support, verify both executable architectures.
 
 [Tauri Mac App Store packaging](https://v2.tauri.app/distribute/app-store/) ·
 [Apple upload and validation](https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds/) ·
@@ -51,23 +51,32 @@ support, verify both executable architectures.
 ## Listing
 
 - **Category** — Productivity
-- **Subtitle** — Search your reading history
+- **Subtitle** — A memory for your browser
 - **Keywords** — bookmarks,highlights,annotation,offline,snapshots,web,timeline,notes,library
 - **Support URL** — [Browser Recall Support](https://github.com/tabokie/browser-recall/blob/main/docs/SUPPORT.md)
 - **Privacy Policy URL** — [Browser Recall Privacy Policy](https://github.com/tabokie/browser-recall/blob/main/docs/PRIVACY.md)
-- **Mac screenshots** — [Timeline](images/mac-app-store/timeline.jpg) and [Book](images/mac-app-store/book.jpg)
+- **Mac screenshots** — [Timeline](images/mac-app-store/timeline.jpg),
+  [Book](images/mac-app-store/book.jpg), and [Timeline in Mono](images/mac-app-store/timeline-mono.jpg)
 
-Browser Recall helps you find what you’ve read. Browse your history in Timeline,
-read highlights and notes together in Book, and organize pages into lists. Search
-titles, addresses, highlights, notes, and saved page text from one place.
+Find a page you read last week or last year. Browser Recall keeps your browsing
+history for as long as you want it. Search by page title or web address.
 
-Import bookmarks or try the included sample library to get started. For automatic
-visit recording and saving pages from the browser, install Browser Recall
-Connector from the Chrome Web Store or Firefox Add-ons and approve recording in
-the desktop app. You can pause recording anytime from the browser toolbar.
+Highlight a passage and leave yourself a note right beside it on the webpage.
+Open Book to read your highlights and notes together.
 
-Browser Recall stores your library in a folder you choose. Saved pages can be
-reopened offline.
+Save a copy of a page to read offline. If all you remember is a phrase, search
+for it in the text of saved pages, highlights, and notes.
+
+Use lists to keep related pages together. The same article can go in both your
+reading list and a project list.
+
+Your library lives in a folder you choose on your Mac. Browser Recall stores it
+as readable files, so you can back it up or work with it using your own tools.
+
+Import bookmarks or try the sample library to get started. Browser Recall Connector
+supports Chrome, Edge, Firefox, and Orion. Install it from the Chrome Web Store or
+Firefox Add-ons to record visits and capture highlights or snapshots. Approve the
+connection in the desktop app. You can pause recording from the browser toolbar.
 
 Publish Browser Recall Connector 1.0.2 or newer on both browser stores so the
 snapshot behavior matches the updated Privacy Policy. `npm run build:extension`
@@ -85,8 +94,10 @@ submitting the Mac App Store build.
   opens live links in the default browser. User-saved notes and snapshots are
   stored in a private library. Consider the user-selected third-party material
   when answering Content Rights.
-- **Export Compliance** — Answer for the uploaded build and its linked libraries.
-  Use the questionnaire if `ITSAppUsesNonExemptEncryption` is unset.
+- **Export Compliance** — The Mac App Store build declares
+  `ITSAppUsesNonExemptEncryption` as `false` in `scripts/app-store-info.plist`.
+  Reassess the declaration if the app or its linked libraries change how they
+  use encryption.
 - **App Review Information** — Provide the publisher's review contact, leave
   **Sign-in required** unchecked, paste the notes below, and attach
   [`review-bookmarks.html`](review-bookmarks.html).

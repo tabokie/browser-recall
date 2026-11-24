@@ -557,12 +557,18 @@ impl Storage {
     }
 
     pub async fn load_list_order_coordinated(&self) -> io::Result<Option<ListOrderManifest>> {
-        Ok(
-            match self.load_entity_coordinated("manifest:list-order").await? {
-                Some(Entity::ListOrder(manifest)) => Some(manifest),
-                _ => None,
-            },
-        )
+        if let Some(Entity::ListOrder(order)) = self.cache_get("manifest:list-order").flatten() {
+            return Ok(Some(order));
+        }
+
+        let _guard = self.write_guard().await;
+        let order = self.load_list_order().await?;
+        if order.is_none()
+            && (self.load_name_to_id().await?.is_some() || !self.load_all_lists().await?.is_empty())
+        {
+            return Err(invalid_data("list order manifest is missing"));
+        }
+        Ok(order)
     }
 
     pub async fn save_list_order(&self, manifest: &ListOrderManifest) -> io::Result<()> {

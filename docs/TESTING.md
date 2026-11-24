@@ -99,6 +99,9 @@ regular app from Finder for personal use. For a missing icon, inspect
 Back up preferences before repairing a confirmed ownership link; preserve other
 permissions.
 
+Test changes to macOS security-scoped file access in App Sandbox. Verify that
+the app releases each grant after its last use, including on error or early return.
+
 | Check                                                          | Command or entry point                                                                   | Session requirement                          |
 | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------- |
 | Startup recovery, tray, focus, five reopen cycles, saved frame | `npm run test:desktop-native`                                                            | Disposable account                           |

@@ -2126,27 +2126,20 @@
         flex: 1;
       }
 
-      .modal-group {
-        padding-top: 16px;
-        margin-top: 8px;
-      }
-
       .modal-group + .modal-group {
-        border-top: 1px solid var(--border-section);
+        margin-block-start: 14px;
+        border-block-start: 1px solid var(--border-section);
+        padding-block-start: 13px;
       }
 
       .modal-group:first-child {
-        padding-top: 4px;
-        margin-top: 0;
-        border-top: none;
+        padding-block-start: 4px;
       }
 
       .modal-group-label {
-        font-family: var(--font-body);
-        font-size: 14px;
-        font-weight: 700;
+        font: 700 16px/1.25 var(--highlight-history-font);
         color: var(--text-primary);
-        margin-bottom: 14px;
+        margin: 0 0 10px;
       }
 
       .data-heading {
@@ -2154,6 +2147,11 @@
         align-items: center;
         flex-wrap: wrap;
         gap: 6px;
+      }
+
+      .data-heading h3 {
+        font: inherit;
+        margin: 0;
       }
 
       .data-heading > :is(.hint-icon, .data-privacy-link) {
@@ -2170,17 +2168,12 @@
       }
 
       .modal-section {
-        margin-bottom: 20px;
+        display: grid;
+        gap: 8px;
       }
 
-      .modal-section h3 {
-        font-size: 14px;
-        font-weight: 500;
-        color: var(--text-primary);
-        margin-bottom: 8px;
-        display: flex;
-        align-items: center;
-        gap: 6px;
+      .modal-section > .option {
+        margin: 0;
       }
 
       .modal-section p {
@@ -2191,12 +2184,8 @@
       }
 
       /* Addon toggle sections — header IS the section, one line when off */
-      .addon-section {
-        padding: 10px 0;
-      }
-
       .addon-section + .addon-section {
-        border-top: 1px solid var(--border-section);
+        margin-block-start: 16px;
       }
 
       .addon-header {
@@ -2208,8 +2197,8 @@
       }
 
       .addon-header-title {
-        font-size: 14px;
-        font-weight: 500;
+        font-size: 13px;
+        font-weight: 600;
         color: var(--text-primary);
         flex-shrink: 0;
       }
@@ -2346,21 +2335,16 @@
       }
 
       .data-storage-row {
-        padding: 8px 10px;
-        background: var(--bg-surface-hover);
-        border-radius: var(--radius-sm);
-        border-left: 3px solid var(--accent-primary);
         align-items: flex-start;
       }
 
-      .data-storage-row.not-configured {
-        border-left-color: var(--accent-red);
-        background: var(--accent-red-soft);
+      .data-storage-row.not-configured .data-path {
+        color: var(--accent-red);
       }
 
       .data-path {
         font-family: var(--font-body);
-        font-size: 12px;
+        font-size: 13px;
         color: var(--text-primary);
         word-break: break-all;
         flex: 1;
@@ -2383,8 +2367,8 @@
       }
 
       .data-device-name {
-        font-size: 11px;
-        color: var(--text-muted);
+        font-size: 12px;
+        color: var(--text-secondary);
         line-height: 1.35;
       }
 
@@ -2576,6 +2560,125 @@
         gap: 8px;
       }
 
+      #settingsModal .modal {
+        max-width: calc(100% - 24px);
+      }
+
+      @media (max-width: 520px) {
+        #settingsModal :is(.modal-header, .modal-body) {
+          padding-inline: 18px;
+        }
+
+        #settingsModal .addon-header {
+          flex-wrap: wrap;
+          row-gap: 4px;
+        }
+
+        #settingsModal .addon-header-desc {
+          flex-basis: 100%;
+          padding-inline-start: 48px;
+          white-space: normal;
+        }
+      }
+
+      #settingsModal .btn-sm {
+        padding: 4px 10px;
+        font-size: 12px;
+      }
+
+      #settingsModal .btn-secondary {
+        border-color: var(--border-subtle);
+        box-shadow: none;
+      }
+
+      #settingsModal .btn-secondary:hover {
+        border-color: var(--border-hover);
+      }
+
+      #settingsModal .addon-header-desc {
+        color: var(--text-secondary);
+      }
+
+      .settings-connect-row {
+        flex-wrap: wrap;
+        row-gap: 6px;
+      }
+
+      .settings-connect-row .browser-store-links {
+        gap: 6px;
+      }
+
+      .settings-activity {
+        padding-block: 3px;
+      }
+
+      .settings-activity-label {
+        margin: 0;
+        font: 600 13px/1.35 var(--font-body);
+      }
+
+      .paired-browsers-list {
+        margin-block-start: 4px;
+        padding-inline-start: 12px;
+      }
+
+      .paired-browser {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding-block: 5px;
+      }
+
+      .paired-browser-details {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+
+      .paired-browser-name {
+        font-size: 13px;
+        line-height: 1.35;
+      }
+
+      .paired-browser-profile,
+      .paired-browser-empty,
+      #launchAtLoginUnsupported {
+        font-size: 12px;
+        line-height: 1.4;
+        color: var(--text-secondary);
+      }
+
+      .paired-browser-status[data-connected='true'] {
+        color: var(--accent-green);
+      }
+
+      .settings-small-action {
+        flex-shrink: 0;
+        min-height: 24px;
+        padding: 3px 8px;
+        border: 1px solid var(--border-subtle);
+        border-radius: 6px;
+        background: var(--bg-surface);
+        color: var(--text-primary);
+        font: 12px/1.3 var(--font-body);
+        cursor: pointer;
+      }
+
+      .settings-small-action:hover {
+        background: var(--bg-surface-hover);
+        border-color: var(--border-hover);
+      }
+
+      .settings-small-action:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+
+      #launchAtLoginUnsupported {
+        display: none;
+        margin-block-start: 4px;
+      }
+
       .color-scheme-dots {
         display: flex;
         gap: 6px;
@@ -2621,12 +2724,174 @@
         border-radius: 50%;
       }
 
-      .option select,
-      .option input[type='number'] {
-        padding: 2px 6px;
+      #settingsModal select,
+      .settings-select-trigger,
+      .settings-number-control input {
+        box-sizing: border-box;
+        min-height: 26px;
         border: 1px solid var(--border-subtle);
+        border-radius: 6px;
+        background: var(--bg-surface);
+        color: var(--text-primary);
+        font: 12px/1.35 var(--font-body);
+      }
+
+      #settingsModal select {
+        padding-inline: 8px;
+        max-inline-size: 60%;
+      }
+
+      .settings-select-trigger {
+        display: inline-flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        max-inline-size: 60%;
+        padding: 3px 8px;
+        text-align: start;
+        cursor: pointer;
+      }
+
+      #themeSelectButton,
+      #localeSelectButton {
+        inline-size: 152px;
+      }
+
+      .settings-select-trigger span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .settings-select-trigger::after {
+        content: '';
+        flex: none;
+        width: 5px;
+        height: 5px;
+        margin-block-start: -3px;
+        border: solid var(--text-secondary);
+        border-width: 0 1px 1px 0;
+        transform: rotate(45deg);
+      }
+
+      .settings-select-trigger:is(:hover, [aria-expanded='true']) {
+        background: var(--bg-surface-hover);
+      }
+
+      .settings-select-menu {
+        position: fixed;
+        inset: auto;
+        box-sizing: border-box;
+        width: max-content;
+        max-width: calc(100vw - 16px);
+        margin: 0;
+        padding: 4px;
+        overflow-y: auto;
+        border: 1px solid var(--border-glass-strong);
+        border-radius: 8px;
+        background: var(--desktop-paper-surface);
+        color: var(--text-primary);
+        box-shadow: var(--shadow-float);
+      }
+
+      .settings-select-menu [role='option'] {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+        min-height: 24px;
+        padding: 3px 8px;
+        border: none;
         border-radius: 4px;
-        font-size: 12px;
+        background: transparent;
+        color: inherit;
+        font: 12px/1.35 var(--font-body);
+        text-align: start;
+        cursor: pointer;
+      }
+
+      .settings-select-menu [role='option']::before {
+        content: '';
+        flex: 0 0 10px;
+      }
+
+      .settings-select-menu [aria-selected='true']::before {
+        content: '✓';
+      }
+
+      .settings-select-menu [role='option']:is(:hover, :focus-visible) {
+        background: var(--bg-surface-active);
+        outline: none;
+      }
+
+      .settings-number-control {
+        display: inline-flex;
+        align-items: stretch;
+        gap: 4px;
+        flex: none;
+      }
+
+      .settings-number-control input {
+        appearance: textfield;
+        inline-size: 54px;
+        padding-inline: 6px;
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .settings-number-control input::-webkit-inner-spin-button,
+      .settings-number-control input::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+
+      .settings-number-control input:focus-visible,
+      .settings-select-trigger:focus-visible,
+      .settings-small-action:focus-visible {
+        outline: 2px solid var(--accent-primary);
+        outline-offset: 1px;
+      }
+
+      .settings-stepper {
+        display: grid;
+        grid-template-rows: repeat(2, 1fr);
+        width: 19px;
+        overflow: hidden;
+        border: 1px solid var(--border-subtle);
+        border-radius: 5px;
+        background: var(--bg-surface);
+      }
+
+      .settings-stepper button {
+        display: grid;
+        place-items: center;
+        min-height: 12px;
+        padding: 0;
+        border: 0;
+        color: var(--text-secondary);
+        background: transparent;
+        cursor: pointer;
+      }
+
+      .settings-stepper button + button {
+        border-block-start: 1px solid var(--border-subtle);
+      }
+
+      .settings-stepper button:is(:hover, :focus-visible) {
+        background: var(--bg-surface-hover);
+      }
+
+      .settings-stepper button::after {
+        content: '';
+        width: 4px;
+        height: 4px;
+        border: solid currentColor;
+        border-width: 0 1px 1px 0;
+        transform: translateY(-1px) rotate(45deg);
+      }
+
+      .settings-stepper button[data-step='up']::after {
+        transform: translateY(1px) rotate(225deg);
       }
 
       code {
@@ -2669,6 +2934,7 @@
 
       .blacklist-input {
         flex: 1;
+        min-width: 0;
         padding: 8px 14px;
         border: 1px solid var(--border-glass);
         border-radius: var(--radius-pill);
@@ -2744,18 +3010,18 @@
 
       .trim-input-row {
         display: flex;
+        align-items: center;
+        flex-wrap: wrap;
         gap: 8px;
         margin-bottom: 8px;
       }
 
-      .trim-action-select {
-        padding: 8px;
-        border: 1px solid var(--border-subtle);
-        border-radius: 4px;
-        font-size: 12px;
-        font-family: var(--font-body);
-        background: var(--bg-surface);
-        flex-shrink: 0;
+      .trim-input-row .settings-select-trigger {
+        min-height: 32px;
+      }
+
+      .trim-input-row .blacklist-input {
+        flex: 1 1 130px;
       }
 
       .trim-action-label {
@@ -5200,13 +5466,18 @@
         <div class="modal-body scroll-boundary-contained">
           <!-- ── Appearance ── -->
           <div class="modal-group">
-            <div class="modal-group-label" data-i18n="desktopAppearance">
+            <h3 class="modal-group-label" data-i18n="desktopAppearance">
               Appearance
-            </div>
+            </h3>
             <div class="modal-section">
               <div class="option">
                 <div class="option-row">
-                  <span data-i18n="desktopTheme">Theme</span>
+                  <label
+                    id="themeSelectLabel"
+                    for="themeSelect"
+                    data-i18n="desktopTheme"
+                    >Theme</label
+                  >
                   <select id="themeSelect">
                     <option value="system" data-i18n="commonSystem">
                       System
@@ -5229,18 +5500,25 @@
                       data-scheme="amber"
                       style="--dot-color: #d07030"
                       title="Amber"
+                      aria-pressed="false"
                     ></button>
                     <button
                       class="color-dot"
                       data-scheme="mono"
                       title="Mono"
+                      aria-pressed="false"
                     ></button>
                   </div>
                 </div>
               </div>
               <div class="option">
                 <div class="option-row">
-                  <span data-i18n="desktopLanguage">Language</span>
+                  <label
+                    id="localeSelectLabel"
+                    for="localeSelect"
+                    data-i18n="desktopLanguage"
+                    >Language</label
+                  >
                   <select id="localeSelect">
                     <option value="system" data-i18n="commonSystem">
                       System
@@ -5253,20 +5531,20 @@
 
           <!-- ── Connection ── -->
           <div class="modal-group">
-            <div
+            <h3
               class="modal-group-label"
               id="desktopConnectionHeading"
               tabindex="-1"
               data-i18n="desktopConnection"
             >
               Connection
-            </div>
+            </h3>
             <div class="modal-section">
-              <div class="option">
-                <p data-i18n="desktopConnectBrowser">Connect a Browser</p>
+              <div class="option option-row settings-connect-row">
+                <span data-i18n="desktopConnectBrowser">Connect a Browser</span>
                 <div class="browser-store-links">
                   <a
-                    class="btn btn-secondary btn-sm external-link"
+                    class="settings-small-action external-link"
                     href="https://chromewebstore.google.com/detail/bgghgkobpfgcinpjjeeconciefclpdgp"
                     target="_blank"
                     rel="noopener noreferrer"
@@ -5277,7 +5555,7 @@
                     <span class="link-arrow" aria-hidden="true">↗</span>
                   </a>
                   <a
-                    class="btn btn-secondary btn-sm external-link"
+                    class="settings-small-action external-link"
                     href="https://addons.mozilla.org/firefox/addon/browser-recall-connector/"
                     target="_blank"
                     rel="noopener noreferrer"
@@ -5289,9 +5567,29 @@
                   </a>
                 </div>
               </div>
+              <div class="option settings-activity">
+                <h4
+                  class="settings-activity-label"
+                  data-i18n="desktopBrowsersActiveToday"
+                >
+                  Browsers active today
+                </h4>
+                <div id="pairedBrowsersList" class="paired-browsers-list">
+                  <div
+                    class="paired-browser-empty"
+                    data-i18n="desktopNoBrowsersActiveToday"
+                  >
+                    No browsers active today.
+                  </div>
+                </div>
+              </div>
               <div class="option" id="launchAtLoginOption">
                 <div class="option-row">
-                  <span data-i18n="desktopLaunchAtLogin">Launch at login</span>
+                  <label
+                    for="launchAtLoginToggle"
+                    data-i18n="desktopLaunchAtLogin"
+                    >Launch at login</label
+                  >
                   <label class="toggle-switch sm">
                     <input type="checkbox" id="launchAtLoginToggle" />
                     <span class="toggle-track"></span>
@@ -5300,41 +5598,10 @@
                 <div
                   id="launchAtLoginUnsupported"
                   data-i18n="desktopLaunchAtLoginUnsupported"
-                  style="
-                    display: none;
-                    margin-top: 6px;
-                    font-size: 12px;
-                    color: var(--text-muted);
-                  "
                 >
                   Launch at login is unavailable on this system.
                 </div>
                 <div id="launchAtLoginError" class="selectable-text"></div>
-              </div>
-              <div class="option">
-                <div class="option-row" style="align-items: flex-start">
-                  <span data-i18n="desktopBrowsersActiveToday"
-                    >Browsers active today</span
-                  >
-                </div>
-                <div
-                  id="pairedBrowsersList"
-                  style="
-                    display: flex;
-                    flex-direction: column;
-                    gap: 8px;
-                    margin-top: 8px;
-                    font-size: 12px;
-                    color: var(--text-secondary);
-                  "
-                >
-                  <div
-                    style="color: var(--text-muted)"
-                    data-i18n="desktopNoBrowsersActiveToday"
-                  >
-                    No browsers active today.
-                  </div>
-                </div>
               </div>
             </div>
           </div>
@@ -5342,7 +5609,7 @@
           <!-- ── Data ── -->
           <div class="modal-group">
             <div class="modal-group-label data-heading">
-              <span data-i18n="desktopData">Data</span>
+              <h3 data-i18n="desktopData">Data</h3>
               <span class="hint-icon"
                 >?<span class="hint-tip" data-i18n="desktopDataStorageHint"
                   >Stored locally as human-readable JSONL files organized by
@@ -5510,9 +5777,7 @@
 
           <!-- ── Add-ons ── -->
           <div class="modal-group">
-            <div class="modal-group-label" data-i18n="desktopAddons">
-              Add-ons
-            </div>
+            <h3 class="modal-group-label" data-i18n="desktopAddons">Add-ons</h3>
 
             <!-- Excluded Sites (default ON) -->
             <div class="addon-section">
@@ -5575,9 +5840,18 @@
                     id="trimUrlInput"
                     placeholder="https://github.com"
                     class="blacklist-input"
-                    style="flex: 2"
                   />
-                  <select id="trimActionSelect" class="trim-action-select">
+                  <label
+                    id="trimActionLabel"
+                    for="trimActionSelect"
+                    data-i18n="desktopTitleCleanup"
+                    hidden
+                    >Title Cleanup</label
+                  >
+                  <select
+                    id="trimActionSelect"
+                    aria-labelledby="trimActionLabel"
+                  >
                     <option
                       value="remove_after_pipe"
                       data-i18n="desktopRemoveAfterPipe"
@@ -5613,13 +5887,13 @@
           </div>
 
           <div class="modal-group">
-            <div
+            <h3
               class="modal-group-label"
               data-i18n="desktopUpdates"
               id="desktopUpdatesSection"
             >
               Updates
-            </div>
+            </h3>
             <div class="modal-section">
               <div class="option">
                 <div class="option-row">
@@ -5652,19 +5926,22 @@
             </div>
           </div>
           <div class="modal-group">
-            <div class="modal-group-label" data-i18n="desktopAdvanced">
+            <h3 class="modal-group-label" data-i18n="desktopAdvanced">
               Advanced
-            </div>
+            </h3>
             <div class="modal-section">
               <div class="option">
                 <div class="option-row">
                   <span
-                    ><span data-i18n="desktopHistoryBatchSize"
-                      >History loading batch size</span
+                    ><label
+                      for="historyFileBatch"
+                      data-i18n="desktopHistoryBatchSize"
+                      >History loading batch size</label
                     >
                     <span class="hint-icon"
                       >?<span
                         class="hint-tip"
+                        id="historyFileBatchHint"
                         data-i18n="desktopHistoryBatchSizeHint"
                         >Number of daily history files loaded at once when
                         scrolling. Higher values load more history upfront but
@@ -5677,14 +5954,16 @@
                     id="historyFileBatch"
                     min="1"
                     value="10"
-                    style="width: 60px"
+                    aria-describedby="historyFileBatchHint"
                   />
                 </div>
               </div>
               <div class="option">
                 <div class="option-row">
-                  <span data-i18n="desktopCaptureVideos"
-                    >Capture videos in snapshots</span
+                  <label
+                    for="captureSnapshotVideo"
+                    data-i18n="desktopCaptureVideos"
+                    >Capture videos in snapshots</label
                   >
                   <label class="toggle-switch sm">
                     <input type="checkbox" id="captureSnapshotVideo" />
@@ -5694,8 +5973,10 @@
               </div>
               <div class="option">
                 <div class="option-row">
-                  <span data-i18n="desktopDebugLogging"
-                    >Debug logging (resets on restart)</span
+                  <label
+                    for="debugLoggingToggle"
+                    data-i18n="desktopDebugLogging"
+                    >Debug logging (resets on restart)</label
                   >
                   <label class="toggle-switch sm">
                     <input type="checkbox" id="debugLoggingToggle" />

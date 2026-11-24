@@ -29,6 +29,10 @@ import {
 } from './desktop-bridge.js';
 import { formatHighlightExcerpt } from './highlight-format.js';
 import { createDesktopUpdates } from './desktop-updates.js';
+import {
+  enhanceSettingsNumber,
+  enhanceSettingsSelect,
+} from './settings-controls.js';
 import { createDesktopSync, javascriptRuleEditor } from './desktop-features.js';
 import { createDesktopReviewRequests } from './desktop-reviews.js';
 import { attentionStrength, aggregateAttention } from './attention-utils.js';
@@ -142,6 +146,8 @@ async function initializeDesktopLocalization({
   const select = document.getElementById('localeSelect');
   populateLocaleSelect(select);
   if (select) select.value = selectedOverride;
+  refreshLocaleSelect();
+  refreshTrimActionSelect();
 }
 
 // ─── Utility ─────────────────────────────────────────────────────────
@@ -6138,6 +6144,18 @@ initMarqueeForElements(
 );
 
 // --- Settings modal ---
+const themeSelect = document.getElementById('themeSelect');
+const refreshThemeSelect = enhanceSettingsSelect(themeSelect);
+const refreshLocaleSelect = enhanceSettingsSelect(
+  document.getElementById('localeSelect'),
+);
+const refreshTrimActionSelect = enhanceSettingsSelect(
+  document.getElementById('trimActionSelect'),
+);
+document
+  .querySelectorAll('#settingsModal input[type="number"]')
+  .forEach(enhanceSettingsNumber);
+
 const desktopUpdatesUi = createDesktopUpdates({
   tr,
   openSettings: openSettingsModal,
@@ -6245,6 +6263,11 @@ async function closeSettingsModal() {
     surfaceBackgroundError('Could not save sync settings', error);
     return false;
   }
+  document
+    .querySelectorAll('#settingsModal .settings-select-menu')
+    .forEach((menu) => {
+      if (menu.matches(':popover-open')) menu.hidePopover();
+    });
   document.getElementById('settingsModal').classList.remove('open');
   return true;
 }
@@ -6269,43 +6292,54 @@ async function refreshDesktopShellSettings() {
 
 function renderPairedBrowsers(browsers) {
   const list = document.getElementById('pairedBrowsersList');
-  const activeToday = browsers.filter(isBrowserActiveToday);
+  const activeToday = browsers.filter(isBrowserActiveToday).map((browser) => ({
+    ...browser,
+    displayName: formatBrowserName(browser.browserName),
+    profileName: browser.browserProfile?.trim() || '',
+  }));
   if (activeToday.length === 0) {
-    list.innerHTML = `<div style="color: var(--text-muted)">${escapeHtml(tr('desktopNoBrowsersActiveToday', 'No browsers active today.'))}</div>`;
+    list.innerHTML = `<div class="paired-browser-empty">${escapeHtml(tr('desktopNoBrowsersActiveToday', 'No browsers active today.'))}</div>`;
     return;
   }
   list.innerHTML = activeToday
-    .map((browser) => {
+    .map((browser, index) => {
       const lastSeen = new Date(browser.lastSeen).toLocaleString(
         getActiveLocale(),
       );
-      const profile =
-        browser.browserProfile === null
-          ? ''
-          : `${escapeHtml(browser.browserProfile)} · `;
-      const browserName = formatBrowserName(browser.browserName);
       const connectionStatus = browser.connected
         ? tr('desktopConnected', 'Connected')
         : tr('desktopDisconnected', 'Disconnected');
-      const connectionColor = browser.connected
-        ? 'var(--accent-primary)'
-        : 'var(--text-muted)';
+      const matchingProfiles = activeToday.filter(
+        (other) =>
+          other !== browser &&
+          other.displayName === browser.displayName &&
+          other.profileName === browser.profileName,
+      );
+      const metadata = [
+        browser.profileName,
+        matchingProfiles.length > 0 ? browser.browserId : '',
+        matchingProfiles.some((other) => other.browserId === browser.browserId)
+          ? browser.extensionId
+          : '',
+        `${tr('desktopLastSeen', 'Last seen')} ${lastSeen}`,
+      ]
+        .filter(Boolean)
+        .map(escapeHtml)
+        .join(' · ');
+      const detailsId = `paired-browser-details-${index}`;
       return `
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-          <div style="min-width:0;">
-            <div style="font-weight:600;color:var(--text-primary);">
-              <span class="paired-browser-name">${escapeHtml(browserName)}</span>
-              <span class="paired-browser-status" style="color: ${connectionColor}; font-weight: 500;">· ${escapeHtml(connectionStatus)}</span>
-            </div>
-            <div class="paired-browser-profile" style="color:var(--text-muted);font-size:11px;">
-              ${profile}${escapeHtml(browser.browserId)} · ${escapeHtml(tr('desktopLastSeen', 'Last seen'))} ${escapeHtml(lastSeen)}
+        <div class="paired-browser">
+          <div class="paired-browser-details" id="${detailsId}">
+            <div class="paired-browser-name">${escapeHtml(browser.displayName)}</div>
+            <div class="paired-browser-profile" title="${escapeHtml(browser.browserId)}">
+              <span class="paired-browser-status" data-connected="${browser.connected}">${escapeHtml(connectionStatus)}</span> · ${metadata}
             </div>
           </div>
           <button
-            class="section-action paired-browser-revoke"
+            class="settings-small-action paired-browser-revoke"
+            aria-describedby="${detailsId}"
             data-browser-id="${escapeHtml(browser.browserId)}"
             data-extension-id="${escapeHtml(browser.extensionId)}"
-            style="padding:3px 8px;flex-shrink:0;"
           >
             ${escapeHtml(tr('desktopRevoke', 'Revoke'))}
           </button>
@@ -6557,9 +6591,9 @@ document.getElementById('selectDirBtn').addEventListener('click', async () => {
   }
 });
 
-document.getElementById('themeSelect').addEventListener('change', () => {
+themeSelect.addEventListener('change', () => {
   runSettingsChange(async () => {
-    const theme = document.getElementById('themeSelect').value;
+    const theme = themeSelect.value;
     await saveSettingsValue('theme', theme);
     await chrome.storage.session.set({ theme });
     await applyTheme();
@@ -6582,7 +6616,9 @@ function applyColorScheme(scheme) {
     document.documentElement.removeAttribute('data-color-scheme');
   }
   document.querySelectorAll('.color-dot').forEach((d) => {
-    d.classList.toggle('active', d.dataset.scheme === scheme);
+    const active = d.dataset.scheme === scheme;
+    d.classList.toggle('active', active);
+    d.setAttribute('aria-pressed', String(active));
   });
 }
 
@@ -6597,17 +6633,39 @@ document.getElementById('colorSchemePicker').addEventListener('click', (e) => {
   });
 });
 
-document.getElementById('historyFileBatch').addEventListener('change', () => {
-  runSettingsChange(async () => {
-    const input = document.getElementById('historyFileBatch');
-    const val = Number.parseInt(input.value, 10);
-    if (!Number.isInteger(val) || val < 1) {
+const historyBatchInput = document.getElementById('historyFileBatch');
+let pendingHistoryBatchSave = null;
+historyBatchInput.addEventListener('change', () => {
+  const value = historyBatchInput.valueAsNumber;
+  if (!Number.isInteger(value) || value < 1) {
+    historyBatchInput.value =
+      pendingHistoryBatchSave?.value ?? historyState.fileBatch;
+    runSettingsChange(async () => {
       throw new Error('History file batch must be an integer of at least 1');
+    });
+    return;
+  }
+  const save = Promise.resolve(pendingHistoryBatchSave?.settled).then(
+    async () => {
+      if (historyState.fileBatch === value) return;
+      await saveSettingsValue('historyFileBatch', value);
+      historyState.fileBatch = value;
+      showStatus(tr('desktopSettingsSaved', 'Settings saved'), 'success');
+    },
+  );
+  const pending = { value, settled: save.catch(() => {}) };
+  pendingHistoryBatchSave = pending;
+  runSettingsChange(async () => {
+    try {
+      await save;
+    } finally {
+      if (pendingHistoryBatchSave === pending) {
+        pendingHistoryBatchSave = null;
+        if (historyBatchInput.valueAsNumber === value) {
+          historyBatchInput.value = historyState.fileBatch;
+        }
+      }
     }
-    await saveSettingsValue('historyFileBatch', val);
-    historyState.fileBatch = val;
-    input.value = val;
-    showStatus(tr('desktopSettingsSaved', 'Settings saved'), 'success');
   });
 });
 
@@ -8831,14 +8889,17 @@ async function hydrateStartupSettings(currentTheme) {
   const persistedTheme = settingsValue(settings, 'theme');
   await chrome.storage.session.set({ theme: persistedTheme });
   currentTheme = await applyTheme();
-  document.getElementById('themeSelect').value = currentTheme;
+  themeSelect.value = currentTheme;
+  refreshThemeSelect();
 
   const savedScheme = settingsValue(settings, 'colorScheme');
   applyColorScheme(savedScheme);
   await chrome.storage.session.set({ colorScheme: savedScheme });
 
   historyState.fileBatch = settingsValue(settings, 'historyFileBatch');
-  document.getElementById('historyFileBatch').value = historyState.fileBatch;
+  // Keep the draft visible while recovering from an earlier queued save.
+  if (!pendingHistoryBatchSave)
+    historyBatchInput.value = historyState.fileBatch;
   document.getElementById('captureSnapshotVideo').checked = settingsValue(
     settings,
     'captureSnapshotVideo',
@@ -8907,7 +8968,8 @@ async function initializeMain(currentTheme, deviceResp = null) {
   }
 
   // Theme select — reflects current value from applyTheme()
-  document.getElementById('themeSelect').value = currentTheme;
+  themeSelect.value = currentTheme;
+  refreshThemeSelect();
 
   // Initialize chart tooltips
   initCharts();

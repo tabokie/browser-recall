@@ -708,15 +708,16 @@ impl ReadProjections {
     }
 
     pub async fn list_tree(&self) -> Result<ListTreeProjection, String> {
-        let order = match self
+        let Some(order) = self
             .storage
-            .load_entity_coordinated("manifest:list-order")
+            .load_list_order_coordinated()
             .await
             .map_err(|error| error.to_string())?
-        {
-            Some(Entity::ListOrder(order)) => order,
-            Some(_) => return Err("list order has unexpected entity type".to_string()),
-            None => return Err("list order manifest is missing".to_string()),
+        else {
+            return Ok(ListTreeProjection {
+                tree: Vec::new(),
+                order: Vec::new(),
+            });
         };
         let mut list_ids = Vec::new();
         collect_list_ids(&order.tree, &mut list_ids)?;

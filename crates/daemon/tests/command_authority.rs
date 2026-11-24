@@ -9,10 +9,7 @@ use tempfile::tempdir;
 
 #[cfg(feature = "mac-app-store")]
 #[tokio::test]
-async fn app_store_keeps_legacy_javascript_rules_without_running_them() {
-    use browser_recall_daemon::rules::{match_list_rules_strict, PageData};
-    use browser_recall_replay::RuleInput;
-
+async fn app_store_library_starts_without_seed_lists() {
     let dir = tempdir().expect("tempdir");
     let storage = Storage::new(dir.path());
     let device = "device-a";
@@ -24,24 +21,92 @@ async fn app_store_keeps_legacy_javascript_rules_without_running_them() {
         .await
         .unwrap();
 
+    let read = ReadProjections::new(storage.clone());
+    let initial = read
+        .list_tree()
+        .await
+        .expect("read the new library's lists");
+    assert!(
+        initial.tree.is_empty(),
+        "unexpected seed lists: {initial:?}"
+    );
+    assert!(initial.order.is_empty());
+
+    let authority = CommandAuthority::new(storage.clone(), device.into());
+    authority
+        .execute(
+            "createListAndPin",
+            json!({ "name": "Hubs", "url": "https://example.org/" }),
+        )
+        .await
+        .expect("create an ordinary list named Hubs");
+    let with_list = read.list_tree().await.expect("read the first user list");
+    assert_eq!(with_list.tree.len(), 1);
+    assert_eq!(with_list.tree[0].name, "Hubs");
+
+    authority
+        .execute("clearAllData", json!({}))
+        .await
+        .expect("reset the library");
+    assert_eq!(
+        read.list_tree().await.expect("read lists after reset"),
+        initial
+    );
+}
+
+#[cfg(feature = "mac-app-store")]
+#[tokio::test]
+async fn app_store_keeps_legacy_javascript_rules_without_running_them() {
+    use browser_recall_daemon::rules::{match_list_rules_strict, PageData};
+    use browser_recall_replay::RuleInput;
+
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    let device = "device-a";
+    storage.ensure_layout(device).await.unwrap();
+    commands::ensure_default_settings(&storage, device)
+        .await
+        .unwrap();
+
     let legacy = json!({ "description": "Always matches", "fnSource": "return true;" });
-    let timestamp = storage.next_command_timestamp_millis();
     browser_recall_daemon::runtime::commit_local_entries(
         &storage,
         device,
-        [LogEntry::AddRule {
-            timestamp,
-            list_owner: "system".into(),
-            name: "Hubs".into(),
-            rule: RuleInput {
-                id: Some("legacy-function".into()),
-                rule_type: "function".into(),
-                config: serde_json::from_value(legacy.clone()).unwrap(),
+        [
+            LogEntry::CreateList {
+                timestamp: storage.next_command_timestamp_millis(),
+                list_owner: "system".into(),
+                list_id: Some("hubs".into()),
+                name: "Hubs".into(),
+                parent_list_id: None,
             },
-        }],
+            LogEntry::AddRule {
+                timestamp: storage.next_command_timestamp_millis(),
+                list_owner: "system".into(),
+                name: "Hubs".into(),
+                rule: RuleInput {
+                    id: Some("title-rule".into()),
+                    rule_type: "keyword".into(),
+                    config: serde_json::from_value(json!({ "pattern": "Home" })).unwrap(),
+                },
+            },
+            LogEntry::AddRule {
+                timestamp: storage.next_command_timestamp_millis(),
+                list_owner: "system".into(),
+                name: "Hubs".into(),
+                rule: RuleInput {
+                    id: Some("legacy-function".into()),
+                    rule_type: "function".into(),
+                    config: serde_json::from_value(legacy.clone()).unwrap(),
+                },
+            },
+        ],
     )
     .await
-    .expect("replay stored JavaScript rule");
+    .expect("replay a stored list with keyword and JavaScript rules");
+    commands::ensure_default_lists(&storage, device)
+        .await
+        .expect("open a library with an existing Hubs list");
 
     let list = storage
         .load_list("hubs")
@@ -59,7 +124,7 @@ async fn app_store_keeps_legacy_javascript_rules_without_running_them() {
     )
     .expect("keyword rule still runs");
     assert_eq!(matches.len(), 1);
-    assert_ne!(matches[0].rule_id, "legacy-function");
+    assert_eq!(matches[0].rule_id, "title-rule");
 
     let authority = CommandAuthority::new(storage.clone(), device.into());
     let error = authority

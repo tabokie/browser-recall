@@ -27,6 +27,7 @@ const macosInputs = new Set([
   'Cargo.toml',
   'Cargo.lock',
   'rust-toolchain.toml',
+  'scripts/app-store-info.plist',
   'scripts/app-store-tauri.conf.json',
   'scripts/app-store.PrivacyInfo.xcprivacy',
   'scripts/app-store.entitlements',

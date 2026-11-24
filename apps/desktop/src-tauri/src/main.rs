@@ -2601,14 +2601,13 @@ fn main() -> tauri::Result<()> {
     #[cfg(target_os = "windows")]
     windows_startup::record("Tauri build finished");
     app.run(|app, event| match event {
-        tauri::RunEvent::ExitRequested { code, api, .. } => {
+        tauri::RunEvent::ExitRequested { code, api, .. }
             if app
                 .try_state::<DesktopState>()
-                .is_some_and(|state| *state.quit_state.lock() != QuitState::Ready)
-            {
-                api.prevent_exit();
-                request_desktop_quit(app, code.unwrap_or(0));
-            }
+                .is_some_and(|state| *state.quit_state.lock() != QuitState::Ready) =>
+        {
+            api.prevent_exit();
+            request_desktop_quit(app, code.unwrap_or(0));
         }
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen { .. } => {

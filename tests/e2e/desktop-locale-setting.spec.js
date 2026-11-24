@@ -130,6 +130,8 @@ async function installDesktopShellBridge(page, helper, setupDir) {
           };
         case 'getSyncAuthState':
           return { success: true, hasToken: false, rememberToken: false };
+        case 'getDesktopUpdateState':
+          return { success: true, enabled: false };
         case 'listHistoryFiles':
           return { success: true, files: [], sizes: null, devices: [] };
         case 'loadHistoryBatch':
@@ -298,9 +300,10 @@ test('desktop locale choices persist across real daemon checkpoints and reloads'
         })),
       ]);
 
+      await page.locator('#localeSelectButton').click();
       await Promise.all([
         page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
-        page.locator('#localeSelect').selectOption('en'),
+        page.getByRole('option', { name: 'English', exact: true }).click(),
       ]);
       await page.waitForFunction(() => document.body.dataset.ready === 'true');
 
@@ -328,12 +331,13 @@ test('desktop locale choices persist across real daemon checkpoints and reloads'
       ).toHaveText(localeMessage('en', 'desktopBook'));
       await expect(page.locator('#localeSelect')).toHaveValue('en');
 
-      for (const { code } of SUPPORTED_LOCALES.filter(
+      for (const { code, nativeName } of SUPPORTED_LOCALES.filter(
         (locale) => locale.code !== 'en',
       )) {
+        await page.locator('#localeSelectButton').click();
         await Promise.all([
           page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
-          page.locator('#localeSelect').selectOption(code),
+          page.getByRole('option', { name: nativeName, exact: true }).click(),
         ]);
         await page.waitForFunction(
           () => document.body.dataset.ready === 'true',

@@ -567,7 +567,23 @@ pub async fn ensure_default_lists(storage: &Storage, device_id: &str) -> Result<
             validate_list_manifests(name_map, list_order, &lists)?;
         }
     }
-    let paths = name_map.as_ref().map(|manifest| &manifest.paths);
+
+    #[cfg(feature = "mac-app-store")]
+    {
+        drop(transaction);
+        Ok(false)
+    }
+    #[cfg(not(feature = "mac-app-store"))]
+    seed_default_lists(storage, transaction, name_map.as_ref()).await
+}
+
+#[cfg(not(feature = "mac-app-store"))]
+async fn seed_default_lists(
+    storage: &Storage,
+    transaction: ReplayTransaction<'_>,
+    name_map: Option<&browser_recall_replay::entities::NameToIdManifest>,
+) -> Result<bool, String> {
+    let paths = name_map.map(|manifest| &manifest.paths);
     let has_user_lists = paths
         .map(|paths| paths.keys().any(|key| !key.starts_with("system/")))
         .unwrap_or(false);
@@ -637,7 +653,7 @@ fn default_hubs_rule() -> RuleInput {
     }
 }
 
-#[cfg(not(all(feature = "javascript-list-rules", not(feature = "mac-app-store"))))]
+#[cfg(not(any(feature = "javascript-list-rules", feature = "mac-app-store")))]
 fn default_hubs_rule() -> RuleInput {
     RuleInput {
         id: None,

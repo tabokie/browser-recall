@@ -2,6 +2,8 @@
 #[allow(dead_code)]
 mod login_item;
 
+#[cfg(target_os = "macos")]
+use login_item::MacosLoginItemStatus;
 use login_item::{
     persist_preference, reconcile, reconcile_for_startup, windows_run_command,
     windows_startup_approved_enabled, LoginItemBackend,
@@ -141,6 +143,63 @@ fn startup_diagnostic_preserves_change_and_restore_failures() {
 
     assert!(diagnostic.contains("could not finish changing login item to true"));
     assert!(diagnostic.contains("could not restore native snapshot"));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_login_item_requiring_approval_points_to_system_settings() {
+    let status = MacosLoginItemStatus::try_from(2).expect("SMAppServiceStatusRequiresApproval");
+
+    let error = status
+        .is_enabled(|| panic!("approval must come from Service Management"))
+        .expect_err("macOS requires user approval before Launch at login can be enabled");
+
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    assert!(error.to_string().contains("System Settings"));
+    assert!(
+        status
+            .needs_unregister(|| panic!("Service Management owns this registration"))
+            .expect("check whether to unregister"),
+        "an item awaiting approval can still be removed"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_login_item_not_found_can_be_registered_or_left_off() {
+    let before_registration =
+        MacosLoginItemStatus::try_from(3).expect("SMAppServiceStatusNotFound");
+    let after_removal = MacosLoginItemStatus::try_from(0).expect("SMAppServiceStatusNotRegistered");
+
+    assert!(!before_registration
+        .is_enabled(|| Ok(false))
+        .expect("read launch eligibility"));
+    assert!(!before_registration
+        .needs_unregister(|| Ok(false))
+        .expect("an absent login item is already off"));
+    assert_eq!(
+        before_registration, after_removal,
+        "rollback restores an absent item"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_preserves_a_listed_login_item_after_the_signing_identifier_changes() {
+    let status = MacosLoginItemStatus::try_from(3).expect("SMAppServiceStatusNotFound");
+
+    assert!(status
+        .is_enabled(|| Ok(true))
+        .expect("the current bundle path already appears in Open at Login"));
+    let listed = Cell::new(true);
+    let needs_unregister = || status.needs_unregister(|| Ok(listed.get()));
+    let error = needs_unregister().expect_err("a listed bundle is still set to open at login");
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    assert!(error.to_string().contains("Open at Login"));
+    assert!(error.to_string().contains("System Settings"));
+
+    listed.set(false);
+    assert!(!needs_unregister().expect("the item was removed from System Settings"));
 }
 
 #[test]

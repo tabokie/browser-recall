@@ -5015,24 +5015,157 @@ test.describe('desktop visual regression', () => {
     });
   });
 
-  test('settings renders nullable profiles and only browsers active today', async ({
+  test('settings menu and numeric stepper support keyboard and pointer input @webkit', async ({
     page,
   }) => {
-    const now = Date.now();
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, { setupComplete: true });
+      await page.locator('#settingsBtn').click();
+
+      const theme = page.getByRole('button', { name: 'Theme Light' });
+      await theme.focus();
+      await theme.press('ArrowDown');
+      const options = page.getByRole('listbox', { name: 'Theme' });
+      await expect(options.getByRole('option', { selected: true })).toHaveText(
+        'Light',
+      );
+      await expect(
+        options.getByRole('option', { name: 'Light' }),
+      ).toBeFocused();
+      await page.keyboard.press('ArrowDown');
+      await expect(options.getByRole('option', { name: 'Dark' })).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(options).toBeHidden();
+      await expect(theme).toBeFocused();
+      await theme.click();
+      await options.getByRole('option', { name: 'Dark' }).click();
+      await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+      await expect(
+        page.getByRole('button', { name: 'Theme Dark' }),
+      ).toBeFocused();
+
+      const batch = page.getByRole('spinbutton', {
+        name: 'History loading batch size',
+      });
+      await batch
+        .locator('..')
+        .getByRole('button', { name: '+1', exact: true })
+        .click();
+      await expect(batch).toHaveValue('11');
+      await batch.press('ArrowDown');
+      await batch.press('Tab');
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness
+              .bridgeActionInvocations()
+              .filter(
+                ({ action, key }) =>
+                  action === 'saveSettingsKey' && key === 'historyFileBatch',
+              )
+              .map(({ value }) => value),
+          ),
+        )
+        .toEqual([11, 10]);
+    });
+  });
+
+  test('settings keeps the latest batch size after an earlier save fails @webkit', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, { setupComplete: true });
+      await page.locator('#settingsBtn').click();
+      await page.evaluate(() => {
+        const invoke = window.__TAURI__.core.invoke;
+        const firstSave = new Promise((resolve) => {
+          window.__releaseFailedBatchSave = resolve;
+        });
+        window.__TAURI__.core.invoke = async (command, payload) => {
+          const request = payload?.request;
+          if (
+            command === 'bridge_action' &&
+            request?.action === 'saveSettingsKey' &&
+            request.key === 'historyFileBatch'
+          ) {
+            if (request.value === 11) {
+              window.__batchSaveIsWaiting = true;
+              await firstSave;
+              return {
+                success: false,
+                error: 'Could not save the first batch size',
+              };
+            }
+            if (request.value === 14) {
+              return {
+                success: false,
+                error: 'Could not save the last batch size',
+              };
+            }
+          }
+          return invoke(command, payload);
+        };
+      });
+
+      const batch = page.getByRole('spinbutton', {
+        name: 'History loading batch size',
+      });
+      const increment = batch
+        .locator('..')
+        .getByRole('button', { name: '+1', exact: true });
+      await expect(batch).toHaveValue('10');
+      await increment.click();
+      await page.waitForFunction(() => window.__batchSaveIsWaiting);
+      await increment.click();
+      await expect(batch).toHaveValue('12');
+      await page.evaluate(() => window.__releaseFailedBatchSave());
+
+      await expect(page.locator('#errorBubble')).toContainText(
+        'Could not save the first batch size',
+      );
+      const persistedSettings = () =>
+        page.evaluate(() =>
+          window.__desktopVisualHarness.sessionValue('manifest:settings'),
+        );
+      await expect
+        .poll(persistedSettings)
+        .toMatchObject({ historyFileBatch: 12 });
+      await expect(batch).toHaveValue('12');
+
+      await increment.click();
+      await expect
+        .poll(persistedSettings)
+        .toMatchObject({ historyFileBatch: 13 });
+
+      await increment.click();
+      await expect(page.locator('#errorBubble')).toContainText(
+        'Could not save the last batch size',
+      );
+      await expect(batch).toHaveValue('13');
+      expect(await persistedSettings()).toMatchObject({ historyFileBatch: 13 });
+    });
+  });
+
+  test('settings distinguishes matching browser profiles and shows only browsers active today @webkit', async ({
+    page,
+  }) => {
+    const now = Date.UTC(2026, 10, 24, 12);
+    await page.clock.setFixedTime(now);
+    const brave = {
+      browserName: 'Brave',
+      browserProfile: null,
+      extensionId: 'abcdefghijklmnop',
+      approvedAt: now - 10 * 86400000,
+      lastSeen: now - 60_000,
+      connected: false,
+    };
     await serveDesktopUi(async (desktopUrl) => {
       await openDesktopUi(page, desktopUrl, {
         setupComplete: true,
         colorScheme: 'amber',
         pairedBrowsers: [
-          {
-            browserId: 'active-brave',
-            browserName: 'Brave',
-            browserProfile: null,
-            extensionId: 'abcdefghijklmnop',
-            approvedAt: now - 10 * 86400000,
-            lastSeen: now - 60_000,
-            connected: false,
-          },
+          { ...brave, browserId: 'brave-profile-a' },
+          { ...brave, browserId: 'brave-profile-b' },
           {
             browserId: 'old-chrome',
             browserName: 'Chrome',
@@ -5048,13 +5181,15 @@ test.describe('desktop visual regression', () => {
       await page.locator('#settingsBtn').click();
       await expect(page.getByText('Connection')).toBeVisible();
       await expect(page.getByText('Browsers active today')).toBeVisible();
-      await expect(page.getByText('Brave', { exact: true })).toBeVisible();
-      await expect(page.locator('.paired-browser-profile')).toContainText(
-        'active-brave',
+      const rows = page.locator('.paired-browser');
+      await expect(rows).toHaveCount(2);
+      await expect(rows.nth(0)).toContainText('brave-profile-a');
+      await expect(rows.nth(1)).toContainText('brave-profile-b');
+      const revoke = rows.nth(1).getByRole('button', { name: 'Revoke' });
+      await expect(revoke).toHaveAccessibleDescription(
+        /Brave.*brave-profile-b/,
       );
-      await expect(page.locator('.paired-browser-profile')).not.toContainText(
-        'null',
-      );
+      await expect(rows.nth(1)).not.toContainText('null');
       await expect(page.getByText('Google Chrome')).toHaveCount(0);
       await expect(page.getByText('Desktop Shell')).toHaveCount(0);
       await expect(page.locator('#storagePath')).toHaveText(
@@ -5063,6 +5198,23 @@ test.describe('desktop visual regression', () => {
       await expect(page.locator('#storageDeviceName')).toHaveText(
         'Device visual-device',
       );
+
+      await revoke.press('Enter');
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness
+              .bridgeActionInvocations()
+              .filter(({ action }) => action === 'revokePairedBrowser'),
+          ),
+        )
+        .toEqual([
+          {
+            action: 'revokePairedBrowser',
+            browserId: 'brave-profile-b',
+            extensionId: brave.extensionId,
+          },
+        ]);
     });
   });
 
@@ -5596,8 +5748,8 @@ test.describe('desktop visual regression', () => {
         page.locator('#onboardingLaunchAtLoginUnsupported'),
       ).toHaveText('此系统不支持登录时启动。');
       await expect(page.locator('.paired-browser-status')).toHaveText([
-        '· 已连接',
-        '· 已断开',
+        '已连接',
+        '已断开',
       ]);
       await expect(
         page.locator('.paired-browser-profile').first(),

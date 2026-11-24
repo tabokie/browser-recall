@@ -15,33 +15,35 @@
   <div class="addon-body" id="syncConfigFields">
     <div class="option" style="margin-top: 8px; display: none">
       <div class="option-row">
-        <span data-i18n="desktopIntervalMinutes">Interval (min)</span>
+        <label for="syncIntervalMinutes" data-i18n="desktopIntervalMinutes"
+          >Interval (min)</label
+        >
         <input
           type="number"
           id="syncIntervalMinutes"
           min="1"
           max="60"
           value="5"
-          style="width: 60px"
         />
       </div>
     </div>
     <div class="option" style="margin-top: 8px">
       <div class="option-row">
-        <span data-i18n="desktopRetentionDays">Retention (days)</span>
+        <label for="syncRetentionDays" data-i18n="desktopRetentionDays"
+          >Retention (days)</label
+        >
         <input
           type="number"
           id="syncRetentionDays"
           min="1"
           max="30"
           value="7"
-          style="width: 60px"
         />
       </div>
     </div>
     <div class="option" style="margin-top: 8px">
       <div class="option-row">
-        <span data-i18n="desktopProvider">Provider</span>
+        <label for="syncMethod" data-i18n="desktopProvider">Provider</label>
         <select id="syncMethod" disabled>
           <option value="github" translate="no">GitHub</option>
         </select>
