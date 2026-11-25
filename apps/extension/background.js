@@ -26,6 +26,7 @@ import {
   getBrowserCapabilities,
   normalizePageScriptError,
 } from './browser-capabilities.js';
+import { isOrionBrowser } from './browser-identity.js';
 import {
   DEFAULT_ICON_PATHS,
   SPECIAL_LIST_ICON_PATHS,
@@ -92,6 +93,7 @@ const POPUP_BOOTSTRAP_TTL_MS = 30_000;
 const POPUP_ACTION_MAPPING_FALLBACK_CLEAR_MS = 5000;
 const POPUP_IDENTITY_NAVIGATION_RETRIES = 2;
 const BROWSER_CAPABILITIES = getBrowserCapabilities();
+const DEFAULT_ACTION_POPUP = isOrionBrowser() ? 'popup.html' : '';
 
 let lastLogTimestamp = 0;
 const pendingPopupBootstraps = new Map();
@@ -213,9 +215,29 @@ function requireNavigationDelivery(tabId, url) {
 
 async function badgeIdentityUrlForTab(tabId, url) {
   requireNavigationDelivery(tabId, url);
-  if (snapshotViewerSlugFromUrl(url)) {
+  if (isSnapshotViewerOrFileUrl(url)) {
     const tab = await chrome.tabs.get(tabId);
-    return (await resolveTabPageIdentity(tab)).url;
+    const isLocalFile = tab.url?.startsWith('file:');
+    // A file may still be parsing its identity metadata. Refresh after load.
+    if (isLocalFile && tab.status === 'loading') {
+      return tab.url;
+    }
+    try {
+      return (await resolveTabPageIdentity(tab)).url;
+    } catch (error) {
+      // Keep the default icon for local files we cannot identify as snapshots.
+      if (
+        isLocalFile &&
+        [
+          'snapshot-file-access-required',
+          'snapshot-file-identity-missing',
+          'page-access-denied',
+        ].includes(error?.code)
+      ) {
+        return tab.url;
+      }
+      throw error;
+    }
   }
   const reportedUrl = tabReportedUrls.get(tabId);
   if (reportedUrl && isSameDocumentPageUrl(reportedUrl, url)) {
@@ -644,13 +666,16 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
 });
 
 chrome.tabs.onUpdated?.addListener?.((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' && snapshotViewerSlugFromUrl(tab?.url)) {
+  if (changeInfo.status === 'complete' && isSnapshotViewerOrFileUrl(tab?.url)) {
     void (async () => {
       const connector = await refreshDesktopConnectorStateProbe();
       await badgeController.setConnectorState(connector);
-      await badgeController.updateBadgeForTab(tabId, tab.url);
+      const currentTab = await chrome.tabs.get(tabId);
+      if (currentTab.url === tab.url) {
+        await badgeController.updateBadgeForTab(tabId, currentTab.url);
+      }
     })().catch((error) => {
-      logDebug('[badge] snapshot viewer refresh failed:', error.message);
+      logDebug('[badge] snapshot tab refresh failed:', error.message);
     });
   }
 });
@@ -1641,19 +1666,19 @@ function releasePreparedActionPopup(token, targetTabId = null) {
     const clearDetails = [];
     if (preparedActionPopupGlobalOwner === token) {
       preparedActionPopupGlobalOwner = null;
-      clearDetails.push({ popup: '' });
+      clearDetails.push({ popup: DEFAULT_ACTION_POPUP });
     }
     if (Number.isFinite(targetTabId)) {
       const owner = preparedActionPopupTabOwners.get(targetTabId);
       if (owner === undefined || owner === token) {
         preparedActionPopupTabOwners.delete(targetTabId);
-        clearDetails.push({ tabId: targetTabId, popup: '' });
+        clearDetails.push({ tabId: targetTabId, popup: DEFAULT_ACTION_POPUP });
       }
     }
     for (const [tabId, owner] of preparedActionPopupTabOwners) {
       if (owner !== token) continue;
       preparedActionPopupTabOwners.delete(tabId);
-      clearDetails.push({ tabId, popup: '' });
+      clearDetails.push({ tabId, popup: DEFAULT_ACTION_POPUP });
     }
     await applyPreparedActionPopupClears(clearDetails);
   });
@@ -1663,10 +1688,10 @@ function resetPreparedActionPopups() {
   if (!chrome.action?.setPopup) return Promise.resolve();
   return queuePreparedActionPopupUpdate(async () => {
     const clearDetails = [
-      { popup: '' },
+      { popup: DEFAULT_ACTION_POPUP },
       ...[...preparedActionPopupTabOwners.keys()].map((tabId) => ({
         tabId,
-        popup: '',
+        popup: DEFAULT_ACTION_POPUP,
       })),
     ];
     preparedActionPopupGlobalOwner = null;
@@ -1730,6 +1755,10 @@ function snapshotViewerSlugFromUrl(url) {
     return parsed.searchParams.get('slug');
   }
   return null;
+}
+
+function isSnapshotViewerOrFileUrl(url) {
+  return url?.startsWith('file:') || Boolean(snapshotViewerSlugFromUrl(url));
 }
 
 function popupTabIsUnavailable(tab) {
@@ -1884,7 +1913,13 @@ async function fileSnapshotPageIdentity(tab) {
     typeof inspected.url !== 'string' ||
     !inspected.url
   ) {
-    throw new Error('Snapshot file does not contain canonical page identity');
+    const error = new Error(
+      'Snapshot file does not contain canonical page identity',
+    );
+    if (inspected.slugCount === 0 && inspected.urlCount === 0) {
+      error.code = 'snapshot-file-identity-missing';
+    }
+    throw error;
   }
   return {
     success: true,
@@ -2083,29 +2118,20 @@ async function preparePopupBootstrapForTab(tab) {
 }
 
 function timeoutPopupBootstrap(tab) {
-  const url = tab?.url || '';
-  const title = typeof tab?.title === 'string' ? tab.title : '';
-  const identity = url
-    ? { slug: generateSlugFromUrl(url), url, title }
-    : { slug: '', url: '', title };
   return {
-    mode: tab?.url ? 'data-unavailable' : 'unavailable',
+    mode: 'data-unavailable',
     tab: tab
       ? {
           id: tab.id,
           url: tab.url,
           title: tab.title || '',
-          _effectiveSlug: identity.slug,
-          _effectiveUrl: identity.url,
-          _effectiveTitle: identity.title,
         }
       : null,
-    identity,
     error: tr('extensionPopupDataTimedOut', 'Popup data timed out. Try again.'),
     diagnostic: {
       reason: 'popup-prepare-timeout',
       timeoutMs: POPUP_PREPARE_TIMEOUT_MS,
-      url,
+      url: tab?.url || '',
     },
   };
 }
@@ -2125,36 +2151,8 @@ async function preparePopupBootstrapWithTimeout(
         );
       }),
     ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function preparePopupOpenPayload(tab, options = {}) {
-  await options.preparationGate;
-  const deadline = Date.now() + POPUP_PREPARE_TIMEOUT_MS;
-  let mutationRevision;
-  let bootstrap;
-  try {
-    do {
-      mutationRevision = popupBootstrapMutationRevision;
-      if (options.preparedBootstrap) {
-        bootstrap = options.preparedBootstrap;
-        break;
-      }
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
-        bootstrap = timeoutPopupBootstrap(tab);
-        break;
-      }
-      bootstrap = await preparePopupBootstrapWithTimeout(tab, remaining);
-      if (bootstrap?.diagnostic?.reason === 'popup-prepare-timeout') break;
-      // A committed mutation during preparation invalidates the projection.
-      // Rebuild before opening, within the same timeout budget.
-    } while (mutationRevision !== popupBootstrapMutationRevision);
   } catch (error) {
-    mutationRevision = popupBootstrapMutationRevision;
-    bootstrap = {
+    return {
       mode: 'data-unavailable',
       tab,
       error: error?.message || String(error),
@@ -2163,10 +2161,41 @@ async function preparePopupOpenPayload(tab, options = {}) {
         url: tab?.url || '',
       },
     };
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+async function prepareCurrentPopupModel(tab) {
+  const deadline = Date.now() + POPUP_PREPARE_TIMEOUT_MS;
+  let mutationRevision;
+  let bootstrap;
+  do {
+    mutationRevision = popupBootstrapMutationRevision;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      bootstrap = timeoutPopupBootstrap(tab);
+      break;
+    }
+    bootstrap = await preparePopupBootstrapWithTimeout(tab, remaining);
+    if (bootstrap?.diagnostic?.reason === 'popup-prepare-timeout') break;
+    // A committed mutation during preparation invalidates the projection.
+    // Rebuild before opening, within the same timeout budget.
+  } while (mutationRevision !== popupBootstrapMutationRevision);
   if (bootstrap?.diagnostic?.reason === 'popup-prepare-timeout') {
     mutationRevision = popupBootstrapMutationRevision;
   }
+  return { bootstrap, mutationRevision };
+}
+
+async function preparePopupOpenPayload(tab, options = {}) {
+  await options.preparationGate;
+  const { bootstrap, mutationRevision } = options.preparedBootstrap
+    ? {
+        bootstrap: options.preparedBootstrap,
+        mutationRevision: popupBootstrapMutationRevision,
+      }
+    : await prepareCurrentPopupModel(tab);
   const token = storePopupBootstrap({
     bootstrap,
     mutationRevision,
@@ -2237,7 +2266,46 @@ async function popupTargetIsCurrent(tab) {
   );
 }
 
-if (chrome.action?.onClicked?.addListener) {
+function registerDirectActionPopup(tabId) {
+  if (!Number.isSafeInteger(tabId) || tabId < 0) return;
+  return queuePreparedActionPopupUpdate(async () => {
+    if (preparedActionPopupTabOwners.has(tabId)) return;
+    await chrome.action.setPopup({ tabId, popup: DEFAULT_ACTION_POPUP });
+  });
+}
+
+if (DEFAULT_ACTION_POPUP) {
+  // Orion can dispatch onClicked despite a tab-specific popup registration.
+  // Open immediately on those clicks. Orion can use the global path for that
+  // call, so register both paths before any popup data is needed.
+  let registered = false;
+  const registration = queuePreparedActionPopupUpdate(async () => {
+    await chrome.action.setPopup({ popup: DEFAULT_ACTION_POPUP });
+    registered = true;
+  });
+  chrome.action.onClicked.addListener(async (tab) => {
+    try {
+      if (!registered) {
+        await registration;
+        if (!(await popupTargetIsCurrent(tab))) return;
+      }
+      await chrome.action.openPopup({ windowId: tab.windowId });
+    } catch (error) {
+      logDebug('[popup] Orion action click failed:', error.message);
+    }
+  });
+  chrome.tabs.onActivated.addListener(({ tabId }) =>
+    registerDirectActionPopup(tabId),
+  );
+  void chrome.tabs
+    .query({ active: true })
+    .then((tabs) =>
+      Promise.all(tabs.map(({ id }) => registerDirectActionPopup(id))),
+    )
+    .catch((error) =>
+      logDebug('[popup] Orion toolbar setup failed:', error.message),
+    );
+} else if (chrome.action?.onClicked?.addListener) {
   chrome.action.onClicked.addListener((tab) => {
     void openPreparedActionPopup(tab).catch((error) => {
       logDebug('[popup] action click failed:', error.message);
@@ -2565,6 +2633,7 @@ globalThis.browserRecallBackgroundTestControl = {
   getConnectorBridgeState,
   resetEphemeralConnectorState: resetEphemeralConnectorStateForTest,
   resetRecordingState: () => recordingController.resetForTest(),
+  updateTabBadge: badgeController.updateBadgeForTab,
 };
 
 function handleRuntimeMutation(request) {
@@ -2636,6 +2705,15 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
         case 'resolvePopupPageIdentity':
           sendResponse(await handleResolvePopupPageIdentity(request));
           break;
+        case 'getPopupStartupModel': {
+          if (!Number.isSafeInteger(request.tabId) || request.tabId < 0) {
+            throw new Error('getPopupStartupModel requires a valid tabId');
+          }
+          const tab = await chrome.tabs.get(request.tabId);
+          const { bootstrap } = await prepareCurrentPopupModel(tab);
+          sendResponse({ success: true, bootstrap });
+          break;
+        }
         case 'getPageInfo':
           sendResponse(await handleGetPageInfo(request));
           break;

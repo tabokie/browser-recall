@@ -10,14 +10,83 @@ import {
   highlightHistoryPageGroupHtml,
 } from '../apps/desktop/ui/book-elements.js';
 import { sidebarListItemHtml } from '../apps/desktop/ui/sidebar-elements.js';
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES } from '../packages/core/i18n.js';
 import { demoLists, featuredPage } from '../packages/demo/collection.js';
 
 // Browser Recall website demos must reuse production renderers and typesetting.
 // Test every demo at phone widths and keep scrolling on the outer page.
 const root = fileURLToPath(new URL('../', import.meta.url));
+const source = path.join(root, 'website');
 const output = path.join(root, 'dist/website');
+const localeDirectory = path.join(source, 'locales');
+const readJson = async (file) => JSON.parse(await readFile(file, 'utf8'));
+const english = await readJson(
+  path.join(localeDirectory, `${DEFAULT_LOCALE}.json`),
+);
+const { document } = new JSDOM(
+  await readFile(path.join(source, 'index.html'), 'utf8'),
+).window;
+const staticKeys = new Set();
+for (const element of document.querySelectorAll('*')) {
+  for (const { name, value } of element.attributes) {
+    if (/^data-i18n(?:-|$)/.test(name)) staticKeys.add(value);
+  }
+}
+staticKeys.delete('language'); // Reuse the product's language picker label.
+const websiteKeys = new Set([...staticKeys, ...Object.keys(english)]);
+const placeholders = (text) =>
+  [...text.matchAll(/\{\w+\}/g)]
+    .map(([value]) => value)
+    .sort()
+    .join(' ');
+const catalogs = {};
+for (const { code } of SUPPORTED_LOCALES) {
+  const messages = await readJson(path.join(localeDirectory, `${code}.json`));
+  const requiredKeys =
+    code === DEFAULT_LOCALE ? Object.keys(english) : [...websiteKeys];
+  for (const key of requiredKeys) {
+    const value = messages[key];
+    if (typeof value !== 'string' || !value.trim()) {
+      throw new Error(`Missing website translation ${code}/${key}`);
+    }
+    if (placeholders(value) !== placeholders(english[key] ?? '')) {
+      throw new Error(`Mismatched website placeholders ${code}/${key}`);
+    }
+    const text =
+      key === 'heroTitle' ? value.replace(/<\/?em>|<br\s*\/?>/g, '') : value;
+    if (/[<>]/.test(text))
+      throw new Error(`Unexpected website markup ${code}/${key}`);
+  }
+  for (const key of Object.keys(messages)) {
+    if (!websiteKeys.has(key))
+      throw new Error(`Unknown website translation ${code}/${key}`);
+  }
+  const productMessages = await readJson(
+    path.join(root, `packages/core/locales/${code}/messages.json`),
+  );
+  catalogs[code] = {
+    ...messages,
+    language: productMessages.desktopLanguage.message,
+  };
+}
+
 await rm(output, { recursive: true, force: true });
-await cp(path.join(root, 'website'), output, { recursive: true });
+await cp(source, output, {
+  recursive: true,
+  filter: (file) => file !== localeDirectory,
+});
+await writeFile(
+  path.join(output, 'locale-catalogs.js'),
+  `export const catalogs = ${JSON.stringify(catalogs)};\n`,
+);
+const localeRuntime = path.join(output, 'locale.js');
+await writeFile(
+  localeRuntime,
+  (await readFile(localeRuntime, 'utf8')).replace(
+    "'../packages/core/i18n.js'",
+    "'./demos/product/packages/core/i18n.js'",
+  ),
+);
 for (const name of ['timeline', 'popup', 'highlight']) {
   const file = path.join(output, `demos/${name}.js`);
   const source = await readFile(file, 'utf8');
@@ -69,6 +138,7 @@ const productFiles = [
   'packages/core/utils.js',
   'packages/core/page-identity.js',
   'packages/core/highlight-lifecycle.js',
+  'packages/core/i18n.js',
   'packages/core/shared.css',
   'packages/core/color-schemes.css',
   'packages/demo/collection.js',
@@ -216,6 +286,11 @@ lists.style.display = '';
 // The demo focuses on toggling existing lists; creating/searching lists belongs
 // to the full popup, so omit the associated hint and add button here.
 lists.querySelector('.list-search-hint').remove();
+const notes = fragment(popup, '#notesSection');
+notes.style.display = '';
+const markupToggleTemplate = notes.querySelector('#markupToggleTemplate');
+notes.querySelector('#markupControls').append(markupToggleTemplate.content);
+markupToggleTemplate.remove();
 const snapshots = fragment(popup, '#snapshotSection');
 snapshots.style.display = '';
 snapshots.classList.add('is-empty');
@@ -224,6 +299,7 @@ await demoDocument(
   `${popup.querySelector('style').outerHTML}<link rel="stylesheet" href="product/apps/extension/color-schemes.css">`,
   `
 <div id="dashboard">${fragment(popup, '#recordingBar').outerHTML}
-<div id="dashboardContent">${pageHeader.outerHTML}${lists.outerHTML}${snapshots.outerHTML}</div></div>`,
+<div id="dashboardContent">${pageHeader.outerHTML}${lists.outerHTML}${notes.outerHTML}${snapshots.outerHTML}</div></div>
+<script src="product/apps/extension/extension-surface.js"></script>`,
 );
 console.log(`Browser Recall website built in ${output}`);

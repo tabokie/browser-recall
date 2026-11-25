@@ -1090,6 +1090,17 @@
 
         <div class="section" id="notesSection" style="display: none">
           <div class="notes-scroll">
+            <template id="markupToggleTemplate">
+              <button
+                type="button"
+                class="markup-toggle-btn"
+                id="hideMarkupBtn"
+                aria-pressed="false"
+                data-i18n="extensionHideMarkup"
+              >
+                Hide markup
+              </button>
+            </template>
             <div class="markup-controls" id="markupControls"></div>
             <div class="highlight-list" id="highlightList"></div>
           </div>

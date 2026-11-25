@@ -84,7 +84,9 @@ function updateSelection(focus = false) {
   previewButton.disabled = !node || !!node.children;
   demo.querySelector('.finder-status').textContent = t(
     node && node.path !== folder ? 'selectedItems' : 'items',
-    { count: children(folder).length },
+    {
+      count: new Intl.NumberFormat(getLocale()).format(children(folder).length),
+    },
   );
   const path = demo.querySelector('.finder-path');
   path.replaceChildren();
@@ -99,6 +101,7 @@ function updateSelection(focus = false) {
       path.append(separator);
     }
     const label = document.createElement(item.children ? 'button' : 'span');
+    label.dir = 'auto';
     label.textContent = item.name;
     label.title = `Browser Recall${target ? `/${target}` : ''}`;
     if (item.children) {
@@ -124,7 +127,7 @@ function finderRowHtml(node, depth) {
     disclosure = `<button class="finder-disclosure" type="button" tabindex="-1" aria-label="${label}">${open ? '⌄' : '›'}</button>`;
   }
   return `<div class="finder-row" role="treeitem" aria-level="${depth + 1}" aria-selected="${active}" ${expandedAttribute} tabindex="${active ? 0 : -1}" data-path="${path}" style="--finder-depth:${depth}">
-        <span class="finder-name">${disclosure}${icon(!!node.children)}<span class="finder-filename" title="${path}">${escape(node.name)}</span></span>
+        <span class="finder-name">${disclosure}${icon(!!node.children)}<span class="finder-filename" dir="auto" title="${path}">${escape(node.name)}</span></span>
         <span class="finder-date">${modified}</span><span class="finder-kind">${kind(node)}</span></div>`;
 }
 
@@ -289,7 +292,11 @@ try {
   onLocaleChange(localizeFiles);
   tree.setAttribute('aria-busy', 'false');
 } catch (error) {
-  tree.textContent = t('libraryError');
+  const localizeError = () => {
+    tree.textContent = t('libraryError');
+  };
+  localizeError();
+  onLocaleChange(localizeError);
   tree.setAttribute('aria-busy', 'false');
   demo.querySelector('.finder-status').textContent = error.message;
 }

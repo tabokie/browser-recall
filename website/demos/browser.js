@@ -1,4 +1,4 @@
-import './highlight.js';
+import { setMarkupHidden } from './highlight.js';
 
 const button = document.querySelector('#extensionToggle');
 const popup = document.querySelector('#extensionPopup');
@@ -59,8 +59,9 @@ window.addEventListener('message', (event) => {
     return;
   if (event.data?.type === 'popup-close') setOpen(false, true);
   if (event.data?.type !== 'popup-state') return;
-  const { height, paused, count } = event.data;
+  const { height, paused, count, markupHidden } = event.data;
   popupHeight = height;
+  setMarkupHidden(markupHidden);
   icon.src = `../assets/extension-${paused ? 'paused' : 'recording'}.svg`;
   icon.alt = paused ? 'Recording paused' : 'Recording on';
   status.textContent = recordingStatus(paused, count);

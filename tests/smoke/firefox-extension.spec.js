@@ -709,6 +709,106 @@ async function waitFor(predicate, label) {
 }
 
 test.describe('Firefox extension smoke', () => {
+  test('Orion opens the direct popup immediately when the toolbar dispatches a click', async () => {
+    await withStagedFirefoxExtension(async (outDir) => {
+      const api = createFirefoxWebExtensionApi();
+      const activeTab = {
+        id: 43,
+        windowId: 1,
+        url: 'https://example.test/orion-toolbar-popup',
+      };
+      api.browserApi.tabs.query = async () => [activeTab];
+      const setPopup = api.browserApi.action.setPopup.bind(
+        api.browserApi.action,
+      );
+      let finishRegistration;
+      const registrationGate = new Promise((resolve) => {
+        finishRegistration = resolve;
+      });
+      Object.defineProperty(api.browserApi.action, 'setPopup', {
+        async value(details) {
+          if (details.tabId === undefined) await registrationGate;
+          return setPopup(details);
+        },
+      });
+      const opens = [];
+      Object.defineProperty(api.browserApi.action, 'openPopup', {
+        async value(details) {
+          const { popupByTab } = api.actionPopupState;
+          opens.push({
+            windowId: details.windowId,
+            globalPopup: popupByTab.get(undefined),
+            tabPopup: popupByTab.get(activeTab.id),
+          });
+          if (popupByTab.get(activeTab.id)?.startsWith('popup.html?')) {
+            throw new Error('Orion could not present the prepared popup');
+          }
+        },
+      });
+      const nativeSetTimeout = globalThis.setTimeout;
+      await withPatchedGlobals(
+        {
+          browser: api.browserApi,
+          chrome: api.chromeCompat,
+          KAGI: {},
+          WebSocket: FailingWebSocket,
+          setTimeout(callback, ms, ...args) {
+            return nativeSetTimeout(callback, ms, ...args).unref();
+          },
+        },
+        async () => {
+          await import(pathToFileURL(path.join(outDir, 'background.js')).href);
+          const coldClick = api.events.actionClicked.dispatch(activeTab);
+          try {
+            expect(opens).toEqual([]);
+          } finally {
+            finishRegistration();
+            await coldClick;
+          }
+          expect(opens).toEqual([
+            expect.objectContaining({
+              windowId: activeTab.windowId,
+              globalPopup: 'popup.html',
+            }),
+          ]);
+          await waitFor(
+            () =>
+              api.actionPopupState.popupByTab.get(activeTab.id) ===
+              'popup.html',
+            'Orion toolbar popup for the active tab',
+          );
+          opens.length = 0;
+          const clickDispatch = api.events.actionClicked.dispatch(activeTab);
+          expect(opens).toEqual([
+            {
+              windowId: activeTab.windowId,
+              globalPopup: 'popup.html',
+              tabPopup: 'popup.html',
+            },
+          ]);
+          await clickDispatch;
+
+          const [result] = await api.browserApi.commands.onCommand.dispatch(
+            'open-popup',
+            activeTab,
+          );
+          expect(result).toEqual({
+            success: false,
+            error: 'Orion could not present the prepared popup',
+          });
+          expect(api.actionPopupState.popupByTab.get(activeTab.id)).toBe(
+            'popup.html',
+          );
+          expect(api.actionPopupState.popupByTab.get(undefined)).toBe(
+            'popup.html',
+          );
+          await api.browserApi.tabs.onActivated.dispatch({ tabId: 44 });
+          expect(api.actionPopupState.popupByTab.get(44)).toBe('popup.html');
+        },
+      );
+    });
+  });
+
   test('toolbar click opens the same prepared current-page popup as Chromium', async () => {
     await withStagedFirefoxExtension(async (outDir) => {
       const manifest = JSON.parse(
@@ -1180,6 +1280,80 @@ test.describe('Firefox extension smoke', () => {
       );
 
       for (const timer of timers) clearTimeout(timer);
+    });
+  });
+
+  test('local snapshot tabs keep the connector badge while approval is pending', async () => {
+    await withStagedFirefoxExtension(async (outDir) => {
+      const api = createFirefoxWebExtensionApi();
+      const tab = {
+        id: 32,
+        url: 'file:///saved-page.html',
+        status: 'complete',
+      };
+      api.browserApi.tabs.get = async () => tab;
+      let inspections = 0;
+      api.browserApi.scripting.executeScript = async () => {
+        inspections++;
+        return [
+          {
+            result: {
+              documentUrl: tab.url,
+              slugCount: 1,
+              urlCount: 1,
+              slug: 'saved-page',
+              url: 'https://example.test/saved-page',
+            },
+          },
+        ];
+      };
+      class PendingApprovalWebSocket extends SuccessfulWebSocket {
+        send(raw) {
+          if (JSON.parse(raw).type !== 'pair_request') return super.send(raw);
+          queueMicrotask(() => {
+            for (const listener of this.listeners.get('message') || []) {
+              listener({ data: JSON.stringify({ type: 'pair_pending' }) });
+            }
+          });
+        }
+      }
+      const timers = new Set();
+      const nativeSetTimeout = globalThis.setTimeout;
+      try {
+        await withPatchedGlobals(
+          {
+            browser: api.browserApi,
+            chrome: api.chromeCompat,
+            navigator: navigatorWithUserAgent(
+              globalThis.navigator,
+              FIREFOX_USER_AGENT,
+            ),
+            WebSocket: PendingApprovalWebSocket,
+            setTimeout(callback, ms, ...args) {
+              const timer = nativeSetTimeout(callback, ms, ...args);
+              timers.add(timer);
+              return timer;
+            },
+          },
+          async () => {
+            await import(
+              pathToFileURL(path.join(outDir, 'background.js')).href
+            );
+            await waitFor(
+              () => api.storage.local._data.connectorState === 'pair_pending',
+              'connector waiting for approval',
+            );
+            await globalThis.browserRecallBackgroundTestControl.updateTabBadge(
+              tab.id,
+              tab.url,
+            );
+            expect(api.badgeState.tabs.get(tab.id).text).toBe('');
+            expect(inspections).toBe(0);
+          },
+        );
+      } finally {
+        for (const timer of timers) clearTimeout(timer);
+      }
     });
   });
 

@@ -1,10 +1,11 @@
 import { test, expect } from './fixtures.js';
 import crypto from 'crypto';
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { migrateSnapshotIdentity } from '../../scripts/migrate-snapshot-identity.mjs';
 import { setSnapshotIdentity } from '../../packages/core/snapshot-html.js';
+import { withCleanup } from '../smoke/desktop-test-cleanup.mjs';
 import {
   resetAndSeed,
   settingsCheckpoint,
@@ -584,7 +585,171 @@ test.describe('Snapshot slug meta tag', () => {
     await viewer.close();
   });
 
-  test('toolbar popup on a migrated legacy snapshot uses the original page data', async ({
+  test('Orion shows a startup timeout for both saved snapshot views', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
+    const url = 'https://example.com/slow-snapshot';
+    const slug = getSlugForUrl(url);
+    const timestamp = 1_700_000_000_000;
+    const sidecar = snapshotSidecarPath(slug, timestamp, 'html');
+    await resetAndSeed(extContext, extensionId, [
+      settingsCheckpoint(),
+      {
+        path: pageCheckpointPath(slug),
+        data: pageEntityFixture({
+          slug,
+          url,
+          title: 'Saved page',
+          parentIds: [],
+          childIds: [`snapshot:${slug}-${timestamp}`],
+          timestamps: { 'test-device': timestamp },
+        }),
+      },
+      {
+        path: sidecar,
+        content: currentSnapshotHtml({
+          slug,
+          url,
+          html: '<!doctype html><title>Saved page</title><p>Saved page body</p>',
+        }),
+      },
+    ]);
+    const snapshotUrls = [
+      pathToFileURL(join(setupDir, sidecar)).href,
+      `chrome-extension://${extensionId}/snapshot-viewer.html?slug=${slug}&ts=${timestamp}`,
+    ];
+    const helper = await openHelperPage(extContext, extensionId);
+    const worker = extContext.serviceWorkers()[0];
+    const message = await helper.evaluate(() =>
+      chrome.i18n.getMessage('extensionPopupDataTimedOut'),
+    );
+    await withCleanup(async () => {
+      for (const snapshotUrl of snapshotUrls) {
+        const snapshot = await extContext.newPage();
+        const popup = await extContext.newPage();
+        await withCleanup(async () => {
+          await snapshot.goto(snapshotUrl);
+          const document = snapshotUrl.startsWith('file:')
+            ? snapshot
+            : snapshot.frameLocator('iframe');
+          await expect(document.getByText('Saved page body')).toBeVisible();
+          const [tab] = await helper.evaluate(
+            (url) => chrome.tabs.query({ url }),
+            snapshotUrl,
+          );
+          await popup.addInitScript((tab) => {
+            globalThis.KAGI = {};
+            const query = chrome.tabs.query.bind(chrome.tabs);
+            chrome.tabs.query = (options) =>
+              options.active && options.currentWindow
+                ? Promise.resolve([tab])
+                : query(options);
+          }, tab);
+          await worker.evaluate(() => {
+            const get = chrome.storage.session.get.bind(chrome.storage.session);
+            let release;
+            const gate = new Promise((resolve) => {
+              release = resolve;
+            });
+            globalThis.releaseSnapshotStartup = () => {
+              chrome.storage.session.get = get;
+              release();
+              delete globalThis.releaseSnapshotStartup;
+            };
+            chrome.storage.session.get = async (keys) => {
+              if (keys.length === 1 && keys[0] === 'workspace') await gate;
+              return get(keys);
+            };
+          });
+          await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+          await expect(popup.locator('#pageDiagnosticMessage')).toHaveText(
+            message,
+          );
+          await expect(popup.locator('#pageDiagnosticSection')).toBeVisible();
+          await expect(popup.locator('html')).not.toHaveAttribute(
+            'data-popup-hidden',
+          );
+        }, [
+          () => worker.evaluate(() => globalThis.releaseSnapshotStartup?.()),
+          () => popup.close(),
+          () => snapshot.close(),
+        ]);
+      }
+    }, [() => helper.close()]);
+  });
+
+  test('scripting denial leaves an ordinary local file on the default icon', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+    const filename = join(setupDir, 'ordinary-local-page.html');
+    writeFileSync(
+      filename,
+      '<!doctype html><title>Ordinary local page</title>',
+    );
+    const url = pathToFileURL(filename).href;
+    const helper = await openHelperPage(extContext, extensionId);
+    const page = await extContext.newPage();
+    const worker = extContext.serviceWorkers()[0];
+    await withCleanup(async () => {
+      await page.goto(url);
+      const [tab] = await helper.evaluate(
+        (url) => chrome.tabs.query({ url }),
+        url,
+      );
+      await worker.evaluate(({ id, url }) => {
+        const execute = chrome.scripting.executeScript.bind(chrome.scripting);
+        const allowed = chrome.extension.isAllowedFileSchemeAccess;
+        chrome.extension.isAllowedFileSchemeAccess = (callback) =>
+          callback(true);
+        globalThis.restoreLocalFileScripting = () => {
+          chrome.scripting.executeScript = execute;
+          chrome.extension.isAllowedFileSchemeAccess = allowed;
+          delete globalThis.restoreLocalFileScripting;
+        };
+        chrome.scripting.executeScript = (details) => {
+          if (details.target.tabId === id) {
+            return Promise.reject(
+              new Error('Missing host permission for the tab.'),
+            );
+          }
+          return execute(details);
+        };
+        return globalThis.browserRecallBackgroundTestControl.updateTabBadge(
+          id,
+          url,
+        );
+      }, tab);
+      expect(await getActionBadgeForUrl(helper, url)).toMatchObject({
+        text: '',
+      });
+      expect(await getActionIconForUrl(helper, url)).toMatchObject({
+        16: 'icons/icon16.png',
+      });
+      const response = await helper.evaluate(
+        (tabId) =>
+          chrome.runtime.sendMessage({
+            action: 'resolvePopupPageIdentity',
+            tabId,
+          }),
+        tab.id,
+      );
+      expect(response).toMatchObject({
+        success: false,
+        code: 'page-access-denied',
+      });
+    }, [
+      () => worker.evaluate(() => globalThis.restoreLocalFileScripting?.()),
+      () => page.close(),
+      () => helper.close(),
+    ]);
+  });
+
+  test('toolbar popup and icon on a migrated legacy snapshot use the original page data', async ({
     extContext,
     extensionId,
     setupDir,
@@ -723,6 +888,14 @@ test.describe('Snapshot slug meta tag', () => {
       highlightText,
     );
 
+    await expect
+      .poll(() => getActionIconForUrl(helper, viewer.url()))
+      .toEqual({
+        16: 'icons/icon16-special-notes.png',
+        48: 'icons/icon48-special-notes.png',
+        128: 'icons/icon128-special-notes.png',
+      });
+
     const openRequest = helper.evaluate((tabId) => {
       return chrome.runtime.sendMessage({
         action: 'openPreparedPopupForTest',
@@ -756,7 +929,6 @@ test.describe('Snapshot slug meta tag', () => {
         diagnosticVisible: false,
       });
     await expect(openRequest).resolves.toMatchObject({ success: true });
-
     const toggleMarkup = () =>
       helper.evaluate(() => {
         const popup = chrome.extension.getViews({ type: 'popup' })[0];
@@ -846,8 +1018,66 @@ test.describe('Snapshot slug meta tag', () => {
         }),
       ),
     ).toEqual({ success: true });
-    await viewer.close();
-    await helper.close();
+    const worker = extContext.serviceWorkers()[0];
+    await worker.evaluate(
+      ({ tabId, snapshotUrl }) => {
+        const execute = chrome.scripting.executeScript.bind(chrome.scripting);
+        let resumeInspection;
+        const gate = new Promise((resolve) => {
+          resumeInspection = resolve;
+        });
+        const staleBadge = { waiting: false, errorBadges: [] };
+        globalThis.snapshotBadgeTest = staleBadge;
+        chrome.scripting.executeScript = async (details) => {
+          const result = await execute(details);
+          if (
+            details.target?.tabId === tabId &&
+            result[0]?.result?.slugCount === 1
+          ) {
+            staleBadge.waiting = true;
+            await gate;
+          }
+          return result;
+        };
+        const setBadge = chrome.action.setBadgeText.bind(chrome.action);
+        chrome.action.setBadgeText = (details) => {
+          if (details.tabId === tabId && details.text === '!') {
+            staleBadge.errorBadges.push(details.text);
+          }
+          return setBadge(details);
+        };
+        const update =
+          globalThis.browserRecallBackgroundTestControl.updateTabBadge(
+            tabId,
+            snapshotUrl,
+          );
+        staleBadge.finish = async () => {
+          chrome.scripting.executeScript = execute;
+          resumeInspection();
+          await update;
+          chrome.action.setBadgeText = setBadge;
+          delete globalThis.snapshotBadgeTest;
+          return staleBadge.errorBadges;
+        };
+      },
+      { tabId: viewerTabId, snapshotUrl: viewer.url() },
+    );
+    const finishBadgeRefresh = () =>
+      worker.evaluate(() => globalThis.snapshotBadgeTest?.finish());
+    await withCleanup(async () => {
+      await expect
+        .poll(() => worker.evaluate(() => globalThis.snapshotBadgeTest.waiting))
+        .toBe(true);
+      await viewer.goto(liveUrl);
+      await expect
+        .poll(() => getActionIconForUrl(helper, liveUrl))
+        .toEqual({
+          16: 'icons/icon16.png',
+          48: 'icons/icon48.png',
+          128: 'icons/icon128.png',
+        });
+      expect(await finishBadgeRefresh()).toEqual([]);
+    }, [finishBadgeRefresh, () => viewer.close(), () => helper.close()]);
   });
 
   test('capture reconnects when cached connector state is stale', async ({

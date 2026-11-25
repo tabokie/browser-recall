@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures.js';
+import { SUPPORTED_LOCALES } from '../../packages/core/i18n.js';
 
 test.use({ locale: 'zh-CN' });
 
@@ -6,7 +7,10 @@ test('Chinese browser preferences translate the website and switching languages 
   page,
 }) => {
   await page.goto('./');
+  const language = page.getByRole('combobox');
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
+  await expect(language).toHaveAccessibleName('语言');
+  await expect(language).toHaveValue('zh-CN');
   await expect(page).toHaveTitle('Browser Recall：给浏览器添一点记性');
   await expect(page.locator('#hero-title')).toHaveText('给浏览器添一点记性。');
   await expect(page.locator('meta[name="description"]')).toHaveAttribute(
@@ -24,9 +28,7 @@ test('Chinese browser preferences translate the website and switching languages 
   await page.evaluate(() => document.fonts.ready);
   for (const width of [viewport.width, 375, 320]) {
     await page.setViewportSize({ ...viewport, width });
-    await expect(
-      page.getByRole('button', { name: '切换为英文' }),
-    ).toBeInViewport();
+    await expect(language).toBeInViewport();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(width);
@@ -51,7 +53,7 @@ test('Chinese browser preferences translate the website and switching languages 
   await expect(
     page.getByRole('button', { name: '折叠 logs', exact: true }),
   ).toBeVisible();
-  await page.getByRole('button', { name: '切换为英文' }).click();
+  await language.selectOption('en');
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await expect(page.locator('#highlight-title')).toHaveText(
     'Leave yourself a note.',
@@ -69,27 +71,27 @@ test('Chinese browser preferences translate the website and switching languages 
   );
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
-  await page.getByRole('button', { name: 'Switch to Chinese' }).click();
+  await language.selectOption('zh-CN');
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
 });
 
-test('locale detection uses the first supported browser preference', async ({
+test('locale detection skips unsupported browser preferences', async ({
   page,
 }) => {
   await page.addInitScript(() =>
     Object.defineProperty(navigator, 'languages', {
-      get: () => ['fr-FR', 'zh-TW', 'en-US'],
+      get: () => ['sv-SE', 'fr-FR', 'zh-TW', 'en-US'],
     }),
   );
   await page.goto('./');
-  await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'fr');
   await expect(page.locator('#get-started-title')).toHaveText(
-    '安装 Browser Recall',
+    'Installer Browser Recall',
   );
 });
 
-test('English preference and explicit language links choose the expected locale', async ({
+test('an explicit language link takes precedence over the saved and browser languages', async ({
   page,
 }) => {
   await page.addInitScript(() =>
@@ -99,12 +101,20 @@ test('English preference and explicit language links choose the expected locale'
   );
   await page.goto('./');
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
-  await page.goto('./?lang=zh-CN#highlight');
-  await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
-  await page.getByRole('button', { name: '切换为英文' }).click();
-  await expect(page).toHaveURL(/lang=en#highlight$/);
+  const language = page.getByRole('combobox');
+  await language.selectOption('pt-BR');
+  await page.goto('./?lang=zh-Hant-HK#highlight');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'zh-TW');
+  await expect(page.locator('#get-started-title')).toHaveText(
+    '安裝 Browser Recall',
+  );
+  await language.selectOption('pt-PT');
+  await expect(page).toHaveURL(/lang=pt-PT#highlight$/);
+  await expect(page.locator('.hero-actions a')).toHaveText(
+    'Descarregar Browser Recall',
+  );
   await page.reload();
-  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'pt-PT');
 });
 
 test('unsupported languages fall back to English and switching works without local storage', async ({
@@ -114,7 +124,7 @@ test('unsupported languages fall back to English and switching works without loc
   page.on('pageerror', (error) => errors.push(error.message));
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'languages', {
-      get: () => ['ja-JP', 'fr-FR'],
+      get: () => ['sv-SE', 'nl-NL'],
     });
     Storage.prototype.getItem = () => {
       throw new Error('Storage blocked');
@@ -125,10 +135,57 @@ test('unsupported languages fall back to English and switching works without loc
   });
   await page.goto('./');
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
-  await page.getByRole('button', { name: 'Switch to Chinese' }).click();
+  await page.getByRole('combobox').selectOption('zh-CN');
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
   await expect(page.locator('#ownership-title')).toHaveText(
     '把资料放在你选的文件夹里。',
   );
   expect(errors).toEqual([]);
+});
+
+test('every product locale translates the website and fits the language picker at phone width', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  await page.goto('./?lang=en');
+  const language = page.getByRole('combobox');
+  await expect(language.locator('option')).toHaveText(
+    SUPPORTED_LOCALES.map(({ nativeName }) => nativeName),
+  );
+  await expect(page.locator('.finder-tree')).toHaveAttribute(
+    'aria-busy',
+    'false',
+  );
+  for (const { code, nativeName } of SUPPORTED_LOCALES) {
+    await test.step(nativeName, async () => {
+      await language.selectOption(code);
+      await expect(language.locator('option:checked')).toHaveAttribute(
+        'lang',
+        code,
+      );
+      await expect(page.locator('html')).toHaveAttribute('lang', code);
+      await expect(page.locator('html')).toHaveAttribute(
+        'dir',
+        code === 'ar' ? 'rtl' : 'ltr',
+      );
+      await expect(page.locator('#hero-title em')).toBeVisible();
+      if (code !== 'en') {
+        await expect(page.locator('#highlight-title')).not.toHaveText(
+          'Leave yourself a note.',
+        );
+        await expect(page.locator('.finder-status')).not.toHaveText(
+          '4 items, 1 selected',
+        );
+      }
+      await expect(language).toBeInViewport();
+      if (code.startsWith('pt-')) {
+        await expect(page.locator('.language-compact-label')).toHaveText(
+          code.toUpperCase(),
+        );
+      }
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth),
+      ).toBeLessThanOrEqual(320);
+    });
+  }
 });

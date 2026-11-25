@@ -34,21 +34,22 @@ Timeline and Book share one 510 px desktop app viewport with sidebar navigation.
 Sidebar lists open matching sample pages without changing Timeline selection.
 A pill toggle below the desktop demo switches between the production Amber and
 Mono styles without resetting navigation or selection.
-The browser extension demo combines an article's saved highlight and note with a
-toolbar popup. List membership, sample snapshot capture, and recording pause are
-interactive; the popup and toolbar icon reflect recording state. Snapshot rows
-share the extension's renderer. The popup stays below the toolbar icon; on phones,
-the article leaves space for the popup and the browser window grows to show the
-saved note.
+The browser extension demo shows the same saved highlight and note beside the
+article and in the toolbar popup. Highlight entries and snapshot rows use the
+extension's renderers. List membership, markup visibility, sample snapshot
+capture, and recording pause are interactive. The popup and toolbar icon reflect
+recording state. The popup stays below the toolbar icon. On phones, the browser
+window grows to fit the popup and article.
 Scrolling stays on the outer page.
 Static screenshots replace the interactive examples when JavaScript is unavailable.
 
-Website copy supports English and Simplified Chinese. The first supported browser
-language chooses the initial locale; an explicit `lang` query parameter or saved
-language choice takes precedence. Translation keys live beside the English copy
-in HTML. The header switch stores only the language preference in browser local
-storage. Static HTML supplies English without JavaScript;
-sample pages and library files retain their original content.
+The product locale registry also defines the website's language choices. An
+explicit `lang` query parameter takes precedence over a saved choice, the first
+supported browser language, and English. The header language picker stores the
+choice in browser local storage. Website catalogs translate the landing page and
+Finder controls. The embedded product demos use English sample content. English
+landing page copy and translation keys live together in HTML, so the page also
+works without JavaScript.
 
 The README uses looping GIFs captured from the native app and browser extension.
 Recipes control each GIF's framing, frame selection, and timing using saved captures.
@@ -322,10 +323,15 @@ a protocol version change.
 ### Popup and editors
 
 Toolbar opens resolve the original page and fetch a complete daemon summary.
-A single-use token transfers the summary to the popup renderer. Preparation
-exceeding 1.5 seconds shows an error. Direct opens use the same renderer. Page
-changes and daemon updates invalidate prepared summaries. Failed opens never
-fall back to an extension tab.
+Chromium and Firefox prepare the summary before opening and transfer it to the
+popup renderer with a single-use token. Orion registers `popup.html` on active
+tabs and globally. If Orion dispatches a toolbar click despite the tab
+registration, the click handler opens the registered popup. A click during
+initial registration waits for the route and checks that the target tab is
+still active. Orion requests the same popup model after opening. Both paths
+show a diagnostic when preparation exceeds 1.5 seconds. Page changes and
+daemon updates invalidate prepared summaries.
+Failed opens never fall back to an extension tab.
 
 Popup identity reads prefer the page's content script, then inspect the live
 document if the receiver is missing. Known scripting denials on HTTP(S) pages
@@ -334,6 +340,11 @@ and inspection results are checked against a fresh tab; navigation restarts iden
 resolution within the existing retry bound. Other inspection failures remain
 explicit errors. File snapshots still require valid embedded identity;
 denied file access never falls back to a file URL as a saved-page identity.
+Toolbar icons for local snapshots refresh once the file finishes loading.
+Files that the browser blocks from inspection keep the default icon.
+When the connector is unavailable, its status takes precedence over page markers.
+Page marker reads may overlap, so the latest lookup for a tab owns the
+result and short browser writes run in order.
 
 The dashboard has no separate restricted-page state. Page actions attempt their
 normal work and report failures in the popup without hiding saved records or list
@@ -353,10 +364,12 @@ Completed dashboard or error content sets the popup size through normal layout
 flow. Chrome toolbar opens defer the document load event with a bounded local
 image request. The popup cancels the request after the initial surface is laid
 out. Firefox and Chrome opens without the request keep the background painted
-while the viewport settles. A connector diagnostic stays in place while
-recovery loads the dashboard. Fatal errors use a bounded scrollable message
-and visible Reload button. Popup edits and list refreshes serialize. Keep the
-list input stable during typing and composition.
+while the viewport settles. Orion refocuses the list search input after reveal
+because the page can retain keyboard focus when the popup's input already has
+document focus. A connector diagnostic stays in place while recovery loads the
+dashboard. Fatal errors use a bounded scrollable message and visible Reload
+button. Popup edits and list refreshes serialize. Keep the list input stable
+during typing and composition.
 
 The desktop sends one `removeListPins` command for the selected pages.
 `addListPins` returns the target list and `confirmedUrls`, including URLs already

@@ -15,7 +15,7 @@
     "packages/core/fonts/nunito.woff2": "f85212b2392aff6c178df5c0c6176fe341785ba641e6ec4ab0c80fb10dc38e0c",
     "packages/core/highlight-format.js": "710f2313423198b50df60be5105e6783f158ea760720ebdfd44dc05a58f9505f",
     "packages/core/highlight-lifecycle.js": "98410c09099cb0e01856c797ee381b84bcac10f5f428c9cf6811a6ac97112f58",
-    "packages/core/i18n.js": "ea06eeb88f0c68af6d26f96d6147dbf68867cad2b3c9aa794eab7083c897b27d",
+    "packages/core/i18n.js": "e39bd42295c85a164e7e00f57f58bc18641292500110f6da8aade51f24ba0ece",
     "packages/core/index.js": "ec9f8dabd019b0c6343e8fb68a599d7b16fbcdc8698e5125e6bef876f6962e18",
     "packages/core/locales/ar/messages.json": "2cdc5d1cc1c0cc0d657702654939e3727712b09178050ff6cca1841f2dd5947b",
     "packages/core/locales/de/messages.json": "8e45d8512c8a36ae627e35ac73fa9a27034875b32594630fb0c57b7dfc38ed0c",
@@ -137,7 +137,7 @@
     "scripts/compose-documentation-hero.mjs": "4e735e9f9e61d8c07f3b4c14df0df56dd9e75c8d167b16fe2ad3ffb72464b394"
   },
   "media": {
-    "sha256": "c5c023d87bf90d73a3942a30fd358797668c4f982b2c0a39632c67a9622dc8ec",
+    "sha256": "fa070339b2888eda047dfe5f50d6957dff1b506e1eac08f4889a711483bf29d2",
     "width": 720,
     "height": 440,
     "frames": 57,
@@ -151,7 +151,7 @@
     }
   },
   "framing": {
-    "sourceSha256": "c5c023d87bf90d73a3942a30fd358797668c4f982b2c0a39632c67a9622dc8ec",
+    "sourceSha256": "fa070339b2888eda047dfe5f50d6957dff1b506e1eac08f4889a711483bf29d2",
     "marginPixels": 24,
     "windowRadiusPixels": 48,
     "scene": {
@@ -201,6 +201,6 @@
       "scripts/lib/documentation-gif-frame.swift": "c335229ec2e9cf4cc9bfc5f28be4a3fcc243af6c31cb8935bfef8035bb4dcf21",
       "scripts/assets/documentation-sonoma-light.png": "79f724d2d36fe90251e32ef9cdc9b90575d419d81c240a9ecdc880780ba579d1"
     },
-    "sha256": "a2f2670f87bc0c87e98e459c49afc5650700186d21f70f1b379c3571c5fe0072"
+    "sha256": "cbdebfb925cd2686755c008dcc8e1b646bb87f861c07bf3b7f4005b70a1a8258"
   }
 }

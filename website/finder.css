@@ -36,7 +36,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-left: 19px;
+  padding-inline-start: 19px;
   background: #e9e9ed;
 }
 .finder-lights i {
@@ -127,7 +127,7 @@
   grid-row: 2 / -1;
   padding: 17px 8px;
   background: linear-gradient(115deg, #e9e9ed, #f0f0f3);
-  border-right: 1px solid #dedee3;
+  border-inline-end: 1px solid #dedee3;
 }
 .finder-sidebar-heading {
   display: block;
@@ -141,15 +141,19 @@
   align-items: center;
   gap: 7px;
   width: 100%;
-  height: 29px;
+  min-height: 29px;
   padding: 0 8px;
   border-radius: 5px;
-  text-align: left;
+  text-align: start;
   font-size: 11px;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .finder-sidebar button[aria-current] {
   background: #d4d4dc;
+}
+.finder-sidebar button[data-finder-folder=''] {
+  gap: 5px;
+  white-space: nowrap;
 }
 .finder-sidebar svg {
   width: 16px;
@@ -179,11 +183,11 @@
   font-size: 10px;
 }
 .finder-columns > span + span {
-  padding-left: 7px;
-  border-left: 1px solid #e3e3e7;
+  padding-inline-start: 7px;
+  border-inline-start: 1px solid #e3e3e7;
 }
 .finder-sort {
-  float: right;
+  float: inline-end;
 }
 .finder-tree {
   flex: 1;
@@ -212,7 +216,7 @@
   align-items: center;
   gap: 5px;
   min-width: 0;
-  padding-left: calc(var(--finder-depth) * 14px);
+  padding-inline-start: calc(var(--finder-depth) * 14px);
 }
 .finder-item-icon {
   width: 18px;
@@ -233,6 +237,14 @@
 }
 .finder-row[aria-selected='true'] .finder-disclosure {
   color: white;
+}
+[dir='rtl']
+  :is(
+    .finder-history button,
+    .finder-row[aria-expanded='false'] .finder-disclosure,
+    .finder-path [aria-hidden]
+  ) {
+  transform: scaleX(-1);
 }
 .finder-filename {
   overflow: hidden;
@@ -372,7 +384,7 @@
   }
   .finder-lights {
     gap: 5px;
-    padding-left: 12px;
+    padding-inline-start: 12px;
     background: none;
   }
   .finder-lights i {
@@ -381,7 +393,8 @@
   }
   .finder-toolbar {
     gap: 6px;
-    padding: 0 9px 0 0;
+    padding: 0;
+    padding-inline-end: 9px;
   }
   .finder-title {
     font-size: 12px;

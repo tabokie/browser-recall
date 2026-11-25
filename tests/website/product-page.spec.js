@@ -1,4 +1,8 @@
 import { test, expect } from './fixtures.js';
+import {
+  measurePopupNoteSpacing,
+  popupNoteSpacing,
+} from '../fixtures/popup-layout.mjs';
 
 const featureIds = ['find', 'highlight', 'ownership'];
 
@@ -442,6 +446,9 @@ test('view the sample collection and saved note, then organize one page into sev
     'Leave a little room for curiosity.',
   );
   await expect(
+    highlight.locator('#browser-recall-highlight-overlay .highlight-item'),
+  ).toHaveCSS('border-top-width', '0px');
+  await expect(
     highlight.getByRole('button', { name: 'Edit note', exact: true }),
   ).toBeDisabled();
   await expect(
@@ -454,6 +461,23 @@ test('view the sample collection and saved note, then organize one page into sev
     .screenshot({ path: testInfo.outputPath('highlights.png') });
   await page.locator('#highlight').scrollIntoViewIfNeeded();
   await highlight.getByRole('button', { name: 'Browser Recall popup' }).click();
+  const popupNote = organize.locator('#highlightList .highlight-item');
+  await expect(popupNote).toBeVisible();
+  expect(
+    await organize.locator('#notesSection').evaluate(measurePopupNoteSpacing),
+  ).toEqual(popupNoteSpacing);
+  await expect(popupNote.locator('.highlight-excerpt')).toHaveText(
+    'Leave room for the unfinished things.',
+  );
+  await expect(popupNote.locator('.highlight-note-text')).toHaveText(
+    'Leave a little room for curiosity.',
+  );
+  await expect(
+    popupNote.getByRole('button', { name: 'Edit note' }),
+  ).toBeDisabled();
+  await expect(
+    popupNote.getByRole('button', { name: 'Delete highlight' }),
+  ).toBeDisabled();
   await organize.getByRole('button', { name: 'Music', exact: true }).click();
   await expect(organize.locator('#listCount')).toHaveText('03');
   await expect(highlight.locator('#browser-status')).toHaveText(
@@ -479,6 +503,39 @@ test('view the sample collection and saved note, then organize one page into sev
   );
   expect(errors).toEqual([]);
 });
+
+test('browser popup hides and restores article markup while keeping the saved note', async ({
+  page,
+}) => {
+  await page.goto('./#highlight');
+  const browser = page.frameLocator('.browser-frame');
+  const popup = browser.frameLocator('.popup-frame');
+  const hideMarkup = popup.getByRole('button', { name: /^hide markup$/i });
+  const showMarkup = popup.getByRole('button', { name: /^show markup$/i });
+  const articleMark = browser.locator('.browser-recall-highlight');
+  const articleNote = browser.getByRole('group', {
+    name: 'Saved highlight and note',
+  });
+  const savedNote = popup.locator('#highlightList .highlight-item');
+
+  await expect(hideMarkup).toHaveAttribute('aria-pressed', 'false');
+  await expect(articleMark).toBeVisible();
+  await hideMarkup.click();
+  await expect(showMarkup).toHaveAttribute('aria-pressed', 'true');
+  await expect(articleMark).toHaveCount(0);
+  await expect(articleNote).toBeHidden();
+  await expect(savedNote).toBeVisible();
+
+  await showMarkup.press('Escape');
+  await expect(browser.locator('#extensionPopup')).toBeHidden();
+  await browser.getByRole('button', { name: 'Browser Recall popup' }).click();
+  await expect(showMarkup).toHaveAttribute('aria-pressed', 'true');
+  await showMarkup.click();
+  await expect(hideMarkup).toHaveAttribute('aria-pressed', 'false');
+  await expect(articleMark).toHaveText('Leave room for the unfinished things.');
+  await expect(articleNote).toBeVisible();
+});
+
 test('browser popup stays under its toolbar icon without covering the highlight or note', async ({
   page,
 }) => {

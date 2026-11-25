@@ -52,14 +52,18 @@
         <a href="https://github.com/tabokie/browser-recall"
           >GitHub <span aria-hidden="true">↗</span></a
         >
-        <button
-          class="language-toggle"
-          id="language-toggle"
-          type="button"
-          hidden=""
-        >
-          中文
-        </button>
+        <span class="language-picker" hidden="">
+          <span
+            class="language-compact-label"
+            aria-hidden="true"
+            dir="auto"
+          ></span>
+          <select
+            id="website-language"
+            aria-label="Language"
+            data-i18n-aria-label="language"
+          ></select>
+        </span>
       </nav>
     </header>
 
@@ -387,11 +391,11 @@
                 data-i18n-aria-label="closePreview"
               >
                 ×</button
-              ><strong id="finder-preview-title"></strong
+              ><strong id="finder-preview-title" dir="auto"></strong
               ><span class="finder-preview-kind"></span>
             </div>
-            <pre class="finder-preview-text" tabindex="0"></pre>
-            <div class="finder-preview-path"></div>
+            <pre class="finder-preview-text" tabindex="0" dir="auto"></pre>
+            <div class="finder-preview-path" dir="auto"></div>
           </dialog>
         </figure>
       </section>

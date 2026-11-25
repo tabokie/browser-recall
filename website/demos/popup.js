@@ -1,8 +1,20 @@
 import { demoLists, featuredPage } from '../../packages/demo/collection.js';
 import { listChipHtml } from '../../apps/extension/popup-list-elements.js';
 import { snapshotRowHtml } from '../../apps/extension/popup-snapshot-elements.js';
+import { sampleNote } from './sample-note.js';
 
 document.body.classList.add('popup-compact');
+const extensionSurface = globalThis.browserRecallExtensionSurface;
+extensionSurface.installHighlightEntryStyles(document);
+const highlightList = document.querySelector('#highlightList');
+highlightList.innerHTML = extensionSurface.highlightEntryHtml(sampleNote, {
+  deleteTitle: 'Delete highlight',
+  editTitle: 'Edit note',
+});
+for (const button of highlightList.querySelectorAll('button')) {
+  button.disabled = true;
+}
+
 const lists = demoLists.map(({ slug, name }) => ({
   slug,
   name,
@@ -11,6 +23,16 @@ const lists = demoLists.map(({ slug, name }) => ({
 const container = document.querySelector('#listChips');
 container.innerHTML = lists.map(listChipHtml).join('');
 let paused = false;
+let markupHidden = false;
+const markupButton = document.querySelector('#hideMarkupBtn');
+const hideMarkupLabel = markupButton.textContent.trim();
+markupButton.addEventListener('click', () => {
+  markupHidden = !markupHidden;
+  markupButton.classList.toggle('is-markup-hidden', markupHidden);
+  markupButton.setAttribute('aria-pressed', String(markupHidden));
+  markupButton.textContent = markupHidden ? 'Show markup' : hideMarkupLabel;
+  reportHeight();
+});
 const recordingToggle = document.querySelector('#recordingToggle');
 const snapshotSection = document.querySelector('#snapshotSection');
 const snapshotList = document.querySelector('#snapshotList');
@@ -89,6 +111,7 @@ function reportHeight() {
       type: 'popup-state',
       height: document.body.getBoundingClientRect().height,
       paused,
+      markupHidden,
       count: lists.filter((list) => list.containsPage).length,
     },
     location.origin,

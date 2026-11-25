@@ -59,6 +59,7 @@ Paths below are relative to `apps/extension/`.
 | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | `manifest.json`                                                           | Permissions, entry points, shortcuts                                                       |
 | `background.js`                                                           | Navigation, page identity inspection, popup preparation, command routing, capture          |
+| `badge-controller.js`                                                     | Connector and recording icons, ordered page marker writes                                  |
 | `recording-controller.js`                                                 | Recording eligibility, pause-aware attention, command admission                            |
 | `content.js`, `spa-navigation-bridge.js`                                  | Capture and page-world navigation detection                                                |
 | `browser-api.js`, `browser-privileged-api.js`                             | Browser APIs and background-only validation                                                |
@@ -160,8 +161,10 @@ Paths below are relative to `scripts/` unless stated otherwise.
 
 Website sections and demo sizing live in `website/index.html`, `website/styles.css`,
 and `website/main.js`. Embedded presentation lives in `website/demos/`.
-`website/locale.js` provides Chinese copy, language detection, the header switch,
-and translated Finder labels. English copy and translation keys stay in the HTML.
+`website/locale.js` handles language detection and the header picker using the
+product locale registry. `website/locales/` supplies the landing page and Finder
+translations, which the website build checks against the keys in the English HTML
+and Finder labels.
 `website/demos/browser.html`, `browser.css`, and `browser.js` supply the sample
 browser window; `highlight.js` and `popup.js` render the extension examples.
 HTTPS page-view counting lives in `website/analytics.js`.

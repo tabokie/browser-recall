@@ -10,6 +10,7 @@ import { logDebug, logError } from './logger.js';
 import { createPopupNoteSession } from './popup-note-session.js';
 import { applyTheme } from './theme.js';
 import { pageKey } from './entity-types.js';
+import { isOrionBrowser } from './browser-identity.js';
 import { formatDesktopConnectorState } from './connector-diagnostics.js';
 import {
   hasConnectorStateStorageChange,
@@ -114,6 +115,8 @@ function revealPopup() {
   const reveal = () => {
     root.removeAttribute('data-popup-hidden');
     schedulePendingLiveListRefresh();
+    if (isOrionBrowser())
+      window.requestAnimationFrame(restoreOrionListSearchFocus);
   };
   const startupImage = document.getElementById('popupStartupImage');
   if (startupImage && !startupImage.complete) {
@@ -862,11 +865,12 @@ async function readHighlightMarkupState() {
 function renderMarkupControls() {
   const wrap = document.getElementById('markupControls');
   if (!currentPage.markupStateAvailable) {
-    wrap.innerHTML = '';
+    wrap.replaceChildren();
     return;
   }
-  wrap.innerHTML = `<button class="markup-toggle-btn" id="hideMarkupBtn" aria-pressed="false">${escapeHtml(tr('extensionHideMarkup', 'Hide markup'))}</button>`;
-  const markupButton = wrap.querySelector('#hideMarkupBtn');
+  const template = document.getElementById('markupToggleTemplate');
+  const markupButton = template.content.firstElementChild.cloneNode(true);
+  wrap.replaceChildren(markupButton);
   const renderMarkupButtonState = () => {
     markupButton.classList.toggle('is-markup-hidden', currentPage.markupHidden);
     markupButton.setAttribute(
@@ -1731,6 +1735,21 @@ function focusListSearchCapture() {
   if (input.value || isListSearchInputComposing(input)) {
     void openListPickerFromTyping(input.value, input);
   }
+}
+
+function restoreOrionListSearchFocus() {
+  const input = listSearchCaptureInput();
+  if (
+    !input ||
+    !shouldFocusListSearchCapture() ||
+    isListSearchInputComposing(input)
+  ) {
+    return;
+  }
+  // Orion can leave keyboard focus on the page even when its popup reports
+  // this input as focused. Renew focus after the native popup is visible.
+  if (document.activeElement === input) input.blur();
+  focusListSearchCapture();
 }
 
 function configureListSearchCaptureInput(input) {
@@ -2718,6 +2737,20 @@ async function initPopup() {
         );
       }
     }
+    return;
+  }
+
+  if (isOrionBrowser()) {
+    const tab = await resolveActiveTab();
+    if (!tab) return;
+    const { bootstrap } = requireSuccessfulResponse(
+      await chrome.runtime.sendMessage({
+        action: 'getPopupStartupModel',
+        tabId: tab.id,
+      }),
+      'getPopupStartupModel',
+    );
+    await renderPreparedPopup(bootstrap);
     return;
   }
 

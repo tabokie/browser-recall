@@ -1,5 +1,9 @@
 import { test, expect } from './fixtures.js';
-import { withPopupLayout } from '../fixtures/popup-layout.mjs';
+import {
+  measurePopupNoteSpacing,
+  popupNoteSpacing,
+  withPopupLayout,
+} from '../fixtures/popup-layout.mjs';
 import { withCleanup } from '../smoke/desktop-test-cleanup.mjs';
 import {
   POPUP_LONG_STARTUP_ERROR,
@@ -1983,12 +1987,9 @@ test.describe('Popup list chip behavior', () => {
     await expect(
       popup.locator('.highlight-item .highlight-note-placeholder'),
     ).toHaveCount(0);
-    const markupPaddingBottom = await popup
-      .locator('#markupControls')
-      .evaluate((controls) =>
-        Number.parseFloat(getComputedStyle(controls).paddingBottom),
-      );
-    expect(markupPaddingBottom).toBe(14);
+    expect(
+      await popup.locator('#notesSection').evaluate(measurePopupNoteSpacing),
+    ).toEqual(popupNoteSpacing);
     const emptyHighlight = popup.locator('.highlight-item').first();
     const viewHeight = await emptyHighlight.evaluate(
       (item) => item.getBoundingClientRect().height,
@@ -4979,6 +4980,101 @@ test.describe('Popup list chip behavior', () => {
 
     await popup.close();
     await page.close();
+  });
+
+  test('Orion direct popup restores typing and bounds slow startup', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    const title = 'Orion Popup Focus';
+    localServer.addPage('/orion-popup-focus', {
+      title,
+      body: '<main>Orion popup focus page</main>',
+    });
+    const url = localServer.url('/orion-popup-focus');
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+
+    const page = await extContext.newPage();
+    let helper;
+    let popup;
+    await withCleanup(async () => {
+      await page.goto(url);
+      helper = await openHelperPage(extContext, extensionId);
+      await waitForContentScript(helper, page, url);
+      const [tab] = await helper.evaluate(
+        (url) => chrome.tabs.query({ url }),
+        url,
+      );
+
+      popup = await extContext.newPage();
+      await popup.addInitScript((tab) => {
+        globalThis.KAGI = {};
+        chrome.extension.getViews = () => [window];
+        const queryTabs = chrome.tabs.query.bind(chrome.tabs);
+        chrome.tabs.query = (query) =>
+          query.active && query.currentWindow
+            ? Promise.resolve([tab])
+            : queryTabs(query);
+
+        // Chromium cannot reproduce Orion's native focus loss. Record whether
+        // the input that gained DOM focus during startup is refocused on reveal.
+        globalThis.listSearchFocusStages = [];
+        document.addEventListener(
+          'focus',
+          ({ target }) => {
+            if (target.id !== 'listSearchInput') return;
+            globalThis.listSearchFocusStages.push(
+              document.documentElement.hasAttribute('data-popup-hidden')
+                ? 'hidden'
+                : 'visible',
+            );
+          },
+          true,
+        );
+      }, tab);
+      await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+      await expect(popup.locator('#pageTitle')).toHaveText(title);
+      await expect
+        .poll(() => popup.evaluate(() => globalThis.listSearchFocusStages))
+        .toEqual(['hidden', 'visible']);
+
+      await popup.keyboard.type('reading');
+      const search = popup.getByRole('combobox');
+      await expect(search).toHaveValue('reading');
+
+      const worker = extContext.serviceWorkers()[0];
+      await worker.evaluate((tabId) => {
+        const send = chrome.tabs.sendMessage.bind(chrome.tabs);
+        let resume;
+        const pendingIdentity = new Promise((resolve) => {
+          resume = resolve;
+        });
+        globalThis.restoreOrionPopupIdentity = () => {
+          chrome.tabs.sendMessage = send;
+          resume();
+          delete globalThis.restoreOrionPopupIdentity;
+        };
+        chrome.tabs.sendMessage = async (id, request, ...rest) => {
+          if (id === tabId && request.action === 'getPageIdentity') {
+            await pendingIdentity;
+          }
+          return send(id, request, ...rest);
+        };
+      }, tab.id);
+      await withCleanup(async () => {
+        await popup.reload();
+        await expectPopupRevealed(popup);
+        const message = await helper.evaluate(() =>
+          chrome.i18n.getMessage('extensionPopupDataTimedOut'),
+        );
+        await expect(popup.locator('#pageDiagnosticMessage')).toHaveText(
+          message,
+        );
+      }, [() => worker.evaluate(() => globalThis.restoreOrionPopupIdentity())]);
+    }, [() => popup?.close(), () => helper?.close(), () => page.close()]);
   });
 
   test('Escape exits list search without dismissing the popup', async ({

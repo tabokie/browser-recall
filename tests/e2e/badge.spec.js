@@ -746,11 +746,14 @@ test.describe('Extension badge', () => {
       url,
       title: 'Page With Highlights',
     });
-    await expect(popup.locator('.highlight-item')).toHaveCount(2);
-    await expect(popup.locator('.highlight-item')).toContainText([
+    const highlights = popup.locator('#highlightList .highlight-item');
+    await expect(highlights).toHaveCount(2);
+    await expect(highlights).toContainText([
       'First highlight',
       'Second highlight',
     ]);
+    await expect(highlights.first()).toHaveCSS('border-top-style', 'dotted');
+    await expect(highlights.nth(1)).toHaveCSS('border-top-style', 'dotted');
 
     await page.close();
     await popup.close();

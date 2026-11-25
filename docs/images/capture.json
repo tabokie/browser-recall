@@ -16,7 +16,7 @@
     "packages/core/fonts/nunito.woff2": "f85212b2392aff6c178df5c0c6176fe341785ba641e6ec4ab0c80fb10dc38e0c",
     "packages/core/highlight-format.js": "710f2313423198b50df60be5105e6783f158ea760720ebdfd44dc05a58f9505f",
     "packages/core/highlight-lifecycle.js": "98410c09099cb0e01856c797ee381b84bcac10f5f428c9cf6811a6ac97112f58",
-    "packages/core/i18n.js": "ea06eeb88f0c68af6d26f96d6147dbf68867cad2b3c9aa794eab7083c897b27d",
+    "packages/core/i18n.js": "e39bd42295c85a164e7e00f57f58bc18641292500110f6da8aade51f24ba0ece",
     "packages/core/index.js": "ec9f8dabd019b0c6343e8fb68a599d7b16fbcdc8698e5125e6bef876f6962e18",
     "packages/core/locales/ar/messages.json": "2cdc5d1cc1c0cc0d657702654939e3727712b09178050ff6cca1841f2dd5947b",
     "packages/core/locales/de/messages.json": "8e45d8512c8a36ae627e35ac73fa9a27034875b32594630fb0c57b7dfc38ed0c",
@@ -157,7 +157,7 @@
   },
   "screenshots": {
     "timeline.png": {
-      "sha256": "bef77406432e43fb8bb1ae07e9e67be2f470fea854f620fa69f453179afe42ea",
+      "sha256": "c00d38e9e2a271dfd2d193511dbea7ac064963963e997643729b1783585641ac",
       "width": 2080,
       "height": 1400
     },
@@ -167,19 +167,19 @@
       "height": 1400
     },
     "timeline-mono.png": {
-      "sha256": "cfde807307e1818a7df69bdce58cf8640dab07994f6c7b2d6a1c94e9e3a8a1a7",
+      "sha256": "740420bfc9cb2eec7cb628ee3444f2d8f8377dfebdcec94d0a02f56972b1149a",
       "width": 2080,
       "height": 1400
     },
     "timeline-styles.png": {
-      "sha256": "d732ed0301cae15ffa2b373dce2bd9ba328dedf25eddbcc409d70420bb3f93fc",
+      "sha256": "b529e5b5fd3f4207c9c035207925b70cf84e3cd8c9e41678912b1cb75451a232",
       "width": 2080,
       "height": 1400,
       "composition": {
         "sources": ["timeline.png", "timeline-mono.png"],
         "sourceSha256": [
-          "bef77406432e43fb8bb1ae07e9e67be2f470fea854f620fa69f453179afe42ea",
-          "cfde807307e1818a7df69bdce58cf8640dab07994f6c7b2d6a1c94e9e3a8a1a7"
+          "c00d38e9e2a271dfd2d193511dbea7ac064963963e997643729b1783585641ac",
+          "740420bfc9cb2eec7cb628ee3444f2d8f8377dfebdcec94d0a02f56972b1149a"
         ],
         "split": { "top": 0.62, "bottom": 0.38 }
       }

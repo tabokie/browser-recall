@@ -30,6 +30,7 @@ export function createBadgeController({
     'Browser Recall is paused',
   );
   let spinnerInterval = null;
+  const pageBadgeUpdates = new Map();
 
   async function queryActiveTab() {
     const [tab] = await api.tabs.query({
@@ -305,41 +306,56 @@ export function createBadgeController({
   }
 
   async function updateBadgeForTab(tabId, url) {
+    const update = { write: pageBadgeUpdates.get(tabId)?.write };
+    pageBadgeUpdates.set(tabId, update);
+    let badgeUrl;
+    let markers;
+    let readError;
     try {
-      const badgeUrl = await resolveTabUrl(tabId, url);
-      if (!isPageBadgeUrl(badgeUrl)) {
-        await clearPageMarkerBadge(tabId, {
-          inheritGlobalBadge: globalConnectorBadgeActive,
-        });
-        return;
+      if (isConnectorUsable()) {
+        badgeUrl = await resolveTabUrl(tabId, url);
+        if (isPageBadgeUrl(badgeUrl) && isConnectorUsable()) {
+          markers = await readPageMarkers(badgeUrl);
+        }
       }
-
-      if (!isConnectorUsable()) {
-        await clearPageMarkerBadge(tabId, {
-          inheritGlobalBadge: globalConnectorBadgeActive,
-        });
-        return;
-      }
-      const markers = await readPageMarkers(badgeUrl);
-      if (!markers) {
-        await clearPageMarkerBadge(tabId);
-        return;
-      }
-      const { hasNotes, hasLists } = markers;
-      if (!hasNotes && !hasLists) {
-        await clearPageMarkerBadge(tabId);
-        return;
-      }
-      await applyPageMarkerBadge(
-        tabId,
-        pageMarkerIconPaths({ hasNotes, hasLists }),
-      );
     } catch (error) {
-      logDebug('[badge] page badge update failed:', error.message);
+      readError = error;
+    }
+
+    // Reads may finish out of order after navigation. Serialize the short
+    // browser writes and let only the latest read begin a new write.
+    update.write = Promise.resolve(update.write).then(async () => {
+      if (pageBadgeUpdates.get(tabId) !== update) return;
       try {
-        await applyPageMarkerErrorBadge(tabId, error);
-      } catch (badgeError) {
-        logDebug('[badge] page badge error state failed:', badgeError.message);
+        const connectorUsable = isConnectorUsable();
+        if (connectorUsable && readError) throw readError;
+        if (!connectorUsable || !isPageBadgeUrl(badgeUrl)) {
+          await clearPageMarkerBadge(tabId, {
+            inheritGlobalBadge: globalConnectorBadgeActive,
+          });
+        } else if (markers?.hasNotes || markers?.hasLists) {
+          await applyPageMarkerBadge(tabId, pageMarkerIconPaths(markers));
+        } else {
+          await clearPageMarkerBadge(tabId);
+        }
+      } catch (error) {
+        logDebug('[badge] page badge update failed:', error.message);
+        if (pageBadgeUpdates.get(tabId) !== update) return;
+        try {
+          await applyPageMarkerErrorBadge(tabId, error);
+        } catch (badgeError) {
+          logDebug(
+            '[badge] page badge error state failed:',
+            badgeError.message,
+          );
+        }
+      }
+    });
+    try {
+      await update.write;
+    } finally {
+      if (pageBadgeUpdates.get(tabId) === update) {
+        pageBadgeUpdates.delete(tabId);
       }
     }
   }

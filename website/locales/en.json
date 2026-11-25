@@ -1,0 +1,9 @@
+{
+  "folder": "Folder",
+  "document": "Document",
+  "expand": "Expand {name}",
+  "collapse": "Collapse {name}",
+  "items": "{count} items",
+  "selectedItems": "{count} items, 1 selected",
+  "libraryError": "The sample library could not be loaded."
+}

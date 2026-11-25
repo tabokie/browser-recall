@@ -1,8 +1,13 @@
+export function isOrionBrowser() {
+  return (
+    typeof globalThis.KAGI !== 'undefined' ||
+    Boolean(globalThis.navigator?.userAgent?.includes('Orion/'))
+  );
+}
+
 export async function detectBrowserName() {
+  if (isOrionBrowser()) return 'Orion';
   const agent = globalThis.navigator?.userAgent || '';
-  if (typeof globalThis.KAGI !== 'undefined' || agent.includes('Orion/')) {
-    return 'Orion';
-  }
   if (globalThis.navigator?.brave?.isBrave) {
     try {
       if (await globalThis.navigator.brave.isBrave()) return 'Brave';

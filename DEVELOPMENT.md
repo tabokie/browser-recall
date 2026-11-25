@@ -332,5 +332,6 @@ and tray assets. Inspect actual target sizes, including 16 px, and commit genera
 assets with source changes. `-- --readme` generates only the README icon strip.
 
 Add locales to `SUPPORTED_LOCALES` in `packages/core/i18n.js` with a complete
-`packages/core/locales/<code>/messages.json`, then run `npm run locales:check`.
+`packages/core/locales/<code>/messages.json` and `website/locales/<code>.json`.
+Run `npm run locales:check` and `npm run test:website`.
 Builds validate keys, placeholders, HTML, shortcuts, and technical/product names.

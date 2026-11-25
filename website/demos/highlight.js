@@ -1,19 +1,14 @@
 import { createHighlightLifecycle } from '../../packages/core/highlight-lifecycle.js';
+import { sampleNote } from './sample-note.js';
 
 const surface = globalThis.browserRecallExtensionSurface;
-const note = {
-  slug: 'website-sample-note',
-  excerpt: ['Leave room for the unfinished things.'],
-  cssPath: ['p:nth-of-type(2)'],
-  note: 'Leave a little room for curiosity.',
-};
 const lifecycle = createHighlightLifecycle({
   document,
   onMark(mark) {
     mark.style.cursor = 'default';
   },
 });
-lifecycle.applySaved([note]);
+lifecycle.applySaved([sampleNote]);
 
 // Render the saved state with the production entry renderer and style tokens.
 // No editor or mutation handlers are installed in this display-only preview.
@@ -32,17 +27,28 @@ shadow.innerHTML = `<style>
     font-size: 12px; line-height: 1.45; padding: 0 8px;
   }
   .highlight-item { --br-highlight-side-padding: 0px; border-top: 0; }
-</style><div class="overlay">${surface.highlightEntryHtml(note, { deleteTitle: 'Delete highlight', editTitle: 'Edit note' })}</div>`;
+</style><div class="overlay">${surface.highlightEntryHtml(sampleNote, { deleteTitle: 'Delete highlight', editTitle: 'Edit note' })}</div>`;
 for (const button of shadow.querySelectorAll('button')) button.disabled = true;
 document.body.appendChild(host);
 
 function positionNote() {
   const mark = document.querySelector('.browser-recall-highlight');
+  if (!mark) return;
   host.style.setProperty(
     '--article-width',
     `${document.querySelector('.sample-article').clientWidth}px`,
   );
   surface.positionNearRect(host, mark.getBoundingClientRect());
+}
+export function setMarkupHidden(hidden) {
+  if (host.hidden === hidden) return;
+  host.hidden = hidden;
+  if (hidden) {
+    lifecycle.remove({ noteSlug: sampleNote.slug });
+  } else {
+    lifecycle.applySaved([sampleNote]);
+    positionNote();
+  }
 }
 new ResizeObserver(positionNote).observe(document.body);
 positionNote();

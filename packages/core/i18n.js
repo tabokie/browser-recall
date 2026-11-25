@@ -57,7 +57,7 @@ function normalizeLocale(locale) {
     .join('-');
 }
 
-function localeCandidates(locale, defaultLocale = DEFAULT_LOCALE) {
+function localeCandidates(locale) {
   const normalized = normalizeLocale(locale);
   const parts = normalized.split('-').filter(Boolean);
   const candidates = [];
@@ -69,12 +69,14 @@ function localeCandidates(locale, defaultLocale = DEFAULT_LOCALE) {
     pushCandidate(parts.join('-'));
     parts.pop();
   }
-  const normalizedDefault = normalizeLocale(defaultLocale);
-  pushCandidate(normalizedDefault);
   return candidates;
 }
 
-function supportedLocaleFor(locale, supportedLocales = SUPPORTED_LOCALES) {
+export function matchSupportedLocale(
+  locale,
+  supportedLocales = SUPPORTED_LOCALES,
+) {
+  if (typeof locale !== 'string' || !locale.trim()) return null;
   for (const candidate of localeCandidates(locale)) {
     const match = supportedLocales.find((entry) => {
       if (normalizeLocale(entry.code) === candidate) return true;
@@ -84,7 +86,7 @@ function supportedLocaleFor(locale, supportedLocales = SUPPORTED_LOCALES) {
     });
     if (match) return match.code;
   }
-  return DEFAULT_LOCALE;
+  return null;
 }
 
 export function canonicalRegisteredLocale(locale) {
@@ -126,7 +128,9 @@ async function loadMessages(locale) {
 
 async function loadCatalog(locale, supportedLocales) {
   const selected =
-    supportedLocaleFor(locale, supportedLocales) || DEFAULT_LOCALE;
+    matchSupportedLocale(locale, supportedLocales) ||
+    matchSupportedLocale(DEFAULT_LOCALE, supportedLocales) ||
+    DEFAULT_LOCALE;
   return {
     locale: selected,
     messages: await loadMessages(selected),
@@ -175,7 +179,7 @@ export async function initializeExtensionI18n(api = globalThis.chrome) {
   return activeI18n;
 }
 
-function setDocumentLocale(locale) {
+export function setDocumentLocale(locale) {
   const normalized = normalizeLocale(locale);
   document.documentElement.lang = normalized;
   document.documentElement.dir = /^(ar|fa|he|ur)(-|$)/i.test(normalized)
@@ -204,6 +208,7 @@ export function populateLocaleSelect(select, { includeSystem = true } = {}) {
       const option = document.createElement('option');
       option.value = code;
       option.textContent = nativeName;
+      if (code !== 'system') option.lang = code;
       return option;
     }),
   );
