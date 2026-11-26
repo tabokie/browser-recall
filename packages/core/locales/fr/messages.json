@@ -859,6 +859,10 @@
     "message": "Afficher le marquage",
     "description": "Popup button that reapplies hidden highlight markup."
   },
+  "extensionMarkupPageLoading": {
+    "message": "Les commandes de surlignage sont en cours de chargement. Réessayez dans un instant.",
+    "description": "Popup markup action error while the page is loading."
+  },
   "extensionResumeTracing": {
     "message": "Reprendre le suivi",
     "description": "Extension popup recording resume title."

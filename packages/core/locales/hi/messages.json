@@ -859,6 +859,10 @@
     "message": "मार्कअप दिखाएँ",
     "description": "Popup button that reapplies hidden highlight markup."
   },
+  "extensionMarkupPageLoading": {
+    "message": "हाइलाइट के नियंत्रण अभी लोड हो रहे हैं। थोड़ी देर में फिर कोशिश करें।",
+    "description": "Popup markup action error while the page is loading."
+  },
   "extensionResumeTracing": {
     "message": "ट्रेसिंग फिर शुरू करें",
     "description": "Extension popup recording resume title."

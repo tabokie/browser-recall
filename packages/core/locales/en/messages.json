@@ -887,6 +887,10 @@
     "message": "Show markup",
     "description": "Popup button that reapplies hidden highlight markup."
   },
+  "extensionMarkupPageLoading": {
+    "message": "Highlight controls are still loading. Try again in a moment.",
+    "description": "Popup markup action error while the page is loading."
+  },
   "extensionResumeTracing": {
     "message": "Resume tracing",
     "description": "Extension popup recording resume title."

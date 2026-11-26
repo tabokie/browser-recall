@@ -1322,11 +1322,8 @@ async fn ingest_typed_entry(
     let transaction = ReplayTransaction::begin(&shared.storage, &device_id)
         .await
         .map_err(WsServerError::Ingest)?;
-    let effects =
-        commit_entry_with_auto_pins(shared, transaction, entry.clone(), raw_entry.clone()).await?;
-
     let mutations =
-        build_mutations(&entry, &raw_entry, &effects, &device_id).map_err(WsServerError::Ingest)?;
+        commit_entry_with_auto_pins(shared, transaction, entry, raw_entry, &device_id).await?;
     Ok(IngestSuccess {
         ack: DaemonMessage::Ack,
         mutations,
@@ -1338,24 +1335,52 @@ async fn commit_entry_with_auto_pins(
     mut transaction: ReplayTransaction<'_>,
     entry: LogEntry,
     raw_entry: Value,
-) -> Result<EntityMapView, WsServerError> {
-    transaction
+    device_id: &str,
+) -> Result<Vec<MutationPayload>, WsServerError> {
+    let visited_page = if let LogEntry::VisitPage { url, .. } = &entry {
+        let slug = generate_slug_from_url(url)
+            .map_err(|error| WsServerError::Ingest(error.to_string()))?;
+        let before = shared.storage.load_page(&slug).await?;
+        Some((format!("page:{slug}"), before))
+    } else {
+        None
+    };
+    let effects = transaction
         .apply(entry.clone())
         .await
         .map_err(WsServerError::Ingest)?;
+    let mut mutations =
+        build_mutations(&entry, &effects, device_id).map_err(WsServerError::Ingest)?;
+    if let Some((key, before)) = visited_page {
+        let affects_popup = match effects.get(&key) {
+            Some(EntityEffect::Upsert(Entity::Page(after))) => {
+                crate::read_projections::visit_changes_popup(before.as_ref(), after)
+            }
+            _ => true,
+        };
+        for mutation in &mut mutations {
+            if mutation.mutation_type == "history" {
+                mutation.affects_popup = Some(affects_popup);
+            }
+        }
+    }
     let synthetic_entries =
         synthesize_auto_pin_entries(&entry, &raw_entry, &shared.storage, transaction.effects())
             .await
             .map_err(|error| WsServerError::Ingest(error.to_string()))?;
 
-    for synthetic in &synthetic_entries {
-        transaction
+    for synthetic in synthetic_entries {
+        let effects = transaction
             .apply(synthetic.parsed.clone())
             .await
             .map_err(WsServerError::Ingest)?;
+        mutations.extend(
+            build_mutations(&synthetic.parsed, &effects, device_id)
+                .map_err(WsServerError::Ingest)?,
+        );
     }
-    let result = transaction.commit().await.map_err(WsServerError::Ingest)?;
-    Ok(result.effects)
+    transaction.commit().await.map_err(WsServerError::Ingest)?;
+    Ok(dedupe_mutations(mutations))
 }
 
 async fn synthesize_auto_pin_entries(
@@ -1632,12 +1657,12 @@ async fn commit_report_entry(
     raw_entry: Value,
     device_id: &str,
 ) -> Result<(Value, Vec<MutationPayload>), WsServerError> {
-    let effects =
-        commit_entry_with_auto_pins(shared, transaction, entry.clone(), raw_entry.clone()).await?;
-
+    let timestamp = entry.timestamp();
+    let mutations =
+        commit_entry_with_auto_pins(shared, transaction, entry, raw_entry, device_id).await?;
     Ok((
-        json!({ "success": true, "timestamp": entry.timestamp() }),
-        build_mutations(&entry, &raw_entry, &effects, device_id).map_err(WsServerError::Ingest)?,
+        json!({ "success": true, "timestamp": timestamp }),
+        mutations,
     ))
 }
 
@@ -2076,8 +2101,7 @@ async fn handle_replay_remote_entries(
                 .map_err(WsServerError::Ingest)?;
 
             mutations.extend(
-                build_mutations(&parsed, raw_entry, &effects, &device_id)
-                    .map_err(WsServerError::Ingest)?,
+                build_mutations(&parsed, &effects, &device_id).map_err(WsServerError::Ingest)?,
             );
         }
 

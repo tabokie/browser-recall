@@ -859,6 +859,10 @@
     "message": "顯示標記",
     "description": "Popup button that reapplies hidden highlight markup."
   },
+  "extensionMarkupPageLoading": {
+    "message": "醒目提示控制項仍在載入，請稍後再試。",
+    "description": "Popup markup action error while the page is loading."
+  },
   "extensionResumeTracing": {
     "message": "繼續追蹤",
     "description": "Extension popup recording resume title."

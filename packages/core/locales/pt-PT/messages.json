@@ -859,6 +859,10 @@
     "message": "Mostrar marcações",
     "description": "Popup button that reapplies hidden highlight markup."
   },
+  "extensionMarkupPageLoading": {
+    "message": "Os controlos de realce ainda estão a carregar. Tente novamente daqui a pouco.",
+    "description": "Popup markup action error while the page is loading."
+  },
   "extensionResumeTracing": {
     "message": "Retomar rastreio",
     "description": "Extension popup recording resume title."

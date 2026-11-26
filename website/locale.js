@@ -34,6 +34,7 @@ for (const attribute of [
 }
 
 const select = document.querySelector('#website-language');
+const fullLabel = document.querySelector('.language-full-label');
 const compactLabel = document.querySelector('.language-compact-label');
 populateLocaleSelect(select, { includeSystem: false });
 const storageKey = 'browser-recall-website-language';
@@ -51,7 +52,9 @@ function detectLocale() {
   } catch {
     // Browser preferences still work when local storage is unavailable.
   }
+  // Automatic detection treats bare English as the fallback.
   for (const language of navigator.languages || [navigator.language]) {
+    if (language?.toLowerCase() === 'en') continue;
     const supported = matchSupportedLocale(language);
     if (supported) return supported;
   }
@@ -84,6 +87,7 @@ function applyLocale(nextLocale) {
   }
   select.value = locale;
   const { textContent: nativeName } = select.selectedOptions[0];
+  fullLabel.textContent = nativeName;
   compactLabel.textContent =
     nativeName.length > 11 ? locale.toUpperCase() : nativeName;
   window.dispatchEvent(new Event('website-locale-change'));

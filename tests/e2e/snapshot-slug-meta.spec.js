@@ -504,6 +504,69 @@ test.describe('Snapshot slug meta tag', () => {
     ).rejects.toThrow('Snapshot page URL does not match');
   });
 
+  test('snapshot popup diagnostics identify missing saved records', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
+    const url = 'https://example.com/snapshot-with-missing-note';
+    const slug = getSlugForUrl(url);
+    const timestamp = Date.now();
+    const sidecar = snapshotSidecarPath(slug, timestamp, 'html');
+    await setExtensionFileAccess(extContext, extensionId, true);
+    await resetAndSeed(extContext, extensionId, [
+      settingsCheckpoint(),
+      {
+        path: pageCheckpointPath(slug),
+        data: pageEntityFixture({
+          slug,
+          url,
+          title: 'Snapshot with missing note',
+          childIds: [
+            'note:missing-snapshot-note',
+            `snapshot:${slug}-${timestamp}`,
+          ],
+        }),
+      },
+      {
+        path: sidecar,
+        content: currentSnapshotHtml({
+          slug,
+          url,
+          html: '<!doctype html><html><head><title>Snapshot with missing note</title></head><body><p>Saved page</p></body></html>',
+        }),
+      },
+    ]);
+    const helper = await openHelperPage(extContext, extensionId);
+    const source = await extContext.newPage();
+    const popup = await extContext.newPage();
+    await withCleanup(async () => {
+      for (const sourceUrl of [
+        pathToFileURL(join(setupDir, sidecar)).href,
+        `chrome-extension://${extensionId}/snapshot-viewer.html?slug=${slug}&ts=${timestamp}`,
+      ]) {
+        await source.goto(sourceUrl);
+        const prepared = await helper.evaluate(async (url) => {
+          const [tab] = await chrome.tabs.query({ url });
+          return chrome.runtime.sendMessage({
+            action: 'preparePopupBootstrapForTest',
+            tabId: tab.id,
+          });
+        }, sourceUrl);
+        expect(prepared).toMatchObject({
+          success: true,
+          mode: 'data-unavailable',
+        });
+        await popup.goto(
+          `chrome-extension://${extensionId}/${prepared.popupPath}`,
+        );
+        await expect(popup.locator('#pageDiagnosticMessage')).toContainText(
+          `page ${slug} references missing note missing-snapshot-note`,
+        );
+      }
+    }, [() => popup.close(), () => source.close(), () => helper.close()]);
+  });
+
   test('toolbar popup explains how to enable snapshot file access', async ({
     extContext,
     extensionId,
@@ -1237,70 +1300,7 @@ test.describe('Snapshot slug meta tag', () => {
     });
   }
 
-  // Content script resolves slug from x-browser-recall-slug meta tag and reapplies highlights.
-  // Simulates the snapshot viewer scenario: the page URL doesn't match the original,
-  // but the embedded meta tag tells content.js which page entity to load notes from.
-  test('highlights reapplied on page with x-browser-recall-slug meta tag', async ({
-    extContext,
-    extensionId,
-    setupDir,
-    localServer,
-  }) => {
-    const originalUrl = 'https://example.com/article';
-    const slug = getSlugForUrl(originalUrl);
-    const noteSlug = 'test-note-abc';
-    const highlightText = 'important sentence';
-    const now = Date.now();
-
-    // Serve a page that has the meta tag (simulating a snapshot blob) and matching text
-    localServer.addPage('/snapshot-view', {
-      title: 'Snapshot View',
-      body: `<meta name="x-browser-recall-slug" content="${slug}"><p>This is an ${highlightText} in the document.</p>`,
-    });
-
-    // Seed: page entity with a note child, and the note entity with an excerpt
-    await resetAndSeed(extContext, extensionId, [
-      settingsCheckpoint(),
-      {
-        path: pageCheckpointPath(slug),
-        data: pageEntityFixture({
-          slug,
-          url: originalUrl,
-          title: 'Example Article',
-          deviceTimestamp: now,
-          parentIds: [],
-          childIds: [`note:${noteSlug}`],
-        }),
-      },
-      {
-        path: `objects/notes/${noteSlug}.json`,
-        data: noteEntityFixture({
-          slug: noteSlug,
-          excerpt: [highlightText],
-          note: '',
-          cssPath: ['body > p'],
-          url: originalUrl,
-        }),
-      },
-    ]);
-
-    // Navigate to the "snapshot" page — content script should inject, read meta tag,
-    // and reapply highlights from the matching page entity
-    const page = await extContext.newPage();
-    await page.goto(localServer.url('/snapshot-view'));
-    await page.waitForLoadState('domcontentloaded');
-
-    // Wait for content script to create <mark> elements (reapplyHighlights is async)
-    await page.waitForSelector('mark', { timeout: 5000 });
-
-    // Verify the highlight mark exists with correct text
-    const markText = await page.textContent('mark');
-    expect(markText).toBe(highlightText);
-
-    await page.close();
-  });
-
-  test('popup preserves embedded snapshot identity while the page is still loading', async ({
+  test('popup and page markup use the HTTP URL even with snapshot metadata', async ({
     extContext,
     extensionId,
     setupDir,
@@ -1310,16 +1310,38 @@ test.describe('Snapshot slug meta tag', () => {
     const slug = getSlugForUrl(originalUrl);
     const noteSlug = 'snapshot-popup-note';
     const highlightText = 'snapshot popup highlight';
+    const hostedText = 'Highlight saved on the hosting page';
+    const snapshotUrl = localServer.url('/snapshot-popup-view');
+    const hostedSlug = getSlugForUrl(snapshotUrl);
     const now = Date.now();
 
     localServer.addPage('/snapshot-popup-view', {
       title: 'Stored Snapshot',
-      body: `<meta name="x-browser-recall-slug" content="${slug}"><meta name="x-browser-recall-url" content="${originalUrl}"><p>This page contains a ${highlightText}.</p>`,
+      body: `<meta name="x-browser-recall-slug" content="${slug}"><meta name="x-browser-recall-url" content="${originalUrl}"><p>${highlightText}</p><p>${hostedText}</p>`,
       endDelayMs: 3_000,
     });
 
     await resetAndSeed(extContext, extensionId, [
       settingsCheckpoint(),
+      {
+        path: pageCheckpointPath(hostedSlug),
+        data: pageEntityFixture({
+          slug: hostedSlug,
+          url: snapshotUrl,
+          title: 'Stored Snapshot',
+          childIds: ['note:hosted-page-note'],
+        }),
+      },
+      {
+        path: 'objects/notes/hosted-page-note.json',
+        data: noteEntityFixture({
+          slug: 'hosted-page-note',
+          url: snapshotUrl,
+          note: '',
+          excerpt: [hostedText],
+          cssPath: ['body > p:nth-of-type(2)'],
+        }),
+      },
       {
         path: pageCheckpointPath(slug),
         data: pageEntityFixture({
@@ -1355,7 +1377,6 @@ test.describe('Snapshot slug meta tag', () => {
       },
     ]);
 
-    const snapshotUrl = localServer.url('/snapshot-popup-view');
     const snapshotPage = await extContext.newPage();
     await snapshotPage.goto(snapshotUrl, { waitUntil: 'commit' });
 
@@ -1392,11 +1413,12 @@ test.describe('Snapshot slug meta tag', () => {
     await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
 
     await expect(popup.locator('#dashboard')).toBeVisible();
-    await expect(popup.locator('#pageTitle')).toHaveText(
-      'Original Snapshot Page',
-    );
-    await expect(popup.locator('#pageUrl')).toHaveText(originalUrl);
-    await expect(popup.locator('#notesSection')).toContainText(highlightText);
+    await expect(popup.locator('#pageTitle')).toHaveText('Stored Snapshot');
+    await expect(popup.locator('#pageUrl')).toHaveText(snapshotUrl);
+    await expect(popup.locator('.highlight-excerpt')).toHaveText(hostedText);
+    await expect(
+      snapshotPage.locator('mark.browser-recall-highlight'),
+    ).toHaveText(hostedText);
 
     await popup.close();
     await helper.close();
@@ -2193,7 +2215,6 @@ test.describe('Snapshot slug meta tag', () => {
     setupDir,
     localServer,
   }) => {
-    void setupDir;
     const highlightText = 'The saved passage stays in its original location';
     localServer.addPage('/snapshot-hidden-siblings', {
       title: 'Snapshot hidden siblings',
@@ -2208,6 +2229,7 @@ test.describe('Snapshot slug meta tag', () => {
     const url = localServer.url('/snapshot-hidden-siblings');
     const slug = getSlugForUrl(url);
     const selector = 'article#story > section > div:nth-of-type(4) > p';
+    await setExtensionFileAccess(extContext, extensionId, true);
     await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
     const page = await extContext.newPage();
     const helper = await openHelperPage(extContext, extensionId);
@@ -2292,10 +2314,13 @@ test.describe('Snapshot slug meta tag', () => {
         2,
       );
 
-      // Direct saved HTML uses the generated content script rather than the viewer adapter.
-      localServer.addRawPage('/snapshot-hidden-siblings-saved', snapshot.html);
+      // A local snapshot uses the generated content script.
+      const file = join(
+        setupDir,
+        snapshotSidecarPath(slug, capture.timestamp, 'html'),
+      );
       savedPage = await extContext.newPage();
-      await savedPage.goto(localServer.url('/snapshot-hidden-siblings-saved'));
+      await savedPage.goto(pathToFileURL(file).href);
       await expect(
         savedPage.locator('mark.browser-recall-highlight'),
       ).toHaveCount(1);

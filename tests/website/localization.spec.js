@@ -76,12 +76,12 @@ test('Chinese browser preferences translate the website and switching languages 
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
 });
 
-test('locale detection skips unsupported browser preferences', async ({
+test('locale detection skips bare English and unsupported browser languages', async ({
   page,
 }) => {
   await page.addInitScript(() =>
     Object.defineProperty(navigator, 'languages', {
-      get: () => ['sv-SE', 'fr-FR', 'zh-TW', 'en-US'],
+      get: () => ['en', 'sv-SE', 'fr-FR', 'zh-TW'],
     }),
   );
   await page.goto('./');
@@ -91,16 +91,43 @@ test('locale detection skips unsupported browser preferences', async ({
   );
 });
 
+test('a regional English browser language takes precedence over later languages', async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    Object.defineProperty(navigator, 'languages', {
+      get: () => ['en', 'en-US', 'zh-CN'],
+    }),
+  );
+  await page.goto('./');
+  await expect(page.getByRole('combobox')).toHaveValue('en');
+});
+
+test('the desktop language picker resizes to fit the selected language', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 800, height: 650 });
+  await page.goto('./?lang=zh-CN');
+  await page.evaluate(() => document.fonts.ready);
+  const language = page.getByRole('combobox');
+  const { width: chineseWidth } = await language.boundingBox();
+  await language.selectOption('pt-PT');
+  await page.evaluate(() => document.fonts.ready);
+  const { width: portugueseWidth } = await language.boundingBox();
+  expect(portugueseWidth).toBeGreaterThan(chineseWidth + 20);
+  await expect(language).toHaveCSS('border-top-width', '0px');
+});
+
 test('an explicit language link takes precedence over the saved and browser languages', async ({
   page,
 }) => {
   await page.addInitScript(() =>
     Object.defineProperty(navigator, 'languages', {
-      get: () => ['en-US', 'zh-CN'],
+      get: () => ['en', 'zh-CN', 'en-US'],
     }),
   );
   await page.goto('./');
-  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
   const language = page.getByRole('combobox');
   await language.selectOption('pt-BR');
   await page.goto('./?lang=zh-Hant-HK#highlight');

@@ -859,6 +859,10 @@
     "message": "Показать разметку",
     "description": "Popup button that reapplies hidden highlight markup."
   },
+  "extensionMarkupPageLoading": {
+    "message": "Элементы управления выделением ещё загружаются. Повторите попытку через некоторое время.",
+    "description": "Popup markup action error while the page is loading."
+  },
   "extensionResumeTracing": {
     "message": "Возобновить отслеживание",
     "description": "Extension popup recording resume title."

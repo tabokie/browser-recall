@@ -175,6 +175,8 @@ pub struct MutationPayload {
     pub key: Option<String>,
     #[serde(rename = "historyEntry")]
     pub history_entry: Option<HistoryMutationEntry>,
+    #[serde(rename = "affectsPopup", skip_serializing_if = "Option::is_none")]
+    pub affects_popup: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -183,6 +185,8 @@ pub struct ConnectorMutationPayload {
     pub mutation_type: String,
     pub url: Option<String>,
     pub urls: Option<Vec<String>>,
+    #[serde(rename = "affectsPopup", skip_serializing_if = "Option::is_none")]
+    pub affects_popup: Option<bool>,
 }
 
 impl From<MutationPayload> for ConnectorMutationPayload {
@@ -191,6 +195,7 @@ impl From<MutationPayload> for ConnectorMutationPayload {
             mutation_type: value.mutation_type,
             url: value.url,
             urls: value.urls,
+            affects_popup: value.affects_popup,
         }
     }
 }

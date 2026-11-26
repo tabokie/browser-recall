@@ -101,6 +101,9 @@ submitting the Mac App Store build.
 - **App Review Information** — Provide the publisher's review contact, leave
   **Sign-in required** unchecked, paste the notes below, and attach
   [`review-bookmarks.html`](review-bookmarks.html).
+- **App Sandbox Information** — Add `com.apple.security.network.server` and
+  describe the incoming WebSocket connection from Browser Recall Connector
+  using the App Review notes below.
 - **Digital Services Act** — Declare the publisher's trader status in
   **Business → Agreements → Compliance** when prompted. Verify the public
   trader contact information if applicable.
@@ -127,7 +130,15 @@ has resumed. The browser popup also saves snapshots on request. Quit Browser
 Recall and reopen it to verify the library reopens without requesting the folder
 again.
 
-The extension communicates with the desktop app over an authenticated WebSocket
-on the same Mac. Browser Recall stores visits and user-requested captures in the
-selected folder. Keyword and regular-expression list rules match page titles.
-Browser Recall works without an account.
+After library setup, the Browser Recall desktop app listens for incoming WebSocket
+connections on the IPv4 loopback address `127.0.0.1`, using the first available
+port from `28471` through `28473`. Browser Recall Connector initiates the
+connection from the browser on the same Mac. The desktop app prompts the user to
+approve pairing and authenticates the connector before accepting visit, highlight,
+or snapshot commands. The `com.apple.security.network.server` entitlement allows
+the desktop app to accept those incoming connections in App Sandbox. The listener
+is reachable only from the same Mac.
+
+Browser Recall stores visits and user-requested captures in the selected folder.
+Keyword and regular-expression list rules match page titles. Browser Recall works
+without an account.

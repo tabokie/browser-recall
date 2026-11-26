@@ -1091,6 +1091,16 @@ fn resolve_highlight_created_at(
     })
 }
 
+pub(crate) fn visit_changes_popup(before: Option<&PageEntity>, after: &PageEntity) -> bool {
+    // The popup displays the earliest visit date. Later dates and raw
+    // timestamps still matter to Timeline's history notification.
+    before.is_none_or(|before| {
+        before.url != after.url
+            || before.title != after.title
+            || before.visit_dates.iter().min() != after.visit_dates.iter().min()
+    })
+}
+
 fn project_page(page: PageEntity) -> PageProjection {
     let has_snapshots = page.child_ids.iter().any(|id| id.starts_with("snapshot:"));
     PageProjection {

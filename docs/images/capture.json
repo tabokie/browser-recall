@@ -18,21 +18,21 @@
     "packages/core/highlight-lifecycle.js": "98410c09099cb0e01856c797ee381b84bcac10f5f428c9cf6811a6ac97112f58",
     "packages/core/i18n.js": "e39bd42295c85a164e7e00f57f58bc18641292500110f6da8aade51f24ba0ece",
     "packages/core/index.js": "ec9f8dabd019b0c6343e8fb68a599d7b16fbcdc8698e5125e6bef876f6962e18",
-    "packages/core/locales/ar/messages.json": "2cdc5d1cc1c0cc0d657702654939e3727712b09178050ff6cca1841f2dd5947b",
-    "packages/core/locales/de/messages.json": "8e45d8512c8a36ae627e35ac73fa9a27034875b32594630fb0c57b7dfc38ed0c",
-    "packages/core/locales/en/messages.json": "42838c3ecf8220f9e83e63f6a83ae8b4c715606c5deb387064c53a92484dd05d",
-    "packages/core/locales/es/messages.json": "935d439f5709af6226d958cb45c38a9fb95cc598a5243b9cbdcefc3f98b1d603",
-    "packages/core/locales/fr/messages.json": "ea82b6d3e6842a6009f0160dcc9838da1263b22294159b6cf9d75c9ebb486a68",
-    "packages/core/locales/hi/messages.json": "01ebf621fca894c601653a9c6ad648dae525cb65a18a81a4dcabc4153b6d4b5b",
-    "packages/core/locales/id/messages.json": "816001885b9af720a289ae0a5e1d91e19d8ff7883150c2e0f17f4a0ce18a5304",
-    "packages/core/locales/it/messages.json": "70df87b1e0ca2721c383407ab6da92b34ea75abaf2f19211f61c2578c3f4ba09",
-    "packages/core/locales/ja/messages.json": "56ab6656fdda270e0ae805eb332af19e16c50d082099a5979f19627a23634d23",
-    "packages/core/locales/ko/messages.json": "777360e5be4b08af884007fa6f499862ad7db9bc27f58adb8b24ce5e0505bd3c",
-    "packages/core/locales/pt-BR/messages.json": "986fb99f890e84a0528a152350d082a54fa3f8cfd78f28d9fef8c7dae58b2e3d",
-    "packages/core/locales/pt-PT/messages.json": "8c4c927940404911b45ddc86b62bce9382025df0cb15c35761fa945b5bbe96a4",
-    "packages/core/locales/ru/messages.json": "df50c8f698182ba102be73c467f68a75509caa0946424884494f7aca66fd2b39",
-    "packages/core/locales/zh-CN/messages.json": "5c03ab8a4d82c4b6426f43e9a124ccdf94c18ce22cf30428f2e1382d6a3fd4ad",
-    "packages/core/locales/zh-TW/messages.json": "309ccdf908e5d88a5fc7bb6e9861c002d5b942b9c69c02bdff69cbb5911df617",
+    "packages/core/locales/ar/messages.json": "404d2a2bdf482fff287d60ec1f3e7964ccabdde975873719dad6b1eb9d2c232f",
+    "packages/core/locales/de/messages.json": "68a03fba711e1d156ce5b9961a83496373684fe9fb70957811ed11e2f6766972",
+    "packages/core/locales/en/messages.json": "6963878ff9934ed86839818e18cc732adda5ecbdc70c3bd7462cada40aa6dac3",
+    "packages/core/locales/es/messages.json": "c3933e23929bfbfff8a74ccbd33c0406d802d9b0a792a782a3c1c2c67ad96790",
+    "packages/core/locales/fr/messages.json": "b694cfd4ee65735b22d00cf160815706b74a6ddfa83a550a90efdba6afe86088",
+    "packages/core/locales/hi/messages.json": "d6de9e7409bb299999ee9f4c2c24ed5d9a62e2259a082a98411a0612fd5d0456",
+    "packages/core/locales/id/messages.json": "6a3439d12cb18eb62cfefb4155b1225a32315a61ed3da4ad2232f1c2fd28b161",
+    "packages/core/locales/it/messages.json": "95641dc295056bc874f9544da3c26f83f92cf2edda3da3bb72fa22d127683b80",
+    "packages/core/locales/ja/messages.json": "466ca08527d3446f64388f74a61817b70f0025c79eafa72dd0694abbe807d2a8",
+    "packages/core/locales/ko/messages.json": "70b20167c8f0ddbfc492c2397ad9a2bca99ea641fbb14629482efd012e2cae58",
+    "packages/core/locales/pt-BR/messages.json": "6771dc8b11c7a3451e25b6fed0166c632bf51ecf67c90282ffa1ca64d0eb4287",
+    "packages/core/locales/pt-PT/messages.json": "c9a243527a31fa335ee94a4fd473fbeb3a8a3bee536754a9eb8df8d50867c25d",
+    "packages/core/locales/ru/messages.json": "d0fbc83090398b15c7062163adbb88fc834cb29acba2723ee13dabebf0c1cd7a",
+    "packages/core/locales/zh-CN/messages.json": "670b78f49ffa72e70b453b2ca9c65845bc46f6503405779f377b1cefe9fe3ef9",
+    "packages/core/locales/zh-TW/messages.json": "2ed44c279563e82f2051782d1d612c9b6590385cdec7ba2187c59f4bbf390d9b",
     "packages/core/logger.js": "cda2bf5c8fc8b9dc30d4d269cbc8944dac5908e1b7e6d31f90fd43713665755f",
     "packages/core/markdown-extractor.js": "65151a76d2ce73ef436ae84822a1babdd67ec212d19572d50c2400a4d5b0845a",
     "packages/core/package.json": "eccd9c4865e177dff2ba60bb2263be84f199fbf0b44b2307e8e9b95a36d584c5",
@@ -157,7 +157,7 @@
   },
   "screenshots": {
     "timeline.png": {
-      "sha256": "c00d38e9e2a271dfd2d193511dbea7ac064963963e997643729b1783585641ac",
+      "sha256": "7041c8bc048b218433ae899c40bef170272cfc00964511516d4b85c22d376421",
       "width": 2080,
       "height": 1400
     },
@@ -167,19 +167,19 @@
       "height": 1400
     },
     "timeline-mono.png": {
-      "sha256": "740420bfc9cb2eec7cb628ee3444f2d8f8377dfebdcec94d0a02f56972b1149a",
+      "sha256": "d3362e2a675508ae0175e004485bff2b766aa97bb673433a3f424ae4202388ba",
       "width": 2080,
       "height": 1400
     },
     "timeline-styles.png": {
-      "sha256": "b529e5b5fd3f4207c9c035207925b70cf84e3cd8c9e41678912b1cb75451a232",
+      "sha256": "dc2496652aac9c571de2ca90af9e7060c24ccaccdbb90214bc4efdd106e8592f",
       "width": 2080,
       "height": 1400,
       "composition": {
         "sources": ["timeline.png", "timeline-mono.png"],
         "sourceSha256": [
-          "c00d38e9e2a271dfd2d193511dbea7ac064963963e997643729b1783585641ac",
-          "740420bfc9cb2eec7cb628ee3444f2d8f8377dfebdcec94d0a02f56972b1149a"
+          "7041c8bc048b218433ae899c40bef170272cfc00964511516d4b85c22d376421",
+          "d3362e2a675508ae0175e004485bff2b766aa97bb673433a3f424ae4202388ba"
         ],
         "split": { "top": 0.62, "bottom": 0.38 }
       }

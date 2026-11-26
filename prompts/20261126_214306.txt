@@ -1,0 +1,56 @@
+- Remove the existing leaks under ./prompts and ../parser/prompts
+- Remove them so that they don't appear even in Git history changes.
+- What do you mean by "I’ll preserve the review request text in those entries"?
+- If the default is removed, this should be removed as well. It sounds like different versions of builtin message from different Codex version.
+- I change my mind, don't touch history in browser-recall. Clean up the latest version is enough. For parser clean Git history thoroughly.
+- Fix app store review issue for me. Then upload the fixed package using my Browser. App connect page already opened. The issue is:
+
+### App Review Guideline Issue
+
+\
+*This is an automated message. The review of this submission cannot proceed. See below for more information.*\
+\
+An automated analysis of the submission indicates the app includes the [com.apple.security.network.server](https://developer.apple.com/documentation/BundleResources/Entitlements/com.apple.security.network.server) entitlement but does not appear to have matching functionality. \
+\
+Apps that initiate outgoing connections (for example, to download new content from a server) only need to include the [com.apple.security.network.client](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.network.client) entitlement. The server entitlement is only necessary for apps that listen for and respond to incoming network connections (such as web or FTP servers).\
+\
+Take one of the following actions:\
+\
+\- If this or other entitlements are not needed, remove them before resubmitting the app for review. Apps should have only the minimum set of entitlements necessary for the app to function properly.\
+\
+\- If the app does need the [com.apple.security.network.server](https://developer.apple.com/documentation/BundleResources/Entitlements/com.apple.security.network.server) entitlement, reply to this message, describe how your app utilizes the entitlement, and add this information to the App Review Information section of App Store Connect. \
+\
+Learn more about the [App Sandbox on macOS](https://developer.apple.com/documentation/security/app-sandbox).
+- If there's another issue, would uploading a new version (1.0.3) takes longer to review than uploading a new build (1.0.6)? I am considering doing a GitHub release but that requires we put further changes to a new semver.
+- There's a long delay to open the popup, sometimes timeout, when the popup has multiple highlights (in this case, four long paragraphs). Is this expected? Investigate but don't modify anything.
+- Which part of the rendering requires the page to be fully or partially loaded?
+- I think the button needs improving. The popup shouldn't wait on page loading at all in the normal case. And if user tries to click markup button before page loads, show an error.
+- Are you sure highlight count doesn't affect popup loading time? After the fix the popup still visibly freezes in blank state before loading. The pause is approximately 1 or 2 second.
+- Why do you test with large list entry count? I specifically said the issue happens when the page has multiple large highlights.
+- You can use my browser to investigate, or use the same data to reproduce in your browser. The page is [https://news.ycombinator.com/item?id=50646108](https://news.ycombinator.com/item?id=50646108)
+- Help me understand, why rendering requires the highlight search finishes?
+- I don't understand "A data change invalidated the prepared list just as the popup opened, so the refresh asked the tab’s content script which page it was showing.". Why is it invalidated, and why does the refresh needs to query content script? Isn't URL enough to locate the page?
+- I don't think in my case, the page should be validated. There's no other mutation. My question is, (1) Why do you think invalidation is involved in the first place, is there evidence? (2) If invalidation is not involved, would the same delay still occur?
+For the second question, you explanation doesn't make sense. The tab is not a file URL and not snapshot, so the routine shouldn't ask content script for the reason of it being a snapshot (or suspect it being one).
+- Did you refresh to page to get a new trace? The issue only occurs on the first popup on a page.
+- I see three issues: (1) `reportVisit` would change some metadata of a page (e.g. firstVisit, lastVisit), but that is not displayed on popup. If we allow reportVisit to invalidate unconditionally, then popup will have to load from daemon without choice. I think we might need to avoid reportVisit invalidating the data. (2) The search and data load is done in one serial thread. This could still be a problem in the future. (3) As you point out, code shouldn't ask content script for non-file URL.
+For 1, 2, I'm not entirely sure they should be fixed. Please investigate the complexity necessary to fix them properly, and report back to me your suggestion.
+- For 1, couldn't we make daemon issue notification smarter? I don't mean to filter out the event at extension side.
+For 2, is it implied that the web worker doesn't allow spawning out search task async? Or is it because the code flow is not adapted to run search async?
+- For 1, do we already distinguish notification scope? i.e. we have the right message to notify Timeline and notify popup differently?
+For 2, do you think the work to offload search is too complicated?
+- Give me a succinct account of the search issue (title and description), I will file it manually on GitHub.
+- Let's implement notification improvement (1) and content script bypass (3).
+- Why is the product website locale setting not auto-detected?
+- It cannot use the browser's locale setting?
+- What command to run to see the navigator.languages value?
+- I see. Can we use the first locale in the list that is not "*en", if any? Because on my browser with CN setting, the value is ['en', 'zh-CN', 'en-US']. I wonder if this approach is idiomatic though.*
+- Only bypass 'en', not en-US or other specific English locale.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) 
+- Fix them all
+- Fix them all. But don't touch the prompt file.
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) co-author=GPT-6.2 Sol
+- Did you run the finish skill fully? It should've sealed the prompt file.
+- Fix this on product website: The locale dropdown menu entry is way too large. It extends to the maximum of all locale names. I want it to be frameless and centered, so that user doesn't notice the gap.
+- Open the local host for me to review
+- Append ./prompts/STAGING.txt to prompts/20261126_214306.txt. Then amend the current changes to last commit, update the commit message if necessary.

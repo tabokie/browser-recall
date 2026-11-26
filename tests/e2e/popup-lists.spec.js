@@ -37,6 +37,40 @@ async function expectPopupRevealed(popup) {
     .toBeUndefined();
 }
 
+async function holdPopupSummary(worker, url) {
+  await worker.evaluate((targetUrl) => {
+    const send = WebSocket.prototype.send;
+    const pending = [];
+    globalThis.popupSummaryGate = {
+      pending,
+      release() {
+        WebSocket.prototype.send = send;
+        for (const { socket, data } of pending) {
+          if (socket.readyState === WebSocket.OPEN) send.call(socket, data);
+        }
+        delete globalThis.popupSummaryGate;
+      },
+    };
+    WebSocket.prototype.send = function (data) {
+      const request = JSON.parse(data);
+      if (
+        request.type === 'get_page_summary' &&
+        request.url === targetUrl &&
+        request.title
+      ) {
+        pending.push({ socket: this, data });
+        return;
+      }
+      return send.call(this, data);
+    };
+  }, url);
+  return {
+    count: () =>
+      worker.evaluate(() => globalThis.popupSummaryGate.pending.length),
+    release: () => worker.evaluate(() => globalThis.popupSummaryGate.release()),
+  };
+}
+
 async function openPopupForUrl(
   extContext,
   extensionId,
@@ -202,7 +236,6 @@ for (const scenario of [
   {
     name: 'unexpected inspection error',
     error: 'Unexpected page inspection failure',
-    mode: 'data-unavailable',
   },
 ]) {
   test(`page access outcome stays consistent through loading: ${scenario.name}`, async ({
@@ -216,7 +249,6 @@ for (const scenario of [
     const page = await extContext.newPage();
     const sourceUrl = localServer.url('/gallery-fixture');
     const storeUrl = scenario.pageUrl || sourceUrl;
-    const expectedMode = scenario.mode || 'dashboard';
     const slug = getSlugForUrl(storeUrl);
     await resetAndSeed(extContext, extensionId, [
       settingsCheckpoint(),
@@ -337,22 +369,16 @@ for (const scenario of [
         'Page access popup evidence:',
         JSON.stringify({ storeUrl, loading, complete }),
       );
-      expect(loading).toMatchObject({ success: true, mode: expectedMode });
-      expect(complete).toMatchObject({ success: true, mode: expectedMode });
+      expect(loading).toMatchObject({ success: true, mode: 'dashboard' });
+      expect(complete).toMatchObject({ success: true, mode: 'dashboard' });
 
       const assertPopup = async (popup) => {
-        if (expectedMode === 'dashboard') {
-          await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
-          await expect(popup.locator('#pageUrl')).toHaveText(storeUrl);
-          await expect(popup.locator('.highlight-excerpt')).toHaveText(
-            'Saved data survives denied scripting.',
-          );
-          await expect(popup.locator('#errorBubble')).toHaveCount(0);
-        } else {
-          await expect(popup.locator('#pageDiagnosticDetail')).toContainText(
-            scenario.error,
-          );
-        }
+        await expect(popup.locator('#pageDiagnosticSection')).toBeHidden();
+        await expect(popup.locator('#pageUrl')).toHaveText(storeUrl);
+        await expect(popup.locator('.highlight-excerpt')).toHaveText(
+          'Saved data survives denied scripting.',
+        );
+        await expect(popup.locator('#errorBubble')).toHaveCount(0);
       };
       popup = await extContext.newPage();
       await popup.goto(
@@ -775,301 +801,30 @@ test('popup reopens with daemon data when the page receiver disappears', async (
   }
 });
 
-for (const reply of ['missing receiver', 'successful stale reply']) {
-  test(`completed popup follows navigation during receiver recovery: ${reply}`, async ({
-    extContext,
-    extensionId,
-    setupDir,
-    localServer,
-  }) => {
-    void setupDir;
-    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
-    localServer.addPage('/popup-recovery-source', {
-      title: 'Source',
-      body: '<main>Source</main>',
-    });
-    localServer.addPage('/popup-recovery-destination', {
-      title: 'Destination',
-      body: '<main>Destination</main>',
-    });
-    const sourceUrl = localServer.url('/popup-recovery-source');
-    const destinationUrl = localServer.url('/popup-recovery-destination');
-    const page = await extContext.newPage();
-    const helper = await openHelperPage(extContext, extensionId);
-    const worker = extContext.serviceWorkers()[0];
-    let primaryFailure;
-    try {
-      await page.goto(sourceUrl);
-      await expect
-        .poll(() =>
-          helper.evaluate(async (url) => {
-            const [tab] = await chrome.tabs.query({ url });
-            return tab?.status;
-          }, sourceUrl),
-        )
-        .toBe('complete');
-      const tabId = await helper.evaluate(async (url) => {
-        const [tab] = await chrome.tabs.query({ url });
-        if (tab.status !== 'complete')
-          throw new Error('Source must be complete');
-        return tab.id;
-      }, sourceUrl);
-      await worker.evaluate(
-        ({ tabId, destinationUrl, reply }) => {
-          const original = chrome.tabs.sendMessage;
-          globalThis.restorePopupReceiverRecovery = () => {
-            chrome.tabs.sendMessage = original;
-          };
-          chrome.tabs.sendMessage = async (id, request, ...rest) => {
-            if (id === tabId && request.action === 'getPageIdentity') {
-              chrome.tabs.sendMessage = original;
-              if (reply === 'missing receiver') {
-                await chrome.tabs.update(tabId, { url: destinationUrl });
-                throw new Error(
-                  'Could not establish connection. Receiving end does not exist.',
-                );
-              }
-              const identity = await original.call(
-                chrome.tabs,
-                id,
-                request,
-                ...rest,
-              );
-              // Deliver a valid old-document reply after the new document commits.
-              await new Promise((resolve, reject) => {
-                const committed = (details) => {
-                  if (
-                    details.tabId !== tabId ||
-                    details.frameId !== 0 ||
-                    details.url !== destinationUrl
-                  )
-                    return;
-                  chrome.webNavigation.onCommitted.removeListener(committed);
-                  resolve();
-                };
-                chrome.webNavigation.onCommitted.addListener(committed);
-                chrome.tabs
-                  .update(tabId, { url: destinationUrl })
-                  .catch((error) => {
-                    chrome.webNavigation.onCommitted.removeListener(committed);
-                    reject(error);
-                  });
-              });
-              return identity;
-            }
-            return original.call(chrome.tabs, id, request, ...rest);
-          };
-        },
-        { tabId, destinationUrl, reply },
-      );
-      const result = await helper.evaluate(
-        (tabId) =>
-          chrome.runtime.sendMessage({
-            action: 'resolvePopupPageIdentity',
-            tabId,
-          }),
-        tabId,
-      );
-      console.log('Completed navigation evidence:', JSON.stringify(result));
-      await expect.poll(() => page.url()).toBe(destinationUrl);
-      expect(result).toMatchObject({
-        success: true,
-        identity: { url: destinationUrl },
-      });
-    } catch (error) {
-      primaryFailure = error;
-      throw error;
-    } finally {
-      const cleanup = await Promise.allSettled([
-        worker.evaluate(() => {
-          globalThis.restorePopupReceiverRecovery?.();
-          delete globalThis.restorePopupReceiverRecovery;
-        }),
-        page.close(),
-        helper.close(),
-      ]);
-      const errors = cleanup
-        .filter((entry) => entry.status === 'rejected')
-        .map((entry) => entry.reason);
-      if (errors.length && primaryFailure)
-        console.error('Review cleanup failures:', errors);
-      else if (errors.length)
-        throw new AggregateError(errors, 'Review cleanup failed');
-    }
-  });
-}
-
-test('popup preserves unexpected page inspection failure detail', async ({
+test('popup shows saved highlights while the page is still loading', async ({
   extContext,
   extensionId,
   setupDir,
   localServer,
 }) => {
   void setupDir;
-  localServer.addPage('/stale-popup-page-identity', {
-    title: 'Stale Popup Page Identity',
-    body: '<main>Page opened before an extension reload.</main>',
-  });
-  const url = localServer.url('/stale-popup-page-identity');
-  await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
-
-  const page = await extContext.newPage();
-  await page.goto(url);
-  await page.waitForLoadState('domcontentloaded');
-  const helper = await openHelperPage(extContext, extensionId);
-  const inspectionError = 'Unexpected page identity inspection failure';
-  const worker = extContext.serviceWorkers()[0];
-  await worker.evaluate((message) => {
-    globalThis.__popupOriginalExecuteScript = chrome.scripting.executeScript;
-    chrome.scripting.executeScript = async () => {
-      throw new Error(message);
-    };
-  }, inspectionError);
-  let popup;
-  let primaryFailure;
-  try {
-    const prepared = await helper.evaluate(async (pageUrl) => {
-      const [tab] = await chrome.tabs.query({ url: pageUrl });
-      if (!tab?.id) throw new Error('Source tab not found');
-      const injected = await chrome.runtime.sendMessage({
-        action: 'failNextTabMessageForTest',
-        messageAction: 'getPageIdentity',
-        repeat: true,
-        tabId: tab.id,
-        error: 'Could not establish connection. Receiving end does not exist.',
-      });
-      if (!injected?.success) throw new Error(injected?.error);
-      return chrome.runtime.sendMessage({
-        action: 'preparePopupBootstrapForTest',
-        tabId: tab.id,
-      });
-    }, url);
-
-    expect(prepared).toMatchObject({
-      success: true,
-      mode: 'data-unavailable',
-      error: inspectionError,
-    });
-    // Force a revision between preparation and consumption, as a late visit
-    // notification does on CI. Failed inspection must remain an explicit error.
-    await helper.evaluate(() =>
-      chrome.runtime.sendMessage({
-        action: 'setRecordingPaused',
-        paused: false,
-      }),
-    );
-    popup = await extContext.newPage();
-    await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
-    await expectPopupRevealed(popup);
-    await expect(popup.locator('#pageDiagnosticSection')).toBeVisible();
-    await expect(popup.locator('#pageDiagnosticMessage')).toHaveText(
-      inspectionError,
-    );
-    await expect(popup.locator('#pageDiagnosticDetail')).toContainText(
-      'reason: popup-page-identity-failed',
-    );
-    await expect(popup.locator('#pageDiagnosticDetail')).toContainText(
-      `error: ${inspectionError}`,
-    );
-  } catch (error) {
-    primaryFailure = error;
-    throw error;
-  } finally {
-    await cleanupPopupScenario(
-      [
-        () =>
-          worker.evaluate(() => {
-            chrome.scripting.executeScript =
-              globalThis.__popupOriginalExecuteScript;
-            delete globalThis.__popupOriginalExecuteScript;
-          }),
-        () => popup?.close(),
-        () => helper.close(),
-        () => page.close(),
-      ],
-      primaryFailure,
-    );
-  }
-});
-
-test('popup uses the tab URL while the page content script is still loading', async ({
-  extContext,
-  extensionId,
-  setupDir,
-  localServer,
-}) => {
-  void setupDir;
-  const title = 'Loading Popup Page Identity';
+  const title = 'Loading Popup Highlights';
+  const excerpt = 'The saved highlight is ready before the page.';
   localServer.addPage('/loading-popup-page-identity', {
     title,
-    body: '<main>Response remains open while popup bootstrap runs.</main>',
-    endDelayMs: 3_000,
+    body: `<main>${excerpt}</main><script src="/hold-popup-page.js"></script>`,
   });
   const url = localServer.url('/loading-popup-page-identity');
-  await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
-
-  const page = await extContext.newPage();
-  await page.goto(url, { waitUntil: 'commit' });
-
-  const helper = await openHelperPage(extContext, extensionId);
-  const prepared = await helper.evaluate(async (pageUrl) => {
-    const [tab] = await chrome.tabs.query({ url: pageUrl });
-    if (!tab?.id) throw new Error('Loading source tab not found');
-    if (tab.status !== 'loading') {
-      throw new Error(`Expected loading tab, received ${tab.status}`);
-    }
-    return chrome.runtime.sendMessage({
-      action: 'preparePopupBootstrapForTest',
-      tabId: tab.id,
-    });
-  }, url);
-  await helper.close();
-  expect(prepared).toMatchObject({ success: true, mode: 'dashboard' });
-
-  const popup = await extContext.newPage();
-  await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
-  await expect(popup.locator('#dashboard')).toBeVisible();
-  await expect(popup.locator('#pageTitle')).toHaveText(title);
-  await expect(popup.locator('#pageDiagnosticDetail')).toBeHidden();
-
-  await popup.close();
-  await page.close();
-});
-
-test('loading popup follows navigation despite a stale permission error', async ({
-  extContext,
-  extensionId,
-  setupDir,
-  localServer,
-}) => {
-  void setupDir;
-  localServer.addPage('/loading-popup-navigation-source', {
-    title: 'Loading Navigation Source',
-    body: '<main>Source page remains loading.</main>',
-    endDelayMs: 3_000,
-  });
-  localServer.addPage('/loading-popup-navigation-destination', {
-    title: 'Loading Navigation Destination',
-    body: '<main>Destination page remains loading.</main>',
-    endDelayMs: 3_000,
-  });
-  const sourceUrl = localServer.url('/loading-popup-navigation-source');
-  const destinationUrl = localServer.url(
-    '/loading-popup-navigation-destination',
-  );
-  const destinationSlug = getSlugForUrl(destinationUrl);
-  const noteSlug = 'loading-destination-highlight';
-  const now = Date.now();
+  const slug = getSlugForUrl(url);
+  const noteSlug = 'loading-popup-highlight';
   await resetAndSeed(extContext, extensionId, [
     settingsCheckpoint(),
     {
-      path: pageCheckpointPath(destinationSlug),
+      path: pageCheckpointPath(slug),
       data: pageEntityFixture({
-        slug: destinationSlug,
-        url: destinationUrl,
-        title: 'Loading Navigation Destination',
-        timestamps: { 'test-device': now },
-        parentIds: [],
+        slug,
+        url,
+        title,
         childIds: [`note:${noteSlug}`],
       }),
     },
@@ -1077,62 +832,131 @@ test('loading popup follows navigation despite a stale permission error', async 
       path: `objects/notes/${noteSlug}.json`,
       data: noteEntityFixture({
         slug: noteSlug,
-        excerpt: ['Receiver-less loading-page highlight'],
+        url,
+        excerpt: [excerpt],
         note: '',
-        cssPath: ['body'],
-        url: destinationUrl,
+        cssPath: ['main'],
       }),
     },
   ]);
 
   const page = await extContext.newPage();
-  await page.goto(sourceUrl, { waitUntil: 'commit' });
-
   const helper = await openHelperPage(extContext, extensionId);
-  await extContext.serviceWorkers()[0].evaluate(() => {
-    const executeScript = chrome.scripting.executeScript.bind(chrome.scripting);
-    chrome.scripting.executeScript = async (...args) => {
-      chrome.scripting.executeScript = executeScript;
-      await executeScript(...args);
-      // Firefox can report this after the target document has navigated away.
-      throw new Error('Missing host permission for the tab or frames');
-    };
+  const scriptArrived = Promise.withResolvers();
+  const releaseScript = Promise.withResolvers();
+  await page.route('**/hold-popup-page.js', async (route) => {
+    scriptArrived.resolve();
+    await releaseScript.promise;
+    await route.fulfill({ contentType: 'text/javascript', body: '' });
   });
-  const prepared = await helper.evaluate(
-    async ({ sourceUrl, destinationUrl }) => {
-      const [tab] = await chrome.tabs.query({ url: sourceUrl });
-      if (!tab?.id) throw new Error('Loading source tab not found');
-      const scheduled = await chrome.runtime.sendMessage({
-        action: 'navigateTabBeforeNextImmediateScriptForTest',
-        tabId: tab.id,
-        url: destinationUrl,
-      });
-      if (!scheduled?.success) throw new Error(scheduled?.error);
-      return chrome.runtime.sendMessage({
-        action: 'preparePopupBootstrapForTest',
-        tabId: tab.id,
-      });
-    },
-    { sourceUrl, destinationUrl },
-  );
-  await helper.close();
-  expect(prepared).toMatchObject({ success: true, mode: 'dashboard' });
-  await expect.poll(() => page.url()).toBe(destinationUrl);
+  let popup;
+  await withCleanup(async () => {
+    await page.goto(url, { waitUntil: 'commit' });
+    await scriptArrived.promise;
+    const tabId = await helper.evaluate(async (pageUrl) => {
+      const [tab] = await chrome.tabs.query({ url: pageUrl });
+      if (tab?.status !== 'loading') throw new Error('Expected a loading tab');
+      return tab.id;
+    }, url);
+    const prepare = () =>
+      helper.evaluate(
+        (tabId) =>
+          chrome.runtime.sendMessage({
+            action: 'preparePopupBootstrapForTest',
+            tabId,
+          }),
+        tabId,
+      );
+    const prepared = await prepare();
+    expect(prepared).toMatchObject({ success: true, mode: 'dashboard' });
+    popup = await extContext.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
+    await expectPopupRevealed(popup);
+    await expect(popup.locator('#pageTitle')).toHaveText(title);
+    await expect(popup.locator('.highlight-excerpt')).toHaveText(excerpt);
+    const markupButton = popup.locator('#hideMarkupBtn');
+    await expect(markupButton).toBeVisible();
+    await markupButton.click();
+    await expect(popup.locator('#errorBubbleMessage')).toHaveText(
+      await getExtensionMessage(helper, 'extensionMarkupPageLoading'),
+    );
+    await expect(popup.locator('.highlight-excerpt')).toHaveText(excerpt);
+    await popup.locator('#dismissErrorBtn').click();
 
-  const popup = await extContext.newPage();
-  await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
-  await expect(popup.locator('#dashboard')).toBeVisible();
-  await expect(popup.locator('#pageTitle')).toHaveText(
-    'Loading Navigation Destination',
-  );
-  await expect(popup.locator('#pageUrl')).toHaveText(destinationUrl);
-  await expect(popup.locator('.highlight-excerpt')).toHaveText(
-    'Receiver-less loading-page highlight',
-  );
-  await expect(popup.locator('#hideMarkupBtn')).toHaveCount(0);
+    releaseScript.resolve();
+    await expect(page.locator('mark.browser-recall-highlight')).toHaveText(
+      excerpt,
+    );
+    await expect(markupButton).toHaveAttribute('aria-pressed', 'false');
+    await markupButton.click();
+    await expect(markupButton).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('mark.browser-recall-highlight')).toHaveCount(0);
+    await popup.close();
 
-  await popup.close();
-  await page.close();
+    for (const failBeforeReload of [true, false]) {
+      const reopening = await prepare();
+      expect(reopening).toMatchObject({ success: true, mode: 'dashboard' });
+      popup = await extContext.newPage();
+      await popup.addInitScript((tabId) => {
+        const send = chrome.tabs.sendMessage.bind(chrome.tabs);
+        const markupState = Promise.withResolvers();
+        globalThis.failPopupMarkupState = () =>
+          markupState.reject(
+            new Error(
+              'The message port closed before a response was received.',
+            ),
+          );
+        chrome.tabs.onUpdated.addListener((id, change) => {
+          if (id === tabId && change.status === 'complete') {
+            globalThis.popupSawReloadComplete = true;
+          }
+        });
+        chrome.tabs.sendMessage = async (id, request, ...rest) => {
+          if (
+            id === tabId &&
+            request.action === 'getHighlightMarkupState' &&
+            !globalThis.popupMarkupStateRequested
+          ) {
+            globalThis.popupMarkupStateRequested = true;
+            await markupState.promise;
+          }
+          return send(id, request, ...rest);
+        };
+      }, tabId);
+      await popup.goto(
+        `chrome-extension://${extensionId}/${reopening.popupPath}`,
+      );
+      await popup.waitForFunction(() => globalThis.popupMarkupStateRequested);
+      await expectPopupRevealed(popup);
+      await expect(popup.locator('.highlight-excerpt')).toHaveText(excerpt);
+      const failState = () =>
+        popup.evaluate(() => globalThis.failPopupMarkupState());
+      if (failBeforeReload) {
+        await failState();
+        await expect(popup.locator('#hideMarkupBtn')).toHaveCount(0);
+      }
+      await page.reload();
+      await popup.waitForFunction(() => globalThis.popupSawReloadComplete);
+      await expect(page.locator('mark.browser-recall-highlight')).toHaveText(
+        excerpt,
+      );
+      if (!failBeforeReload) await failState();
+      await expect(popup.locator('#hideMarkupBtn')).toHaveAttribute(
+        'aria-pressed',
+        'false',
+      );
+      await popup.locator('#hideMarkupBtn').click();
+      await expect(page.locator('mark.browser-recall-highlight')).toHaveCount(
+        0,
+      );
+      await popup.close();
+    }
+  }, [
+    () => releaseScript.resolve(),
+    () => popup?.close(),
+    () => helper.close(),
+    () => page.close(),
+  ]);
 });
 
 test.describe('Popup list chip behavior', () => {
@@ -2417,14 +2241,15 @@ test.describe('Popup list chip behavior', () => {
 
       popup = await extContext.newPage();
       await popup.addInitScript(() => {
-        const send = chrome.tabs.sendMessage.bind(chrome.tabs);
-        chrome.tabs.sendMessage = async (tabId, request, ...args) => {
-          if (request.action === 'getHighlightMarkupState') {
+        const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+        chrome.runtime.sendMessage = async (request, ...args) => {
+          const response = await send(request, ...args);
+          if (request.action === 'consumePopupBootstrap') {
             await new Promise((resolve) => {
-              globalThis.releaseHighlightLookup = resolve;
+              globalThis.releasePopupBootstrap = resolve;
             });
           }
-          return send(tabId, request, ...args);
+          return response;
         };
         chrome.runtime.onMessage.addListener((request) => {
           if (request.action === 'mutation' && request.type === 'lists') {
@@ -2436,7 +2261,7 @@ test.describe('Popup list chip behavior', () => {
         `chrome-extension://${extensionId}/${prepared.popupPath}`,
       );
       await popup.waitForFunction(
-        () => typeof globalThis.releaseHighlightLookup === 'function',
+        () => typeof globalThis.releasePopupBootstrap === 'function',
       );
       const saved = await helper.evaluate(() =>
         chrome.runtime.sendMessage({
@@ -2451,7 +2276,7 @@ test.describe('Popup list chip behavior', () => {
           () => document.documentElement.dataset.popupHidden,
         ),
       ).toBe('true');
-      await popup.evaluate(() => globalThis.releaseHighlightLookup());
+      await popup.evaluate(() => globalThis.releasePopupBootstrap());
       await expectPopupRevealed(popup);
       await expect(popup.locator('#pageTitle')).toHaveText(title);
       await expect(popup.locator('#notesSection')).toContainText('Saved note');
@@ -2898,21 +2723,7 @@ test.describe('Popup list chip behavior', () => {
     }, page.url());
     expect(prepared).toMatchObject({ success: true, mode: 'dashboard' });
     const worker = extContext.serviceWorkers()[0];
-    await worker.evaluate(() => {
-      const sendMessage = chrome.tabs.sendMessage.bind(chrome.tabs);
-      globalThis.__popupOriginalSendMessage = sendMessage;
-      globalThis.__popupIdentityCalls = 0;
-      globalThis.__releasePopupIdentity = [];
-      chrome.tabs.sendMessage = async (...args) => {
-        if (args[1]?.action === 'getPageIdentity') {
-          globalThis.__popupIdentityCalls++;
-          await new Promise((resolve) =>
-            globalThis.__releasePopupIdentity.push(resolve),
-          );
-        }
-        return sendMessage(...args);
-      };
-    });
+    const summary = await holdPopupSummary(worker, page.url());
     try {
       await helper.evaluate(() =>
         chrome.runtime.sendMessage({
@@ -2932,9 +2743,7 @@ test.describe('Popup list chip behavior', () => {
             return response;
           });
       }, prepared.popupPath);
-      await expect
-        .poll(() => worker.evaluate(() => globalThis.__popupIdentityCalls))
-        .toBe(1);
+      await expect.poll(summary.count).toBe(1);
       await helper.evaluate(() =>
         chrome.runtime.sendMessage({
           action: 'setRecordingPaused',
@@ -2949,14 +2758,9 @@ test.describe('Popup list chip behavior', () => {
           diagnostic: { reason: 'popup-prepare-timeout' },
         },
       });
-      expect(await worker.evaluate(() => globalThis.__popupIdentityCalls)).toBe(
-        1,
-      );
+      expect(await summary.count()).toBe(1);
     } finally {
-      await worker.evaluate(() => {
-        globalThis.__releasePopupIdentity?.forEach((resolve) => resolve());
-        chrome.tabs.sendMessage = globalThis.__popupOriginalSendMessage;
-      });
+      await summary.release();
       await helper.close();
       await page.close();
     }
@@ -2982,20 +2786,7 @@ test.describe('Popup list chip behavior', () => {
       const [tab] = await chrome.tabs.query({ url });
       return tab.id;
     }, page.url());
-    await worker.evaluate(() => {
-      const sendMessage = chrome.tabs.sendMessage.bind(chrome.tabs);
-      globalThis.__popupOriginalSendMessage = sendMessage;
-      globalThis.__popupTimeoutIdentityStarted = false;
-      chrome.tabs.sendMessage = async (...args) => {
-        if (args[1]?.action === 'getPageIdentity') {
-          globalThis.__popupTimeoutIdentityStarted = true;
-          await new Promise((resolve) => {
-            globalThis.__releasePopupTimeoutIdentity = resolve;
-          });
-        }
-        return sendMessage(...args);
-      };
-    });
+    const summary = await holdPopupSummary(worker, page.url());
     try {
       await page.bringToFront();
       const opening = helper.evaluate(
@@ -3006,11 +2797,7 @@ test.describe('Popup list chip behavior', () => {
           }),
         tabId,
       );
-      await expect
-        .poll(() =>
-          worker.evaluate(() => globalThis.__popupTimeoutIdentityStarted),
-        )
-        .toBe(true);
+      await expect.poll(summary.count).toBe(1);
       expect(
         await helper.evaluate(
           () => chrome.extension.getViews({ type: 'popup' }).length,
@@ -3061,10 +2848,7 @@ test.describe('Popup list chip behavior', () => {
         chrome.extension.getViews({ type: 'popup' })[0]?.close();
       });
     } finally {
-      await worker.evaluate(() => {
-        globalThis.__releasePopupTimeoutIdentity?.();
-        chrome.tabs.sendMessage = globalThis.__popupOriginalSendMessage;
-      });
+      await summary.release();
       await helper.close();
       await page.close();
     }
@@ -3450,6 +3234,283 @@ test.describe('Popup list chip behavior', () => {
       await helper.close();
       await page.close();
     }
+  });
+
+  test('live toolbar popup resolves its page without inspecting the document', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    const title = 'Live toolbar identity';
+    const url = localServer.url('/live-toolbar-identity');
+    localServer.addPage('/live-toolbar-identity', {
+      title,
+      body: '<p>Live page</p>',
+    });
+    await resetAndSeed(extContext, extensionId, [settingsCheckpoint()]);
+    const page = await extContext.newPage();
+    await page.goto(url);
+    const worker = extContext.serviceWorkers()[0];
+    await worker.evaluate(async (targetUrl) => {
+      const [tab] = await chrome.tabs.query({ url: targetUrl });
+      const sendMessage = chrome.tabs.sendMessage;
+      const executeScript = chrome.scripting.executeScript;
+      globalThis.restorePopupIdentityApis = () => {
+        chrome.tabs.sendMessage = sendMessage;
+        chrome.scripting.executeScript = executeScript;
+      };
+      globalThis.popupIdentityAttempts = 0;
+      chrome.tabs.sendMessage = (id, request, ...args) => {
+        if (id === tab.id && request.action === 'getPageIdentity') {
+          globalThis.popupIdentityAttempts += 1;
+        }
+        return sendMessage(id, request, ...args);
+      };
+      chrome.scripting.executeScript = (details) => {
+        if (
+          details.target.tabId === tab.id &&
+          details.injectImmediately &&
+          details.func
+        ) {
+          globalThis.popupIdentityAttempts += 1;
+        }
+        return executeScript(details);
+      };
+    }, url);
+    try {
+      const popup = await openPreparedPopupForPage(
+        extContext,
+        extensionId,
+        page,
+        title,
+      );
+      await expect(popup.locator('#pageUrl')).toHaveText(url);
+      expect(
+        await worker.evaluate(() => globalThis.popupIdentityAttempts),
+      ).toBe(0);
+      await popup.close();
+    } finally {
+      await worker.evaluate(() => globalThis.restorePopupIdentityApis());
+      await page.close();
+    }
+  });
+
+  test('prepared toolbar popup reuses the summary after a history-only revisit', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    const url = localServer.url('/popup-history-only-revisit');
+    const title = 'History-only revisit';
+    const slug = getSlugForUrl(url);
+    localServer.addPage('/popup-history-only-revisit', {
+      title,
+      body: '<main>Previously visited page</main><script src="/hold-revisit.js"></script>',
+    });
+    await resetAndSeed(extContext, extensionId, [
+      settingsCheckpoint(),
+      {
+        path: pageCheckpointPath(slug),
+        data: pageEntityFixture({ slug, url, title, visitDates: [20260101] }),
+      },
+    ]);
+    const page = await extContext.newPage();
+    const helper = await openHelperPage(extContext, extensionId);
+    const scriptRequested = Promise.withResolvers();
+    const releaseScript = Promise.withResolvers();
+    await page.route('**/hold-revisit.js', async (route) => {
+      scriptRequested.resolve();
+      await releaseScript.promise;
+      await route.fulfill({ contentType: 'text/javascript', body: '' });
+    });
+    await helper.evaluate((url) => {
+      globalThis.popupRevisit = new Promise((resolve) => {
+        const listener = (message) => {
+          if (
+            message.action !== 'mutation' ||
+            message.type !== 'history' ||
+            message.url !== url
+          )
+            return;
+          chrome.runtime.onMessage.removeListener(listener);
+          resolve(message);
+        };
+        chrome.runtime.onMessage.addListener(listener);
+      });
+    }, url);
+    let summary;
+    await withCleanup(async () => {
+      await page.goto(url, { waitUntil: 'commit' });
+      await scriptRequested.promise;
+      const prepared = await helper.evaluate(async (url) => {
+        const [tab] = await chrome.tabs.query({ url });
+        if (tab?.status !== 'loading')
+          throw new Error('Expected a loading tab');
+        return chrome.runtime.sendMessage({
+          action: 'preparePopupBootstrapForTest',
+          tabId: tab.id,
+        });
+      }, url);
+      expect(prepared).toMatchObject({ success: true, mode: 'dashboard' });
+      summary = await holdPopupSummary(extContext.serviceWorkers()[0], url);
+      releaseScript.resolve();
+      expect(
+        await helper.evaluate(() => globalThis.popupRevisit),
+      ).toMatchObject({
+        affectsPopup: false,
+      });
+      const consumed = await helper.evaluate((popupPath) => {
+        const token = new URL(popupPath, location.href).searchParams.get(
+          'bootstrap',
+        );
+        return chrome.runtime.sendMessage({
+          action: 'consumePopupBootstrap',
+          token,
+        });
+      }, prepared.popupPath);
+      expect(consumed).toMatchObject({
+        success: true,
+        bootstrap: { mode: 'dashboard', summary: { url } },
+      });
+      expect(await summary.count()).toBe(0);
+    }, [
+      () => releaseScript.resolve(),
+      () => summary?.release(),
+      () => helper.close(),
+      () => page.close(),
+    ]);
+  });
+
+  test('a first visit refreshes the open popup without rebuilding another page', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    const url = localServer.url('/popup-first-visit');
+    const otherUrl = localServer.url('/popup-unrelated-visit');
+    const slug = getSlugForUrl(otherUrl);
+    localServer.addRawPage(
+      '/popup-first-visit',
+      '<!doctype html><head><script src="/hold-first-visit.js"></script><title>First visit</title></head><main>First visit</main>',
+    );
+    localServer.addPage('/popup-unrelated-visit', {
+      title: 'Another page',
+      body: '<main>Another page</main>',
+    });
+    await resetAndSeed(extContext, extensionId, [
+      settingsCheckpoint(),
+      {
+        path: pageCheckpointPath(slug),
+        data: pageEntityFixture({
+          slug,
+          url: otherUrl,
+          title: 'Another page',
+          visitDates: [20260101],
+        }),
+      },
+    ]);
+    const page = await extContext.newPage();
+    const otherPage = await extContext.newPage();
+    const helper = await openHelperPage(extContext, extensionId);
+    const worker = extContext.serviceWorkers()[0];
+    await worker.evaluate((targetUrl) => {
+      const get = chrome.tabs.get.bind(chrome.tabs);
+      globalThis.restoreFirstVisitTitle = () => {
+        chrome.tabs.get = get;
+      };
+      chrome.tabs.get = async (id) => {
+        const tab = await get(id);
+        return tab.url === targetUrl && tab.status === 'loading'
+          ? { ...tab, title: '' }
+          : tab;
+      };
+    }, url);
+    const scriptRequested = Promise.withResolvers();
+    const releaseScript = Promise.withResolvers();
+    await page.route('**/hold-first-visit.js', async (route) => {
+      scriptRequested.resolve();
+      await releaseScript.promise;
+      await route.fulfill({ contentType: 'text/javascript', body: '' });
+    });
+    const prepare = (url) =>
+      helper.evaluate(async (url) => {
+        const [tab] = await chrome.tabs.query({ url });
+        return chrome.runtime.sendMessage({
+          action: 'preparePopupBootstrapForTest',
+          tabId: tab.id,
+        });
+      }, url);
+    let popup;
+    let otherSummary;
+    await withCleanup(async () => {
+      await otherPage.goto(otherUrl);
+      await page.goto(url, { waitUntil: 'commit' });
+      await scriptRequested.promise;
+      const prepared = await prepare(url);
+      expect(prepared).toMatchObject({ success: true, mode: 'dashboard' });
+      popup = await extContext.newPage();
+      await popup.goto(
+        `chrome-extension://${extensionId}/${prepared.popupPath}`,
+      );
+      await expectPopupRevealed(popup);
+      await expect(popup.locator('#visitsLikesSection')).toBeHidden();
+      await expect(popup.locator('#pageTitle')).toHaveText(url);
+      const otherPrepared = await prepare(otherUrl);
+      expect(otherPrepared).toMatchObject({ success: true, mode: 'dashboard' });
+      otherSummary = await holdPopupSummary(
+        extContext.serviceWorkers()[0],
+        otherUrl,
+      );
+      await helper.evaluate((url) => {
+        globalThis.firstVisitNotification = new Promise((resolve) => {
+          const listener = (message) => {
+            if (
+              message.action !== 'mutation' ||
+              message.type !== 'history' ||
+              message.url !== url
+            )
+              return;
+            chrome.runtime.onMessage.removeListener(listener);
+            resolve(message);
+          };
+          chrome.runtime.onMessage.addListener(listener);
+        });
+      }, url);
+      releaseScript.resolve();
+      expect(
+        await helper.evaluate(() => globalThis.firstVisitNotification),
+      ).toMatchObject({ affectsPopup: true });
+      const consumed = await helper.evaluate((popupPath) => {
+        const token = new URL(popupPath, location.href).searchParams.get(
+          'bootstrap',
+        );
+        return chrome.runtime.sendMessage({
+          action: 'consumePopupBootstrap',
+          token,
+        });
+      }, otherPrepared.popupPath);
+      expect.soft(await otherSummary.count()).toBe(0);
+      expect.soft(consumed.bootstrap.mode).toBe('dashboard');
+      await expect(popup.locator('#visitsLikesSection')).toBeVisible();
+      await expect(popup.locator('#pageTitle')).toHaveText('First visit');
+      await expect(popup.locator('#attentionGrid')).toContainText(
+        await getExtensionMessage(helper, 'extensionFirst'),
+      );
+    }, [
+      () => releaseScript.resolve(),
+      () => otherSummary?.release(),
+      () => worker.evaluate(() => globalThis.restoreFirstVisitTitle()),
+      () => popup?.close(),
+      () => helper.close(),
+      () => otherPage.close(),
+      () => page.close(),
+    ]);
   });
 
   test('prepared toolbar bootstrap invalidates when membership changes before popup opens', async ({
@@ -5046,24 +5107,7 @@ test.describe('Popup list chip behavior', () => {
       await expect(search).toHaveValue('reading');
 
       const worker = extContext.serviceWorkers()[0];
-      await worker.evaluate((tabId) => {
-        const send = chrome.tabs.sendMessage.bind(chrome.tabs);
-        let resume;
-        const pendingIdentity = new Promise((resolve) => {
-          resume = resolve;
-        });
-        globalThis.restoreOrionPopupIdentity = () => {
-          chrome.tabs.sendMessage = send;
-          resume();
-          delete globalThis.restoreOrionPopupIdentity;
-        };
-        chrome.tabs.sendMessage = async (id, request, ...rest) => {
-          if (id === tabId && request.action === 'getPageIdentity') {
-            await pendingIdentity;
-          }
-          return send(id, request, ...rest);
-        };
-      }, tab.id);
+      const summary = await holdPopupSummary(worker, url);
       await withCleanup(async () => {
         await popup.reload();
         await expectPopupRevealed(popup);
@@ -5073,7 +5117,7 @@ test.describe('Popup list chip behavior', () => {
         await expect(popup.locator('#pageDiagnosticMessage')).toHaveText(
           message,
         );
-      }, [() => worker.evaluate(() => globalThis.restoreOrionPopupIdentity())]);
+      }, [summary.release]);
     }, [() => popup?.close(), () => helper?.close(), () => page.close()]);
   });
 

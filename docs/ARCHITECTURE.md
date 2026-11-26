@@ -43,13 +43,14 @@ window grows to fit the popup and article.
 Scrolling stays on the outer page.
 Static screenshots replace the interactive examples when JavaScript is unavailable.
 
-The product locale registry also defines the website's language choices. An
-explicit `lang` query parameter takes precedence over a saved choice, the first
-supported browser language, and English. The header language picker stores the
-choice in browser local storage. Website catalogs translate the landing page and
-Finder controls. The embedded product demos use English sample content. English
-landing page copy and translation keys live together in HTML, so the page also
-works without JavaScript.
+The product locale registry also defines the website's language choices. The
+website applies a supported `lang` query parameter first, then a choice saved by
+the header language picker in browser local storage. Automatic detection skips
+the bare `en` tag, uses the first supported browser language in order, and falls
+back to English. Regional English tags such as `en-US` keep their priority.
+Website catalogs translate the landing page and Finder controls. The embedded
+product demos use English sample content. English landing page copy and
+translation keys live together in HTML, so the page also works without JavaScript.
 
 The README uses looping GIFs captured from the native app and browser extension.
 Recipes control each GIF's framing, frame selection, and timing using saved captures.
@@ -329,17 +330,23 @@ tabs and globally. If Orion dispatches a toolbar click despite the tab
 registration, the click handler opens the registered popup. A click during
 initial registration waits for the route and checks that the target tab is
 still active. Orion requests the same popup model after opening. Both paths
-show a diagnostic when preparation exceeds 1.5 seconds. Page changes and
-daemon updates invalidate prepared summaries.
+show a diagnostic when preparation exceeds 1.5 seconds. History notifications
+invalidate prepared summaries for the affected page. List changes can affect
+every popup's list ordering. For a recorded visit, the daemon compares the page's
+existence, URL, title, and earliest visit date before and after the write. It
+sends `affectsPopup: false` when those fields are unchanged, so the extension
+skips popup and badge refreshes. An explicit `affectsPopup: true` also refreshes
+the title and visit date in an open popup. Automatic list pins emit their own
+pin notifications. Older daemon versions still invalidate the affected
+prepared summary.
 Failed opens never fall back to an extension tab.
 
-Popup identity reads prefer the page's content script, then inspect the live
-document if the receiver is missing. Known scripting denials on HTTP(S) pages
-allow URL-scoped daemon reads, including on Chrome Web Store pages. Content replies
-and inspection results are checked against a fresh tab; navigation restarts identity
-resolution within the existing retry bound. Other inspection failures remain
-explicit errors. File snapshots still require valid embedded identity;
-denied file access never falls back to a file URL as a saved-page identity.
+HTTP(S) pages use the tab URL for popup reads, highlight restoration, and page
+actions. The popup uses the URL as a temporary title when the tab and the daemon
+have yet to supply one. An HTTP(S)-hosted copy uses its hosting URL. The Browser
+Recall Snapshot Viewer uses the page slug in its extension URL. Local snapshot
+files require a valid embedded identity and report file access or identity
+errors explicitly.
 Toolbar icons for local snapshots refresh once the file finishes loading.
 Files that the browser blocks from inspection keep the default icon.
 When the connector is unavailable, its status takes precedence over page markers.
@@ -348,7 +355,10 @@ result and short browser writes run in order.
 
 The dashboard has no separate restricted-page state. Page actions attempt their
 normal work and report failures in the popup without hiding saved records or list
-controls. Popup, webpage, snapshot viewer, and injected fallback errors share one
+controls. Saved highlights render from the daemon summary while the Hide markup
+or Show markup button reads the active page's markup state independently. An
+early click shows an error until the page's markup controls are ready.
+Popup, webpage, snapshot viewer, and injected fallback errors share one
 renderer. Error bubbles remain until dismissed, with selectable, scrollable text
 and a Copy details button. Copied details include the page URL, extension version,
 browser information, and original error, including when a reload hint is shown.

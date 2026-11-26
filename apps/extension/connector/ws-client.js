@@ -229,10 +229,19 @@ function broadcastDaemonMutations(mutations) {
     ) {
       throw new Error('Desktop mutation urls must be a string array or null');
     }
+    if (
+      mutation.affectsPopup !== undefined &&
+      typeof mutation.affectsPopup !== 'boolean'
+    ) {
+      throw new Error('Desktop mutation affectsPopup must be a boolean');
+    }
     const canonicalMutation = {
       type: mutation.type,
       url: mutation.url,
       urls: mutation.urls,
+      ...(mutation.affectsPopup === undefined
+        ? {}
+        : { affectsPopup: mutation.affectsPopup }),
     };
     for (const listener of [...daemonMutationListeners]) {
       try {

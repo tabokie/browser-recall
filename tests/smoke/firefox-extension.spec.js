@@ -823,7 +823,16 @@ test.describe('Firefox extension smoke', () => {
         url: 'https://example.test/firefox-toolbar-popup',
         title: 'Firefox Toolbar Popup',
       };
+      Object.assign(api.storage.local._data, {
+        connectorAuthToken: 'test-token',
+        connectorDaemonPort: 28471,
+      });
       api.browserApi.tabs.query = async () => [activeTab];
+      const identityRequests = [];
+      api.browserApi.tabs.sendMessage = async (_tabId, message) => {
+        if (message.action === 'getPageIdentity')
+          identityRequests.push(message);
+      };
       const timers = new Set();
       const nativeSetTimeout = globalThis.setTimeout;
       const unrefSetTimeout = (callback, ms, ...args) => {
@@ -841,11 +850,15 @@ test.describe('Firefox extension smoke', () => {
             globalThis.navigator,
             FIREFOX_USER_AGENT,
           ),
-          WebSocket: FailingWebSocket,
+          WebSocket: SuccessfulWebSocket,
           setTimeout: unrefSetTimeout,
         },
         async () => {
           await import(pathToFileURL(path.join(outDir, 'background.js')).href);
+          await waitFor(
+            () => api.storage.local._data.connectorState === 'connected',
+            'Firefox toolbar popup connector',
+          );
           await api.events.actionClicked.dispatch(activeTab);
           await waitFor(
             () => api.actionPopupState.openCount === 1,
@@ -855,6 +868,7 @@ test.describe('Firefox extension smoke', () => {
           expect(api.actionPopupState.popupByTab.get(activeTab.id)).toMatch(
             /^popup\.html\?bootstrap=/,
           );
+          expect(identityRequests).toEqual([]);
         },
       );
 

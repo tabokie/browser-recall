@@ -3795,15 +3795,61 @@ async fn visit_events_auto_pin_lists_with_matching_function_rules() {
                 }
             }
         }),
-        json!({
-            "timestamp": 1_710_000_004_200i64,
-            "action": "visit_page",
-            "url": "https://example.com/",
-            "title": null,
-            "referrerUrl": null,
-        }),
     ] {
         send_event_and_ack(&mut socket, entry).await;
+    }
+
+    let mut desktop_changes = handle.subscribe_changes();
+    let url = "https://example.com/";
+    for (timestamp, title, affects_popup, auto_pinned) in [
+        (1_710_000_004_200i64, "Example", true, true),
+        (1_710_086_404_200i64, "Example", false, false),
+        (1_710_086_404_300i64, "Updated title", true, false),
+    ] {
+        send_raw(
+            &mut socket,
+            json!({
+                "type": "run_command",
+                "action": "reportVisit",
+                "request": {
+                    "timestamp": timestamp, "url": url, "title": title, "referrer": null,
+                    "bodyPreview": null, "bypassBlacklist": false
+                }
+            }),
+        )
+        .await;
+        assert!(matches!(
+            next_daemon(&mut socket).await,
+            DaemonMessage::CommandResult { success: true, .. }
+        ));
+        let change: Value = serde_json::from_str(&next_text_message(&mut socket).await)
+            .expect("connector visit notification");
+        assert_eq!(change["type"], "change");
+        let mutations = change["mutations"].as_array().expect("connector mutations");
+        assert!(
+            mutations.iter().any(|event| {
+                event["type"] == "history"
+                    && event["url"] == url
+                    && event["affectsPopup"] == affects_popup
+            }),
+            "{change}"
+        );
+        assert_eq!(
+            mutations
+                .iter()
+                .any(|event| event["type"] == "pins" && event["urls"] == json!([url])),
+            auto_pinned,
+            "{change}"
+        );
+        let desktop_mutations = timeout(Duration::from_secs(5), desktop_changes.recv())
+            .await
+            .expect("desktop visit notification")
+            .expect("desktop mutations");
+        assert!(desktop_mutations.iter().any(|event| {
+            event.history_entry.as_ref().is_some_and(|entry| {
+                entry.action == "visit_page" && entry.timestamp == timestamp && entry.url == url
+            })
+        }));
     }
 
     let list_path = list_path(&data_dir, "auto-hubs");

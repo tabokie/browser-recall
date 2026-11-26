@@ -162,6 +162,7 @@ function initContentScript({ recordingEligible, recordingDocumentToken }) {
   }
 
   function getEmbeddedPageSlug() {
+    if (window.location.protocol !== 'file:') return null;
     const meta = document.querySelector('meta[name="x-browser-recall-slug"]');
     return meta?.content || null;
   }

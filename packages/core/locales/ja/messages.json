@@ -859,6 +859,10 @@
     "message": "マークアップを表示",
     "description": "Popup button that reapplies hidden highlight markup."
   },
+  "extensionMarkupPageLoading": {
+    "message": "ハイライトの操作機能を読み込み中です。少し待ってからもう一度お試しください。",
+    "description": "Popup markup action error while the page is loading."
+  },
   "extensionResumeTracing": {
     "message": "トレースを再開する",
     "description": "Extension popup recording resume title."

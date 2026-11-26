@@ -47,7 +47,6 @@ async function handleResetForTest() {
   await control.resetRecordingState();
   await control.resetEphemeralConnectorState();
   await globalThis.browserRecallPreparedPopupForTest?.reset?.();
-  globalThis.browserRecallImmediateScriptNavigationsForTest.length = 0;
   globalThis.browserRecallTabMessageFailuresForTest.length = 0;
   return { success: true };
 }
@@ -203,26 +202,6 @@ async function handleFailNextTabMessageForTest(request) {
   return { success: true };
 }
 
-function handleNavigateTabBeforeNextImmediateScriptForTest(request) {
-  const navigations = globalThis.browserRecallImmediateScriptNavigationsForTest;
-  if (!navigations) {
-    return { success: false, error: 'Immediate script navigation unavailable' };
-  }
-  if (
-    !Number.isSafeInteger(request.tabId) ||
-    request.tabId < 0 ||
-    typeof request.url !== 'string' ||
-    !request.url
-  ) {
-    return {
-      success: false,
-      error: 'Immediate script navigation requires a tabId and URL',
-    };
-  }
-  navigations.push({ tabId: request.tabId, url: request.url });
-  return { success: true };
-}
-
 async function handleTriggerCommandForTest(request) {
   const command = request.command;
   if (typeof command !== 'string' || !command) {
@@ -261,10 +240,6 @@ const testMessageHandlers = new Map([
   ['setFileSchemeAccessForTest', handleSetFileSchemeAccessForTest],
   ['releasePopupPreparationForTest', handleReleasePopupPreparationForTest],
   ['failNextTabMessageForTest', handleFailNextTabMessageForTest],
-  [
-    'navigateTabBeforeNextImmediateScriptForTest',
-    handleNavigateTabBeforeNextImmediateScriptForTest,
-  ],
   ['triggerCommandForTest', handleTriggerCommandForTest],
   ['readDesktopValue', handleReadDesktopValueForTest],
   [

@@ -859,6 +859,10 @@
     "message": "마크업 표시",
     "description": "Popup button that reapplies hidden highlight markup."
   },
+  "extensionMarkupPageLoading": {
+    "message": "하이라이트 컨트롤을 불러오는 중입니다. 잠시 후 다시 시도하세요.",
+    "description": "Popup markup action error while the page is loading."
+  },
   "extensionResumeTracing": {
     "message": "추적 재개",
     "description": "Extension popup recording resume title."

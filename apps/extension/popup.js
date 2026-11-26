@@ -8,6 +8,7 @@ import {
 } from './utils.js';
 import { logDebug, logError } from './logger.js';
 import { createPopupNoteSession } from './popup-note-session.js';
+import { affectsPopupPage } from './popup-mutations.js';
 import { applyTheme } from './theme.js';
 import { pageKey } from './entity-types.js';
 import { isOrionBrowser } from './browser-identity.js';
@@ -45,8 +46,6 @@ const currentPage = {
   url: '',
   title: '',
   tab: null,
-  markupHidden: false,
-  markupStateAvailable: false,
   generation: 0,
   loadInFlight: null,
   pageSummaryState: 'idle',
@@ -71,8 +70,9 @@ const boundListSearchCaptureInputs = new WeakSet();
 let popupUiMutationQueue = Promise.resolve();
 let popupUiMutationActiveIdleResolvers = [];
 let listChipsClickBound = false;
-let liveListRefreshQueued = false;
-let pendingLiveListRefresh = false;
+let livePopupRefreshQueued = false;
+let pendingLivePopupMutations = [];
+let refreshMarkupControls = null;
 
 function resetCurrentPageIdentity({ slug, url, title, tab }) {
   Object.assign(
@@ -82,8 +82,6 @@ function resetCurrentPageIdentity({ slug, url, title, tab }) {
       entry: null,
       summary: null,
       notes: [],
-      markupHidden: false,
-      markupStateAvailable: false,
     },
   );
 }
@@ -114,7 +112,7 @@ function revealPopup() {
   root.dataset.popupHidden = 'sizing';
   const reveal = () => {
     root.removeAttribute('data-popup-hidden');
-    schedulePendingLiveListRefresh();
+    schedulePendingLivePopupRefresh();
     if (isOrionBrowser())
       window.requestAnimationFrame(restoreOrionListSearchFocus);
   };
@@ -828,76 +826,132 @@ function isSnapshotViewerTab(tab) {
   }
 }
 
-function sendHighlightMarkupAction(tabId, action) {
-  if (isSnapshotViewerTab(currentPage.tab)) {
-    return chrome.runtime.sendMessage({ action, targetTabId: tabId });
+function sendHighlightMarkupAction(tab, action) {
+  if (isSnapshotViewerTab(tab)) {
+    return chrome.runtime.sendMessage({ action, targetTabId: tab.id });
   }
-  return chrome.tabs.sendMessage(tabId, { action });
-}
-
-async function readHighlightMarkupState() {
-  const tabId = currentPage.tab?.id;
-  if (!Number.isInteger(tabId)) {
-    throw new Error(tr('extensionNoTargetTab', 'No target tab', undefined));
-  }
-  let response;
-  try {
-    response = await sendHighlightMarkupAction(
-      tabId,
-      'getHighlightMarkupState',
-    );
-  } catch (error) {
-    // This tab RPC gates only the markup toggle. Authoritative notes come from
-    // the desktop and must still render when a loading/restricted tab has no
-    // content-script receiver.
-    if (globalThis.browserRecallWebExtension?.isRuntimeFailure?.(error)) {
-      return { markupStateAvailable: false, markupHidden: false };
-    }
-    throw error;
-  }
-  requireSuccessfulResponse(response, 'getHighlightMarkupState');
-  if (typeof response.hidden !== 'boolean') {
-    throw new Error('getHighlightMarkupState response missing hidden');
-  }
-  return { markupStateAvailable: true, markupHidden: response.hidden };
+  return chrome.tabs.sendMessage(tab.id, { action });
 }
 
 function renderMarkupControls() {
   const wrap = document.getElementById('markupControls');
-  if (!currentPage.markupStateAvailable) {
-    wrap.replaceChildren();
-    return;
-  }
+  const tab = currentPage.tab;
+  wrap.replaceChildren();
+  refreshMarkupControls = null;
+  if (!currentPage.notes.length || !Number.isInteger(tab?.id)) return;
+
   const template = document.getElementById('markupToggleTemplate');
   const markupButton = template.content.firstElementChild.cloneNode(true);
-  wrap.replaceChildren(markupButton);
-  const renderMarkupButtonState = () => {
-    markupButton.classList.toggle('is-markup-hidden', currentPage.markupHidden);
-    markupButton.setAttribute(
-      'aria-pressed',
-      currentPage.markupHidden ? 'true' : 'false',
-    );
-    markupButton.textContent = currentPage.markupHidden
+  wrap.append(markupButton);
+  let markupHidden;
+  let markupStateError;
+  let readingMarkupState = false;
+  let completedWhileReading;
+  const renderMarkupButtonState = (hidden) => {
+    markupHidden = hidden;
+    markupButton.classList.toggle('is-markup-hidden', hidden === true);
+    markupButton.textContent = hidden
       ? tr('extensionShowMarkup', 'Show markup')
       : tr('extensionHideMarkup', 'Hide markup');
+    if (hidden === undefined) markupButton.removeAttribute('aria-pressed');
+    else markupButton.setAttribute('aria-pressed', String(hidden));
   };
   renderMarkupButtonState();
+
+  // Saved highlights render before the page reports its markup state.
+  const refreshState = async (target, loadCompleted = false) => {
+    if (
+      refreshMarkupControls !== refreshState ||
+      target.url !== tab.url ||
+      target.status === 'loading'
+    ) {
+      return;
+    }
+    if (readingMarkupState) {
+      if (loadCompleted) completedWhileReading = target;
+      return;
+    }
+    if (!loadCompleted && markupHidden !== undefined) return;
+    readingMarkupState = true;
+    markupStateError = undefined;
+    if (loadCompleted) renderMarkupButtonState();
+    try {
+      const action = 'getHighlightMarkupState';
+      const response = requireSuccessfulResponse(
+        await sendHighlightMarkupAction(tab, action),
+        action,
+      );
+      if (typeof response.hidden !== 'boolean') {
+        throw new Error('getHighlightMarkupState response missing hidden');
+      }
+      if (refreshMarkupControls !== refreshState || completedWhileReading)
+        return;
+      renderMarkupButtonState(response.hidden);
+      if (!markupButton.isConnected) wrap.append(markupButton);
+    } catch (error) {
+      if (refreshMarkupControls !== refreshState || completedWhileReading)
+        return;
+      if (globalThis.browserRecallWebExtension?.isRuntimeFailure?.(error)) {
+        // A later tab completion can restore the control when its receiver returns.
+        markupButton.remove();
+      } else {
+        markupStateError = error;
+      }
+    } finally {
+      readingMarkupState = false;
+      if (completedWhileReading) {
+        const completed = completedWhileReading;
+        completedWhileReading = undefined;
+        void refreshState(completed, true);
+      }
+    }
+  };
+  refreshMarkupControls = refreshState;
+  void chrome.tabs
+    .get(tab.id)
+    .then(refreshState)
+    .catch((error) => {
+      markupStateError = error;
+    });
+
   markupButton.addEventListener('click', () => {
     void runPopupUiMutation('hide-highlight-markup', async () => {
-      const tabId = currentPage.tab?.id;
-      if (!Number.isInteger(tabId)) {
-        throw new Error(tr('extensionNoTargetTab', 'No target tab', undefined));
+      const target = await chrome.tabs.get(tab.id);
+      if (!markupButton.isConnected) return;
+      if (target.url !== tab.url) {
+        throw new Error(
+          tr('extensionNotAvailablePage', 'Not available for this page'),
+        );
       }
-      const action = currentPage.markupHidden
+      if (target.status !== 'loading' && markupStateError) {
+        const error = markupStateError;
+        void refreshState(target);
+        throw error;
+      }
+      if (target.status === 'loading' || markupHidden === undefined) {
+        void refreshState(target);
+        throw new Error(
+          tr(
+            'extensionMarkupPageLoading',
+            'Highlight controls are still loading. Try again in a moment.',
+          ),
+        );
+      }
+      const action = markupHidden
         ? 'showHighlightMarkup'
         : 'hideHighlightMarkup';
-      const response = await sendHighlightMarkupAction(tabId, action);
+      const response = await sendHighlightMarkupAction(tab, action);
       requireSuccessfulResponse(response, action);
-      currentPage.markupHidden = !currentPage.markupHidden;
-      renderMarkupButtonState();
+      renderMarkupButtonState(!markupHidden);
     }).catch((error) => showErrorBubble(error.message));
   });
 }
+
+chrome.tabs.onUpdated?.addListener((tabId, changeInfo, tab) => {
+  if (tabId === currentPage.tab?.id && changeInfo.status === 'complete') {
+    void refreshMarkupControls?.(tab, true);
+  }
+});
 
 function renderNotes(notes) {
   const container = document.getElementById('highlightList');
@@ -2145,11 +2199,6 @@ async function renderDashboardSummary(tab, identity, summary, options = {}) {
     renderBlacklistDiagnostic(tab, summary.url || identity.url || tab.url);
     return false;
   }
-  if (renderSections && summary.notes.length > 0) {
-    const markupState = await readHighlightMarkupState();
-    if (generation !== currentPage.generation) return false;
-    Object.assign(currentPage, markupState);
-  }
   if (resetSections) resetDashboardSections();
   else clearPageDiagnosticSection();
   const page = summary.page || transientPageView(identity.slug, summary);
@@ -2162,8 +2211,8 @@ async function renderDashboardSummary(tab, identity, summary, options = {}) {
   currentPage.url = page.url || identity.url;
   document.getElementById('pageTitle').textContent = currentPage.title;
   document.getElementById('pageUrl').textContent = currentPage.url;
+  renderVisitsAndLikes(page);
   if (renderSections) {
-    renderVisitsAndLikes(page);
     renderSnapshots(summary.snapshots);
     renderNotes(summary.notes);
   }
@@ -2171,7 +2220,7 @@ async function renderDashboardSummary(tab, identity, summary, options = {}) {
   if (finish) {
     await finishDashboardRender(tab, generation);
     if (generation !== currentPage.generation) return false;
-    schedulePendingLiveListRefresh();
+    schedulePendingLivePopupRefresh();
   }
   logDebug(
     `[popup] Loaded ${summary.notes.length} notes, ${summary.snapshots.length} snapshots, ${summary.lists.length} lists`,
@@ -2185,13 +2234,12 @@ async function fetchAndRenderPageData(tab, identity, options = {}) {
   currentPage.pageSummaryState = 'loading';
 
   try {
-    logDebug(
-      `[popup] Fetching page summary for url=${currentPage.url || tab.url}`,
-    );
+    const url = currentPage.url || tab.url;
+    logDebug(`[popup] Fetching page summary for url=${url}`);
     const summary = await chrome.runtime.sendMessage({
       action: 'getPageSummary',
-      url: currentPage.url || tab.url,
-      title: currentPage.title || tab.title || '',
+      url,
+      title: currentPage.title || tab.title || url,
     });
     if (generation !== currentPage.generation) return false;
     logDebug('[popup] getPageSummary response:', summary);
@@ -2253,7 +2301,7 @@ async function fetchAndRenderPageData(tab, identity, options = {}) {
 }
 
 async function refreshCurrentPageSummary(options = {}) {
-  const { renderSections = true, renderLists = true } = options;
+  const { renderSections = true, renderLists = true, finish = false } = options;
   if (!currentPage.tab || !currentPage.url) return;
   const { paused } = await loadRecordingState();
   if (
@@ -2274,59 +2322,66 @@ async function refreshCurrentPageSummary(options = {}) {
     resetSections: false,
     renderSections,
     renderLists,
+    finish,
   });
   if (!updated || generation !== currentPage.generation) return;
   await renderRecordingBar();
 }
 
-function listMutationTargetsCurrentPage(request) {
-  if (request?.type === 'lists') return true;
-  if (request?.type !== 'pins') return false;
-  const urls = [request.url, ...(request.urls || [])].filter(
-    (url) => typeof url === 'string' && url,
-  );
-  if (urls.length === 0) return true;
-  return urls.some((url) => generateSlugFromUrl(url) === currentPage.slug);
-}
-
-function scheduleLiveListRefresh(request) {
-  if (
-    !['lists', 'pins'].includes(request?.type) ||
-    (currentPage.slug && !listMutationTargetsCurrentPage(request))
-  ) {
+function schedulePendingLivePopupRefresh() {
+  if (document.documentElement.hasAttribute('data-popup-hidden')) return;
+  if (!currentPage.slug) {
+    pendingLivePopupMutations = [];
     return;
   }
-  pendingLiveListRefresh = true;
-  schedulePendingLiveListRefresh();
-}
-
-function schedulePendingLiveListRefresh() {
   if (
-    !pendingLiveListRefresh ||
-    !currentPage.slug ||
-    liveListRefreshQueued ||
+    !pendingLivePopupMutations.length ||
+    livePopupRefreshQueued ||
     (popupShellState.surface === 'diagnostic' &&
-      currentPage.pageSummaryState === 'loading') ||
-    document.documentElement.hasAttribute('data-popup-hidden')
+      currentPage.pageSummaryState === 'loading')
   ) {
     return;
   }
-  liveListRefreshQueued = true;
-  void enqueuePopupUiMutation('refresh-live-list-mutation', async () => {
-    pendingLiveListRefresh = false;
-    liveListRefreshQueued = false;
+  livePopupRefreshQueued = true;
+  void enqueuePopupUiMutation('refresh-live-popup-mutation', async () => {
+    const mutations = pendingLivePopupMutations;
+    pendingLivePopupMutations = [];
+    if (
+      !mutations.some((mutation) =>
+        affectsPopupPage(mutation, currentPage.slug),
+      )
+    )
+      return;
+    const showDashboard = popupShellState.surface === 'diagnostic';
     await refreshCurrentPageSummary({
-      renderSections: false,
-      renderLists: true,
+      renderSections: showDashboard,
+      renderLists:
+        showDashboard ||
+        mutations.some(({ type }) => type === 'lists' || type === 'pins'),
+      finish: showDashboard,
     });
-  }).catch((error) => {
-    liveListRefreshQueued = false;
-    logDebug('[popup] live list refresh failed:', error.message);
-  });
+  })
+    .catch((error) => {
+      logDebug('[popup] live refresh failed:', error.message);
+    })
+    .finally(() => {
+      livePopupRefreshQueued = false;
+      schedulePendingLivePopupRefresh();
+    });
 }
 
 chrome.runtime.onMessage.addListener((request) => {
-  if (request?.action === 'mutation') scheduleLiveListRefresh(request);
+  if (request?.action !== 'mutation') return;
+  const { type, affectsPopup } = request;
+  if (
+    (type === 'lists' ||
+      type === 'pins' ||
+      (type === 'history' && affectsPopup === true)) &&
+    affectsPopupPage(request, currentPage.slug)
+  ) {
+    pendingLivePopupMutations.push(request);
+    schedulePendingLivePopupRefresh();
+  }
 });
 
 function renderPageDashboardShell(options = {}) {
@@ -2683,6 +2738,7 @@ async function renderPreparedPopup(bootstrap) {
       ) {
         throw new Error('Blacklisted popup model is missing its page identity');
       }
+      resetCurrentPageIdentity({ ...bootstrap.identity, tab: bootstrap.tab });
       renderBlacklistDiagnostic(bootstrap.tab, bootstrap.identity.url);
       return;
     }

@@ -22,6 +22,7 @@ import {
 } from './popup-note-session.js';
 import { createBadgeController } from './badge-controller.js';
 import { createRecordingController } from './recording-controller.js';
+import { affectsPopupPage } from './popup-mutations.js';
 import {
   getBrowserCapabilities,
   normalizePageScriptError,
@@ -91,13 +92,12 @@ const CONNECTOR_STATE_REFRESH_TIMEOUT_MS = 1000;
 const POPUP_PREPARE_TIMEOUT_MS = 1500;
 const POPUP_BOOTSTRAP_TTL_MS = 30_000;
 const POPUP_ACTION_MAPPING_FALLBACK_CLEAR_MS = 5000;
-const POPUP_IDENTITY_NAVIGATION_RETRIES = 2;
 const BROWSER_CAPABILITIES = getBrowserCapabilities();
 const DEFAULT_ACTION_POPUP = isOrionBrowser() ? 'popup.html' : '';
 
 let lastLogTimestamp = 0;
 const pendingPopupBootstraps = new Map();
-let popupBootstrapMutationRevision = 0;
+const preparingPopupModels = new Set();
 let preparedActionPopupUpdateTail = Promise.resolve();
 let preparedActionPopupGlobalOwner = null;
 const preparedActionPopupTabOwners = new Map();
@@ -589,7 +589,8 @@ subscribeConnectorBridgeState((connector) => {
 });
 
 subscribeDaemonMutations((mutation) => {
-  popupBootstrapMutationRevision += 1;
+  if (mutation.affectsPopup === false) return;
+  invalidatePopupPreparations(mutation);
   handleRuntimeMutation(mutation);
 });
 
@@ -1543,9 +1544,9 @@ function popupBootstrapPath(token, actionTabId = null) {
 
 function storePopupBootstrap({
   bootstrap,
+  preparation,
   mutationRevision,
   targetTabId,
-  refreshAfterMutation = true,
   errorNotification = null,
 }) {
   // The popup can only receive a URL from chrome.action.openPopup(), not an
@@ -1554,9 +1555,9 @@ function storePopupBootstrap({
   const token = popupBootstrapToken();
   pendingPopupBootstraps.set(token, {
     bootstrap,
+    preparation,
     mutationRevision,
     targetTabId: Number.isFinite(targetTabId) ? targetTabId : null,
-    refreshAfterMutation,
     errorNotification,
     lifecycleConnected: false,
     claimed: false,
@@ -1581,11 +1582,9 @@ function deletePopupBootstrap(token, entry) {
 async function resolvePopupBootstrapEntry(entry) {
   const deadline = Date.now() + POPUP_PREPARE_TIMEOUT_MS;
   let bootstrap = entry.bootstrap;
-  while (
-    entry.refreshAfterMutation &&
-    entry.mutationRevision !== popupBootstrapMutationRevision
-  ) {
-    const preparationRevision = popupBootstrapMutationRevision;
+  const preparation = entry.preparation;
+  while (preparation && entry.mutationRevision !== preparation.revision) {
+    const preparationRevision = preparation.revision;
     let tab = bootstrap?.tab;
     if (Number.isFinite(entry.targetTabId)) {
       try {
@@ -1603,7 +1602,7 @@ async function resolvePopupBootstrapEntry(entry) {
     const remaining = deadline - Date.now();
     bootstrap =
       remaining > 0
-        ? await preparePopupBootstrapWithTimeout(tab, remaining)
+        ? await preparePopupBootstrapWithTimeout(tab, preparation, remaining)
         : timeoutPopupBootstrap(tab);
     entry.bootstrap = bootstrap;
     entry.mutationRevision = preparationRevision;
@@ -1768,91 +1767,6 @@ function popupTabIsUnavailable(tab) {
   );
 }
 
-async function readTabPageIdentity(tab) {
-  // Successful replies and failures can arrive after navigation. Recheck the
-  // tab URL and loading state before accepting either outcome.
-  if (tab.status !== 'loading') {
-    try {
-      const identity = await sendReadyContentMessage(tab.id, {
-        action: 'getPageIdentity',
-      });
-      const currentTab = await chrome.tabs.get(tab.id);
-      if (currentTab.url !== tab.url || currentTab.status !== tab.status) {
-        return { currentTab, identity: null };
-      }
-      return { currentTab, identity };
-    } catch (error) {
-      const currentTab = await chrome.tabs.get(tab.id);
-      if (currentTab.url !== tab.url || currentTab.status !== tab.status) {
-        return { currentTab, identity: null };
-      }
-      if (!isExtensionRuntimeFailure(error)) throw error;
-      // Reading daemon data must survive a missing page receiver. Inspect the
-      // live document without reinstalling capture or changing its eligibility.
-    }
-  }
-  let pageIdentity = null;
-  let inspectionError = null;
-  try {
-    const [execution] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      injectImmediately: true,
-      func: () => ({
-        documentUrl: window.location.href,
-        embeddedSlug:
-          document.querySelector('meta[name="x-browser-recall-slug"]')
-            ?.content ?? null,
-        embeddedUrl:
-          document.querySelector('meta[name="x-browser-recall-url"]')
-            ?.content ?? null,
-      }),
-    });
-    pageIdentity = execution?.result ?? null;
-  } catch (error) {
-    inspectionError = error;
-  }
-
-  const currentTab = await chrome.tabs.get(tab.id);
-  if (
-    currentTab.url !== tab.url ||
-    currentTab.status !== tab.status ||
-    (pageIdentity && pageIdentity.documentUrl !== tab.url)
-  ) {
-    return { currentTab, identity: null };
-  }
-  if (inspectionError) {
-    const error = normalizePageScriptError(inspectionError);
-    // A browser denial prevents page actions, not URL-scoped daemon reads.
-    // File snapshots use a separate strict metadata path below.
-    if (error?.code !== 'page-access-denied' || !/^https?:/.test(tab.url)) {
-      throw error;
-    }
-  } else if (!pageIdentity) {
-    throw new Error('Page identity inspection returned no result');
-  }
-
-  if (pageIdentity?.documentUrl === tab.url && pageIdentity.embeddedSlug) {
-    return {
-      currentTab,
-      identity: {
-        success: true,
-        embedded: true,
-        slug: pageIdentity.embeddedSlug,
-        url: pageIdentity.embeddedUrl,
-      },
-    };
-  }
-  return {
-    currentTab,
-    identity: {
-      success: true,
-      embedded: false,
-      slug: generateSlugFromUrl(tab.url),
-      url: tab.url,
-    },
-  };
-}
-
 async function fileSnapshotPageIdentity(tab) {
   if (typeof chrome.extension?.isAllowedFileSchemeAccess === 'function') {
     const allowed = await new Promise((resolve, reject) => {
@@ -1921,98 +1835,33 @@ async function fileSnapshotPageIdentity(tab) {
     }
     throw error;
   }
-  return {
-    success: true,
-    embedded: true,
-    slug: inspected.slug,
-    url: inspected.url,
-  };
+  return { slug: inspected.slug, url: inspected.url };
 }
 
-async function resolveTabPageIdentity(tab, navigationRetries = 0) {
+async function resolveTabPageIdentity(tab) {
   requireNavigationDelivery(tab.id, tab.url);
-  let effectiveUrl = tab.url;
-  let effectiveSlug = null;
-  let effectiveTitle = typeof tab.title === 'string' ? tab.title : '';
-
-  const reportedUrl = tabReportedUrls.get(tab.id);
-  if (reportedUrl && isSameDocumentPageUrl(reportedUrl, tab.url)) {
-    effectiveUrl = reportedUrl;
-  }
-
+  const title = tab.title || '';
   const viewerSlug = snapshotViewerSlugFromUrl(tab.url);
-  if (viewerSlug) {
-    const pageInfo = await handleGetPageInfo({ slug: viewerSlug });
-    if (!pageInfo?.success || !pageInfo.entry?.url) {
-      throw new Error(
-        pageInfo?.error || 'Snapshot viewer page identity is unavailable',
-      );
-    }
-    effectiveSlug = viewerSlug;
-    effectiveUrl = pageInfo.entry.url;
-    if (pageInfo.entry.title) effectiveTitle = pageInfo.entry.title;
-  } else if (tab.id != null) {
-    let identity;
-    if (tab.url.startsWith('file:')) {
-      identity = await fileSnapshotPageIdentity(tab);
-    } else {
-      const resolved = await readTabPageIdentity(tab);
-      if (!resolved.identity) {
-        if (navigationRetries >= POPUP_IDENTITY_NAVIGATION_RETRIES) {
-          throw new Error(
-            'Page kept navigating while popup identity was resolving',
-          );
-        }
-        return resolveTabPageIdentity(
-          resolved.currentTab,
-          navigationRetries + 1,
-        );
-      }
-      identity = resolved.identity;
-      if (typeof resolved.currentTab.title === 'string') {
-        effectiveTitle = resolved.currentTab.title;
-      }
-    }
-    if (
-      identity?.success !== true ||
-      typeof identity.embedded !== 'boolean' ||
-      typeof identity.slug !== 'string' ||
-      !identity.slug ||
-      typeof identity.url !== 'string' ||
-      !identity.url
-    ) {
-      throw new Error('Page identity response is invalid');
-    }
-    if (identity.embedded) {
-      effectiveSlug = identity.slug;
-      effectiveUrl = identity.url;
-      const pageInfo = await handleGetPageInfo({ slug: identity.slug });
-      if (!pageInfo?.success || !pageInfo.entry?.url) {
-        throw new Error(
-          pageInfo?.error || 'Embedded page identity is unavailable',
-        );
-      }
-      if (pageInfo.entry.url !== identity.url) {
-        throw new Error('Embedded page identity does not match desktop data');
-      }
-      if (pageInfo.entry.title) {
-        effectiveTitle = pageInfo.entry.title;
-      }
-    } else {
-      const expectedSlug = generateSlugFromUrl(identity.url);
-      if (identity.url !== tab.url || identity.slug !== expectedSlug) {
-        throw new Error('Page identity does not match the active tab');
-      }
-      effectiveUrl = identity.url;
-      effectiveSlug = identity.slug;
-    }
-  }
+  const snapshot = tab.url.startsWith('file:')
+    ? await fileSnapshotPageIdentity(tab)
+    : null;
+  const slug = viewerSlug ?? snapshot?.slug;
+  if (!slug) return { slug: generateSlugFromUrl(tab.url), url: tab.url, title };
 
-  return {
-    slug: effectiveSlug ?? generateSlugFromUrl(effectiveUrl),
-    url: effectiveUrl,
-    title: effectiveTitle,
-  };
+  const pageInfo = await handleGetPageInfo({ slug });
+  const entry = pageInfo?.entry;
+  if (!pageInfo?.success || !entry?.url) {
+    throw new Error(
+      pageInfo?.error ||
+        (snapshot
+          ? 'Embedded page identity is unavailable'
+          : 'Snapshot viewer page identity is unavailable'),
+    );
+  }
+  if (snapshot && entry.url !== snapshot.url) {
+    throw new Error('Embedded page identity does not match desktop data');
+  }
+  return { slug, url: entry.url, title: entry.title || title };
 }
 
 async function handleResolvePopupPageIdentity(request) {
@@ -2029,7 +1878,7 @@ async function handleResolvePopupPageIdentity(request) {
   };
 }
 
-async function preparePopupBootstrapForTab(tab) {
+async function preparePopupBootstrapForTab(tab, preparation) {
   if (popupTabIsUnavailable(tab)) {
     return {
       mode: 'unavailable',
@@ -2065,6 +1914,7 @@ async function preparePopupBootstrapForTab(tab) {
       },
     };
   }
+  preparation.slug = identity.slug;
   const preparedTab = {
     id: tab.id,
     url: tab.url,
@@ -2076,7 +1926,7 @@ async function preparePopupBootstrapForTab(tab) {
 
   const summary = await handleGetPageSummary({
     url: identity.url,
-    title: identity.title,
+    title: identity.title || identity.url,
   });
   const connector = await getConnectorBridgeState();
   if (!summary?.success) {
@@ -2138,12 +1988,13 @@ function timeoutPopupBootstrap(tab) {
 
 async function preparePopupBootstrapWithTimeout(
   tab,
+  preparation,
   timeoutMs = POPUP_PREPARE_TIMEOUT_MS,
 ) {
   let timer;
   try {
     return await Promise.race([
-      preparePopupBootstrapForTab(tab),
+      preparePopupBootstrapForTab(tab, preparation),
       new Promise((resolve) => {
         timer = setTimeout(
           () => resolve(timeoutPopupBootstrap(tab)),
@@ -2166,48 +2017,79 @@ async function preparePopupBootstrapWithTimeout(
   }
 }
 
-async function prepareCurrentPopupModel(tab) {
+function invalidatePopupPreparations(mutation) {
+  for (const preparation of preparingPopupModels) {
+    if (affectsPopupPage(mutation, preparation.slug)) preparation.revision += 1;
+  }
+  for (const { preparation } of pendingPopupBootstraps.values()) {
+    if (preparation && affectsPopupPage(mutation, preparation.slug)) {
+      preparation.revision += 1;
+    }
+  }
+}
+
+async function trackPopupPreparation(tab, prepare) {
+  const preparation = {
+    slug: snapshotViewerSlugFromUrl(tab?.url),
+    revision: 0,
+  };
+  if (/^https?:\/\//.test(tab?.url))
+    preparation.slug = generateSlugFromUrl(tab.url);
+  preparingPopupModels.add(preparation);
+  try {
+    return await prepare(preparation);
+  } finally {
+    preparingPopupModels.delete(preparation);
+  }
+}
+
+async function prepareCurrentPopupModel(tab, preparation) {
   const deadline = Date.now() + POPUP_PREPARE_TIMEOUT_MS;
   let mutationRevision;
   let bootstrap;
   do {
-    mutationRevision = popupBootstrapMutationRevision;
+    mutationRevision = preparation.revision;
     const remaining = deadline - Date.now();
     if (remaining <= 0) {
       bootstrap = timeoutPopupBootstrap(tab);
       break;
     }
-    bootstrap = await preparePopupBootstrapWithTimeout(tab, remaining);
+    bootstrap = await preparePopupBootstrapWithTimeout(
+      tab,
+      preparation,
+      remaining,
+    );
     if (bootstrap?.diagnostic?.reason === 'popup-prepare-timeout') break;
     // A committed mutation during preparation invalidates the projection.
     // Rebuild before opening, within the same timeout budget.
-  } while (mutationRevision !== popupBootstrapMutationRevision);
+  } while (mutationRevision !== preparation.revision);
   if (bootstrap?.diagnostic?.reason === 'popup-prepare-timeout') {
-    mutationRevision = popupBootstrapMutationRevision;
+    mutationRevision = preparation.revision;
   }
   return { bootstrap, mutationRevision };
 }
 
 async function preparePopupOpenPayload(tab, options = {}) {
   await options.preparationGate;
-  const { bootstrap, mutationRevision } = options.preparedBootstrap
-    ? {
-        bootstrap: options.preparedBootstrap,
-        mutationRevision: popupBootstrapMutationRevision,
-      }
-    : await prepareCurrentPopupModel(tab);
-  const token = storePopupBootstrap({
-    bootstrap,
-    mutationRevision,
-    targetTabId: tab?.id,
-    refreshAfterMutation: !options.preparedBootstrap,
-    errorNotification: options.errorNotification,
-  });
-  return {
-    bootstrap,
-    token,
-    popupPath: popupBootstrapPath(token, options.actionTabId),
+  const store = ({ bootstrap, mutationRevision }, preparation = null) => {
+    const token = storePopupBootstrap({
+      bootstrap,
+      preparation,
+      mutationRevision,
+      targetTabId: tab?.id,
+      errorNotification: options.errorNotification,
+    });
+    return {
+      bootstrap,
+      token,
+      popupPath: popupBootstrapPath(token, options.actionTabId),
+    };
   };
+  if (options.preparedBootstrap)
+    return store({ bootstrap: options.preparedBootstrap });
+  return trackPopupPreparation(tab, async (preparation) =>
+    store(await prepareCurrentPopupModel(tab, preparation), preparation),
+  );
 }
 
 async function openPreparedActionPopup(tab, options = {}) {
@@ -2658,7 +2540,7 @@ async function handleSetRecordingPaused(request) {
   }
   const paused = request.paused;
   await recordingController.setPaused(paused);
-  popupBootstrapMutationRevision += 1;
+  invalidatePopupPreparations();
   await badgeController.setRecordingPaused(paused);
   return { success: true };
 }
@@ -2710,7 +2592,10 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
             throw new Error('getPopupStartupModel requires a valid tabId');
           }
           const tab = await chrome.tabs.get(request.tabId);
-          const { bootstrap } = await prepareCurrentPopupModel(tab);
+          const { bootstrap } = await trackPopupPreparation(
+            tab,
+            (preparation) => prepareCurrentPopupModel(tab, preparation),
+          );
           sendResponse({ success: true, bootstrap });
           break;
         }

@@ -153,42 +153,46 @@ p {
 }
 .language-picker {
   position: relative;
-  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding-inline: 8px;
+  /* WebKit can lay out the invisible native label beyond the picker. */
+  overflow: clip;
+  white-space: nowrap;
+  font-size: 14px;
 }
 .language-picker::after {
   content: '';
-  position: absolute;
-  inset-inline-end: 11px;
-  top: calc(50% - 4px);
+  flex: none;
   width: 5px;
   height: 5px;
   border-right: 1px solid;
   border-bottom: 1px solid;
-  transform: rotate(45deg);
+  transform: translateY(-1px) rotate(45deg);
   pointer-events: none;
 }
-.language-picker :is(select, .language-compact-label) {
-  min-height: 36px;
-  max-width: 100%;
-  padding: 5px 10px;
-  padding-inline-end: 26px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: transparent;
-  white-space: nowrap;
-  color: inherit;
-  font-size: 14px;
-  text-overflow: ellipsis;
-  cursor: pointer;
-}
 .language-picker select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   appearance: none;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
 }
 .language-compact-label {
   display: none;
 }
-.language-picker select:hover {
-  background: #eeebe2;
+.language-picker:hover {
+  color: var(--orange);
+}
+.language-picker:has(select:focus-visible) {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
 }
 html:lang(zh) {
   --serif: 'Songti SC', 'Noto Serif CJK SC', 'Source Han Serif SC', serif;
@@ -600,33 +604,12 @@ h1 em {
     font-size: 12px;
   }
   .language-picker {
-    /* WebKit can lay out the invisible native label beyond the compact pill. */
-    overflow: clip;
-    border-radius: 999px;
-  }
-  .language-picker :is(select, .language-compact-label) {
-    padding-inline-start: 8px;
-    padding-inline-end: 21px;
     font-size: 12px;
   }
-  .language-picker select {
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-    width: 100%;
-    height: 100%;
-    opacity: 0;
+  .language-full-label {
+    display: none;
   }
   .language-compact-label {
-    display: inline-flex;
-    align-items: center;
-    pointer-events: none;
-  }
-  .language-picker:has(select:focus-visible) {
-    outline: 2px solid var(--orange);
-    outline-offset: 5px;
-  }
-  .language-picker::after {
-    inset-inline-end: 8px;
+    display: block;
   }
 }

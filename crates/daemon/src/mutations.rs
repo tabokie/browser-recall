@@ -1,7 +1,6 @@
 use crate::protocol::{HistoryMutationEntry, MutationPayload};
 use crate::runtime::EntityMapView;
 use browser_recall_replay::{generate_slug_from_url, LogEntry};
-use serde_json::Value;
 use std::collections::HashSet;
 
 pub fn dedupe_mutations(mutations: Vec<MutationPayload>) -> Vec<MutationPayload> {
@@ -27,6 +26,7 @@ pub fn mutation(mutation_type: &str) -> MutationPayload {
         urls: None,
         key: None,
         history_entry: None,
+        affects_popup: None,
     }
 }
 
@@ -69,7 +69,6 @@ fn first_list_id_from_effects(effects: &EntityMapView) -> Option<String> {
 
 pub fn build_mutations(
     entry: &LogEntry,
-    raw_entry: &Value,
     effects: &EntityMapView,
     device_id: &str,
 ) -> Result<Vec<MutationPayload>, String> {
@@ -254,19 +253,6 @@ pub fn build_mutations(
     if effects.contains_key("manifest:list-order") || effects.contains_key("manifest:name-to-id") {
         mutations.push(mutation("lists"));
     }
-    if raw_entry.get("source").and_then(Value::as_str) == Some("auto") {
-        let url = raw_entry
-            .get("url")
-            .and_then(Value::as_str)
-            .map(str::to_string);
-        mutations.push(MutationPayload {
-            list_id: first_list_id_from_effects(effects),
-            urls: url.clone().map(|value| vec![value]),
-            url,
-            ..mutation("pins")
-        });
-    }
-
     Ok(dedupe_mutations(mutations))
 }
 
@@ -285,13 +271,8 @@ mod tests {
             title: Some("Precise mutation".to_string()),
             referrer_url: None,
         };
-        let mutations = build_mutations(
-            &entry,
-            &serde_json::to_value(&entry).expect("visit JSON"),
-            &EntityMapView::new(),
-            "device-a",
-        )
-        .expect("history mutation");
+        let mutations =
+            build_mutations(&entry, &EntityMapView::new(), "device-a").expect("history mutation");
 
         assert_eq!(mutations.len(), 1);
         assert_eq!(
@@ -326,20 +307,10 @@ mod tests {
             title: Some("Precise mutation".to_string()),
         };
 
-        let leave_mutations = build_mutations(
-            &leave,
-            &serde_json::to_value(&leave).expect("leave JSON"),
-            &EntityMapView::new(),
-            "device-a",
-        )
-        .expect("leave mutation");
-        let rate_mutations = build_mutations(
-            &rate,
-            &serde_json::to_value(&rate).expect("rate JSON"),
-            &EntityMapView::new(),
-            "device-a",
-        )
-        .expect("rate mutation");
+        let leave_mutations =
+            build_mutations(&leave, &EntityMapView::new(), "device-a").expect("leave mutation");
+        let rate_mutations =
+            build_mutations(&rate, &EntityMapView::new(), "device-a").expect("rate mutation");
 
         assert_eq!(
             serde_json::to_value(&leave_mutations[0]).expect("leave mutation JSON")["historyEntry"]
@@ -379,13 +350,8 @@ mod tests {
         let mut mutations = Vec::new();
         for entry in entries {
             mutations.extend(
-                build_mutations(
-                    &entry,
-                    &serde_json::to_value(&entry).expect("entry JSON"),
-                    &EntityMapView::new(),
-                    "device-a",
-                )
-                .expect("history mutation"),
+                build_mutations(&entry, &EntityMapView::new(), "device-a")
+                    .expect("history mutation"),
             );
         }
 

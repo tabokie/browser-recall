@@ -859,6 +859,10 @@
     "message": "إظهار العلامات",
     "description": "Popup button that reapplies hidden highlight markup."
   },
+  "extensionMarkupPageLoading": {
+    "message": "لا تزال أدوات التحكم في التمييز قيد التحميل. حاول مرة أخرى بعد قليل.",
+    "description": "Popup markup action error while the page is loading."
+  },
   "extensionResumeTracing": {
     "message": "استئناف التتبع",
     "description": "Extension popup recording resume title."

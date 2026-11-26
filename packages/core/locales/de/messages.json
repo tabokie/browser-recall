@@ -859,6 +859,10 @@
     "message": "Markierungen anzeigen",
     "description": "Popup button that reapplies hidden highlight markup."
   },
+  "extensionMarkupPageLoading": {
+    "message": "Die Steuerelemente für Hervorhebungen werden noch geladen. Versuche es gleich erneut.",
+    "description": "Popup markup action error while the page is loading."
+  },
   "extensionResumeTracing": {
     "message": "Verfolgung fortsetzen",
     "description": "Extension popup recording resume title."

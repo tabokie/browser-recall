@@ -58,7 +58,7 @@ Paths below are relative to `apps/extension/`.
 | File                                                                      | Responsibility                                                                             |
 | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | `manifest.json`                                                           | Permissions, entry points, shortcuts                                                       |
-| `background.js`                                                           | Navigation, page identity inspection, popup preparation, command routing, capture          |
+| `background.js`                                                           | Navigation, URL-based popup reads, snapshot identity, command routing, capture             |
 | `badge-controller.js`                                                     | Connector and recording icons, ordered page marker writes                                  |
 | `recording-controller.js`                                                 | Recording eligibility, pause-aware attention, command admission                            |
 | `content.js`, `spa-navigation-bridge.js`                                  | Capture and page-world navigation detection                                                |
@@ -66,11 +66,12 @@ Paths below are relative to `apps/extension/`.
 | `browser-capabilities.js`                                                 | Browser response capabilities and scripting error classification                           |
 | `browser-identity.js`, `browser-build-target.js`                          | Browser identity and generated build target                                                |
 | `popup.js`, `popup.html`, `popup-note-session.js`                         | Dashboard, sizing, list edits, note drafts                                                 |
+| `popup-mutations.js`                                                      | Page relevance for prepared popup data and open dashboards                                 |
 | `popup-startup.js`                                                        | Chrome document load timing for the first popup layout                                     |
 | `popup-list-elements.js`                                                  | List chip ordering and markup for the popup and website demo                               |
 | `popup-snapshot-elements.js`                                              | Snapshot-row markup shared with website demos                                              |
 | `extension-surface.js`, `extension-surface.css`, `extension-ui-tokens.js` | Isolated editors, highlights, overlays, shared persistent error renderer                   |
-| `connector/ws-client.js`                                                  | Sessions, validation, requests, queue draining                                             |
+| `connector/ws-client.js`                                                  | Sessions, requests, daemon change notifications, queue draining                            |
 | `connector/state.js`, `connector/pairing.js`                              | Connection diagnostics and authentication                                                  |
 | `connector/command-buffer.js`                                             | Bounded temporary command storage                                                          |
 | `savepage-bridge.js`, `snapshot-resource-fetch.js`                        | Capture sessions, resource policy, diagnostics                                             |
